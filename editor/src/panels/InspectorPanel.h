@@ -146,6 +146,9 @@ private:
     // То же для звукового файла и по той же причине: диалог отвечает через
     // кадр, а сцену за это время могут перезагрузить.
     int m_browseAudioEntity = -1;
+    // Файл эффекта частиц: загрузить в эмиттер сущности / сохранить её эффект.
+    int m_browseLoadEffectEntity = -1;
+    int m_browseSaveEffectEntity = -1;
     bool m_pendingMeshLoad = false;  // загрузку делаем в кадре, а не из колбэка диалога
     void DrawModelImportEditor(EditorHost& host); // настройки импорта выбранной модели
 

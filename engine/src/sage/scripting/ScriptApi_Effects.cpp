@@ -2,7 +2,8 @@
 #include "sage/audio/AudioComponents.h"
 
 #include "sage/core/Log.h"
-#include "sage/render/ParticlePresets.h"
+#include "sage/assets/AssetDatabase.h"
+#include "sage/render/ParticleEffectIO.h"
 
 // ---------------------------------------------------------------------------
 // Частицы, билборды и звук: sage.fx.*, sage.audio.*
@@ -16,48 +17,183 @@
 // в каком файле лежит тело.
 // ---------------------------------------------------------------------------
 
+namespace {
+
+// Перечисления эффекта — СЛОВАМИ, теми же, что в файле .sagefx: скрипт и файл
+// говорят на одном языке, и номер из середины списка ни у кого не сломается.
+template <typename E, size_t N>
+sol::property_wrapper<std::function<std::string(const sage::fx::ParticleEffect&)>,
+                      std::function<void(sage::fx::ParticleEffect&, const std::string&)>>
+EnumProperty(E sage::fx::ParticleEffect::*field, const char* const (&names)[N]) {
+    std::function<std::string(const sage::fx::ParticleEffect&)> get =
+        [field, &names](const sage::fx::ParticleEffect& f) {
+            const size_t i = (size_t)(f.*field);
+            return std::string(i < N ? names[i] : names[0]);
+        };
+    std::function<void(sage::fx::ParticleEffect&, const std::string&)> set =
+        [field, &names](sage::fx::ParticleEffect& f, const std::string& v) {
+            for (size_t i = 0; i < N; ++i)
+                if (v == names[i]) { f.*field = (E)i; return; }
+            throw std::runtime_error("ParticleEffect: неизвестное значение «" + v + "»");
+        };
+    return sol::property(get, set);
+}
+
+const char* const kLuaShapes[] = {"point", "sphere", "hemisphere", "cone", "box", "circle", "edge"};
+const char* const kLuaRenders[] = {"billboard", "stretched", "horizontal", "vertical", "mesh", "trail"};
+const char* const kLuaBlends[] = {"alpha", "additive", "premultiplied"};
+const char* const kLuaSpaces[] = {"world", "local"};
+const char* const kLuaSprites[] = {"softCircle", "circle", "square"};
+const char* const kLuaFlipbooks[] = {"overLifetime", "speed", "random", "fixed"};
+
+// Кривая из таблицы {{t, v}, {t, v}, ...}.
+sage::fx::Curve CurveFrom(const sol::table& t) {
+    sage::fx::Curve c;
+    for (auto& kv : t) {
+        sol::table k = kv.second.as<sol::table>();
+        c.Keys.push_back({k.get_or(1, 0.0f), k.get_or(2, 1.0f)});
+    }
+    c.Sort();
+    return c;
+}
+
+// Градиент из таблицы {{t, r, g, b, a}, ...}: у каждого ключа и цвет, и альфа.
+sage::fx::Gradient GradientFrom(const sol::table& t) {
+    sage::fx::Gradient g;
+    for (auto& kv : t) {
+        sol::table k = kv.second.as<sol::table>();
+        const float at = k.get_or(1, 0.0f);
+        g.Colors.push_back({at, {k.get_or(2, 1.0f), k.get_or(3, 1.0f), k.get_or(4, 1.0f)}});
+        g.Alphas.push_back({at, k.get_or(5, 1.0f)});
+    }
+    g.Sort();
+    return g;
+}
+
+} // namespace
+
 void ScriptEngine::RegisterParticleApi() {
-    // --- Частицы: доступно после BindParticles. ParticleConfig — те же поля,
-    // что и ParticleEmitterConfig в C++ (см. render/Particle.h), плюс готовые
-    // пресеты ParticlePresets.* (готовые визуальные рецепты — всплеск/дым/осколки) —
-    // Lua-скрипт может взять пресет как основу и подправить пару полей,
-    // вместо того чтобы описывать весь конфиг с нуля. ---
-    m_lua.new_usertype<ParticleEmitterConfig>("ParticleConfig",
-        sol::constructors<ParticleEmitterConfig()>(),
-        "DirectionMin", &ParticleEmitterConfig::DirectionMin,
-        "DirectionMax", &ParticleEmitterConfig::DirectionMax,
-        "SpeedMin", &ParticleEmitterConfig::SpeedMin,
-        "SpeedMax", &ParticleEmitterConfig::SpeedMax,
-        "Gravity", &ParticleEmitterConfig::Gravity,
-        "LifetimeMin", &ParticleEmitterConfig::LifetimeMin,
-        "LifetimeMax", &ParticleEmitterConfig::LifetimeMax,
-        "StartSizeMin", &ParticleEmitterConfig::StartSizeMin,
-        "StartSizeMax", &ParticleEmitterConfig::StartSizeMax,
-        "EndSizeMin", &ParticleEmitterConfig::EndSizeMin,
-        "EndSizeMax", &ParticleEmitterConfig::EndSizeMax,
-        "StartColor", &ParticleEmitterConfig::StartColor,
-        "EndColor", &ParticleEmitterConfig::EndColor,
-        "AngularVelocityMax", &ParticleEmitterConfig::AngularVelocityMax,
-        "EmissionRate", &ParticleEmitterConfig::EmissionRate
-    );
+    using sage::fx::ParticleEffect;
+    // --- Частицы: доступно после BindParticles. ---------------------------
+    //
+    // ГОТОВЫХ ЭФФЕКТОВ В ДВИЖКЕ НЕТ. Эффект — данные: файл .sagefx из проекта
+    // (fx.LoadEffect) или таблица полей, собранная скриптом. Прежние пресеты
+    // «огонь», «дым», «брызги» были кодом движка и знали только то, что в них
+    // зашили.
+    m_lua.new_usertype<sage::fx::Range>("ParticleRange",
+        sol::factories([] { return sage::fx::Range{}; },
+                       [](float lo, float hi) { return sage::fx::Range{lo, hi}; }),
+        "Min", &sage::fx::Range::Min,
+        "Max", &sage::fx::Range::Max);
 
-    sol::table presets = m_lua.create_table();
-    presets.set_function("WaterSplash", &ParticlePresets::WaterSplash);
-    presets.set_function("Smoke", &ParticlePresets::Smoke);
-    presets.set_function("BlockBreak", &ParticlePresets::BlockBreak);
-    presets.set_function("StoveEmbers", &ParticlePresets::StoveEmbers);
-    m_lua["ParticlePresets"] = presets;
+    m_lua.new_usertype<ParticleEffect>("ParticleEffect",
+        sol::constructors<ParticleEffect()>(),
+        "Duration", &ParticleEffect::Duration,
+        "Loop", &ParticleEffect::Loop,
+        "StartDelay", &ParticleEffect::StartDelay,
+        "Prewarm", &ParticleEffect::Prewarm,
+        "MaxParticles", &ParticleEffect::MaxParticles,
+        "SimulationSpeed", &ParticleEffect::SimulationSpeed,
+        "GravityScale", &ParticleEffect::GravityScale,
+        "InheritVelocity", &ParticleEffect::InheritVelocity,
+        "StartLifetime", &ParticleEffect::StartLifetime,
+        "StartSpeed", &ParticleEffect::StartSpeed,
+        "StartSize", &ParticleEffect::StartSize,
+        "StartRotation", &ParticleEffect::StartRotation,
+        "StartColorA", &ParticleEffect::StartColorA,
+        "StartColorB", &ParticleEffect::StartColorB,
+        "RateOverTime", &ParticleEffect::RateOverTime,
+        "RateOverDistance", &ParticleEffect::RateOverDistance,
+        "Radius", &ParticleEffect::Radius,
+        "ConeAngle", &ParticleEffect::ConeAngle,
+        "Arc", &ParticleEffect::Arc,
+        "BoxSize", &ParticleEffect::BoxSize,
+        "EdgeLength", &ParticleEffect::EdgeLength,
+        "FromShell", &ParticleEffect::FromShell,
+        "RandomizeDirection", &ParticleEffect::RandomizeDirection,
+        "ShapeOffset", &ParticleEffect::ShapeOffset,
+        "ShapeRotation", &ParticleEffect::ShapeRotation,
+        "UseVelocity", &ParticleEffect::UseVelocity,
+        "LinearVelocity", &ParticleEffect::LinearVelocity,
+        "Orbital", &ParticleEffect::Orbital,
+        "Radial", &ParticleEffect::Radial,
+        "UseForces", &ParticleEffect::UseForces,
+        "Force", &ParticleEffect::Force,
+        "Wind", &ParticleEffect::Wind,
+        "WindInfluence", &ParticleEffect::WindInfluence,
+        "Gustiness", &ParticleEffect::Gustiness,
+        "Drag", &ParticleEffect::Drag,
+        "MaxSpeed", &ParticleEffect::MaxSpeed,
+        "Attraction", &ParticleEffect::Attraction,
+        "UseNoise", &ParticleEffect::UseNoise,
+        "NoiseStrength", &ParticleEffect::NoiseStrength,
+        "NoiseFrequency", &ParticleEffect::NoiseFrequency,
+        "NoiseScroll", &ParticleEffect::NoiseScroll,
+        "UseCollision", &ParticleEffect::UseCollision,
+        "PlaneHeight", &ParticleEffect::PlaneHeight,
+        "Bounce", &ParticleEffect::Bounce,
+        "Friction", &ParticleEffect::Friction,
+        "LifetimeLoss", &ParticleEffect::LifetimeLoss,
+        "Texture", &ParticleEffect::Texture,
+        "TilesX", &ParticleEffect::TilesX,
+        "TilesY", &ParticleEffect::TilesY,
+        "FrameRate", &ParticleEffect::FrameRate,
+        "PixelArt", &ParticleEffect::PixelArt,
+        "Intensity", &ParticleEffect::Intensity,
+        "SortByDistance", &ParticleEffect::SortByDistance,
+        "StretchLength", &ParticleEffect::StretchLength,
+        "StretchBySpeed", &ParticleEffect::StretchBySpeed,
+        "TrailLifetime", &ParticleEffect::TrailLifetime,
+        "AlignToVelocity", &ParticleEffect::AlignToVelocity,
+        "Shape", EnumProperty(&ParticleEffect::Shape, kLuaShapes),
+        "Render", EnumProperty(&ParticleEffect::Render, kLuaRenders),
+        "Blend", EnumProperty(&ParticleEffect::Blend, kLuaBlends),
+        "Space", EnumProperty(&ParticleEffect::Space, kLuaSpaces),
+        "Sprite", EnumProperty(&ParticleEffect::Sprite, kLuaSprites),
+        "Flipbook", EnumProperty(&ParticleEffect::Flipbook, kLuaFlipbooks),
+        // Кривые и градиенты — таблицами; вызов заодно включает свой модуль:
+        // задать кривую и забыть галку — самая частая «почему не работает».
+        "SetSizeOverLifetime", [](ParticleEffect& f, sol::table keys) {
+            f.SizeOverLifetime = CurveFrom(keys);
+            f.UseSizeOverLifetime = true;
+        },
+        "SetColorOverLifetime", [](ParticleEffect& f, sol::table keys) {
+            f.ColorOverLifetime = GradientFrom(keys);
+            f.UseColorOverLifetime = true;
+        },
+        "SetSpeedOverLifetime", [](ParticleEffect& f, sol::table keys) {
+            f.SpeedOverLifetime = CurveFrom(keys);
+            f.UseVelocity = true;
+        },
+        "SetFrames", [](ParticleEffect& f, sol::table frames) {
+            f.Frames.clear();
+            for (auto& kv : frames) f.Frames.push_back(kv.second.as<std::string>());
+        },
+        "AddBurst", [](ParticleEffect& f, float time, int count, sol::optional<int> cycles,
+                       sol::optional<float> interval) {
+            f.Bursts.push_back({time, count, count, cycles.value_or(1), interval.value_or(0.5f)});
+        });
 
-    // Разовый залп частиц в мировой точке — см. ParticleSystem::Burst
-    Bind("fx", "Emit", "EmitParticles", [this](const ParticleEmitterConfig& config, glm::vec3 pos, int count) {
-        if (!m_particles) throw std::runtime_error("EmitParticles: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
-        m_particles->Burst(config, pos, count);
+    // Эффект из файла проекта (.sagefx). Ошибка — исключение с причиной, а не
+    // пустой эффект: «не нашёлся файл» и «эффект такой» различать обязательно.
+    Bind("fx", "LoadEffect", "LoadParticleEffect", [](const std::string& path) {
+        ParticleEffect fx;
+        std::string err;
+        const std::string real = sage::AssetDatabase::Instance().LocatePath(path);
+        if (!sage::fx::LoadEffectFile(real, fx, &err))
+            throw std::runtime_error("LoadEffect: " + err);
+        return fx;
     });
-    // Непрерывная струя (дым, искры) — создаётся выключенной, включай
-    // SetParticleStreamActive(id, true) отдельно (см. ParticleSystem::CreateStream)
-    Bind("fx", "CreateStream", "CreateParticleStream", [this](const std::string& id, const ParticleEmitterConfig& config, glm::vec3 pos) {
+
+    // Разовый залп частиц в мировой точке.
+    Bind("fx", "Emit", "EmitParticles", [this](const ParticleEffect& fx, glm::vec3 pos, int count) {
+        if (!m_particles) throw std::runtime_error("EmitParticles: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
+        m_particles->Burst(fx, pos, count);
+    });
+    // Непрерывная струя по имени — создаётся выключенной, включай SetStreamActive.
+    Bind("fx", "CreateStream", "CreateParticleStream", [this](const std::string& id, const ParticleEffect& fx, glm::vec3 pos) {
         if (!m_particles) throw std::runtime_error("CreateParticleStream: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
-        m_particles->CreateStream(id, config, pos);
+        m_particles->CreateStream(id, fx, pos);
     });
     Bind("fx", "SetStreamActive", "SetParticleStreamActive", [this](const std::string& id, bool active) {
         if (!m_particles) throw std::runtime_error("SetParticleStreamActive: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
@@ -70,6 +206,29 @@ void ScriptEngine::RegisterParticleApi() {
     Bind("fx", "RemoveStream", "RemoveParticleStream", [this](const std::string& id) {
         if (!m_particles) throw std::runtime_error("RemoveParticleStream: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
         m_particles->RemoveStream(id);
+    });
+
+    // --- Эмиттер ОБЪЕКТА --------------------------------------------------
+    // Команда ставится компоненту, система исполнит её в своём шаге кадра —
+    // так же, как у звука объекта.
+    auto emitter = [](GameObject& obj, const char* who) -> ParticleEmitterComponent& {
+        if (!obj.Valid()) throw std::runtime_error(std::string(who) + ": объект недействителен");
+        ParticleEmitterComponent* pe = obj.Registry()->try_get<ParticleEmitterComponent>(obj.Entity());
+        if (!pe) throw std::runtime_error(std::string(who) + ": у объекта нет эмиттера частиц");
+        return *pe;
+    };
+    Bind("fx", "Play", "PlayParticles", [emitter](GameObject obj) {
+        ParticleEmitterComponent& pe = emitter(obj, "fx.Play");
+        pe.Playing = true;
+        pe.RestartRequested = true;
+    });
+    Bind("fx", "Stop", "StopParticles", [emitter](GameObject obj, sol::optional<bool> clear) {
+        ParticleEmitterComponent& pe = emitter(obj, "fx.Stop");
+        pe.Playing = false;
+        if (clear.value_or(false)) pe.ClearRequested = true;
+    });
+    Bind("fx", "EmitFrom", "EmitFromObject", [emitter](GameObject obj, int count) {
+        emitter(obj, "fx.EmitFrom").PendingEmit += std::max(count, 0);
     });
 }
 

@@ -14,6 +14,7 @@
 #include "sage/core/Profiler.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/render/ParticleECS.h"
+#include "sage/render/ParticleSystem.h"
 #include "sage/scripting/ScriptEngine.h"
 
 namespace sage {
@@ -190,6 +191,24 @@ void RegisterCoreSystems(SystemScheduler& scheduler, const CoreSystems& systems)
     // сущность оказалась В ИТОГЕ, а не там, где была до физики.
     if (systems.Particles) {
         ParticleSystem* particles = systems.Particles;
+        // Столкновения частиц с миром — лучом в физику сцены, если она есть.
+        // Без неё частицы сталкиваются только с плоскостью из своих настроек.
+        // Без физики запрос снимается: иначе остался бы указатель на физику
+        // прошлого запуска.
+        particles->SetCollisionQuery({});
+        if (PhysicsScene* physics = systems.Physics) {
+            particles->SetCollisionQuery([physics](const glm::vec3& from, const glm::vec3& to,
+                                                   sage::fx::CollisionHit& hit) {
+                const glm::vec3 d = to - from;
+                const float len = glm::length(d);
+                if (len < 1e-6f) return false;
+                const PhysicsScene::EntityHit h = physics->Raycast(from, d / len, len);
+                if (!h.Hit) return false;
+                hit.Point = h.Point;
+                hit.Normal = h.Normal;
+                return true;
+            });
+        }
         scheduler.Add(Stage::Effects, "particles", [particles](Scene& scene, float dt) {
             sage::fx::UpdateEmitters(scene, *particles, dt);
         });

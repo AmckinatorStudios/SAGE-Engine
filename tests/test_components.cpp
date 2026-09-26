@@ -80,7 +80,7 @@ TEST(Components_survive_a_scene_round_trip) {
     col.Radius = 2.5f;
 
     GameObject emitter = scene.CreateObject("Emitter");
-    emitter.Registry()->emplace<ParticleEmitterComponent>(emitter.Entity()).BurstCount = 55;
+    emitter.Registry()->emplace<ParticleEmitterComponent>(emitter.Entity()).Effect.MaxParticles = 55;
 
     GameObject probe = scene.CreateObject("Probe");
     probe.Registry()->emplace<ReflectionProbeComponent>(probe.Entity()).Resolution = 64;
@@ -124,7 +124,7 @@ TEST(Components_survive_a_scene_round_trip) {
     GameObject em = Find<ParticleEmitterComponent>(*loaded);
     CHECK_TRUE(em.Valid());
     if (em.Valid()) {
-        CHECK_EQ(em.Registry()->get<ParticleEmitterComponent>(em.Entity()).BurstCount, 55);
+        CHECK_EQ(em.Registry()->get<ParticleEmitterComponent>(em.Entity()).Effect.MaxParticles, 55);
     }
 
     GameObject pr = Find<ReflectionProbeComponent>(*loaded);

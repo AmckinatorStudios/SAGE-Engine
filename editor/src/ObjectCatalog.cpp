@@ -59,14 +59,12 @@ Group Catalog() {
              {"fx.probe",      T("Reflection probe"), T("Captures the surroundings so nearby surfaces reflect them")},
          },
          {
+             // Один пункт, а не «огонь / дым / искры»: готовых эффектов в
+             // движке нет — эффект собирается в инспекторе или приходит файлом
+             // .sagefx (его можно бросить на объект из дерева проекта).
              {T("Particles"),
               {
-                  {"fx.particles.fire",    T("Fire"),        T("Flame tongues with an upward draft")},
-                  {"fx.particles.smoke",   T("Smoke"),       T("Slow grey plume")},
-                  {"fx.particles.sparks",  T("Sparks"),      T("Short hot flecks: grinding, shorts")},
-                  {"fx.particles.splash",  T("Water splash"),T("Spray of droplets")},
-                  {"fx.particles.embers",  T("Embers"),      T("Rare glowing specks over a fire")},
-                  {"fx.particles.debris",  T("Debris"),      T("Shards of a broken block")},
+                  {"fx.particles", T("Particle system"), T("An emitter to shape into any effect: rain, snow, smoke, fire, magic")},
               },
               {}},
          }},

@@ -397,6 +397,7 @@ void PlayerLayer::OnDetach() {
     // уходят раньше прежнего движка: Lua-бэкенд живёт на его состоянии.
     if (m_scripting) m_scripting->Shutdown();
     m_scripting.reset();
+    if (m_particles) m_particles->SetCollisionQuery({});   // запрос держит физику
     m_physics.reset();
     m_scripts.reset();
     // Кэш префабов держит разобранные сцены, а в них — меши на GPU. Он
@@ -557,6 +558,7 @@ bool PlayerLayer::SwitchScene(const std::string& sceneName) {
     m_systems.Clear();
     if (m_scripting) m_scripting->Shutdown();
     m_scripting.reset();
+    if (m_particles) m_particles->SetCollisionQuery({});   // запрос держит физику
     m_physics.reset();
     m_scripts.reset();   // вместе с ним уходит всё состояние скриптов уровня
     // Шина событий принадлежит сцене — снимаем ссылку ДО того, как старая

@@ -114,5 +114,6 @@ void RunMaterialChecks(FrameRenderer& r);                   // материал:
 void RunVolumetricChecks();                                 // объёмный свет: зерно, полосы, кайма
 void RunStabilityChecks(FrameRenderer& r, Scene& scene);     // дрейф, утечки, разрешения, resize
 void RunTextureChecks(FrameRenderer& r);                    // мипмапы, детализация, анизотропия
+void RunParticleChecks();                                   // частицы: текстура, кадры, смешивание, меш, след
 
 } // namespace sage::rendertest

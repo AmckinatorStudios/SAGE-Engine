@@ -38,7 +38,6 @@
 #include "sage/render/ModelLoader.h"
 #include "sage/render/ModelMaterial.h"
 #include "sage/assets/AssetDatabase.h"
-#include "sage/render/ParticlePresets.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"

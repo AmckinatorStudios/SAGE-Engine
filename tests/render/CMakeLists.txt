@@ -11,6 +11,7 @@ add_executable(sage_render_tests
     main.cpp                 # только порядок прогона
     Fixture.cpp              # общая оснастка: сцена, камера, проход, учёт
     Checks_Frame.cpp         # кадр и пост-обработка
+    Checks_Particles.cpp     # частицы
     Checks_Animation.cpp     # морфинг и обратная кинематика
     Checks_Reflections.cpp   # отражения и блик
     Checks_Shadows.cpp       # тени

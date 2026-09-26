@@ -57,7 +57,6 @@
 #include "sage/anim/AnimationSystem.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderSystem.h"
-#include "sage/render/ParticlePresets.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"

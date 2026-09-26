@@ -45,7 +45,6 @@
 #include "sage/anim/AnimationSystem.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderSystem.h"
-#include "sage/render/ParticlePresets.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
@@ -704,9 +703,7 @@ void EditorLayer::OnAttach() {
         reg.emplace_or_replace<ReflectionProbeComponent>(e);
         reg.emplace_or_replace<ScriptComponent>(e, ScriptComponent{"assets/scripts/spin.lua"});
         sage::ui::ApplyPreset(reg, e, "Button");
-        ParticleEmitterComponent em;
-        em.Config = ParticlePresets::Registry()[0].Make();
-        reg.emplace_or_replace<ParticleEmitterComponent>(e, em);
+        reg.emplace_or_replace<ParticleEmitterComponent>(e);
         m_selection.SetPrimary(all.Id());
         LOG_INFO("Editor") << "SAGE_EDITOR_ALL_COMPONENTS: сущность со всеми компонентами создана";
     }

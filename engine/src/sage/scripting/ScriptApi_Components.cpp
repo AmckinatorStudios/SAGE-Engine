@@ -87,11 +87,8 @@ void ScriptEngine::RegisterComponentTypes() {
         "ConeHalfAngle", &JointComponent::ConeHalfAngle
     );
     m_lua.new_usertype<ParticleEmitterComponent>("ParticleEmitterComponent",
-        "Config", &ParticleEmitterComponent::Config,
-        "Active", &ParticleEmitterComponent::Active,
-        "Continuous", &ParticleEmitterComponent::Continuous,
-        "BurstCount", &ParticleEmitterComponent::BurstCount,
-        "BurstInterval", &ParticleEmitterComponent::BurstInterval
+        "Effect", &ParticleEmitterComponent::Effect,
+        "Playing", &ParticleEmitterComponent::Playing
     );
     m_lua.new_usertype<MeshRendererComponent>("MeshRendererComponent",
         // Цвет объекта БЕЗ материала. Свечения и прозрачности здесь больше нет:

@@ -57,7 +57,6 @@
 #include "sage/anim/AnimationSystem.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderSystem.h"
-#include "sage/render/ParticlePresets.h"
 #include "sage/gi/GI.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
@@ -456,32 +455,13 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
         return done(obj);
     }
 
-    // Частицы: ключ каталога -> название пресета движка. Связь по ИМЕНИ, а не
-    // по номеру в реестре: номера сдвинутся от любой вставки нового пресета, и
-    // «Огонь» в меню молча стал бы дымом.
-    struct FxEntry { const char* Id; const char* Preset; const char* Name; };
-    static const FxEntry kFx[] = {
-        {"fx.particles.fire",   "Fire",         "Fire"},
-        {"fx.particles.smoke",  "Smoke",        "Smoke"},
-        {"fx.particles.sparks", "Sparks",       "Sparks"},
-        {"fx.particles.splash", "Water Splash", "Water Splash"},
-        {"fx.particles.embers", "Embers",       "Embers"},
-        {"fx.particles.debris", "Block Break",  "Debris"},
-    };
-    for (const FxEntry& fx : kFx) {
-        if (id != fx.Id) continue;
-        const auto& registry = ParticlePresets::Registry();
-        int index = 0;
-        for (int i = 0; i < (int)registry.size(); ++i) {
-            if (std::string(registry[(size_t)i].Name) == fx.Preset) { index = i; break; }
-        }
+    // Частицы: нейтральный эмиттер — дальше его настраивают в инспекторе.
+    // Старые ключи «fx.particles.*» (сохранённые избранные, шаблоны) ведут сюда же.
+    if (id == "fx.particles" || id.rfind("fx.particles.", 0) == 0) {
         PushUndoSnapshot();
-        GameObject obj = m_scene->CreateEmptyObject(fx.Name);
+        GameObject obj = m_scene->CreateEmptyObject("Particles");
         obj.GetTransform().Position = {0.0f, 0.5f, 0.0f};
-        ParticleEmitterComponent em;
-        em.Config = registry[(size_t)index].Make();
-        em.Preset = index;
-        reg.emplace<ParticleEmitterComponent>(obj.Entity(), em);
+        reg.emplace<ParticleEmitterComponent>(obj.Entity());
         return done(obj);
     }
 

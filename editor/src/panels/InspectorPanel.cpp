@@ -1,6 +1,8 @@
 #include <cstdarg>
 #include "../PanelWindows.h"
 #include "InspectorPanel.h"
+#include "sage/render/ParticleEffectIO.h"
+#include "sage/core/Paths.h"
 
 #include <cmath>
 #include <cstdio>
@@ -25,7 +27,6 @@
 #include "sage/render/ModelLoader.h"
 #include "sage/render/ModelMaterial.h"
 #include "sage/assets/AssetDatabase.h"
-#include "sage/render/ParticlePresets.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
@@ -68,6 +69,30 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
                 entt::registry& reg = host.CurrentScene().Registry();
                 AudioSourceComponent& au = reg.get_or_emplace<AudioSourceComponent>(target.Entity());
                 au.Clip = picked;
+            }
+        } else if (m_browseLoadEffectEntity >= 0 || m_browseSaveEffectEntity >= 0) {
+            // Эффект частиц адресован сущности — как скрипт и звук выше.
+            const bool save = m_browseSaveEffectEntity >= 0;
+            GameObject target = host.CurrentScene().Get(save ? m_browseSaveEffectEntity : m_browseLoadEffectEntity);
+            m_browseLoadEffectEntity = m_browseSaveEffectEntity = -1;
+            ParticleEmitterComponent* pe =
+                target.Valid() ? target.Registry()->try_get<ParticleEmitterComponent>(target.Entity()) : nullptr;
+            if (pe) {
+                std::string err;
+                const std::string file = sage::PathToUtf8(m_browser.Result());
+                if (save) {
+                    if (!sage::fx::SaveEffectFile(file, pe->Effect, &err))
+                        LOG_ERROR("Editor") << "Эффект не сохранился: " << err;
+                } else {
+                    sage::fx::ParticleEffect loaded;
+                    if (sage::fx::LoadEffectFile(file, loaded, &err)) {
+                        host.PushUndoSnapshot();
+                        pe->Effect = loaded;
+                        pe->RestartRequested = true;
+                    } else {
+                        LOG_ERROR("Editor") << "Эффект не загрузился: " << err;
+                    }
+                }
             }
         } else if (m_browseTarget) {
             *m_browseTarget = picked;

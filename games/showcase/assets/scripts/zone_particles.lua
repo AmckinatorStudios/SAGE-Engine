@@ -35,53 +35,108 @@ local fireLamp
 local time = 0.0
 local marks = {}
 
--- Огонь: короткая жизнь, малая скорость, тёплый цвет, гаснущий в тёмно-красный.
-local function fireConfig()
-    local c = ParticlePresets.StoveEmbers()
-    c.EmissionRate = 90.0
-    c.SpeedMin, c.SpeedMax = 0.8, 2.2
-    c.LifetimeMin, c.LifetimeMax = 0.5, 1.1
-    c.StartSizeMin, c.StartSizeMax = 0.10, 0.20
-    c.EndSizeMin, c.EndSizeMax = 0.02, 0.05
-    c.StartColor = Vec4(1.0, 0.72, 0.28, 1.0)
-    c.EndColor = Vec4(0.55, 0.12, 0.05, 0.0)
-    c.Gravity = 1.4          -- ускорение по Y вверх: горячее поднимается
-    return c
+-- Эффекты собираются ЗДЕСЬ, данными: готовых «огня» и «дыма» в движке нет.
+
+-- Огонь: короткая жизнь, всплытие, цвет от жёлтого к тёмно-красному и
+-- прозрачности, сложение со светом (ярче там, где языки накладываются).
+local function fireEffect()
+    local f = ParticleEffect.new()
+    f.RateOverTime = 90.0
+    f.Shape = "cone"
+    f.Radius = 0.35
+    f.ConeAngle = 12.0
+    f.StartSpeed = ParticleRange.new(0.8, 2.2)
+    f.StartLifetime = ParticleRange.new(0.5, 1.1)
+    f.StartSize = ParticleRange.new(0.18, 0.34)
+    f.UseForces = true
+    f.Force = Vec3(0.0, 1.4, 0.0)          -- горячее поднимается
+    f.UseNoise = true                       -- языки пламени дрожат
+    f.NoiseStrength = 0.8
+    f.NoiseFrequency = 1.5
+    f:SetSizeOverLifetime({{0.0, 0.6}, {0.2, 1.0}, {1.0, 0.15}})
+    f:SetColorOverLifetime({{0.0, 1.0, 0.85, 0.4, 0.0}, {0.1, 1.0, 0.72, 0.28, 1.0},
+                            {0.6, 0.9, 0.3, 0.08, 0.7}, {1.0, 0.4, 0.08, 0.04, 0.0}})
+    f.Blend = "additive"
+    f.Intensity = 2.5                       -- светится и цепляет свечение поста
+    return f
 end
 
--- Дым: жизнь долгая, размер растёт, цвет уходит в прозрачный серый. Он же
--- проверяет сортировку полупрозрачного прохода: клубы обязаны накладываться
--- друг на друга, а не мигать по очереди.
-local function smokeConfig()
-    local c = ParticlePresets.Smoke()
-    c.EmissionRate = 22.0
-    c.LifetimeMin, c.LifetimeMax = 2.2, 3.8
-    c.StartSizeMin, c.StartSizeMax = 0.25, 0.45
-    c.EndSizeMin, c.EndSizeMax = 1.4, 2.1
-    -- Дым СВЕТЛЫЙ и полупрозрачный. Тёмный столб на светлом небе читается не
-    -- как дым, а как дыра в кадре: на просвет настоящий дым почти всегда
-    -- светлее фона, а не темнее.
-    c.StartColor = Vec4(0.62, 0.61, 0.60, 0.30)
-    c.EndColor = Vec4(0.78, 0.78, 0.80, 0.0)
-    -- Вверх, но слабее огня: дым легче воздуха, а не выстреливает из костра.
-    c.Gravity = 0.9
-    -- Снос вбок задаётся разбросом направления: гравитация в движке — одно
-    -- число по Y, и «ветра» в ней нет. Вертикальный столб дыма выглядит мёртвым.
-    c.DirectionMin = Vec3(0.1, 0.8, -0.25)
-    c.DirectionMax = Vec3(0.6, 1.2, 0.25)
-    return c
+-- Дым: долгая жизнь, растущий размер, прозрачный серый, СНОС ВЕТРОМ и
+-- турбулентность — вертикальный ровный столб выглядит мёртвым. Он же проверяет
+-- сортировку полупрозрачного прохода.
+local function smokeEffect()
+    local f = ParticleEffect.new()
+    f.RateOverTime = 22.0
+    f.Shape = "cone"
+    f.Radius = 0.4
+    f.ConeAngle = 8.0
+    f.StartLifetime = ParticleRange.new(2.2, 3.8)
+    f.StartSpeed = ParticleRange.new(0.6, 1.0)
+    f.StartSize = ParticleRange.new(0.25, 0.45)
+    -- Дым СВЕТЛЫЙ: тёмный столб на светлом небе читается как дыра в кадре.
+    f.StartColorA = Vec4(0.62, 0.61, 0.60, 0.30)
+    f.StartColorB = Vec4(0.70, 0.69, 0.68, 0.30)
+    f.UseForces = true
+    f.Force = Vec3(0.0, 0.6, 0.0)
+    f.Wind = Vec3(1.2, 0.0, 0.0)
+    f.WindInfluence = 0.4
+    f.Gustiness = 0.5
+    f.Drag = 0.3
+    f.UseNoise = true
+    f.NoiseStrength = 0.5
+    f.NoiseFrequency = 0.6
+    f.UseRotation = true
+    f.AngularVelocity = ParticleRange.new(-40.0, 40.0)
+    f:SetSizeOverLifetime({{0.0, 1.0}, {1.0, 4.5}})
+    f:SetColorOverLifetime({{0.0, 1.0, 1.0, 1.0, 0.0}, {0.15, 1.0, 1.0, 1.0, 1.0}, {1.0, 1.2, 1.2, 1.25, 0.0}})
+    f.SortByDistance = true
+    return f
 end
 
-local function waterConfig()
-    local c = ParticlePresets.WaterSplash()
-    c.EmissionRate = 140.0
-    c.SpeedMin, c.SpeedMax = 3.5, 5.0
-    c.LifetimeMin, c.LifetimeMax = 0.9, 1.5
-    c.DirectionMin = Vec3(-0.25, 1.0, -0.25)
-    c.DirectionMax = Vec3(0.25, 1.0, 0.25)
-    c.StartColor = Vec4(0.62, 0.86, 1.0, 0.95)
-    c.EndColor = Vec4(0.30, 0.58, 0.86, 0.0)
-    return c
+-- Фонтан: вода падает под тяготением и отскакивает от чаши (столкновения с
+-- плоскостью), капли вытянуты по скорости.
+local function waterEffect()
+    local f = ParticleEffect.new()
+    f.RateOverTime = 140.0
+    f.Shape = "cone"
+    f.Radius = 0.05
+    f.ConeAngle = 14.0
+    f.StartSpeed = ParticleRange.new(3.5, 5.0)
+    f.StartLifetime = ParticleRange.new(0.9, 1.5)
+    f.StartSize = ParticleRange.new(0.04, 0.07)
+    f.StartColorA = Vec4(0.62, 0.86, 1.0, 0.95)
+    f.StartColorB = Vec4(0.40, 0.70, 0.95, 0.95)
+    f.GravityScale = 1.0
+    f.UseCollision = true
+    f.PlaneHeight = 0.05
+    f.Bounce = 0.25
+    f.Render = "stretched"
+    f.StretchLength = 1.0
+    f.StretchBySpeed = 0.6
+    f:SetColorOverLifetime({{0.0, 1.0, 1.0, 1.0, 1.0}, {1.0, 0.6, 0.8, 1.0, 0.0}})
+    return f
+end
+
+-- Осколки залпа: объёмные тетраэдры, кувыркаются, отскакивают от пола.
+local function debrisEffect()
+    local f = ParticleEffect.new()
+    f.Shape = "sphere"
+    f.Radius = 0.2
+    f.StartSpeed = ParticleRange.new(3.0, 9.0)
+    f.StartLifetime = ParticleRange.new(0.6, 1.6)
+    f.StartSize = ParticleRange.new(0.06, 0.14)
+    f.StartColorA = Vec4(1.0, 0.85, 0.45, 1.0)
+    f.StartColorB = Vec4(0.9, 0.5, 0.2, 1.0)
+    f.GravityScale = 1.0
+    f.UseRotation = true
+    f.AngularVelocity = ParticleRange.new(-720.0, 720.0)
+    f.UseCollision = true
+    f.PlaneHeight = 0.0
+    f.Bounce = 0.4
+    f.Friction = 0.3
+    f.Render = "mesh"
+    f:SetColorOverLifetime({{0.0, 1.0, 1.0, 1.0, 1.0}, {0.8, 0.7, 0.25, 0.1, 1.0}, {1.0, 0.7, 0.25, 0.1, 0.0}})
+    return f
 end
 
 function Z.Build()
@@ -110,9 +165,9 @@ function Z.Build()
         s:SetParent(root)
     end
 
-    sage.fx.CreateStream("demo_fire", fireConfig(), Vec3(cx - 6.0, 0.25, cz))
+    sage.fx.CreateStream("demo_fire", fireEffect(), Vec3(cx - 6.0, 0.25, cz))
     sage.fx.SetStreamActive("demo_fire", true)
-    sage.fx.CreateStream("demo_smoke", smokeConfig(), Vec3(cx - 6.0, 1.1, cz))
+    sage.fx.CreateStream("demo_smoke", smokeEffect(), Vec3(cx - 6.0, 1.1, cz))
     sage.fx.SetStreamActive("demo_smoke", true)
 
     -- Свет костра. Частицы САМИ НЕ СВЕТЯТ — они рисуются как полупрозрачные
@@ -147,9 +202,8 @@ function Z.Build()
     nozzle:SetParent(carousel)
 
     local em = nozzle:AddEmitter()
-    em.Config = waterConfig()
-    em.Active = true
-    em.Continuous = true
+    em.Effect = waterEffect()
+    em.Playing = true
 
     -- Билборды: метки, которые всегда повёрнуты к камере. Три штуки на разной
     -- высоте — по ним видно, что поворот честный, а не «повернули один раз».
@@ -185,15 +239,11 @@ end
 -- хлопушкой, а не взрывом.
 function Z.Use()
     local cx, cz = Z.center.x, Z.center.z
-    local c = ParticlePresets.BlockBreak()
-    c.SpeedMin, c.SpeedMax = 3.0, 9.0
-    c.LifetimeMin, c.LifetimeMax = 0.6, 1.6
-    c.StartColor = Vec4(1.0, 0.85, 0.45, 1.0)
-    c.EndColor = Vec4(0.7, 0.25, 0.1, 0.0)
-    sage.fx.Emit(c, Vec3(cx, 1.4, cz + 4.0), 60)
+    sage.fx.Emit(debrisEffect(), Vec3(cx, 1.4, cz + 4.0), 60)
 
-    local s = smokeConfig()
-    s.StartColor = Vec4(0.5, 0.45, 0.4, 0.7)
+    local s = smokeEffect()
+    s.StartColorA = Vec4(0.5, 0.45, 0.4, 0.7)
+    s.StartColorB = Vec4(0.45, 0.42, 0.4, 0.7)
     sage.fx.Emit(s, Vec3(cx, 1.6, cz + 4.0), 18)
 
     -- Вспышка: короткий яркий свет. Без неё взрыв не освещает ничего вокруг, и

@@ -8,9 +8,12 @@
 #include "sage/render/PostProcessComponent.h"
 #include "sage/render/ResourceManager.h"
 #include <nlohmann/json.hpp>
+
+#include "sage/render/ParticleEffectIO.h"
 #include <fstream>
 #include <stdexcept>
 #include <algorithm>
+#include <cmath>
 #include <vector>
 #include "sage/core/Log.h"
 #include "sage/assets/AssetDatabase.h"
@@ -294,6 +297,16 @@ static LightingEnvironment LightingFromJson(const json& root) {
         lighting.Skybox.Enabled = sj.value("enabled", lighting.Skybox.Enabled);
         if (sj.contains("top")) lighting.Skybox.TopColor = Vec3FromJson(sj["top"]);
         if (sj.contains("horizon")) lighting.Skybox.HorizonColor = Vec3FromJson(sj["horizon"]);
+        // НЕТРОНУТЫЕ ПРЕЖНИЕ УМОЛЧАНИЯ — ЭТО УМОЛЧАНИЯ, а не выбор человека.
+        // Сцена сохраняет цвета неба всегда, и старая палитра (почти серая, в
+        // кадре — «пасмурно») осталась бы во всех сценах навсегда, хотя её
+        // никто не выбирал. Совпадение до бита с прежним умолчанием значит
+        // «не трогали» — такие цвета переходят на нынешние умолчания.
+        if (lighting.Skybox.TopColor == glm::vec3(0.30f, 0.45f, 0.75f) &&
+            lighting.Skybox.HorizonColor == glm::vec3(0.70f, 0.80f, 0.92f)) {
+            lighting.Skybox.TopColor = SkyboxSettings{}.TopColor;
+            lighting.Skybox.HorizonColor = SkyboxSettings{}.HorizonColor;
+        }
         lighting.Skybox.CubemapDir = sj.value("cubemapDir", lighting.Skybox.CubemapDir);
         lighting.Skybox.ImagePath = sj.value("image", lighting.Skybox.ImagePath);
         lighting.Skybox.ImageLayout = sj.value("imageLayout", lighting.Skybox.ImageLayout);
@@ -966,51 +979,66 @@ static AudioSourceComponent ParseAudio(const json& aj) {
 
 static void SaveParticles(json& j, const ParticleEmitterComponent& pe) {
     json& pj = j["particles"];
-    pj["preset"] = pe.Preset;
-    pj["active"] = pe.Active;
-    pj["continuous"] = pe.Continuous;
-    pj["burstCount"] = pe.BurstCount;
-    pj["burstInterval"] = pe.BurstInterval;
-    const ParticleEmitterConfig& c = pe.Config;
-    pj["directionMin"] = Vec3ToJson(c.DirectionMin);
-    pj["directionMax"] = Vec3ToJson(c.DirectionMax);
-    pj["speedMin"] = c.SpeedMin; pj["speedMax"] = c.SpeedMax;
-    pj["gravity"] = c.Gravity;
-    pj["lifetimeMin"] = c.LifetimeMin; pj["lifetimeMax"] = c.LifetimeMax;
-    pj["startSizeMin"] = c.StartSizeMin; pj["startSizeMax"] = c.StartSizeMax;
-    pj["endSizeMin"] = c.EndSizeMin; pj["endSizeMax"] = c.EndSizeMax;
-    pj["startColor"] = Vec4ToJson(c.StartColor);
-    pj["endColor"] = Vec4ToJson(c.EndColor);
-    pj["angularVelocityMax"] = c.AngularVelocityMax;
-    pj["shape"] = (c.Shape == ParticleShape::Quad) ? "quad" : "circle";
-    pj["emissionRate"] = c.EmissionRate;
+    pj["playing"] = pe.Playing;
+    // Эффект — тем же форматом, что и файл .sagefx: эмиттер, сохранённый в
+    // файл из инспектора, и эмиттер в сцене — одно и то же.
+    pj["effect"] = json::parse(sage::fx::EffectToJson(pe.Effect));
+}
+
+// СТАРЫЙ ЭМИТТЕР (две точки «начало/конец», направление коробкой, гравитация
+// по Y) — переводится в новый эффект так, чтобы выглядеть как раньше. Сцены,
+// сохранённые до переделки частиц, открываются без потерь.
+static sage::fx::ParticleEffect EffectFromLegacy(const json& pj) {
+    using namespace sage::fx;
+    ParticleEffect f;
+    const glm::vec3 dmin = pj.contains("directionMin") ? Vec3FromJson(pj["directionMin"]) : glm::vec3(-0.5f, 0.5f, -0.5f);
+    const glm::vec3 dmax = pj.contains("directionMax") ? Vec3FromJson(pj["directionMax"]) : glm::vec3(0.5f, 1.5f, 0.5f);
+    const glm::vec3 mid = (dmin + dmax) * 0.5f;
+    const float spread = std::max({std::abs(dmin.x), std::abs(dmax.x), std::abs(dmin.z), std::abs(dmax.z)});
+    f.Shape = EmitShape::Cone;
+    f.Radius = 0.0f;
+    f.ConeAngle = glm::degrees(std::atan2(spread, std::max(std::abs(mid.y), 1e-3f)));
+    if (mid.y < 0.0f) f.ShapeRotation = glm::vec3(180.0f, 0.0f, 0.0f);
+    f.StartSpeed = {pj.value("speedMin", 1.0f), pj.value("speedMax", 2.0f)};
+    f.GravityScale = -pj.value("gravity", -2.0f) / 9.81f;
+    f.StartLifetime = {pj.value("lifetimeMin", 0.5f), pj.value("lifetimeMax", 1.0f)};
+    f.StartSize = {pj.value("startSizeMin", 0.08f), pj.value("startSizeMax", 0.15f)};
+    const float startAvg = std::max((f.StartSize.Min + f.StartSize.Max) * 0.5f, 1e-4f);
+    const float endAvg = (pj.value("endSizeMin", 0.0f) + pj.value("endSizeMax", 0.02f)) * 0.5f;
+    f.UseSizeOverLifetime = true;
+    f.SizeOverLifetime = Curve::Linear(1.0f, endAvg / startAvg);
+    const glm::vec4 c0 = pj.contains("startColor") ? Vec4FromJson(pj["startColor"]) : glm::vec4(1.0f);
+    const glm::vec4 c1 = pj.contains("endColor") ? Vec4FromJson(pj["endColor"], glm::vec4(1, 1, 1, 0)) : glm::vec4(1, 1, 1, 0);
+    f.StartColorA = f.StartColorB = glm::vec4(1.0f);
+    f.UseColorOverLifetime = true;
+    f.ColorOverLifetime = Gradient::Fade(c0, c1);
+    const float spin = pj.value("angularVelocityMax", 0.0f);
+    if (spin > 0.0f) {
+        f.UseRotation = true;
+        f.AngularVelocity = {-glm::degrees(spin), glm::degrees(spin)};
+    }
+    f.Sprite = pj.value("shape", std::string("circle")) == "quad" ? ParticleSprite::Square : ParticleSprite::SoftCircle;
+    if (pj.value("continuous", true)) {
+        f.RateOverTime = pj.value("emissionRate", 20.0f);
+    } else {
+        f.RateOverTime = 0.0f;
+        const float interval = std::max(pj.value("burstInterval", 1.5f), 0.05f);
+        const int count = pj.value("burstCount", 24);
+        f.Duration = interval;
+        f.Bursts.push_back({0.0f, count, count, 1, interval});
+    }
+    return f;
 }
 
 static ParticleEmitterComponent ParseParticles(const json& pj) {
     ParticleEmitterComponent pe;
-    pe.Preset = pj.value("preset", 0);
-    pe.Active = pj.value("active", true);
-    pe.Continuous = pj.value("continuous", true);
-    pe.BurstCount = pj.value("burstCount", 24);
-    pe.BurstInterval = pj.value("burstInterval", 1.5f);
-    ParticleEmitterConfig& c = pe.Config;
-    if (pj.contains("directionMin")) c.DirectionMin = Vec3FromJson(pj["directionMin"]);
-    if (pj.contains("directionMax")) c.DirectionMax = Vec3FromJson(pj["directionMax"]);
-    c.SpeedMin = pj.value("speedMin", c.SpeedMin);
-    c.SpeedMax = pj.value("speedMax", c.SpeedMax);
-    c.Gravity = pj.value("gravity", c.Gravity);
-    c.LifetimeMin = pj.value("lifetimeMin", c.LifetimeMin);
-    c.LifetimeMax = pj.value("lifetimeMax", c.LifetimeMax);
-    c.StartSizeMin = pj.value("startSizeMin", c.StartSizeMin);
-    c.StartSizeMax = pj.value("startSizeMax", c.StartSizeMax);
-    c.EndSizeMin = pj.value("endSizeMin", c.EndSizeMin);
-    c.EndSizeMax = pj.value("endSizeMax", c.EndSizeMax);
-    if (pj.contains("startColor")) c.StartColor = Vec4FromJson(pj["startColor"]);
-    if (pj.contains("endColor")) c.EndColor = Vec4FromJson(pj["endColor"], glm::vec4(1, 1, 1, 0));
-    c.AngularVelocityMax = pj.value("angularVelocityMax", c.AngularVelocityMax);
-    c.Shape = (pj.value("shape", std::string("circle")) == "quad")
-                  ? ParticleShape::Quad : ParticleShape::SoftCircle;
-    c.EmissionRate = pj.value("emissionRate", c.EmissionRate);
+    if (pj.contains("effect") && pj["effect"].is_object()) {
+        sage::fx::EffectFromJson(pj["effect"].dump(), pe.Effect);
+        pe.Playing = pj.value("playing", true);
+    } else {
+        pe.Effect = EffectFromLegacy(pj);
+        pe.Playing = pj.value("active", true);
+    }
     return pe;
 }
 

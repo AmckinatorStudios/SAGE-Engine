@@ -437,3 +437,30 @@ TEST(Sky_single_image_layout_is_detected_by_aspect) {
 }
 
 } // namespace
+
+// --- Ясный день — синий, а не серый ------------------------------------------
+//
+// Умолчания неба были почти серыми (0.30/0.45/0.75 и 0.70/0.80/0.92), и после
+// тон-маппинга «ясный день» выглядел пасмурным. Здесь проверяется, что дневные
+// цвета по умолчанию насыщенные: в зените синий канал многократно сильнее
+// красного, и даже у горизонта небо остаётся голубым, а не белёсым.
+TEST(Sky_default_day_is_clear_blue_not_overcast) {
+    const SkyboxSettings sky;
+    CHECK_TRUE(sky.TopColor.b > sky.TopColor.r * 8.0f);
+    CHECK_TRUE(sky.TopColor.b > sky.TopColor.g * 3.0f);
+    CHECK_TRUE(sky.HorizonColor.b > sky.HorizonColor.r * 2.0f);
+
+    // Сцена, сохранённая со СТАРЫМИ умолчаниями (их никто не выбирал), переходит
+    // на нынешние; выбранные человеком цвета не трогаются.
+    Scene scene("sky");
+    scene.Lighting.Skybox.Enabled = true;
+    scene.Lighting.Skybox.TopColor = {0.30f, 0.45f, 0.75f};
+    scene.Lighting.Skybox.HorizonColor = {0.70f, 0.80f, 0.92f};
+    std::unique_ptr<Scene> old = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    CHECK_NEAR(old->Lighting.Skybox.TopColor.b, sky.TopColor.b, 1e-6f);
+    CHECK_NEAR(old->Lighting.Skybox.TopColor.r, sky.TopColor.r, 1e-6f);
+
+    scene.Lighting.Skybox.TopColor = {0.30f, 0.45f, 0.76f};   // тронули — это выбор
+    std::unique_ptr<Scene> mine = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    CHECK_NEAR(mine->Lighting.Skybox.TopColor.r, 0.30f, 1e-6f);
+}

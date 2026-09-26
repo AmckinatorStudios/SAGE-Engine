@@ -39,8 +39,8 @@ namespace sage::net { class NetworkSystem; }
 //     волны спавна, задержки) пишутся как обычный линейный Lua-код
 //   - GetCamera() — чтение/правка позиции и угла обзора камеры (катсцены,
 //     программные камера-эффекты)
-//   - EmitParticles/CreateParticleStream и т.п. — частицы (залпы и непрерывные
-//     струи) с готовыми пресетами из ParticlePresets или своей конфигурацией
+//   - fx.Emit/CreateStream/LoadEffect и т.п. — частицы (залпы и непрерывные
+//     струи) по эффекту из файла .sagefx или собранному скриптом
 //   - AddBillboard/RemoveBillboard и т.п. — именованные спрайты, повёрнутые к камере
 //   - ДОСТУП К КОМПОНЕНТАМ сущности: entity:GetLight()/AddRigidBody()/HasCollider()
 //     и т.п. для Light/Camera/RigidBody/Collider/ParticleEmitter — скрипт читает и
@@ -416,7 +416,7 @@ private:
     void RegisterMeshApi();       // SetMeshCube/Sphere/…/Model/None
     void RegisterInputApi();      // IsActionDown/WasActionPressed/…
     void RegisterCameraApi();     // Camera usertype + GetCamera
-    void RegisterParticleApi();   // ParticleConfig, пресеты, Emit/Stream
+    void RegisterParticleApi();   // ParticleEffect, LoadEffect, Emit/Stream, эмиттер объекта
     void RegisterBillboardApi();  // AddBillboard/…
     void RegisterAudioApi();      // PlaySound/PlayMusic/…
     void RegisterSaveApi();       // sage.save.* — прогресс игрока

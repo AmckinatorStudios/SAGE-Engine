@@ -61,7 +61,6 @@
 #include "sage/render/Frustum.h"
 #include "sage/audio/AudioSystem.h"
 #include "sage/render/ParticleECS.h"
-#include "sage/render/ParticlePresets.h"
 #include "sage/rhi/ResourceLedger.h"
 #include "sage/anim/AnimationSystem.h"
 #include "sage/gi/GI.h"
@@ -1392,9 +1391,8 @@ bool EditorLayer::SelfTestProjectAndAssets() {
     // открытия другого проекта ни того, ни другого остаться не должно.
     if (ok) {
         ParticleSystem& particles = m_renderer.Particles();
-        ParticleEmitterConfig cfg;
-        cfg.LifetimeMin = 30.0f;      // заведомо переживёт переход
-        cfg.LifetimeMax = 30.0f;
+        sage::fx::ParticleEffect cfg;
+        cfg.StartLifetime = {30.0f, 30.0f};   // заведомо переживёт переход
         particles.Burst(cfg, glm::vec3(0.0f), 64);
         particles.CreateStream("selftest_ghost", cfg, glm::vec3(0.0f));
         particles.SetStreamActive("selftest_ghost", true);
@@ -2796,9 +2794,7 @@ bool EditorLayer::SelfTestSystems() {
         ParticleSystem& particles = m_renderer.Particles();
         GameObject fx = m_scene->CreateObject("SelftestEmitter");
         fx.GetTransform().Position = {0.0f, 1.0f, 0.0f};
-        ParticleEmitterComponent em;
-        em.Config = ParticlePresets::Fire();
-        m_scene->Registry().emplace<ParticleEmitterComponent>(fx.Entity(), em);
+        m_scene->Registry().emplace<ParticleEmitterComponent>(fx.Entity());
 
         for (int i = 0; i < 8; ++i) sage::fx::UpdateEmitters(*m_scene, particles, 0.05f);
         if (particles.AliveCount() == 0) {
@@ -4123,7 +4119,7 @@ bool EditorLayer::SelfTestSelection() {
         NewScene(ProjectTemplateKind::Empty);
         struct Probe { const char* Catalog; const char* What; };
         const Probe kProbes[] = {
-            {"fx.particles.fire", "эмиттер частиц"},
+            {"fx.particles", "эмиттер частиц"},
             {"fx.probe", "зонд отражений"},
             {"audio.source", "источник звука"},
             {"camera.game", "камера"},
@@ -4610,19 +4606,15 @@ bool EditorLayer::SelfTestSelection() {
             }
         }
 
-        // Частицы: пункт «Дым» обязан дать именно дым. Связь ключа с пресетом
-        // идёт по имени, и ошибка здесь — это молча подменённый эффект.
+        // Частицы: единственный пункт даёт эмиттер. Старые ключи «fx.particles.*»
+        // (избранное, шаблоны прежних версий) ведут туда же, а не в пустоту.
         if (ok) {
-            GameObject smoke = m_scene->Get(CreateCatalogObject("fx.particles.smoke"));
-            const auto& presets = ParticlePresets::Registry();
-            int smokeIndex = -1;
-            for (int i = 0; i < (int)presets.size(); ++i)
-                if (std::string(presets[(size_t)i].Name) == "Smoke") smokeIndex = i;
-            if (!smoke.Valid() ||
-                !m_scene->Registry().all_of<ParticleEmitterComponent>(smoke.Entity()) ||
-                m_scene->Registry().get<ParticleEmitterComponent>(smoke.Entity()).Preset != smokeIndex) {
-                LOG_ERROR("Editor") << "SELFTEST: пункт «Дым» дал не дым";
-                ok = false;
+            for (const char* key : {"fx.particles", "fx.particles.smoke"}) {
+                GameObject p = m_scene->Get(CreateCatalogObject(key));
+                if (!p.Valid() || !m_scene->Registry().all_of<ParticleEmitterComponent>(p.Entity())) {
+                    LOG_ERROR("Editor") << "SELFTEST: пункт каталога «" << key << "» не дал эмиттер частиц";
+                    ok = false;
+                }
             }
         }
 
@@ -5167,11 +5159,9 @@ bool EditorLayer::SelfTestRenderStability() {
     fx.GetTransform().Position = {0.0f, 1.0f, 0.0f};
     ParticleEmitterComponent& emitter =
         m_scene->Registry().emplace<ParticleEmitterComponent>(fx.Entity());
-    emitter.Continuous = true;
-    emitter.Config.EmissionRate = 60.0f;
-    emitter.Config.LifetimeMin = 30.0f; // частицы не должны умереть посреди прогона
-    emitter.Config.LifetimeMax = 30.0f;
-    emitter.Active = true;
+    emitter.Effect.RateOverTime = 60.0f;
+    emitter.Effect.StartLifetime = {30.0f, 30.0f};   // частицы не должны умереть посреди прогона
+    emitter.Playing = true;
 
     m_renderer.SetViewportSize(0, 320, 240);
     m_renderer.SetGameSize(320, 240);
@@ -6630,11 +6620,7 @@ bool EditorLayer::SelfTestTools() {
         // Со СЦЕНОЙ, а не с реестром: у кнопки есть ребёнок-надпись, и создать
         // объект умеет только сцена (см. UIPresets.h).
         sage::ui::ApplyPreset(*m_scene, e, "Button");
-        {
-            ParticleEmitterComponent em;
-            em.Config = ParticlePresets::Registry()[0].Make();
-            reg.emplace_or_replace<ParticleEmitterComponent>(e, em);
-        }
+        reg.emplace_or_replace<ParticleEmitterComponent>(e);
 
         const fs::path allPath = m_project.ScenesDir() / "selftest_all_components.sage";
         if (!SaveSceneToFile(allPath)) {

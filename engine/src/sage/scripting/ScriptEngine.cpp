@@ -6,7 +6,6 @@
 #include "sage/render/SkinnedModel.h"
 #include "sage/physics/Ragdoll.h"
 #include "sage/ui/UIShowcase.h"
-#include "sage/render/ParticlePresets.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UIIcons.h"
 #include <algorithm>
