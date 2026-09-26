@@ -29,7 +29,20 @@ void ScriptEngine::RegisterLightingApi() {
         "Enabled", &FogSettings::Enabled,
         "Color", &FogSettings::Color,
         "Start", &FogSettings::Start,
-        "End", &FogSettings::End
+        "End", &FogSettings::End,
+        "Density", &FogSettings::Density,
+        "HeightFalloff", &FogSettings::HeightFalloff,
+        "BaseHeight", &FogSettings::BaseHeight,
+        "MaxOpacity", &FogSettings::MaxOpacity,
+        "SunScatter", &FogSettings::SunScatter,
+        "SunExponent", &FogSettings::SunExponent,
+        // Вид тумана строкой: "linear" или "height" — номера в скрипте
+        // читаются хуже и молча ломаются при перестановке перечисления.
+        "Mode", sol::property(
+            [](const FogSettings& f) { return std::string(f.Kind == FogSettings::Mode::ExponentialHeight ? "height" : "linear"); },
+            [](FogSettings& f, const std::string& m) {
+                f.Kind = m == "height" ? FogSettings::Mode::ExponentialHeight : FogSettings::Mode::Linear;
+            })
     );
     // Само НЕБО, а не только засветка от него. Без этого цикл суток из скрипта
     // выходил половинчатым: свет, туман и вода темнели к ночи, а купол неба

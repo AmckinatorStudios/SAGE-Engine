@@ -1041,6 +1041,147 @@ void TestShadedWithPostIsNotBlack(FrameRenderer& r, Scene& scene) {
 // по заведомо серому кадру и смотрят, не пропала ли картинка. Здесь проверяется,
 // что проверка НЕ ЛЖЁТ — на исправной машине она обязана говорить «работает»,
 // иначе редактор молча отключит эффекты у всех.
+// --- Цвет вывода и кривые: ровная заливка заданной яркости через тракт -------
+//
+// Кадр — сплошной HDR-цвет (очистка буфера сцены), поэтому меряется ровно то,
+// что делает тракт, без геометрии и света.
+float FlatThroughChain(FrameRenderer& r, float hdr, const sage::render::PostChain& chain,
+                       bool resetHistory = true) {
+    const int w = 64, h = 64;
+    Framebuffer sceneFbo(w, h), output(w, h);
+    sceneFbo.Bind();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    device.SetClearColor(hdr, hdr, hdr, 1.0f);
+    device.Clear(true, true);
+    if (resetHistory) r.Fx.ResetHistory();
+    const glm::mat4 id(1.0f);
+    r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h, id, id, chain, &output, 0, 0, w, h);
+    output.Bind();
+    const Image img = Capture(w, h);
+    double sum = 0.0;
+    for (unsigned char v : img.Pixels) sum += v;
+    return img.Pixels.empty() ? 0.0f : (float)(sum / (double)img.Pixels.size() / 255.0);
+}
+
+sage::render::PostChain ToneOnly(float mode, float output) {
+    sage::render::PostChain chain;
+    AddEffect(chain, "tonemap");
+    SetParam(chain, "tonemap", "mode", mode);
+    SetParam(chain, "tonemap", "output", output);
+    return chain;
+}
+
+void TestOutputEncodingAndCurves(FrameRenderer& r) {
+    // Средне-серый 18 %: в sRGB он около 118/255, линейный вывод оставляет
+    // его 46/255. Выбор «sRGB / линейный» обязан менять кадр именно так.
+    const float srgb = FlatThroughChain(r, 0.18f, ToneOnly(0.0f, 0.0f));
+    const float linear = FlatThroughChain(r, 0.18f, ToneOnly(0.0f, 2.0f));
+    const float gamma = FlatThroughChain(r, 0.18f, ToneOnly(0.0f, 1.0f));
+    std::printf("       серый 0.18: sRGB %.3f, гамма %.3f, линейный %.3f\n", srgb, gamma, linear);
+    Check(std::abs(srgb - 0.461f) < 0.02f, "вывод sRGB кодирует серый по стандарту");
+    Check(std::abs(linear - 0.18f) < 0.02f, "линейный вывод оставляет значение как есть");
+    Check(std::abs(gamma - 0.459f) < 0.02f, "вывод «гамма» — степенная кривая 2.2");
+
+    // Плёночная кривая UE5 держит средне-серый на месте (InMatch = OutMatch =
+    // 0.18) и сжимает света: 16x ярче серого — всё ещё не белый в клип.
+    const float ueGrey = FlatThroughChain(r, 0.18f, ToneOnly(4.0f, 2.0f));
+    const float ueBright = FlatThroughChain(r, 2.88f, ToneOnly(4.0f, 2.0f));
+    const float agxGrey = FlatThroughChain(r, 0.18f, ToneOnly(5.0f, 0.0f));
+    const float neutralGrey = FlatThroughChain(r, 0.18f, ToneOnly(6.0f, 2.0f));
+    std::printf("       Unreal: серый %.3f, x16 %.3f; AgX серый %.3f; Neutral серый %.3f\n",
+                ueGrey, ueBright, agxGrey, neutralGrey);
+    Check(std::abs(ueGrey - 0.18f) < 0.04f, "кривая Unreal держит средне-серый на месте");
+    Check(ueBright > 0.6f && ueBright < 0.99f, "кривая Unreal сжимает света, а не обрезает");
+    Check(agxGrey > 0.3f && agxGrey < 0.7f, "AgX даёт среднюю яркость для серого");
+    Check(std::abs(neutralGrey - 0.14f) < 0.04f, "Neutral не трогает цвета ниже плеча");
+}
+
+// --- Автоэкспозиция: глаз привыкает к свету сцены ---------------------------
+void TestAutoExposure(FrameRenderer& r) {
+    sage::render::PostChain chain = ToneOnly(4.0f, 0.0f);
+    AddEffect(chain, "autoexposure");
+    // Без привыкания тёмная и светлая сцены различаются в 64 раза по свету.
+    const float darkRaw = FlatThroughChain(r, 0.02f, ToneOnly(4.0f, 0.0f));
+    const float brightRaw = FlatThroughChain(r, 1.28f, ToneOnly(4.0f, 0.0f));
+    const float dark = FlatThroughChain(r, 0.02f, chain);
+    const float bright = FlatThroughChain(r, 1.28f, chain);
+    std::printf("       без адаптации: %.3f / %.3f, с адаптацией: %.3f / %.3f\n", darkRaw, brightRaw,
+                dark, bright);
+    Check(std::abs(dark - bright) < 0.05f, "автоэкспозиция приводит тёмную и светлую сцены к одной яркости");
+    Check(brightRaw - darkRaw > 0.4f, "без неё сцены заметно разные (проверка не пустая)");
+
+    // Привыкание ПЛАВНОЕ: после смены сцены первый кадр ещё помнит прошлую.
+    FlatThroughChain(r, 1.28f, chain);                         // привыкли к свету
+    const float firstDark = FlatThroughChain(r, 0.02f, chain, /*resetHistory=*/false);
+    std::printf("       первый кадр в темноте после света: %.3f (привыкший глаз: %.3f)\n",
+                firstDark, dark);
+    Check(firstDark < dark - 0.05f, "глаз привыкает к темноте не мгновенно");
+}
+
+// --- Высотный туман: плотнее у земли, реже вверху ---------------------------
+//
+// Высокая колонна вдали и туман ядовито-пурпурного цвета: у основания колонна
+// обязана уйти в пурпур сильнее, чем у вершины. Линейный туман их не различает.
+void TestHeightFog(FrameRenderer& r) {
+    auto run = [&](FogSettings::Mode mode, float& bottom, float& top) {
+        auto scene = std::make_unique<Scene>("Fog");
+        scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(-0.3f, -0.8f, -0.5f));
+        scene->Lighting.Sun.Intensity = 1.0f;
+        scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+        scene->Lighting.AmbientStrength = 0.2f;
+        scene->Lighting.Skybox.Enabled = false;
+        FogSettings& f = scene->Lighting.Fog;
+        f.Enabled = true;
+        f.Kind = mode;
+        f.Color = {1.0f, 0.0f, 1.0f};
+        f.Start = 0.0f;
+        f.End = 30.0f;
+        f.Density = 0.25f;
+        f.HeightFalloff = 0.8f;
+        f.BaseHeight = 0.0f;
+        f.SunScatter = 0.0f;
+        GameObject pillar = scene->CreateObject("Pillar");
+        pillar.GetTransform().Position = {0.0f, 4.0f, -12.0f};
+        pillar.GetTransform().Scale = {2.0f, 8.0f, 2.0f};
+        pillar.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+        pillar.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+        pillar.Renderer().Color = {0.1f, 0.8f, 0.1f};   // зелёная
+        const int w = 96, h = 96;
+        Framebuffer out(w, h);
+        out.Bind();
+        auto& device = sage::rhi::GraphicsDevice::Get();
+        device.SetSRGBWrite(true);
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear(true, true);
+        const glm::vec3 eye(0.0f, 4.0f, 10.0f);
+        const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.0f, 4.0f, -12.0f), glm::vec3(0, 1, 0));
+        const glm::mat4 proj = glm::perspective(glm::radians(45.0f), 1.0f, 0.1f, 100.0f);
+        const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+        r.Batch.RenderColor(*scene, view, proj, eye, env, ShadowBinding(), 0);
+        device.SetSRGBWrite(false);
+        const Image img = Capture(w, h);
+        // Доля пурпура: (R+B)/2 - G в пятне у низа и у верха колонны.
+        auto magenta = [&](float fy) {
+            double s = 0.0; int n = 0;
+            for (int y = (int)(fy * h) - 2; y <= (int)(fy * h) + 2; ++y)
+                for (int x = w / 2 - 2; x <= w / 2 + 2; ++x) {
+                    const size_t i = ((size_t)y * w + x) * 3;
+                    s += (img.Pixels[i] + img.Pixels[i + 2]) * 0.5 - img.Pixels[i + 1];
+                    ++n;
+                }
+            return (float)(s / n / 255.0);
+        };
+        bottom = magenta(0.66f);   // колонна занимает примерно 0.28..0.72 высоты кадра
+        top = magenta(0.34f);
+    };
+    float hb = 0, ht = 0, lb = 0, lt = 0;
+    run(FogSettings::Mode::ExponentialHeight, hb, ht);
+    run(FogSettings::Mode::Linear, lb, lt);
+    std::printf("       туман у низа/верха колонны: высотный %.3f/%.3f, линейный %.3f/%.3f\n", hb, ht, lb, lt);
+    Check(hb > ht + 0.15f, "высотный туман плотнее у земли, чем наверху");
+    Check(std::abs(lb - lt) < 0.08f, "линейный туман от высоты не зависит (проверка не пустая)");
+}
+
 void TestPostSelfCheck(FrameRenderer& r) {
     const sage::render::PostFX::SelfCheck& check = r.Fx.CheckPipeline();
     if (check.Ran && check.Ok) {
@@ -1060,6 +1201,9 @@ void RunFrameChecks(FrameRenderer& r, Scene& scene) {
     TestSolidSky(r);
     TestShadedWithPostIsNotBlack(r, scene);
     TestPostSelfCheck(r);
+    TestOutputEncodingAndCurves(r);
+    TestAutoExposure(r);
+    TestHeightFog(r);
     TestSceneOrthographic(r, scene);
     TestNoPostFX(r, scene);
     TestDepthOfField(r, scene);

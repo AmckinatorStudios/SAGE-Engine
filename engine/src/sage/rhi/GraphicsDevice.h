@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <vector>
 #include "sage/rhi/Resources.h"
 
 // ---------------------------------------------------------------------------
@@ -260,6 +261,25 @@ public:
     // забыть дописать сюда новый труднее, чем в чужом файле.
     static const char* BackendId(Backend backend);
     static bool ParseBackend(const std::string& text, Backend& out);
+
+    // ВСЕ графические API, о которых стоит спросить человека, — с честным
+    // статусом. Не только то, что есть в перечислении Backend: человек ищет в
+    // настройках «DirectX», и молчание («такого пункта нет») читается как «не
+    // нашёл, где включается», а не как «его нет». Пункт с причиной отвечает
+    // на вопрос сразу.
+    struct BackendInfo {
+        enum class State {
+            Ready,           // рисует всё, можно выбирать
+            Experimental,    // есть в сборке и на машине, но доделан не весь
+            Unavailable,     // в сборке есть, на этой машине нет драйвера
+            NotBuilt,        // эта сборка движка собрана без него
+            NotImplemented,  // бэкенда в движке нет вообще
+        };
+        const char* Id = "";     // что пишется в sage.cfg ("opengl", "vulkan", "d3d11")
+        const char* Name = "";   // что видит человек ("OpenGL 3.3+")
+        State Support = State::NotImplemented;   // не «Status»: X11 объявляет макрос с этим именем
+    };
+    static std::vector<BackendInfo> Catalog();
 
     // Текущий девайс процесса — ставится Application после создания. Даёт
     // подсистемам доступ к устройству без протаскивания указателя повсюду.

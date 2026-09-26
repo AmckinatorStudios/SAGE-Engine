@@ -63,6 +63,13 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
     shader.SetVec3("uFogColor", env.Fog.Color);
     shader.SetFloat("uFogStart", env.Fog.Start);
     shader.SetFloat("uFogEnd", env.Fog.End);
+    shader.SetInt("uFogMode", env.Fog.Kind == FogSettings::Mode::ExponentialHeight ? 1 : 0);
+    shader.SetFloat("uFogDensity", std::max(env.Fog.Density, 0.0f));
+    shader.SetFloat("uFogFalloff", std::max(env.Fog.HeightFalloff, 0.0f));
+    shader.SetFloat("uFogHeight", env.Fog.BaseHeight);
+    shader.SetFloat("uFogMaxOpacity", std::clamp(env.Fog.MaxOpacity, 0.0f, 1.0f));
+    shader.SetFloat("uFogSunScatter", std::max(env.Fog.SunScatter, 0.0f));
+    shader.SetFloat("uFogSunExponent", std::max(env.Fog.SunExponent, 1.0f));
 }
 
 // Тени прожекторов и точечных источников: один атлас, по прямоугольнику на

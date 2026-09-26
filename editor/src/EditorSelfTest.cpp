@@ -5193,6 +5193,10 @@ bool EditorLayer::SelfTestRenderStability() {
     // ленивые шейдеры), со второго кадр обязан быть один и тот же.
     constexpr int kFrames = 8;
     for (int i = 0; i < kFrames; ++i) {
+        // Адаптация глаза меняет кадр ЗАКОННО, пока привыкает (и темп её — от
+        // часов, а не от номера кадра). Здесь ищется накопление по ошибке,
+        // поэтому каждый кадр считается первым: экспозиция встаёт сразу.
+        m_renderer.ResetPostHistory();
         LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
         m_renderer.PrepareReflections(*m_scene, env);
         m_renderer.RenderShadow(*m_scene, env, m_camera);

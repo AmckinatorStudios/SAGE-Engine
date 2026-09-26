@@ -8,6 +8,10 @@
 #include <imgui.h>
 #include "../Localization.h"
 #include "EditorIcons.h"
+#include "sage/rhi/GraphicsDevice.h"
+
+#include <string>
+#include <vector>
 
 // ============================================================================
 //  Окно гибких настроек движка (EngineConfig). Редактирует host.Settings() и
@@ -76,6 +80,50 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         int msaaIdx = c.Msaa >= 8 ? 3 : c.Msaa >= 4 ? 2 : c.Msaa >= 2 ? 1 : 0;
         if (ImGui::Combo(T("MSAA"), &msaaIdx, msaa, IM_ARRAYSIZE(msaa)))
             c.Msaa = kMsaaVals[msaaIdx];
+    }
+
+    // ГРАФИЧЕСКИЙ API. Список — у RHI (GraphicsDevice::Catalog) вместе с
+    // честным статусом: человек ищет «DirectX» и должен найти ответ, а не
+    // пустое место. Выбор едет в sage.cfg и применяется при запуске игры —
+    // сменить API у уже открытого окна нельзя ни в одном движке.
+    if (EditorTheme::SectionHeader("chart", T("Graphics API" "###Graphics API"), ImGuiTreeNodeFlags_DefaultOpen,
+                                   nullptr, T("Applies when the game starts."))) {
+        using State = sage::rhi::GraphicsDevice::BackendInfo::State;
+        const std::vector<sage::rhi::GraphicsDevice::BackendInfo> apis =
+            sage::rhi::GraphicsDevice::Catalog();
+        auto statusText = [](State s) -> const char* {
+            switch (s) {
+                case State::Ready: return T("ready");
+                case State::Experimental: return T("experimental");
+                case State::Unavailable: return T("no driver on this PC");
+                case State::NotBuilt: return T("not in this build");
+                case State::NotImplemented: return T("not implemented yet");
+            }
+            return "";
+        };
+        const sage::rhi::GraphicsDevice::BackendInfo* current = &apis.front();
+        for (const auto& api : apis)
+            if (c.Backend == api.Id) current = &api;
+        const std::string preview = std::string(current->Name) + " — " + statusText(current->Support);
+        if (ImGui::BeginCombo(T("API"), preview.c_str())) {
+            for (const auto& api : apis) {
+                const bool selectable = api.Support == State::Ready || api.Support == State::Experimental;
+                const std::string label = std::string(api.Name) + " — " + statusText(api.Support);
+                ImGui::BeginDisabled(!selectable);
+                if (ImGui::Selectable(label.c_str(), current == &api)) c.Backend = api.Id;
+                ImGui::EndDisabled();
+            }
+            ImGui::EndCombo();
+        }
+        if (current->Support == State::Experimental)
+            EditorTheme::Hint(T("Vulkan is not finished: the game starts on OpenGL unless "
+                                "SAGE_VULKAN_EXPERIMENTAL=1 is set."));
+        EditorTheme::Hint(T("DirectX is not available: the engine's shaders are GLSL and a Direct3D "
+                            "backend does not exist yet."));
+        // На чём рисует сам редактор — чтобы выбор был не вслепую.
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        ImGui::TextDisabled(T("Editor renders with: %s %s"), device.BackendName(),
+                            device.ApiVersion().c_str());
     }
 
     if (EditorTheme::SectionHeader("window", T("Display" "###Display"), ImGuiTreeNodeFlags_DefaultOpen,

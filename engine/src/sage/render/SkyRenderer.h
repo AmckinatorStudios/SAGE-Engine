@@ -42,6 +42,15 @@ struct SkyCelestials {
     // представления о времени суток однажды разойдутся, и звёзды загорятся не
     // тогда, когда стемнеет освещение.
     float DayFactor = 1.0f;
+
+    // Высотный туман на НЕБЕ: без него даль тонула в дымке, а небо над ней
+    // оставалось чистым — по горизонту шла резкая черта «конец тумана».
+    // Луч неба считается длиной kSkyFogDistance.
+    bool HeightFog = false;
+    glm::vec3 FogColor{0.55f, 0.62f, 0.72f};
+    float FogDensity = 0.0f, FogFalloff = 0.2f, FogHeight = 0.0f, FogMaxOpacity = 1.0f;
+    float FogSunScatter = 0.0f, FogSunExponent = 8.0f;
+    glm::vec3 FogSunLight{0.0f};   // цвет * яркость солнца сцены
 };
 
 // Светила из окружения сцены. Отдельной функцией, потому что потребителей у

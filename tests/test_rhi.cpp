@@ -329,3 +329,21 @@ void main() { FragColor = vec4(uColor, 1.0); }
 
     dev->BindDefaultFramebuffer();
 }
+
+// Список графических API для настроек игры: всё, о чём человек может
+// спросить, с честным статусом. OpenGL — готов; DirectX в списке ЕСТЬ, но
+// выбрать его нельзя: человек ищет «DirectX» и должен увидеть ответ.
+TEST(Rhi_backend_catalog_tells_what_can_be_chosen) {
+    using State = sage::rhi::GraphicsDevice::BackendInfo::State;
+    const auto list = sage::rhi::GraphicsDevice::Catalog();
+    bool gl = false, d3d = false;
+    for (const auto& b : list) {
+        if (std::string(b.Id) == "opengl") gl = b.Support == State::Ready;
+        if (std::string(b.Id) == "d3d11") d3d = b.Support == State::NotImplemented;
+    }
+    CHECK_TRUE(gl);
+    CHECK_TRUE(d3d);
+    // Строка «d3d11» в sage.cfg не разбирается в бэкенд — запуск берёт OpenGL.
+    sage::rhi::Backend b = sage::rhi::Backend::Null;
+    CHECK_FALSE(sage::rhi::GraphicsDevice::ParseBackend("d3d11", b));
+}
