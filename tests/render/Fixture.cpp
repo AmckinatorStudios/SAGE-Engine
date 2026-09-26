@@ -211,6 +211,9 @@ sage::render::PostChain BaseChain() {
     AddEffect(chain, "tonemap");
     SetParam(chain, "tonemap", "mode", 2.0f); // ACES — та же кривая, что была
     SetParam(chain, "tonemap", "gamma", 2.2f);
+    // Вывод — степенная гамма, как было до выбора вывода: эталоны сняты с
+    // ней, а умолчание звена теперь sRGB.
+    SetParam(chain, "tonemap", "output", 1.0f);
 
     AddEffect(chain, "vignette");
     SetParam(chain, "vignette", "intensity", 0.35f);

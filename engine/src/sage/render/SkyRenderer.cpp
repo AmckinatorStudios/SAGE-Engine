@@ -1,5 +1,7 @@
 #include "sage/render/SkyRenderer.h"
 
+#include <algorithm>
+
 #include "sage/scene/Light.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -52,6 +54,16 @@ uniform vec3 uMoonColor;
 uniform float uMoonSize;
 uniform float uStars;
 uniform float uDay;   // 1 день, 0 ночь — по нему гаснут звёзды и бледнеет луна
+uniform int uHeightFog;
+uniform vec3 uFogColor;
+uniform float uFogDensity;
+uniform float uFogFalloff;
+uniform float uFogHeight;
+uniform float uFogMaxOpacity;
+uniform float uFogSunScatter;
+uniform float uFogSunExponent;
+uniform vec3 uFogSunLight;
+uniform float uCamHeight;
 void main() {
     float y = normalize(vDir).y;
     float t = clamp(y, 0.0, 1.0);            // 0 у горизонта и ниже, 1 в зените
@@ -119,6 +131,21 @@ void main() {
         }
     }
 
+    // Высотный туман — та же формула, что у геометрии (ApplyFog в
+    // PbrShader.h), на луче длиной 3 км: вниз и вдоль горизонта небо тонет в
+    // дымке, вверх — чистое.
+    if (uHeightFog == 1) {
+        vec3 dir = normalize(vDir);
+        const float len = 3000.0;
+        float fall = uFogFalloff * dir.y * len;
+        float shape = abs(fall) > 1e-4 ? (1.0 - exp(-fall)) / fall : 1.0;
+        float density = uFogDensity * exp(-uFogFalloff * (uCamHeight - uFogHeight));
+        float amount = min(1.0 - exp(-density * len * shape), uFogMaxOpacity);
+        float sun = pow(max(dot(dir, uSunDir), 0.0), uFogSunExponent);
+        vec3 inscatter = uFogColor + uFogSunLight * uFogSunScatter * sun;
+        col = mix(col, inscatter, clamp(amount, 0.0, 1.0));
+    }
+
     FragColor = vec4(col, 1.0);
 }
 )GLSL";
@@ -150,6 +177,15 @@ SkyCelestials CelestialsFromEnvironment(const LightingEnvironment& env) {
     c.MoonColor = env.Skybox.MoonColor;
     c.MoonSize = env.Skybox.MoonSize;
     c.StarIntensity = env.Skybox.StarIntensity;
+    c.HeightFog = env.Fog.Enabled && env.Fog.Kind == FogSettings::Mode::ExponentialHeight;
+    c.FogColor = env.Fog.Color;
+    c.FogDensity = env.Fog.Density;
+    c.FogFalloff = env.Fog.HeightFalloff;
+    c.FogHeight = env.Fog.BaseHeight;
+    c.FogMaxOpacity = env.Fog.MaxOpacity;
+    c.FogSunScatter = env.Fog.SunScatter;
+    c.FogSunExponent = env.Fog.SunExponent;
+    c.FogSunLight = env.Sun.Color * env.Sun.Intensity;
     return c;
 }
 
@@ -187,6 +223,18 @@ void SkyRenderer::Draw(const glm::mat4& view, const glm::mat4& proj,
     // время суток на кадр — одно место, где оно считается.
     m_shader->SetFloat("uDay", sky.DayFactor);
     m_shader->SetFloat("uStars", (1.0f - sky.DayFactor) * sky.StarIntensity);
+    m_shader->SetInt("uHeightFog", sky.HeightFog ? 1 : 0);
+    m_shader->SetVec3("uFogColor", sky.FogColor);
+    m_shader->SetFloat("uFogDensity", std::max(sky.FogDensity, 0.0f));
+    m_shader->SetFloat("uFogFalloff", std::max(sky.FogFalloff, 0.0f));
+    m_shader->SetFloat("uFogHeight", sky.FogHeight);
+    m_shader->SetFloat("uFogMaxOpacity", std::clamp(sky.FogMaxOpacity, 0.0f, 1.0f));
+    m_shader->SetFloat("uFogSunScatter", std::max(sky.FogSunScatter, 0.0f));
+    m_shader->SetFloat("uFogSunExponent", std::max(sky.FogSunExponent, 1.0f));
+    m_shader->SetVec3("uFogSunLight", sky.FogSunLight);
+    // Высота камеры — из обратной матрицы вида: плотность тумана зависит от
+    // того, где стоит зритель, а небо матрицу вида получает без переноса.
+    m_shader->SetFloat("uCamHeight", glm::inverse(view)[3].y);
 
     // Небо — фон: без теста и записи глубины, без отсечения. Рисуется первым,
     // сцена ложится поверх по своей глубине.

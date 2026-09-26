@@ -201,6 +201,30 @@ TEST(Scene_string_roundtrip_entities_and_transforms) {
         CHECK_NEAR(loaded->Lighting.PointLights[0].Intensity, 1.7f, 1e-4);
 }
 
+// Высотный туман (как Exponential Height Fog в UE) — часть сцены: вид и все
+// его ручки переживают сохранение.
+TEST(Scene_roundtrip_preserves_height_fog) {
+    Scene scene("FogScene");
+    FogSettings& f = scene.Lighting.Fog;
+    f.Enabled = true;
+    f.Kind = FogSettings::Mode::ExponentialHeight;
+    f.Density = 0.05f;
+    f.HeightFalloff = 0.4f;
+    f.BaseHeight = -2.0f;
+    f.MaxOpacity = 0.8f;
+    f.SunScatter = 1.5f;
+    f.SunExponent = 16.0f;
+    std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    const FogSettings& g = loaded->Lighting.Fog;
+    CHECK_TRUE(g.Kind == FogSettings::Mode::ExponentialHeight);
+    CHECK_NEAR(g.Density, 0.05f, 1e-5f);
+    CHECK_NEAR(g.HeightFalloff, 0.4f, 1e-5f);
+    CHECK_NEAR(g.BaseHeight, -2.0f, 1e-5f);
+    CHECK_NEAR(g.MaxOpacity, 0.8f, 1e-5f);
+    CHECK_NEAR(g.SunScatter, 1.5f, 1e-5f);
+    CHECK_NEAR(g.SunExponent, 16.0f, 1e-5f);
+}
+
 TEST(Scene_roundtrip_preserves_parent_hierarchy) {
     Scene scene("HierScene");
     GameObject parent = scene.CreateObject("Parent");

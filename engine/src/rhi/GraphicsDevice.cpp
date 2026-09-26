@@ -57,6 +57,26 @@ const char* GraphicsDevice::BackendId(Backend backend) {
     return "opengl";
 }
 
+std::vector<GraphicsDevice::BackendInfo> GraphicsDevice::Catalog() {
+    using S = BackendInfo::State;
+    std::vector<BackendInfo> list;
+    list.push_back({"opengl", "OpenGL 3.3+", S::Ready});
+#ifdef SAGE_HAS_VULKAN
+    // Устройство Vulkan поднимается, ресурсы и конвейеры — ещё нет (см.
+    // ChooseBackend в Application.cpp): выбрать можно, но это эксперимент.
+    list.push_back({"vulkan", "Vulkan 1.2",
+                    VulkanDevice::Available() ? S::Experimental : S::Unavailable});
+#else
+    list.push_back({"vulkan", "Vulkan 1.2", S::NotBuilt});
+#endif
+    // DirectX в движке нет: все шейдеры написаны на GLSL, и бэкенду D3D нужен
+    // перевод каждого в HLSL. Пункты здесь затем, чтобы человек увидел ответ,
+    // а не пустое место (см. BackendInfo).
+    list.push_back({"d3d11", "DirectX 11", S::NotImplemented});
+    list.push_back({"d3d12", "DirectX 12", S::NotImplemented});
+    return list;
+}
+
 bool GraphicsDevice::ParseBackend(const std::string& text, Backend& out) {
     std::string s;
     for (char c : text) s += (char)std::tolower((unsigned char)c);

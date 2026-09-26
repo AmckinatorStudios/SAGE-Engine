@@ -1,5 +1,7 @@
 #include "sage/core/Application.h"
 
+#include <cctype>
+
 #include "sage/core/CrashHandler.h"
 #include "sage/core/Log.h"
 #include "sage/core/Systems.h"
@@ -29,6 +31,12 @@ namespace {
 rhi::Backend ChooseBackend(const std::string& requested) {
     rhi::Backend backend = rhi::Backend::OpenGL;
     if (!rhi::GraphicsDevice::ParseBackend(requested, backend)) {
+        std::string lower;
+        for (char c : requested) lower += (char)std::tolower((unsigned char)c);
+        if (lower.rfind("d3d", 0) == 0 || lower.rfind("directx", 0) == 0 || lower.rfind("dx", 0) == 0) {
+            LOG_WARN("RHI") << "DirectX в движке пока нет (шейдеры написаны на GLSL) — беру OpenGL";
+            return rhi::Backend::OpenGL;
+        }
         LOG_WARN("RHI") << "неизвестный графический бэкенд '" << requested
                         << "' — беру OpenGL (доступны: opengl, vulkan, null)";
         return rhi::Backend::OpenGL;

@@ -99,6 +99,13 @@ uniform bool uFogEnabled;
 uniform vec3 uFogColor;
 uniform float uFogStart;
 uniform float uFogEnd;
+uniform int uFogMode;          // 0 линейный, 1 высотный экспоненциальный
+uniform float uFogDensity;
+uniform float uFogFalloff;
+uniform float uFogHeight;
+uniform float uFogMaxOpacity;
+uniform float uFogSunScatter;
+uniform float uFogSunExponent;
 
 float DistributionGGX(vec3 N, vec3 H, float rough) {
     float a = rough * rough;
@@ -572,6 +579,31 @@ float SunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
 // солнце, стала означать «тень почти чёрная». Отсюда «непонятные тёмные
 // участки» под кроной и на изнанке веток. Тот же множитель здесь возвращает
 // прежнее соотношение неба и солнца: 0.3 значит то же, что значило всегда.
+// ТУМАН. Высотный — формула Exponential Height Fog из UE: плотность
+// d(h) = Density * exp(-Falloff * (h - BaseHeight)), и её интеграл вдоль луча
+// от камеры (с отступом Start) до точки берётся аналитически. Против солнца
+// дымка светится его цветом — узнаваемый «воздух» UE на рассвете и закате.
+vec3 ApplyFog(vec3 color, vec3 fragPos) {
+    vec3 ray = fragPos - uViewPos;
+    float dist = length(ray);
+    if (uFogMode == 1) {
+        vec3 V = ray / max(dist, 1e-4);
+        float start = min(uFogStart, dist);
+        vec3 from = uViewPos + V * start;
+        float len = dist - start;
+        float dy = V.y * len;
+        float densityAtStart = uFogDensity * exp(-uFogFalloff * (from.y - uFogHeight));
+        float fall = uFogFalloff * dy;
+        float shape = abs(fall) > 1e-4 ? (1.0 - exp(-fall)) / fall : 1.0;
+        float amount = min(1.0 - exp(-densityAtStart * len * shape), uFogMaxOpacity);
+        float sun = pow(max(dot(V, normalize(-uSunDir)), 0.0), uFogSunExponent);
+        vec3 inscatter = uFogColor + uSunColor * uSunIntensity * uFogSunScatter * sun;
+        return mix(color, inscatter, clamp(amount, 0.0, 1.0));
+    }
+    float f = clamp((uFogEnd - dist) / max(uFogEnd - uFogStart, 0.0001), 0.0, 1.0);
+    return mix(uFogColor, color, f);
+}
+
 vec3 CalcHemisphereAmbient(vec3 normal) {
     float w = normal.y * 0.5 + 0.5;
     return mix(uAmbientGround, uAmbientSky, w) * uAmbientStrength * PI;
@@ -784,11 +816,7 @@ vec3 ShadePBRplanar(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rou
     }
 
     vec3 result = ambient + Lo;
-    if (uFogEnabled) {
-        float dist = length(uViewPos - fragPos);
-        float f = clamp((uFogEnd - dist) / max(uFogEnd - uFogStart, 0.0001), 0.0, 1.0);
-        result = mix(uFogColor, result, f);
-    }
+    if (uFogEnabled) result = ApplyFog(result, fragPos);
     return result;
 }
 

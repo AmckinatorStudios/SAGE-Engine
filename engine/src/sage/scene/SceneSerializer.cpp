@@ -142,6 +142,13 @@ static json LightingToJson(const LightingEnvironment& lighting) {
     j["fog"]["color"] = Vec3ToJson(lighting.Fog.Color);
     j["fog"]["start"] = lighting.Fog.Start;
     j["fog"]["end"] = lighting.Fog.End;
+    j["fog"]["mode"] = lighting.Fog.Kind == FogSettings::Mode::ExponentialHeight ? "height" : "linear";
+    j["fog"]["density"] = lighting.Fog.Density;
+    j["fog"]["heightFalloff"] = lighting.Fog.HeightFalloff;
+    j["fog"]["baseHeight"] = lighting.Fog.BaseHeight;
+    j["fog"]["maxOpacity"] = lighting.Fog.MaxOpacity;
+    j["fog"]["sunScatter"] = lighting.Fog.SunScatter;
+    j["fog"]["sunExponent"] = lighting.Fog.SunExponent;
 
     j["skybox"]["enabled"] = lighting.Skybox.Enabled;
     // РЕЖИМ НЕБА — явным полем. Раньше он выводился из того, пуст ли путь к
@@ -241,6 +248,15 @@ static LightingEnvironment LightingFromJson(const json& root) {
         if (fj.contains("color")) lighting.Fog.Color = Vec3FromJson(fj["color"]);
         lighting.Fog.Start = fj.value("start", lighting.Fog.Start);
         lighting.Fog.End = fj.value("end", lighting.Fog.End);
+        lighting.Fog.Kind = fj.value("mode", std::string("linear")) == "height"
+                                ? FogSettings::Mode::ExponentialHeight
+                                : FogSettings::Mode::Linear;
+        lighting.Fog.Density = fj.value("density", lighting.Fog.Density);
+        lighting.Fog.HeightFalloff = fj.value("heightFalloff", lighting.Fog.HeightFalloff);
+        lighting.Fog.BaseHeight = fj.value("baseHeight", lighting.Fog.BaseHeight);
+        lighting.Fog.MaxOpacity = fj.value("maxOpacity", lighting.Fog.MaxOpacity);
+        lighting.Fog.SunScatter = fj.value("sunScatter", lighting.Fog.SunScatter);
+        lighting.Fog.SunExponent = fj.value("sunExponent", lighting.Fog.SunExponent);
     }
     if (j.contains("skybox")) {
         const json& sj = j["skybox"];

@@ -211,9 +211,13 @@ TEST(PostChain_default_is_a_working_chain) {
     const PostChain chain = PostChain::Default();
     CHECK_TRUE(chain.Compile().Ok);
     CHECK_TRUE(EffectOf(chain, "exposure") != nullptr);
+    CHECK_TRUE(EffectOf(chain, "autoexposure") != nullptr);   // адаптация глаза, как в UE5
     CHECK_TRUE(EffectOf(chain, "bloom") != nullptr);
     CHECK_TRUE(EffectOf(chain, "color") != nullptr);
     CHECK_TRUE(EffectOf(chain, "tonemap") != nullptr);
+    if (const PostEffect* t = EffectOf(chain, "tonemap")) CHECK_EQ(t->Int("mode", -1), 4);   // Unreal
+    // А у самого звена — прежняя ACES: нетронутые сохранённые сцены не меняются.
+    CHECK_EQ(MakePostEffect("tonemap").Int("mode", -1), 2);
     CHECK_TRUE(EffectOf(chain, "dof") == nullptr);
     CHECK_TRUE(EffectOf(chain, "grain") == nullptr);
 }
@@ -238,7 +242,9 @@ TEST(PostChain_effects_carry_their_own_settings) {
         CHECK_TRUE(mode != nullptr);
         if (mode) {
             CHECK_TRUE(mode->Type == PostParamType::Enum);
-            CHECK_EQ(mode->Options.size(), (size_t)4); // Clamp/Reinhard/ACES/Filmic
+            // Clamp/Reinhard/ACES/Filmic + Unreal/AgX/Neutral: новые только в конце.
+            CHECK_EQ(mode->Options.size(), (size_t)7);
+            if (mode->Options.size() == 7) CHECK_EQ(mode->Options[2], std::string("ACES"));
         }
     }
 }

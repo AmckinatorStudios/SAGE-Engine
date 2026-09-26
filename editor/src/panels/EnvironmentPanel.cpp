@@ -357,12 +357,36 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     DrawAmbientSection(host, env);
 
     if (EditorTheme::SectionHeader("cone", T("Fog" "###Fog"), ImGuiTreeNodeFlags_DefaultOpen, nullptr,
-                                   T("Linear distance fog (applied in Shaded mode)"))) {
+                                   T("Air of the scene: linear distance fog or exponential height fog as in Unreal"))) {
         if (ImGui::Checkbox(T("Enable Fog"), &env.Fog.Enabled)) host.PushUndoSnapshot();
+        const char* kinds[] = {T("Linear"), T("Exponential height")};
+        int kind = (int)env.Fog.Kind;
+        if (ImGui::Combo(T("Fog Type"), &kind, kinds, 2)) {
+            env.Fog.Kind = (FogSettings::Mode)kind;
+            host.PushUndoSnapshot();
+        }
         Sage::UI::ColorField3(T("Fog Color"), &env.Fog.Color.x); host.TrackLastImGuiItem();
-        ImGui::DragFloat(T("Fog Start"), &env.Fog.Start, 0.2f, 0.0f, 500.0f); host.TrackLastImGuiItem();
-        ImGui::DragFloat(T("Fog End"), &env.Fog.End, 0.2f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
-        if (env.Fog.End < env.Fog.Start) env.Fog.End = env.Fog.Start;
+        if (env.Fog.Kind == FogSettings::Mode::Linear) {
+            ImGui::DragFloat(T("Fog Start"), &env.Fog.Start, 0.2f, 0.0f, 500.0f); host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Fog End"), &env.Fog.End, 0.2f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
+            if (env.Fog.End < env.Fog.Start) env.Fog.End = env.Fog.Start;
+        } else {
+            ImGui::DragFloat(T("Density"), &env.Fog.Density, 0.001f, 0.0f, 1.0f, "%.4f");
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Height Falloff"), &env.Fog.HeightFalloff, 0.005f, 0.0f, 5.0f, "%.3f");
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Base Height"), &env.Fog.BaseHeight, 0.1f, -1000.0f, 1000.0f, "%.1f m");
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Start Distance"), &env.Fog.Start, 0.2f, 0.0f, 1000.0f, "%.1f m");
+            host.TrackLastImGuiItem();
+            ImGui::SliderFloat(T("Max Opacity"), &env.Fog.MaxOpacity, 0.0f, 1.0f);
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Sun Glow"), &env.Fog.SunScatter, 0.01f, 0.0f, 4.0f);
+            host.TrackLastImGuiItem();
+            ImGui::DragFloat(T("Sun Glow Size"), &env.Fog.SunExponent, 0.1f, 1.0f, 64.0f);
+            host.TrackLastImGuiItem();
+            EditorTheme::Hint(T("Denser near the ground, thinner up high; glows toward the sun."));
+        }
     }
 
     // ВЫПЕЧКА GI ПОКА УБРАНА ИЗ РЕДАКТОРА (см. EnvironmentPanel.h).

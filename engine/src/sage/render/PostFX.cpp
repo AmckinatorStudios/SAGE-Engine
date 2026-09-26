@@ -648,6 +648,58 @@ uniform float uEV;
 void main() { FragColor = vec4(texture(uScene, vUV).rgb * exp2(uEV), 1.0); }
 )";
 
+// --- Автоэкспозиция (адаптация глаза) ----------------------------------------
+// Замер: средняя log2-яркость кадра по сетке 24x24 с весом к центру — так же
+// меряет UE по умолчанию («центрально-взвешенный»): небо по краям кадра не
+// должно затемнять героя в середине. Результат плавно догоняет прошлое
+// значение: светлеет глаз быстрее, чем темнеет, как у человека.
+const char* kAutoExposureMeterFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform sampler2D uPrev;
+uniform int uHasPrev;
+uniform float uDt;
+uniform float uSpeedUp;
+uniform float uSpeedDown;
+uniform float uMinEV;
+uniform float uMaxEV;
+void main() {
+    float sum = 0.0, wsum = 0.0;
+    for (int y = 0; y < 24; ++y) {
+        for (int x = 0; x < 24; ++x) {
+            vec2 uv = (vec2(float(x), float(y)) + 0.5) / 24.0;
+            vec3 c = textureLod(uScene, uv, 0.0).rgb;
+            float l = max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 1e-5);
+            vec2 d = uv - 0.5;
+            float w = exp(-dot(d, d) * 5.0);
+            sum += log2(l) * w;
+            wsum += w;
+        }
+    }
+    float ev = clamp(sum / max(wsum, 1e-5), uMinEV, uMaxEV);
+    float prev = uHasPrev == 1 ? texture(uPrev, vec2(0.5)).r : ev;
+    float speed = ev > prev ? uSpeedUp : uSpeedDown;
+    float k = uHasPrev == 1 ? 1.0 - exp(-uDt * max(speed, 0.0)) : 1.0;
+    FragColor = vec4(mix(prev, ev, k), 0.0, 0.0, 1.0);
+}
+)";
+
+// Применение: средне-серый 18 % кадра приводится к 18 % на экране, плюс
+// компенсация автора в ступенях (у UE5 по умолчанию она +1).
+const char* kAutoExposureApplyFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform sampler2D uAdapted;
+uniform float uCompensation;
+void main() {
+    float avg = texture(uAdapted, vec2(0.5)).r;
+    float scale = 0.18 * exp2(uCompensation - avg);
+    FragColor = vec4(texture(uScene, vUV).rgb * scale, 1.0);
+}
+)";
+
 // --- Цвет: яркость, контраст, насыщенность, температура. HDR -> HDR ---------
 const char* kColorFrag = R"(#version 330 core
 in vec2 vUV;
@@ -713,6 +765,7 @@ out vec4 FragColor;
 uniform sampler2D uScene;
 uniform int uMode;
 uniform float uGamma;
+uniform int uOutput;   // 0 sRGB, 1 гамма, 2 линейный
 
 vec3 ACES(vec3 x) {
     return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
@@ -726,14 +779,105 @@ vec3 Filmic(vec3 x) {
     return clamp(v / w, 0.0, 1.0);
 }
 
+// --- Unreal Engine 5: плёночная кривая по умолчанию -------------------------
+// Та же формула, что FilmToneMap в UE (TonemapCommon.ush), с настройками
+// проекта по умолчанию: Slope 0.88, Toe 0.55, Shoulder 0.26, BlackClip 0,
+// WhiteClip 0.04. Кривая строится в логарифме яркости в пространстве ACES AP1:
+// там насыщенные цвета выгорают к белому, а не к «кислотному» оттенку, — это
+// и делает картинку UE мягкой в светах. Глоу и красная поправка RRT опущены:
+// они меняют оттенок едва заметно, а стоят двух лишних матриц.
+vec3 MulRows(vec3 r0, vec3 r1, vec3 r2, vec3 v) { return vec3(dot(r0, v), dot(r1, v), dot(r2, v)); }
+vec3 UnrealFilmic(vec3 lin) {
+    const float Slope = 0.88, Toe = 0.55, Shoulder = 0.26, BlackClip = 0.0, WhiteClip = 0.04;
+    const vec3 Y = vec3(0.2722287, 0.6740818, 0.0536895);   // яркость в AP1
+    vec3 ap1 = MulRows(vec3(0.61319, 0.33951, 0.04737), vec3(0.07021, 0.91634, 0.01345),
+                       vec3(0.02062, 0.10957, 0.86961), lin);
+    ap1 = max(mix(vec3(dot(ap1, Y)), ap1, 0.96), vec3(1e-10));
+    vec3 logc = log(ap1) / log(10.0);
+    const float ToeScale = 1.0 + BlackClip - Toe;
+    const float ShoulderScale = 1.0 + WhiteClip - Shoulder;
+    const float InMatch = 0.18, OutMatch = 0.18;
+    float bt = (OutMatch + BlackClip) / ToeScale - 1.0;
+    float ToeMatch = log(InMatch) / log(10.0) - 0.5 * log((1.0 + bt) / (1.0 - bt)) * (ToeScale / Slope);
+    float StraightMatch = (1.0 - Toe) / Slope - ToeMatch;
+    float ShoulderMatch = Shoulder / Slope - StraightMatch;
+    vec3 straight = Slope * (logc + StraightMatch);
+    vec3 toe = -BlackClip + (2.0 * ToeScale) / (1.0 + exp((-2.0 * Slope / ToeScale) * (logc - ToeMatch)));
+    vec3 shoulder = (1.0 + WhiteClip) - (2.0 * ShoulderScale) /
+                    (1.0 + exp((2.0 * Slope / ShoulderScale) * (logc - ShoulderMatch)));
+    toe = mix(straight, toe, vec3(lessThan(logc, vec3(ToeMatch))));
+    shoulder = mix(straight, shoulder, vec3(greaterThan(logc, vec3(ShoulderMatch))));
+    vec3 t = clamp((logc - ToeMatch) / (ShoulderMatch - ToeMatch), 0.0, 1.0);
+    // При настройках UE по умолчанию стык плеча лежит ЛЕВЕЕ стыка носка, и
+    // смешивание разворачивается — без этой строки средне-серый уезжал на
+    // плечо и темнел до 0.14.
+    if (ShoulderMatch < ToeMatch) t = 1.0 - t;
+    t = (3.0 - 2.0 * t) * t * t;
+    vec3 tone = mix(toe, shoulder, t);
+    tone = max(mix(vec3(dot(tone, Y)), tone, 0.93), vec3(0.0));
+    vec3 srgb = MulRows(vec3(1.70505, -0.62179, -0.08326), vec3(-0.13026, 1.14080, -0.01055),
+                        vec3(-0.02400, -0.12897, 1.15297), tone);
+    return clamp(srgb, 0.0, 1.0);
+}
+
+// --- AgX (Blender 4): мягкие света, честный переход насыщенного в белый ----
+// Приближение полиномом (Benjamin Wrensch), вывод — линейный цвет дисплея.
+vec3 AgX(vec3 lin) {
+    const mat3 inMat = mat3(0.842479062253094, 0.0423282422610123, 0.0423756549057051,
+                            0.0784335999999992, 0.878468636469772, 0.0784336,
+                            0.0792237451477643, 0.0791661274605434, 0.879142973793104);
+    const mat3 outMat = mat3(1.19687900512017, -0.0528968517574562, -0.0529716355144438,
+                             -0.0980208811401368, 1.15190312990417, -0.0980434501171241,
+                             -0.0990297440797205, -0.0989611768448433, 1.15107367264116);
+    const float minEv = -12.47393, maxEv = 4.026069;
+    vec3 v = inMat * lin;
+    v = clamp(log2(max(v, vec3(1e-10))), minEv, maxEv);
+    v = (v - minEv) / (maxEv - minEv);
+    vec3 x2 = v * v, x4 = x2 * x2;
+    v = 15.5 * x4 * x2 - 40.14 * x4 * v + 31.96 * x4 - 6.868 * x2 * v + 0.4298 * x2 + 0.1191 * v - 0.00232;
+    v = outMat * v;
+    return clamp(pow(max(v, vec3(0.0)), vec3(2.2)), 0.0, 1.0);
+}
+
+// --- Khronos PBR Neutral: цвет материала остаётся цветом материала ---------
+// Кривая для предметной визуализации: до 0.76 не трогает ничего, выше —
+// сжимает только света. Базовый цвет ассета на экране совпадает с заданным.
+vec3 PbrNeutral(vec3 c) {
+    const float start = 0.8 - 0.04, desat = 0.15;
+    float x = min(c.r, min(c.g, c.b));
+    float offset = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    c -= offset;
+    float peak = max(c.r, max(c.g, c.b));
+    if (peak < start) return clamp(c, 0.0, 1.0);
+    const float d = 1.0 - start;
+    float newPeak = 1.0 - d * d / (peak + d - start);
+    c *= newPeak / peak;
+    float g = 1.0 - 1.0 / (desat * (peak - newPeak) + 1.0);
+    return clamp(mix(c, vec3(newPeak), g), 0.0, 1.0);
+}
+
+// Кодирование для экрана. sRGB — кусочная кривая стандарта (её ждут мониторы
+// и браузеры), гамма — степенная (как было в движке до выбора), линейный —
+// без кодирования: для внешней обработки кадра и для отладки.
+vec3 Encode(vec3 c) {
+    if (uOutput == 2) return c;
+    if (uOutput == 1) return pow(c, vec3(1.0 / uGamma));
+    vec3 lo = c * 12.92;
+    vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
+    return mix(hi, lo, vec3(lessThanEqual(c, vec3(0.0031308))));
+}
+
 void main() {
     vec3 hdr = max(texture(uScene, vUV).rgb, 0.0);
     vec3 c;
     if (uMode == 1)      c = Reinhard(hdr);
     else if (uMode == 2) c = ACES(hdr);
     else if (uMode == 3) c = Filmic(hdr);
+    else if (uMode == 4) c = UnrealFilmic(hdr);
+    else if (uMode == 5) c = AgX(hdr);
+    else if (uMode == 6) c = PbrNeutral(hdr);
     else                 c = clamp(hdr, 0.0, 1.0); // без кривой: просто обрезка
-    FragColor = vec4(pow(c, vec3(1.0 / uGamma)), 1.0);
+    FragColor = vec4(Encode(c), 1.0);
 }
 )";
 
@@ -840,6 +984,8 @@ Shader& MotionShader()    { static Shader* s = new Shader(Shader::FromSource(kFs
 Shader& BrightShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBrightFrag, "PostFX.Bright")); return *s; }
 Shader& BlurShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBlurFrag, "PostFX.Blur")); return *s; }
 Shader& ExposureShader()  { static Shader* s = new Shader(Shader::FromSource(kFsVert, kExposureFrag, "PostFX.Exposure")); return *s; }
+Shader& AutoExposureMeterShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kAutoExposureMeterFrag, "PostFX.AutoExposureMeter")); return *s; }
+Shader& AutoExposureApplyShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kAutoExposureApplyFrag, "PostFX.AutoExposureApply")); return *s; }
 Shader& ColorShader()     { static Shader* s = new Shader(Shader::FromSource(kFsVert, kColorFrag, "PostFX.Color")); return *s; }
 Shader& GradeShader()     { static Shader* s = new Shader(Shader::FromSource(kFsVert, kGradeFrag, "PostFX.Grade")); return *s; }
 Shader& TonemapShader()   { static Shader* s = new Shader(Shader::FromSource(kFsVert, kTonemapFrag, "PostFX.Tonemap")); return *s; }
@@ -1187,6 +1333,52 @@ void RunExposure(PostContext& ctx, const PostEffect& e) {
     });
 }
 
+// --- Звено «Auto Exposure»: глаз привыкает к свету сцены -------------------
+void RunAutoExposure(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("Автоэкспозиция");
+    GraphicsDevice& device = Dev(ctx);
+    PostScratch& sc = *ctx.Scratch;
+    for (auto& t : sc.Adapt)
+        if (!t) t = MakeColor(1, 1);
+
+    // Шаг времени — по часам тракта; первый кадр и длинный разрыв (свернули
+    // окно, стояли на точке останова) не должны раскачивать экспозицию.
+    float dt = sc.HasAdapt ? ctx.Time - sc.AdaptTime : 0.0f;
+    dt = glm::clamp(dt, 0.0f, 0.25f);
+    sc.AdaptTime = ctx.Time;
+
+    const int prev = sc.AdaptIndex, next = 1 - sc.AdaptIndex;
+    sc.Adapt[next]->Bind();
+    Shader& meter = AutoExposureMeterShader();
+    meter.Use();
+    meter.SetInt("uScene", 0);
+    meter.SetInt("uPrev", 1);
+    meter.SetInt("uHasPrev", sc.HasAdapt ? 1 : 0);
+    meter.SetFloat("uDt", dt);
+    meter.SetFloat("uSpeedUp", e.Float("speedUp", 3.0f));
+    meter.SetFloat("uSpeedDown", e.Float("speedDown", 1.0f));
+    const float minEv = e.Float("minEV", -8.0f), maxEv = e.Float("maxEV", 10.0f);
+    meter.SetFloat("uMinEV", glm::min(minEv, maxEv));
+    meter.SetFloat("uMaxEV", glm::max(minEv, maxEv));
+    device.BindTexture2D(0, ctx.Color);
+    device.BindTexture2D(1, sc.Adapt[prev]->ColorTextureHandle());
+    DrawFullscreen(ctx);
+    sc.AdaptIndex = next;
+    sc.HasAdapt = true;
+
+    RenderTarget* out = PostAcquireTarget(ctx, 1);
+    out->Bind();
+    Shader& apply = AutoExposureApplyShader();
+    apply.Use();
+    apply.SetInt("uScene", 0);
+    apply.SetInt("uAdapted", 1);
+    apply.SetFloat("uCompensation", e.Float("compensation", 1.0f));
+    device.BindTexture2D(0, ctx.Color);
+    device.BindTexture2D(1, sc.Adapt[next]->ColorTextureHandle());
+    DrawFullscreen(ctx);
+    PostSetColor(ctx, out->ColorTextureHandle(), /*ldr=*/false);
+}
+
 // --- Звено «Color»: яркость, контраст, насыщенность, температура ------------
 void RunColor(PostContext& ctx, const PostEffect& e) {
     SAGE_PROFILE("Цвет");
@@ -1218,8 +1410,9 @@ void RunGrading(PostContext& ctx, const PostEffect& e) {
 void RunTonemap(PostContext& ctx, const PostEffect& e) {
     SAGE_PROFILE("Тон-маппинг");
     RunSimplePass(ctx, TonemapShader(), /*ldrOut=*/true, [&](Shader& sh) {
-        sh.SetInt("uMode", glm::clamp(e.Int("mode", 2), 0, 3));
+        sh.SetInt("uMode", glm::clamp(e.Int("mode", 2), 0, 6));
         sh.SetFloat("uGamma", glm::max(e.Float("gamma", 2.2f), 0.01f));
+        sh.SetInt("uOutput", glm::clamp(e.Int("output", 0), 0, 2));
     });
 }
 
@@ -1335,6 +1528,26 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
     }
     {
         PostEffectKind k;
+        k.Id = "autoexposure";
+        k.Label = "Auto Exposure";
+        k.Hint = "Адаптация глаза, как в UE5: кадр сам подстраивается под яркость сцены —\n"
+                 "в пещере светлеет, на солнце темнеет, плавно";
+        k.Stage = PostStage::Exposure;
+        k.Params = {Param("compensation", "Compensation", 1.0f, -4.0f, 4.0f,
+                          "Поправка в ступенях: +1 — вдвое светлее (у UE5 по умолчанию +1)"),
+                    Param("minEV", "Min Brightness", -8.0f, -16.0f, 16.0f,
+                          "Темнее этого (log2 яркости) сцену не вытягивать"),
+                    Param("maxEV", "Max Brightness", 10.0f, -16.0f, 16.0f,
+                          "Ярче этого (log2 яркости) сцену не притушивать"),
+                    Param("speedUp", "Speed Up", 3.0f, 0.0f, 20.0f,
+                          "Как быстро глаз привыкает к свету (1/с)"),
+                    Param("speedDown", "Speed Down", 1.0f, 0.0f, 20.0f,
+                          "Как быстро глаз привыкает к темноте (1/с)")};
+        k.Run = RunAutoExposure;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
         k.Id = "ao";
         k.Label = "Ambient Occlusion";
         k.Hint = "Затемняет щели и места контакта предметов; считается по глубине кадра";
@@ -1422,9 +1635,21 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
         k.Hint = "Переводит HDR-кадр в готовый к показу: кривая света и гамма";
         k.Stage = PostStage::Tonemap;
         k.Tonemaps = true;
-        k.Params = {EnumParam("mode", "Mode", 2, {"Clamp", "Reinhard", "ACES", "Filmic"},
-                              "Кривая света: чем переводить HDR в картинку"),
-                    Param("gamma", "Gamma", 2.2f, 1.0f, 3.0f, "Гамма вывода")};
+        // Номера кривых только ДОПИСЫВАЮТСЯ в конец: сохранённые сцены хранят
+        // номер, и вставка в середину молча сменила бы им кривую.
+        // Умолчание звена — ACES, как было: сохранённые сцены не хранят
+        // нетронутые значения, и смена умолчания молча перекрасила бы их.
+        // Кривую UE5 получает НОВАЯ камера (см. PostChain::Default).
+        k.Params = {EnumParam("mode", "Mode", 2,
+                              {"Clamp", "Reinhard", "ACES", "Filmic", "Unreal", "AgX", "Neutral"},
+                              "Кривая света: чем переводить HDR в картинку.\n"
+                              "Unreal — плёночная кривая UE5 (у новой камеры), AgX — как в Blender 4,\n"
+                              "Neutral — Khronos PBR Neutral: цвет материала без искажений"),
+                    EnumParam("output", "Output", 0, {"sRGB", "Gamma", "Linear"},
+                              "Кодирование для экрана: sRGB — стандарт мониторов,\n"
+                              "Gamma — степенная кривая с показателем ниже,\n"
+                              "Linear — без кодирования (для внешней обработки)"),
+                    Param("gamma", "Gamma", 2.2f, 1.0f, 3.0f, "Показатель для вывода Gamma")};
         k.Run = RunTonemap;
         catalog.Register(std::move(k));
     }
@@ -1484,17 +1709,22 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
 // умолчания неотделима от того, какие виды зарегистрировал движок, — имена
 // звеньев и их параметры заданы прямо выше.
 //
-// Что в нём есть: экспозиция, свечение, цвет и тон-маппинг. То есть то, что
-// делает картинку картинкой. Чего нет: глубины резкости, смаза, зерна,
+// Что в нём есть: экспозиция, адаптация глаза, свечение, цвет и тон-маппинг
+// плёночной кривой UE5 (у самого звена умолчание ACES — ради старых сцен). То есть то, что делает картинку
+// картинкой: так настроена новая камера в Unreal Engine 5, и кадр «как в UE»
+// получается без единой правки. Чего нет: глубины резкости, смаза, зерна,
 // аберрации — эффектов, которые нужны НЕ всегда и которые человек добавляет
 // осознанно. Компонент, приезжающий со всем сразу, пришлось бы первым делом
 // раздевать.
 PostChain PostChain::Default() {
     PostChain chain;
     chain.Effects.push_back(MakePostEffect("exposure"));
+    chain.Effects.push_back(MakePostEffect("autoexposure"));
     chain.Effects.push_back(MakePostEffect("bloom"));
     chain.Effects.push_back(MakePostEffect("color"));
-    chain.Effects.push_back(MakePostEffect("tonemap"));
+    PostEffect tonemap = MakePostEffect("tonemap");
+    if (PostValue* mode = tonemap.Find("mode")) mode->V[0] = 4.0f;   // Unreal
+    chain.Effects.push_back(std::move(tonemap));
     return chain;
 }
 
