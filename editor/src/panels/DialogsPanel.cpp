@@ -9,6 +9,9 @@
 
 #include "EditorIcons.h"
 #include "EditorTheme.h"
+#include "../GameBuilder.h"
+#include "../ProjectLauncher/ProjectDatabase.h"
+#include "sage/core/Paths.h"
 #include <filesystem>
 
 #include <cstdio>
@@ -16,17 +19,20 @@
 
 namespace fs = std::filesystem;
 
+namespace {
+// Размер окна в пикселях интерфейса: при крупном масштабе (4K, 150 %) окно
+// растёт вместе с текстом, а не обрезает его.
+float Scaled(float px) { return px * EditorTheme::UiScale(); }
+} // namespace
+
 DialogsPanel::DialogsPanel() {
     // Дефолтная папка диалогов — рядом с бинарником; сборка игр — в dist/.
     std::snprintf(m_projectDir, sizeof(m_projectDir), "%s", fs::current_path().string().c_str());
-    std::snprintf(m_buildDir, sizeof(m_buildDir), "%s",
-                  (fs::current_path() / "dist").string().c_str());
+    // Папка сборки ставится при открытии окна — от проекта (см. Build Game).
 }
 
 void DialogsPanel::Open(const char* name) {
     m_error.clear();
-    // Build Game показывает путь прошлой успешной сборки — сбрасываем при повторном открытии.
-    if (std::string(name) == "Build Game") m_buildResult.clear();
     ImGui::OpenPopup(name);
 }
 
@@ -173,27 +179,76 @@ void DialogsPanel::Draw(EditorHost& host) {
         ImGui::EndPopup();
     }
 
+    // --- СБОРКА ИГРЫ -----------------------------------------------------------
+    //
+    // ПАПКА ПО УМОЛЧАНИЮ — В ПРОЕКТЕ (<проект>/Builds), а не рядом с редактором:
+    // сборка — это результат ПРОЕКТА, и складывать игры всех проектов в папку
+    // установки движка (там её и находили — в Downloads/SageEditor-Windows/dist)
+    // значило смешивать чужое с программой, которую обновляют заменой папки.
+    //
+    // Сборка идёт В ФОНЕ (GameBuilder): окно показывает полосу хода, сборку
+    // можно отменить, редактор не висит.
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal(T("Build Game" "###Build Game"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    ImGui::SetNextWindowSize(ImVec2(Scaled(640.0f), 0.0f), ImGuiCond_Appearing);
+    if (ImGui::BeginPopupModal(T("Build Game" "###Build Game"), nullptr,
+                               ImGuiWindowFlags_AlwaysAutoResize)) {
         Project& project = host.CurrentProject();
-        ImGui::TextDisabled(T("Packages SagePlayer + project '%s' into a runnable game"),
-                            project.Name().c_str());
-        ImGui::InputText(T("Output dir"), m_buildDir, sizeof(m_buildDir));
+        GameBuilder& builder = host.Builder();
+        const bool running = builder.Running();
+        const std::string projectKey = sage::PathToUtf8(project.Dir());
+        if (m_buildDirProject != projectKey) {
+            m_buildDirProject = projectKey;
+            std::error_code absEc;
+            std::snprintf(m_buildDir, sizeof(m_buildDir), "%s",
+                          sage::PathToUtf8(fs::absolute(project.Dir() / "Builds", absEc).lexically_normal()).c_str());
+        }
+        const float width = Scaled(600.0f);
+
+        ImGui::TextUnformatted(project.Name().c_str());
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+        ImGui::TextDisabled("%s", T("Player and project are packed into a folder ready to run. "
+                                    "All game files go into one encrypted game.sagepak."));
+        ImGui::PopTextWrapPos();
+
+        ImGui::SeparatorText(T("Output folder"));
+        ImGui::BeginDisabled(running);
         {
+            const float browseW = EditorIcons::LabeledWidth(ImGui::GetFontSize(), T("Browse...")) +
+                                  ImGui::GetStyle().FramePadding.x * 2.0f;
+            ImGui::SetNextItemWidth(width - browseW - ImGui::GetStyle().ItemSpacing.x);
+            ImGui::InputText("##builddir", m_buildDir, sizeof(m_buildDir));
             FileBrowser::Config c;
             c.Title = T("Where to build the game");
             c.Mode = FileBrowser::PickMode::PickFolder;
             BrowseButton("builddir", c, m_buildDir, sizeof(m_buildDir));
         }
-        ImGui::TextDisabled("-> %s/%s/%s", m_buildDir, project.Name().c_str(),
-                            project.Name().c_str());
+        ImGui::EndDisabled();
+        {
+            const fs::path exe = sage::PathFromUtf8(m_buildDir) / project.Name() /
+#ifdef _WIN32
+                                 (project.Name() + ".exe");
+#else
+                                 project.Name();
+#endif
+            ImGui::TextDisabled("%s", T("The game will be:"));
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+            ImGui::TextWrapped("%s", sage::PathToUtf8(exe.lexically_normal()).c_str());
+            ImGui::PopTextWrapPos();
+        }
+
+        ImGui::SeparatorText(T("What goes in"));
+        ImGui::BulletText("%s %s", T("Start scene:"),
+                          project.StartScene().empty() ? T("main.sage, else the first by name")
+                                                       : (project.StartScene() + ".sage").c_str());
+        ImGui::BulletText("%s", T("Scenes, scripts, models, textures, sounds, materials, interfaces"));
+        ImGui::BulletText("%s", T("Engine shaders and fonts"));
+
         // ПРЕДУПРЕЖДЕНИЕ ДО НАЖАТИЯ, А НЕ ОШИБКА ПОСЛЕ. Игры без сцены не
         // бывает: плеер открыл бы пустой экран, и человек, получивший такую
-        // сборку, увидел бы чёрное окно без единого объяснения. Сказать об
-        // этом надо раньше, чем он нажмёт и подождёт.
+        // сборку, увидел бы чёрное окно без единого объяснения.
         const bool hasScene = host.HasAnyScene();
         if (!hasScene) {
-            ImGui::Separator();
+            ImGui::Spacing();
             EditorIcons::Inline("warn", glm::vec3(EditorTheme::Color(EditorTheme::Role::Warn).x,
                                                   EditorTheme::Color(EditorTheme::Role::Warn).y,
                                                   EditorTheme::Color(EditorTheme::Role::Warn).z));
@@ -201,25 +256,56 @@ void DialogsPanel::Draw(EditorHost& host) {
             ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
                                T("The project has no scene — there is nothing to run"));
             ImGui::TextDisabled("%s", T("Create a scene and save it into scenes/ of the project."));
-            ImGui::Separator();
         }
 
-        if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
-        if (!m_buildResult.empty())
-            ImGui::TextColored(ImVec4(0.4f, 0.9f, 0.4f, 1), T("Built: %s"), m_buildResult.c_str());
-        ImGui::BeginDisabled(!hasScene);
-        if (ImGui::Button(T("Build"), ImVec2(120, 0))) {
-            std::string err;
-            if (host.BuildGame(m_buildDir, err)) {
-                m_error.clear();
-                m_buildResult = (fs::path(m_buildDir) / project.Name()).string();
-            } else {
-                m_error = err;
+        // Ход сборки — всегда на своём месте, чтобы окно не прыгало.
+        ImGui::Spacing();
+        if (running || builder.Finished()) {
+            const std::string stage = running ? builder.Stage()
+                                   : builder.Succeeded() ? std::string(T("Done"))
+                                                         : std::string(T("Build failed"));
+            ImGui::ProgressBar(running ? builder.Progress() : (builder.Succeeded() ? 1.0f : 0.0f),
+                               ImVec2(width, 0.0f), stage.c_str());
+        }
+        if (builder.Finished() && !running) {
+            if (builder.Succeeded()) {
+                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Ok), T("Built: %s"),
+                                   sage::PathToUtf8(builder.GameDir()).c_str());
+            } else if (!builder.Error().empty()) {
+                ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Danger), "%s",
+                                   builder.Error().c_str());
+                ImGui::PopTextWrapPos();
             }
         }
-        ImGui::EndDisabled();
+        if (!m_error.empty()) {
+            ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
+            ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Danger), "%s", m_error.c_str());
+            ImGui::PopTextWrapPos();
+        }
+
+        ImGui::Separator();
+        const ImVec2 btn(Scaled(150.0f), 0.0f);
+        if (running) {
+            if (ImGui::Button(T("Cancel build"), btn)) builder.Cancel();
+        } else {
+            ImGui::BeginDisabled(!hasScene);
+            if (ImGui::Button(T("Build"), btn)) {
+                std::string err;
+                m_error.clear();
+                if (!host.StartBuildGame(sage::PathFromUtf8(m_buildDir), err)) m_error = err;
+            }
+            ImGui::EndDisabled();
+            if (builder.Finished() && builder.Succeeded()) {
+                ImGui::SameLine();
+                if (ImGui::Button(T("Open folder"), btn))
+                    Sage::Launcher::RevealInFileManager(builder.GameDir());
+            }
+        }
         ImGui::SameLine();
-        if (ImGui::Button(T("Close"), ImVec2(120, 0))) ImGui::CloseCurrentPopup();
+        ImGui::BeginDisabled(running);
+        if (ImGui::Button(T("Close"), btn)) ImGui::CloseCurrentPopup();
+        ImGui::EndDisabled();
         ImGui::EndPopup();
     }
 

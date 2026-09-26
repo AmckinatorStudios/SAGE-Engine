@@ -1,3 +1,4 @@
+#include "sage/assets/Pack.h"
 #include "Font.h"
 
 #include <algorithm>
@@ -65,12 +66,11 @@ constexpr int kGlyphPadding = 8;
 } // namespace
 
 std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight, bool nearest) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file) {
+    // Через vfs: в собранной игре шрифт лежит в пакете, а не на диске.
+    std::vector<unsigned char> ttf;
+    if (!sage::assets::vfs::ReadFile(path, ttf)) {
         throw std::runtime_error("Font: не удалось открыть файл шрифта: " + path);
     }
-    std::vector<unsigned char> ttf((std::istreambuf_iterator<char>(file)),
-                                    std::istreambuf_iterator<char>());
     if (ttf.empty()) {
         throw std::runtime_error("Font: пустой файл шрифта: " + path);
     }

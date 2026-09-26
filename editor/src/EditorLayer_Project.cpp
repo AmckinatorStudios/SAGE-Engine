@@ -1007,7 +1007,8 @@ bool EditorLayer::HasAnyScene() const {
     return false;
 }
 
-bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
+bool EditorLayer::PrepareBuild(const fs::path& outputDir, GameBuilder::Request& req,
+                               std::string& err) {
     if (!m_project.Loaded()) {
         err = "No project open";
         return false;
@@ -1107,81 +1108,30 @@ bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
     }
     LOG_INFO("Editor") << "Сборка игры: плеер " << fs::weakly_canonical(player, ec).string();
 
-    // 2. Слепить папку игры: <out>/<Name>/{<Name>, assets/(рантайм), project/}.
-    fs::path gameDir = outputDir / m_project.Name();
-    fs::remove_all(gameDir, ec); // пересборка затирает прошлую (это артефакт, не данные)
-    fs::create_directories(gameDir, ec);
-    if (ec) {
-        err = "Cannot create " + gameDir.string() + ": " + ec.message();
+    req.ProjectDir = m_project.Dir();
+    req.ProjectName = m_project.Name();
+    req.OutputDir = outputDir;
+    req.Player = player;
+    req.CopyProjectFile = m_settings.BuildProjectFile;
+    // Оглавление базы — снимок ЗДЕСЬ, в главном потоке: база живёт в нём, и
+    // читать её из потока сборки, пока редактор её правит, нельзя.
+    req.AssetIndex = sage::AssetDatabase::Instance().ExportIndex();
+    return true;
+}
+
+bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
+    GameBuilder::Request req;
+    if (!PrepareBuild(outputDir, req, err)) return false;
+    return GameBuilder::RunSync(req, err);
+}
+
+bool EditorLayer::StartBuildGame(const fs::path& outputDir, std::string& err) {
+    GameBuilder::Request req;
+    if (!PrepareBuild(outputDir, req, err)) return false;
+    if (!m_builder.Start(req)) {
+        err = T("A build is already running");
         return false;
     }
-
-    fs::copy_file(player, gameDir / (m_project.Name() + exeSuffix),
-                  fs::copy_options::overwrite_existing, ec);
-    if (ec) {
-        err = "Player copy failed: " + ec.message();
-        return false;
-    }
-    fs::copy(player.parent_path() / "assets", gameDir / "assets",
-             fs::copy_options::recursive, ec);
-    if (ec) {
-        err = "Runtime assets copy failed: " + ec.message();
-        return false;
-    }
-    // Проект едет в игру ПАКЕТОМ (game.sagepak), а не россыпью файлов.
-    //
-    // Копирование папки как есть означало три вещи сразу: медленный старт
-    // (тысяча мелких файлов открывается дольше одного большого), игру, которую
-    // открывают блокнотом (исходные .lua и .sage лежат рядом с exe), и лишний
-    // размер (текстовые сцены и скрипты жмутся в разы).
-    //
-    // Файлы .meta и .sageimport в пакет не кладутся: это служебные данные
-    // редактора (GUID'ы ассетов, параметры импорта), в игре по ним никто не
-    // ходит, а место они занимают.
-    {
-        sage::assets::PackWriter pack;
-        // МАНИФЕСТ ЛЕЖИТ В ПАКЕТЕ, а не россыпью рядом с exe.
-        //
-        // project.sageproj — это манифест игры: по нему плеер узнаёт её имя.
-        // Раньше он копировался ОТДЕЛЬНЫМ файлом рядом с exe, и получалось,
-        // что игра, целиком упакованная в один game.sagepak, всё равно везёт
-        // рядом кусок редакторского проекта — тот самый, который у автора уже
-        // есть. Теперь он внутри пакета, и плеер читает его оттуда (см.
-        // runtime/src/PlayerLayer.cpp).
-        //
-        // Файлы .meta и .sageimport в пакет не кладутся: это служебные данные
-        // редактора (GUID'ы ассетов, параметры импорта), в игре по ним никто не
-        // ходит, а место они занимают.
-        const size_t packed = pack.AddDirectory(m_project.Dir(), {".meta", ".sageimport"});
-        if (!pack.Save(gameDir / "game.sagepak")) {
-            err = T("Could not write the game package");
-            return false;
-        }
-
-        // ОТДЕЛЬНАЯ КОПИЯ — только если её попросили параметром сборки (см.
-        // EngineConfig::BuildProjectFile; в настройках редактора его нет и не
-        // должно быть). Нужна она ровно для одного: запускать игру, перетащив
-        // project.sageproj на плеер.
-        if (m_settings.BuildProjectFile) {
-            fs::copy_file(m_project.Dir() / "project.sageproj", gameDir / "project.sageproj",
-                          fs::copy_options::overwrite_existing, ec);
-            if (ec) {
-                err = T("Could not copy the project file: ") + ec.message();
-                return false;
-            }
-        }
-        LOG_INFO("Editor") << "Пакет игры: " << packed << " файлов";
-    }
-
-    // Настройки проекта — рядом с exe игры (sage.cfg), чтобы игрок мог править их
-    // без залезания в project/. SagePlayer грузит и этот, и project/sage.cfg.
-    std::error_code cfgEc;
-    fs::path projCfg = m_project.Dir() / "sage.cfg";
-    if (fs::exists(projCfg, cfgEc)) {
-        fs::copy_file(projCfg, gameDir / "sage.cfg", fs::copy_options::overwrite_existing, cfgEc);
-    }
-
-    LOG_INFO("Editor") << "Game built: " << gameDir.string();
     return true;
 }
 

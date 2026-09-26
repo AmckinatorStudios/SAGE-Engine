@@ -2377,9 +2377,23 @@ bool EditorLayer::SelfTestSceneAndPlay() {
             // Проверяем и то, что папки нет: положить рядом и пакет, и россыпь
             // значило бы, что какой из них прочтут — дело случая.
             if (!fs::exists(exe, ec) || !fs::exists(gameDir / "game.sagepak", ec) ||
-                fs::exists(gameDir / "project", ec) ||
-                !fs::exists(gameDir / "assets" / "shaders" / "lit.frag", ec)) {
+                fs::exists(gameDir / "project", ec)) {
                 LOG_ERROR("Editor") << "SELFTEST: built game layout incomplete in " << gameDir.string();
+                ok = false;
+            }
+            // ВСЁ — В ПАКЕТЕ: и ресурсы движка (шейдеры, шрифт), и оглавление
+            // базы ассетов. Россыпь assets/ рядом с exe — это файлы, которые
+            // игрок правит блокнотом, и ровно этого пакет и не должен допускать.
+            if (fs::exists(gameDir / "assets", ec)) {
+                LOG_ERROR("Editor") << "SELFTEST: рядом с игрой лежит россыпь assets/";
+                ok = false;
+            }
+            sage::assets::PackReader built;
+            if (!built.Open(gameDir / "game.sagepak") || built.Version() != 2 ||
+                !built.Contains("assets/shaders/lit.frag") || !built.Contains("assetdb.json") ||
+                !built.Contains("project.sageproj")) {
+                LOG_ERROR("Editor") << "SELFTEST: в пакете игры нет шейдеров движка, оглавления "
+                                       "базы или манифеста (или пакет не защищён)";
                 ok = false;
             }
             // МАНИФЕСТА РЯДОМ С EXE НЕТ — он в пакете (см.
@@ -2390,6 +2404,29 @@ bool EditorLayer::SelfTestSceneAndPlay() {
                                        "хотя сборка по умолчанию его не кладёт";
                 ok = false;
             }
+        }
+    }
+
+    // --- Сборка В ФОНЕ: окно не висит, полоса хода доходит до конца --------
+    //
+    // Пока сборка шла в главном потоке, редактор на настоящем проекте висел
+    // белым окном десятки секунд. Проверяем, что StartBuildGame возвращается
+    // СРАЗУ (до конца сборки), а поток доводит её до успеха и 100 %.
+    if (ok) {
+        std::string startErr;
+        if (!StartBuildGame("selftest_dist_async", startErr)) {
+            LOG_ERROR("Editor") << "SELFTEST: фоновая сборка не запустилась: " << startErr;
+            ok = false;
+        } else {
+            for (int i = 0; i < 6000 && m_builder.Running(); ++i)
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            if (!m_builder.Finished() || !m_builder.Succeeded() || m_builder.Progress() < 0.999f) {
+                LOG_ERROR("Editor") << "SELFTEST: фоновая сборка не дошла до конца: "
+                                    << m_builder.Error();
+                ok = false;
+            }
+            std::error_code rmec;
+            fs::remove_all("selftest_dist_async", rmec);
         }
     }
 

@@ -1,4 +1,5 @@
 #define STB_IMAGE_IMPLEMENTATION
+#include "sage/assets/Pack.h"
 #include <stb_image.h>
 #include "Texture.h"
 #include "sage/core/Log.h"
@@ -44,7 +45,10 @@ Texture::Texture(const std::string& path, TextureFilter filter, bool generateMip
 
     stbi_set_flip_vertically_on_load_thread(true); // GPU ждёт (0,0) внизу-слева, у большинства картинок — вверху-слева
 
-    unsigned char* data = stbi_load(path.c_str(), &m_width, &m_height, &m_channels, 0);
+    // Через vfs: stbi_load(путь) открывает файл сам и о пакете не знает — в
+    // собранной игре не грузилась ни одна текстура.
+    unsigned char* data =
+        sage::assets::vfs::LoadImage(path, &m_width, &m_height, &m_channels, 0);
     if (!data) {
         LOG_ERROR("Texture") << "Не удалось загрузить текстуру: " << path << " (" << stbi_failure_reason() << ")";
         throw std::runtime_error("Не удалось загрузить текстуру: " + path + " (" + stbi_failure_reason() + ")");

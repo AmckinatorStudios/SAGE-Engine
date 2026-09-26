@@ -116,8 +116,8 @@ private:
     // Внутри ли путь границы (Root). Пустая граница пускает куда угодно.
     bool WithinRoot(const std::filesystem::path& p) const;
     bool PassesFilter(const std::filesystem::path& p) const;
-    void DrawPlaces();
-    void DrawBreadcrumbs();
+    void DrawPlaces(float height);
+    void DrawBreadcrumbs(float width);
     // Два вида одного и того же списка. Возвращают true, если выбор подтверждён
     // двойным щелчком (тогда путь уже лежит в m_result).
     bool DrawList();

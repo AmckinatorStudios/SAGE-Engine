@@ -1,4 +1,5 @@
 #include "sage/assets/format/Blob.h"
+#include "sage/assets/Pack.h"
 
 #include <cstring>
 #include <fstream>
@@ -320,14 +321,8 @@ bool Blob::Write(const std::string& path, std::string& err) const {
 }
 
 bool Blob::Read(const std::string& path, Blob& out, std::string& err) {
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
-    if (!f) { err = "не открыть: " + path; return false; }
-    const std::streamsize size = f.tellg();
-    if (size < 0) { err = "не прочитать размер: " + path; return false; }
-    f.seekg(0);
-    std::vector<uint8_t> bytes((size_t)size);
-    if (size > 0) f.read((char*)bytes.data(), size);
-    if (!f) { err = "ошибка чтения: " + path; return false; }
+    std::vector<uint8_t> bytes;   // через vfs — .sagetex/.sagemesh едут в пакете
+    if (!vfs::ReadFile(path, bytes)) { err = "не открыть: " + path; return false; }
     return Parse(bytes, out, err);
 }
 

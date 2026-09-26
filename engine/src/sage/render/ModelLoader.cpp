@@ -1,4 +1,5 @@
 #include "sage/core/Paths.h"
+#include "sage/assets/Pack.h"
 #include "ModelLoader.h"
 
 #include "sage/assets/import/Importer.h"
@@ -26,6 +27,17 @@
 
 #include "sage/core/Log.h"
 
+namespace {
+// .obj и его .mtl — через vfs (пакет собранной игры), см. ReadObjWithMtl.
+bool ParseObjViaVfs(tinyobj::ObjReader& reader, const std::string& path,
+                    const tinyobj::ObjReaderConfig& config) {
+    std::string objText, mtlText;
+    if (!sage::assets::ReadObjWithMtl(path, objText, mtlText)) return false;
+    return reader.ParseFromString(objText, mtlText, config);
+}
+} // namespace
+
+
 namespace ModelLoader {
 
 // ПУТЁМ, а не строкой: по ней открывают файл, а узкая строка на Windows
@@ -39,11 +51,12 @@ std::filesystem::path ImportSidecarPath(const std::string& modelPath) {
 
 ImportSettings LoadImportSettings(const std::string& modelPath) {
     ImportSettings s;
-    std::ifstream f(ImportSidecarPath(modelPath));
-    if (!f) return s;
+    // Через vfs: сайдкар едет в пакет вместе с моделью, и без него игра
+    // собирала модель с другим масштабом и поворотом, чем редактор.
+    std::string text;
+    if (!sage::assets::vfs::ReadText(sage::PathToUtf8(ImportSidecarPath(modelPath)), text)) return s;
     try {
-        nlohmann::json j;
-        f >> j;
+        nlohmann::json j = nlohmann::json::parse(text);
         s.Scale = j.value("scale", s.Scale);
         s.Recenter = j.value("recenter", s.Recenter);
         s.NormalizeSize = j.value("normalize", s.NormalizeSize);
@@ -289,7 +302,7 @@ sage::render::MeshData LoadObjData(const std::string& path,
     config.triangulate = false;
     tinyobj::ObjReader reader;
 
-    if (!reader.ParseFromFile(path, config)) {
+    if (!ParseObjViaVfs(reader, path, config)) {
         std::string err = reader.Error().empty() ? "неизвестная ошибка" : reader.Error();
         throw std::runtime_error("Не удалось загрузить модель " + path + ": " + err);
     }
@@ -491,11 +504,8 @@ sage::render::MeshData LoadMeshData(const std::string& path) {
     // Отсутствующий файл отличаем от битого ЗДЕСЬ: ниже оба выглядят как
     // «парсер не смог», а человеку, у которого «модель не грузится», нужно
     // знать, опечатался он в пути или у него испорченный экспорт.
-    {
-        std::ifstream probe(path, std::ios::binary);
-        if (!probe) {
-            throw std::runtime_error("Файл модели не найден: " + path);
-        }
+    if (!sage::assets::vfs::Exists(path)) {
+        throw std::runtime_error("Файл модели не найден: " + path);
     }
 
     const std::string ext = ExtensionLower(path);

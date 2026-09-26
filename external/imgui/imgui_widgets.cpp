@@ -1258,8 +1258,12 @@ bool ImGui::Checkbox(const char* label, bool* v)
     const char* label_end = FindRenderedTextEnd(label);
     const ImVec2 label_size = CalcTextSize(label, label_end, false);
 
-    const float square_sz = GetFrameHeight();
+    // [SAGE] Квадрат может быть меньше высоты строки (style.CheckboxScale):
+    // строка остаётся высотой поля — ряды выравниваются, — а квадрат по центру.
+    const float frame_sz = GetFrameHeight();
+    const float square_sz = IM_TRUNC(frame_sz * ImClamp(style.CheckboxScale, 0.4f, 1.0f));
     const ImVec2 pos = window->DC.CursorPos;
+    const ImVec2 square_pos = pos + ImVec2(0.0f, IM_TRUNC((frame_sz - square_sz) * 0.5f));
     const ImRect total_bb(pos, pos + ImVec2(square_sz + (label_size.x > 0.0f ? style.ItemInnerSpacing.x + label_size.x : 0.0f), label_size.y + style.FramePadding.y * 2.0f));
     ItemSize(total_bb, style.FramePadding.y);
     const bool is_visible = ItemAdd(total_bb, id);
@@ -1292,7 +1296,7 @@ bool ImGui::Checkbox(const char* label, bool* v)
         MarkItemEdited(id);
     }
 
-    const ImRect check_bb(pos, pos + ImVec2(square_sz, square_sz));
+    const ImRect check_bb(square_pos, square_pos + ImVec2(square_sz, square_sz));
     const bool mixed_value = (g.LastItemData.ItemFlags & ImGuiItemFlags_MixedValue) != 0;
     if (is_visible)
     {
@@ -1313,7 +1317,7 @@ bool ImGui::Checkbox(const char* label, bool* v)
             RenderCheckMark(window->DrawList, check_bb.Min + ImVec2(pad, pad), check_col, square_sz - pad * 2.0f);
         }
     }
-    const ImVec2 label_pos = ImVec2(check_bb.Max.x + style.ItemInnerSpacing.x, check_bb.Min.y + style.FramePadding.y);
+    const ImVec2 label_pos = ImVec2(check_bb.Max.x + style.ItemInnerSpacing.x, pos.y + style.FramePadding.y); // [SAGE] строка, а не квадрат
     if (g.LogEnabled)
         LogRenderedText(&label_pos, mixed_value ? "[~]" : *v ? "[x]" : "[ ]");
     if (is_visible && label_size.x > 0.0f)

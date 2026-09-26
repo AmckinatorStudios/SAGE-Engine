@@ -1,4 +1,5 @@
 #include "UIRenderer.h"
+#include "sage/assets/Pack.h"
 #include "stb_easy_font.h"
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
@@ -577,9 +578,9 @@ const Font* UIRenderer::LoadFont(const std::string& path, float pixelHeight, boo
         std::string file = sage::AssetDatabase::Instance().LocatePath(path);
         std::error_code ec;
         // Движковые шрифты лежат рядом с бинарником, а не в проекте.
-        if (!std::filesystem::exists(file, ec)) {
+        if (!sage::assets::vfs::Exists(file)) {
             const std::string engineFile = sage::EngineAssetPath(path);
-            if (std::filesystem::exists(engineFile, ec)) file = engineFile;
+            if (sage::assets::vfs::Exists(engineFile)) file = engineFile;
         }
         font = Font::Load(file, pixelHeight, nearest);
     } catch (const std::exception& e) {

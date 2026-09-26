@@ -1,3 +1,4 @@
+#include "sage/assets/Pack.h"
 #include <array>
 #include <filesystem>
 #include "ResourceManager.h"
@@ -170,7 +171,7 @@ bool ResourceManager::DecodeImageFile(const std::string& path, std::vector<unsig
     // глобальный нельзя, поточный всегда старше.
     stbi_set_flip_vertically_on_load_thread(true);
     int channels = 0;
-    unsigned char* data = stbi_load(path.c_str(), &outW, &outH, &channels, 4); // форсируем RGBA
+    unsigned char* data = sage::assets::vfs::LoadImage(path, &outW, &outH, &channels, 4); // RGBA
     if (!data) return false;
     const size_t bytes = (size_t)outW * (size_t)outH * 4u;
     outRGBA.assign(data, data + bytes);

@@ -1,12 +1,14 @@
 #include "FileBrowser.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cstdio>
 #include <cstring>
 
 #include "AssetSlot.h"
 #include "EditorIcons.h"
 #include "EditorPrefs.h"
+#include "EditorTheme.h"
 #include "PathList.h"
 #include "sage/core/Paths.h"
 #include "PathScope.h"
@@ -22,6 +24,19 @@ namespace pathlist = sage::editor::pathlist;
 namespace covers = sage::editor::covers;
 
 namespace {
+
+// Размеры окна — в пикселях интерфейса: при масштабе 150 % окно растёт вместе
+// с текстом, а не обрезает кнопки.
+float Scaled(float px) { return px * EditorTheme::UiScale(); }
+
+// СТРОКА СПИСКА МЕСТ: значок + имя, выделение — подсветкой строки, как в
+// любом проводнике. Кнопкой на каждую папку («Домой», «Рабочий стол», …) это
+// было стопкой разнокалиберных плашек, и список выглядел неразобранным.
+bool PlaceRow(const char* icon, const std::string& label, bool here) {
+    EditorIcons::Inline(icon);
+    ImGui::SameLine(0.0f, 0.0f);
+    return ImGui::Selectable(label.c_str(), here);
+}
 
 std::string LowerOf(std::string s) {
     std::transform(s.begin(), s.end(), s.begin(),
@@ -293,18 +308,13 @@ void FileBrowser::DrawPathGroup(const char* title, const std::vector<std::string
         const fs::path p = sage::PathFromUtf8(utf8);
         if (!fs::is_directory(p, ec) || !WithinRoot(p)) continue;
         if (!header) {
-            ImGui::Spacing();
-            ImGui::TextDisabled("%s", title);
-            ImGui::Separator();
+            ImGui::SeparatorText(title);
             header = true;
         }
         ImGui::PushID(utf8.c_str());
         std::string label = sage::PathToUtf8(p.filename());
         if (label.empty()) label = utf8;
-        const bool here = p == m_dir;
-        if (here) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.35f, 1.0f));
-        if (EditorIcons::Button(favorites ? "folder-full" : "clock", label.c_str())) GoTo(p);
-        if (here) ImGui::PopStyleColor();
+        if (PlaceRow(favorites ? "folder-full" : "clock", label, p == m_dir)) GoTo(p);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", utf8.c_str());
         if (favorites) {
             if (Sage::UI::MenuScope favMenu; ImGui::BeginPopupContextItem("##fav_menu")) {
@@ -359,30 +369,28 @@ void FileBrowser::Refresh() {
     });
 }
 
-void FileBrowser::DrawPlaces() {
-    ImGui::BeginChild("##places", ImVec2(190, -ImGui::GetFrameHeightWithSpacing() * 2.2f), true);
+void FileBrowser::DrawPlaces(float height) {
+    ImGui::BeginChild("##places", ImVec2(Scaled(200.0f), height), ImGuiChildFlags_Borders);
     // Избранное — первым: это места, которые человек выбрал сам.
     DrawPathGroup(T("Favorites"), m_favorites, true);
     DrawPathGroup(T("Recent"), m_recent, false);
-    for (const Place& p : m_places) {
+    for (size_t i = 0; i < m_places.size(); ++i) {
+        const Place& p = m_places[i];
         if (p.IsGroup) {
-            ImGui::Spacing();
-            ImGui::TextDisabled("%s", p.Label.c_str());
-            ImGui::Separator();
+            ImGui::SeparatorText(p.Label.c_str());
             continue;
         }
+        ImGui::PushID((int)i);
         // Текущее место подсвечено: в списке из полутора десятков папок иначе
         // не видно, где ты находишься.
-        const bool here = !p.Path.empty() && p.Path == m_dir;
-        if (here) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.35f, 1.0f));
-        if (EditorIcons::Button("folder", p.Label.c_str())) GoTo(p.Path);
-        if (here) ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", p.Path.string().c_str());
+        if (PlaceRow("folder", p.Label, !p.Path.empty() && p.Path == m_dir)) GoTo(p.Path);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", sage::PathToUtf8(p.Path).c_str());
+        ImGui::PopID();
     }
     ImGui::EndChild();
 }
 
-void FileBrowser::DrawBreadcrumbs() {
+void FileBrowser::DrawBreadcrumbs(float width) {
     // Хлебные крошки кликабельны: подняться на три уровня — один клик, а не три
     // нажатия «вверх».
     // ЗА ГРАНИЦЕЙ КРОШЕК НЕТ. Показывать «/home/user/Проекты/Игра/assets»
@@ -393,23 +401,59 @@ void FileBrowser::DrawBreadcrumbs() {
     for (auto it = m_cfg.Root.begin(); it != m_cfg.Root.end(); ++it) ++rootParts;
 
     fs::path acc;
-    std::vector<fs::path> parts;
+    std::vector<std::pair<std::string, fs::path>> crumbs;
     size_t seen = 0;
     for (const fs::path& part : m_dir) {
+        acc /= part;
         // Всё, что ВЫШЕ границы, копим в acc молча: по этим кускам собирается
         // рабочий путь для кнопок, но кнопок у них нет.
-        if (rootParts > 0 && seen + 1 < rootParts) acc /= part;
-        else parts.push_back(part);
+        if (!(rootParts > 0 && seen + 1 < rootParts)) {
+            std::string label = sage::PathToUtf8(part);
+            // Разделитель корня («\» на Windows, «/» на Linux) — не папка:
+            // отдельной кнопкой он был пустым квадратиком между «C:» и «Users».
+            if (label == "\\" || label == "/") {
+                if (!crumbs.empty()) { crumbs.back().second = acc; ++seen; continue; }
+                label = "/";
+            }
+            crumbs.push_back({label, acc});
+        }
         ++seen;
     }
-    for (size_t i = 0; i < parts.size(); ++i) {
-        acc /= parts[i];
-        std::string label = parts[i].string();
-        if (label.empty() || label == "/") label = "/";
+
+    // НЕ ВЛЕЗАЕТ — ГОЛОВА СВОРАЧИВАЕТСЯ В «…». Раньше длинный путь просто
+    // уезжал за край окна вместе с поиском и последними кнопками. Видны всегда
+    // ПОСЛЕДНИЕ папки — где ты сейчас; предки — в меню под «…».
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float sep = ImGui::CalcTextSize("/").x + 4.0f;
+    auto crumbWidth = [&](const std::string& l) { return ImGui::CalcTextSize(l.c_str()).x + st.FramePadding.x * 2.0f; };
+    const float moreW = crumbWidth("...") + sep;
+    size_t first = 0;
+    float total = 0.0f;
+    for (const auto& c : crumbs) total += crumbWidth(c.first) + sep;
+    while (first + 1 < crumbs.size() && total + (first > 0 ? moreW : 0.0f) > width) {
+        total -= crumbWidth(crumbs[first].first) + sep;
+        ++first;
+    }
+    if (first > 0) {
+        if (ImGui::Button("...")) ImGui::OpenPopup("##crumbs_more");
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Parent folders"));
+        if (Sage::UI::MenuScope moreMenu; ImGui::BeginPopup("##crumbs_more")) {
+            for (size_t i = 0; i < first; ++i) {
+                ImGui::PushID((int)i);
+                if (EditorIcons::MenuItem("folder", crumbs[i].first.c_str())) GoTo(crumbs[i].second);
+                ImGui::PopID();
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::SameLine(0.0f, 2.0f);
+        ImGui::TextDisabled("/");
+        ImGui::SameLine(0.0f, 2.0f);
+    }
+    for (size_t i = first; i < crumbs.size(); ++i) {
         ImGui::PushID((int)i);
-        if (ImGui::Button(label.c_str())) GoTo(acc);
+        if (ImGui::Button(crumbs[i].first.c_str())) GoTo(crumbs[i].second);
         ImGui::PopID();
-        if (i + 1 < parts.size()) {
+        if (i + 1 < crumbs.size()) {
             ImGui::SameLine(0.0f, 2.0f);
             ImGui::TextDisabled("/");
             ImGui::SameLine(0.0f, 2.0f);
@@ -427,10 +471,22 @@ bool FileBrowser::DrawList() {
     bool confirmed = false;
     const std::string needle = LowerOf(m_search);
     const float icon = ImGui::GetTextLineHeight() + 4.0f;
+    // ТАБЛИЦА С ШАПКОЙ «Имя | Размер»: размер стоит в своём столбце ровно под
+    // шапкой, а не «где-то справа» на глаз, и шапка не уезжает при прокрутке.
+    if (!ImGui::BeginTable("##files", 2,
+                           ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg |
+                               ImGuiTableFlags_BordersInnerV | ImGuiTableFlags_PadOuterX))
+        return false;
+    ImGui::TableSetupScrollFreeze(0, 1);
+    ImGui::TableSetupColumn(T("Name"), ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn(T("Size"), ImGuiTableColumnFlags_WidthFixed, Scaled(90.0f));
+    ImGui::TableHeadersRow();
     for (int i = 0; i < (int)m_entries.size(); ++i) {
         const Entry& e = m_entries[i];
         if (!needle.empty() && LowerOf(e.Name).find(needle) == std::string::npos) continue;
 
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
         ImGui::PushID(i);
         const fs::path full = m_dir / e.Name;
         const ImVec2 ip0 = ImGui::GetCursorScreenPos();
@@ -445,7 +501,8 @@ bool FileBrowser::DrawList() {
         }
         ImGui::SameLine(0.0f, 0.0f);
         if (ImGui::Selectable(e.Name.c_str(), i == m_selected,
-                              ImGuiSelectableFlags_AllowDoubleClick)) {
+                              ImGuiSelectableFlags_AllowDoubleClick |
+                                  ImGuiSelectableFlags_SpanAllColumns)) {
             const Hit hit = DrawEntryCommon(i, e, ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left));
             if (hit == Hit::EnterDir) {
                 GoTo(full);
@@ -458,12 +515,11 @@ bool FileBrowser::DrawList() {
         // ли сейчас разглядеть картинку, и лишать строки превью значит заставлять
         // человека переключать вид ради одного взгляда.
         if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) DrawHoverPreview(full, e);
-        if (!e.IsDir) {
-            ImGui::SameLine(ImGui::GetContentRegionAvail().x - 70.0f);
-            ImGui::TextDisabled("%s", covers::HumanSize(e.Size).c_str());
-        }
+        ImGui::TableSetColumnIndex(1);
+        if (!e.IsDir) ImGui::TextDisabled("%s", covers::HumanSize(e.Size).c_str());
         ImGui::PopID();
     }
+    ImGui::EndTable();
     return confirmed;
 }
 
@@ -557,46 +613,68 @@ bool FileBrowser::Draw() {
 
     const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(760, 480), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSize(ImVec2(Scaled(920.0f), Scaled(580.0f)), ImGuiCond_Appearing);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(Scaled(640.0f), Scaled(420.0f)), ImVec2(FLT_MAX, FLT_MAX));
 
     bool confirmed = false;
     bool stayOpen = true;
     if (ImGui::BeginPopupModal(m_cfg.Title.c_str(), &stayOpen)) {
-        // --- Панель навигации ---
-        if (EditorIcons::Button("up", T("Up"))) {
+        // --- ПАНЕЛЬ НАВИГАЦИИ: ОДНА СТРОКА ---
+        //
+        // Слева — движение (вверх, обновить, новая папка), по центру — путь,
+        // справа — вид (избранное, скрытые, строки/сетка) и поиск. Все
+        // действия — ЗНАЧКАМИ с подсказками: подписанными кнопками строка не
+        // влезала в окно, и справа обрезались «В избранное» и поиск.
+        const float iconW = ImGui::GetFrameHeight();
+        const float gap = ImGui::GetStyle().ItemSpacing.x;
+        if (EditorIcons::IconOnlyButton("up", T("Up one folder"))) {
             if (m_dir.has_parent_path() && m_dir.parent_path() != m_dir) GoTo(m_dir.parent_path());
         }
         ImGui::SameLine();
-        if (EditorIcons::Button("refresh", T("Refresh"))) Refresh();
+        if (EditorIcons::IconOnlyButton("refresh", T("Refresh"))) Refresh();
         ImGui::SameLine();
-        if (EditorIcons::Button("folder-plus", T("New Folder"))) ImGui::OpenPopup("##newfolder");
+        if (EditorIcons::IconOnlyButton("folder-plus", T("New folder"))) ImGui::OpenPopup("##newfolder");
         ImGui::SameLine();
-        ImGui::Checkbox(T("Hidden"), &m_showHidden);
-        if (ImGui::IsItemDeactivatedAfterEdit()) Refresh();
-        ImGui::SameLine();
-        // Вид — ОДНА кнопка-переключатель, а не две радиокнопки: состояний два,
-        // и значок на ней показывает тот вид, в который она переключит.
-        if (EditorIcons::Button(m_grid ? "list" : "grid",
-                                m_grid ? T("Rows: name and size") : T("Grid: covers"))) {
-            m_grid = !m_grid;
-            sage::editor::prefs::SetBool("filebrowser.grid", m_grid);
-        }
-        ImGui::SameLine();
+
+        const float searchW = Scaled(190.0f);
+        const float rightW = iconW * 3.0f + gap * 3.0f + searchW;
+        const float crumbsW = std::max(Scaled(80.0f), ImGui::GetContentRegionAvail().x - rightW - gap);
+        const float crumbsX = ImGui::GetCursorPosX();
+        ImGui::BeginGroup();
+        DrawBreadcrumbs(crumbsW);
+        ImGui::EndGroup();
+        ImGui::SameLine(crumbsX + crumbsW + gap);
+
         // В избранное — нынешнюю папку одним щелчком; повторный — убрать.
         {
             const std::string here = sage::PathToUtf8(m_dir);
             const bool fav = pathlist::Contains(m_favorites, here);
-            if (EditorIcons::Button(fav ? "folder-full" : "folder", fav ? T("In favorites") : T("To favorites"),
-                                    fav ? T("Remove this folder from favorites")
-                                        : T("Add this folder to favorites: it will be one click away "
-                                            "in every file dialog"),
-                                    fav)) {
+            if (EditorIcons::IconOnlyButton(fav ? "folder-full" : "folder",
+                                            fav ? T("Remove this folder from favorites")
+                                                : T("Add this folder to favorites: it will be one click "
+                                                    "away in every file dialog"),
+                                            fav)) {
                 pathlist::Toggle(m_favorites, here);
                 SaveLists();
             }
         }
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(180);
+        if (EditorIcons::IconOnlyButton(m_showHidden ? "eye" : "eye-off",
+                                        m_showHidden ? T("Hide hidden files") : T("Show hidden files"),
+                                        m_showHidden)) {
+            m_showHidden = !m_showHidden;
+            Refresh();
+        }
+        ImGui::SameLine();
+        // Вид — ОДНА кнопка-переключатель: значок показывает тот вид, в
+        // который она переключит.
+        if (EditorIcons::IconOnlyButton(m_grid ? "list" : "grid",
+                                        m_grid ? T("Rows: name and size") : T("Grid: covers"))) {
+            m_grid = !m_grid;
+            sage::editor::prefs::SetBool("filebrowser.grid", m_grid);
+        }
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(-FLT_MIN);
         ImGui::InputTextWithHint("##search", T("Search..."), m_search, sizeof(m_search));
 
         // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
@@ -618,44 +696,64 @@ bool FileBrowser::Draw() {
             ImGui::EndPopup();
         }
 
-        DrawBreadcrumbs();
         ImGui::Separator();
 
-        DrawPlaces();
+        // --- ПОДВАЛ: высота считается заранее, чтобы список занял всё остальное
+        // и кнопки не уезжали за нижний край окна. ---
+        std::vector<std::string> hints;
+        if (m_cfg.Mode == PickMode::OpenAny)
+            hints.push_back(T("A file, a folder or a .zip — nothing chosen means this folder"));
+        // ГРАНИЦУ ВИДНО. Человек, не нашедший в диалоге своей папки «Загрузки»,
+        // обязан понять, почему её там нет, — иначе это выглядит как потерянный
+        // список мест.
+        if (!m_cfg.Root.empty())
+            hints.push_back(T("Inside the project only. Outside files: Assets > Import"));
+        const float frame = ImGui::GetFrameHeightWithSpacing();
+        const float line = ImGui::GetTextLineHeightWithSpacing();
+        const float footer = frame * 2.0f + line * (float)(hints.size() + (m_error.empty() ? 0 : 1)) +
+                             ImGui::GetStyle().ItemSpacing.y * 2.0f;
+        const float bodyH = std::max(Scaled(160.0f), ImGui::GetContentRegionAvail().y - footer);
+
+        DrawPlaces(bodyH);
         ImGui::SameLine();
 
         // --- Список или сетка ---
-        ImGui::BeginChild("##list", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 2.2f), true);
+        ImGui::BeginChild("##list", ImVec2(0, bodyH), ImGuiChildFlags_Borders);
         confirmed = m_grid ? DrawGrid() : DrawList();
         if (m_entries.empty()) ImGui::TextDisabled("%s", T("Empty"));
         ImGui::EndChild();
 
-        // --- Имя и кнопки ---
+        // --- Имя ---
         if (m_cfg.Mode != PickMode::PickFolder) {
-            ImGui::SetNextItemWidth(-220);
-            ImGui::InputText("##name", m_name, sizeof(m_name));
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(m_cfg.Mode == PickMode::SaveFile ? T("File name") : T("Selected"));
             ImGui::SameLine();
-            if (!m_cfg.FilterLabel.empty()) ImGui::TextDisabled("%s", m_cfg.FilterLabel.c_str());
+            const float filterW = m_cfg.FilterLabel.empty()
+                                      ? 0.0f
+                                      : ImGui::CalcTextSize(m_cfg.FilterLabel.c_str()).x + gap;
+            ImGui::SetNextItemWidth(std::max(Scaled(120.0f), ImGui::GetContentRegionAvail().x - filterW));
+            ImGui::InputText("##name", m_name, sizeof(m_name));
+            if (!m_cfg.FilterLabel.empty()) {
+                ImGui::SameLine();
+                ImGui::TextDisabled("%s", m_cfg.FilterLabel.c_str());
+            }
         } else {
-            ImGui::TextDisabled(T("Will select: %s"), m_dir.string().c_str());
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled(T("Will select: %s"), sage::PathToUtf8(m_dir).c_str());
         }
-        if (m_cfg.Mode == PickMode::OpenAny) {
-            ImGui::TextDisabled("%s", T("A file, a folder or a .zip — nothing chosen means this folder"));
-        }
-        // ГРАНИЦУ ВИДНО. Человек, не нашедший в диалоге своей папки «Загрузки»,
-        // обязан понять, почему её там нет, — иначе это выглядит как потерянный
-        // список мест.
-        if (!m_cfg.Root.empty()) {
-            ImGui::TextDisabled("%s", T("Inside the project only. Outside files: Assets > Import"));
-        }
-
+        for (const std::string& h : hints) ImGui::TextDisabled("%s", h.c_str());
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
 
+        // Кнопки — СПРАВА, как в любом системном диалоге: взгляд ищет
+        // «Открыть» в правом нижнем углу.
+        const ImVec2 btn(Scaled(140.0f), 0.0f);
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() +
+                             std::max(0.0f, ImGui::GetContentRegionAvail().x - btn.x * 2.0f - gap));
         const char* okLabel = m_cfg.Mode == PickMode::SaveFile     ? T("Save")
                               : m_cfg.Mode == PickMode::PickFolder ? T("Choose folder")
                               : m_cfg.Mode == PickMode::OpenAny    ? T("Bring in")
                                                                : T("Open");
-        if (ImGui::Button(okLabel, ImVec2(140, 0))) {
+        if (ImGui::Button(okLabel, btn)) {
             if (m_cfg.Mode == PickMode::PickFolder) {
                 m_result = m_dir;
                 confirmed = true;
@@ -695,7 +793,7 @@ bool FileBrowser::Draw() {
             }
         }
         ImGui::SameLine();
-        if (ImGui::Button(T("Cancel"), ImVec2(140, 0))) {
+        if (ImGui::Button(T("Cancel"), btn)) {
             m_open = false;
             ImGui::CloseCurrentPopup();
         }

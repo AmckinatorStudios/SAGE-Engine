@@ -12,6 +12,7 @@
 // три области, у которых нет ничего общего, кроме имени класса.
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
+#include "FileBrowser.h"
 #include "ModelImportDialog.h"
 #include "sage/assets/Pack.h"
 
@@ -896,6 +897,18 @@ void EditorLayer::DrawDockspaceAndMenu() {
     if (openDialog && std::strcmp(openDialog, "model-import") == 0) {
         sage::editor::modelimport::Ask({std::filesystem::path("Stylized Nature MegaKit/FBX/CommonTree_1.fbx"),
                                         std::filesystem::path("Stylized Nature MegaKit/FBX/Bush_Common.fbx")});
+        openDialog = nullptr;
+    }
+    // Диалог файлов — тоже для снимка: его макет (строка навигации, места,
+    // таблица, подвал) проверяется только глазами.
+    if (openDialog && std::strcmp(openDialog, "file-dialog") == 0) {
+        static char path[512] = "";
+        FileBrowser::Config c;
+        c.Title = T("Open scene");
+        c.Filters = {".sage"};
+        c.FilterLabel = T("Scenes (*.sage)");
+        c.StartDir = m_project.Loaded() ? m_project.Dir() : std::filesystem::current_path();
+        m_dialogs.Browse(c, path, sizeof(path));
         openDialog = nullptr;
     }
     if (openDialog) m_dialogs.Open(openDialog);

@@ -6,13 +6,20 @@
 // Поймать это глазами нельзя, а у игрока оно выглядит как «игра сломалась».
 #include "TestFramework.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <iterator>
 #include <filesystem>
 #include <fstream>
 #include <string>
 #include <vector>
 
 #include "sage/assets/Pack.h"
+#include "sage/assets/import/ObjMtl.h"
+#include "sage/render/ModelLoader.h"
+#include "sage/render/MeshData.h"
+
+#include <stb_image.h>
 
 namespace fs = std::filesystem;
 using sage::assets::PackReader;
@@ -204,5 +211,249 @@ TEST(Pack_vfs_prefers_the_package_over_stale_files_on_disk) {
 
     std::error_code ec;
     fs::current_path(saved, ec);
+    fs::remove_all(dir, ec);
+}
+
+// ---------------------------------------------------------------------------
+// ЗАЩИТА ПАКЕТА (версия 2).
+//
+// Имена файлов и содержимое не должны читаться «в лоб»: пакет открывали
+// блокнотом и архиватором, видели там сцены и скрипты текстом — и правили.
+// ---------------------------------------------------------------------------
+namespace {
+std::vector<uint8_t> ReadAll(const fs::path& p) {
+    std::ifstream f(p, std::ios::binary);
+    return std::vector<uint8_t>((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+}
+bool Contains(const std::vector<uint8_t>& hay, const std::string& needle) {
+    return std::search(hay.begin(), hay.end(), needle.begin(), needle.end()) != hay.end();
+}
+} // namespace
+
+TEST(Pack_v2_hides_file_names_and_content) {
+    const fs::path file = TempDir("sage_pack_hide") / "game.sagepak";
+    PackWriter writer;
+    writer.Add("scripts/boss_level_logic.lua", Bytes("local SECRET_BALANCE = 9000"));
+    writer.Add("scenes/main.sage", Bytes(std::string(2000, 'x') + "PLAINTEXT_MARKER"));
+    CHECK_TRUE(writer.Save(file));
+
+    const std::vector<uint8_t> raw = ReadAll(file);
+    CHECK_FALSE(Contains(raw, "boss_level_logic"));
+    CHECK_FALSE(Contains(raw, "SECRET_BALANCE"));
+    CHECK_FALSE(Contains(raw, "scenes/main.sage"));
+
+    PackReader reader;
+    CHECK_TRUE(reader.Open(file));
+    CHECK_EQ((int)reader.Version(), 2);
+    std::vector<uint8_t> out;
+    CHECK_TRUE(reader.Read("scripts/boss_level_logic.lua", out));
+    CHECK_TRUE(Text(out) == "local SECRET_BALANCE = 9000");
+    std::error_code ec;
+    fs::remove_all(file.parent_path(), ec);
+}
+
+// Изменённый байт — это ОТКАЗ читать файл, а не «чуть другая» сцена: игра,
+// пошедшая по подправленным данным молча, хуже игры, которая сказала «пакет
+// повреждён».
+TEST(Pack_v2_refuses_tampered_data_and_index) {
+    const fs::path dir = TempDir("sage_pack_tamper");
+    // Несжимаемые байты: запись ляжет как есть, и смещение 56+100 точно внутри неё.
+    std::vector<uint8_t> big(4096);
+    uint32_t x = 2463534242u;
+    for (size_t i = 0; i < big.size(); ++i) {
+        x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+        big[i] = (uint8_t)x;
+    }
+    PackWriter writer;
+    writer.Add("a.bin", big);
+    CHECK_TRUE(writer.Save(dir / "game.sagepak"));
+
+    // Данные: байт посреди первого (и единственного) файла.
+    fs::copy_file(dir / "game.sagepak", dir / "data.sagepak");
+    {
+        std::fstream f(dir / "data.sagepak", std::ios::binary | std::ios::in | std::ios::out);
+        f.seekg(56 + 100);
+        char c = 0;
+        f.read(&c, 1);
+        c ^= 0x5A;
+        f.seekp(56 + 100);
+        f.write(&c, 1);
+    }
+    PackReader data;
+    CHECK_TRUE(data.Open(dir / "data.sagepak"));
+    std::vector<uint8_t> out;
+    CHECK_FALSE(data.Read("a.bin", out));
+    CHECK_TRUE(out.empty());
+
+    // Оглавление: последний байт файла — его хвост.
+    fs::copy_file(dir / "game.sagepak", dir / "index.sagepak");
+    {
+        const uintmax_t size = fs::file_size(dir / "index.sagepak");
+        std::fstream f(dir / "index.sagepak", std::ios::binary | std::ios::in | std::ios::out);
+        f.seekg((std::streamoff)size - 1);
+        char c = 0;
+        f.read(&c, 1);
+        c ^= 0x01;
+        f.seekp((std::streamoff)size - 1);
+        f.write(&c, 1);
+    }
+    PackReader index;
+    CHECK_FALSE(index.Open(dir / "index.sagepak"));
+
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+// Пакеты ВЕРСИИ 1 (без шифрования) обязаны читаться: так собраны шаблоны
+// проектов и игры, выпущенные до защиты.
+TEST(Pack_reads_version1_packages) {
+    const fs::path dir = TempDir("sage_pack_v1");
+    const std::string body = "{\"v1\":true}";
+    std::vector<uint8_t> file;
+    auto u32 = [&](uint32_t v) { for (int i = 0; i < 4; ++i) file.push_back((uint8_t)(v >> (i * 8))); };
+    auto u64 = [&](uint64_t v) { for (int i = 0; i < 8; ++i) file.push_back((uint8_t)(v >> (i * 8))); };
+    u32(0x4B415053);   // 'SPAK'
+    u32(1);
+    u32(1);
+    u32(0);
+    const uint64_t indexOffset = 24 + body.size();
+    u64(indexOffset);
+    file.insert(file.end(), body.begin(), body.end());
+    const std::string name = "scenes/old.sage";
+    u32((uint32_t)name.size());
+    file.insert(file.end(), name.begin(), name.end());
+    u64(24);
+    u64(body.size());
+    u64(body.size());
+    u32(0);
+    { std::ofstream f(dir / "old.sagepak", std::ios::binary); f.write((const char*)file.data(), (std::streamsize)file.size()); }
+
+    PackReader reader;
+    CHECK_TRUE(reader.Open(dir / "old.sagepak"));
+    CHECK_EQ((int)reader.Version(), 1);
+    std::vector<uint8_t> out;
+    CHECK_TRUE(reader.Read("scenes/old.sage", out));
+    CHECK_TRUE(Text(out) == body);
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+// Ход записи доходит до конца, а отмена не оставляет полупакета: половина
+// пакета хуже никакого — игра открыла бы её и развалилась на первом файле.
+TEST(Pack_save_reports_progress_and_cancel_removes_the_file) {
+    const fs::path dir = TempDir("sage_pack_progress");
+    PackWriter writer;
+    for (int i = 0; i < 100; ++i) writer.Add("f" + std::to_string(i) + ".txt", Bytes("данные"));
+    size_t last = 0, calls = 0;
+    CHECK_TRUE(writer.Save(dir / "ok.sagepak", [&](size_t done, size_t total) {
+        CHECK_EQ((int)total, 100);
+        last = done;
+        ++calls;
+        return true;
+    }));
+    CHECK_EQ((int)last, 100);
+    CHECK_TRUE(calls > 1);
+
+    CHECK_FALSE(writer.Save(dir / "cancel.sagepak", [](size_t, size_t) { return false; }));
+    CHECK_FALSE(fs::exists(dir / "cancel.sagepak"));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+// Файлы с диска читаются лениво, и имена — в UTF-8: папка «Уровни» на
+// Windows уходила в пакет байтами ANSI и потом не находилась.
+TEST(Pack_add_directory_keeps_utf8_names) {
+    const fs::path dir = TempDir("sage_pack_utf8");
+    fs::create_directories(dir / "proj" / fs::u8path(u8"Уровни"));
+    { std::ofstream f(dir / "proj" / fs::u8path(u8"Уровни") / fs::u8path(u8"первый.sage")); f << "{}"; }
+    PackWriter writer;
+    CHECK_EQ((int)writer.AddDirectory(dir / "proj", {}, "assets"), 1);
+    CHECK_TRUE(writer.Save(dir / "game.sagepak"));
+    PackReader reader;
+    CHECK_TRUE(reader.Open(dir / "game.sagepak"));
+    CHECK_TRUE(reader.Contains(u8"assets/Уровни/первый.sage"));
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+// Абсолютный путь внутри папки игры — тот же, что относительный: движок ищет
+// свои ресурсы «рядом с exe» абсолютным путём, а они теперь в пакете. Путь с
+// «..» внутри (так модели ссылаются на свои текстуры) тоже находится.
+TEST(Pack_vfs_finds_absolute_and_dotdot_paths_inside_the_game) {
+    namespace vfs = sage::assets::vfs;
+    const fs::path dir = TempDir("sage_pack_abs");
+    PackWriter writer;
+    writer.Add("assets/fonts/ui.ttf", Bytes("шрифт"));
+    writer.Add("assets/tex/a.png", Bytes("картинка"));
+    CHECK_TRUE(writer.Save(dir / "game.sagepak"));
+    CHECK_TRUE(vfs::Mount(dir / "game.sagepak"));
+    std::string text;
+    const std::string abs = (fs::absolute(dir) / "assets" / "fonts" / "ui.ttf").generic_string();
+    CHECK_TRUE(vfs::Exists(abs));
+    CHECK_TRUE(vfs::ReadText(abs, text));
+    CHECK_TRUE(text == "шрифт");
+    CHECK_TRUE(vfs::ReadText("assets/models/../tex/a.png", text));
+    CHECK_TRUE(text == "картинка");
+    CHECK_FALSE(vfs::ListFiles(fs::absolute(dir / "assets" / "tex").generic_string(), ".png").empty());
+    vfs::Unmount();
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+// ЗАГРУЗЧИКИ ЧИТАЮТ ИЗ ПАКЕТА. stb, tinyobj и tinygltf открывали файлы сами, и
+// в собранной игре не грузилась ни одна текстура и модель — пакет был
+// подключён, а читали мимо него (так и выглядел лог игрока: «can't fopen»).
+TEST(Pack_loaders_read_images_and_obj_models_from_the_package) {
+    namespace vfs = sage::assets::vfs;
+    const fs::path dir = TempDir("sage_pack_loaders");
+    // Картинка 2x2 в TGA без сжатия — её понимает stb, и собрать её руками просто.
+    std::vector<uint8_t> tga = {0, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 2, 0, 24, 0};
+    for (int i = 0; i < 4; ++i) { tga.push_back(10); tga.push_back(20); tga.push_back(200); }
+    const std::string obj = "mtllib box.mtl\nusemtl Red\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+    const std::string mtl = "newmtl Red\nKd 1 0 0\n";
+    PackWriter writer;
+    writer.Add("assets/tex/dot.tga", tga);
+    writer.Add("assets/models/box.obj", Bytes(obj));
+    writer.Add("assets/models/box.mtl", Bytes(mtl));
+    CHECK_TRUE(writer.Save(dir / "game.sagepak"));
+    CHECK_TRUE(vfs::Mount(dir / "game.sagepak"));
+
+    int w = 0, h = 0, c = 0;
+    unsigned char* px = vfs::LoadImage("assets/tex/dot.tga", &w, &h, &c, 4);
+    CHECK_TRUE(px != nullptr);
+    CHECK_EQ(w, 2);
+    CHECK_EQ(h, 2);
+    if (px) {
+        CHECK_EQ((int)px[0], 200);   // BGR -> RGBA: красный канал
+        stbi_image_free(px);
+    }
+
+    std::string objText, mtlText;
+    CHECK_TRUE(sage::assets::ReadObjWithMtl("assets/models/box.obj", objText, mtlText));
+    CHECK_TRUE(mtlText.find("newmtl Red") != std::string::npos);
+    const sage::render::MeshData mesh = ModelLoader::LoadMeshData("assets/models/box.obj");
+    CHECK_EQ((int)mesh.Indices.size(), 3);
+
+    vfs::Unmount();
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+// ПАПКА СБОРОК ВНУТРИ ПРОЕКТА В ПАКЕТ НЕ ЕДЕТ: иначе каждая сборка везла бы в
+// себе предыдущую игру, и пакет рос бы с каждым нажатием «Собрать».
+TEST(Pack_add_directory_skips_the_builds_folder) {
+    const fs::path dir = TempDir("sage_pack_skipdirs");
+    fs::create_directories(dir / "scenes");
+    fs::create_directories(dir / "Builds" / "Game");
+    fs::create_directories(dir / "BuildsNotes");
+    { std::ofstream f(dir / "scenes" / "main.sage"); f << "{}"; }
+    { std::ofstream f(dir / "Builds" / "Game" / "game.sagepak"); f << "old"; }
+    { std::ofstream f(dir / "BuildsNotes" / "todo.txt"); f << "x"; }
+    PackWriter writer;
+    CHECK_EQ((int)writer.AddDirectory(dir, {}, "", {dir / "Builds"}), 2);
+    CHECK_TRUE(writer.Has("scenes/main.sage"));
+    CHECK_TRUE(writer.Has("BuildsNotes/todo.txt"));
+    CHECK_FALSE(writer.Has("Builds/Game/game.sagepak"));
+    std::error_code ec;
     fs::remove_all(dir, ec);
 }

@@ -19,4 +19,10 @@ namespace sage::assets {
 // map_Kd, но нет Kd. Файл не читается — пустой набор.
 std::unordered_set<std::string> MtlTexturedWithoutKd(const std::string& objPath);
 
+// Текст .obj и всех подключённых к нему .mtl (mtllib) — через vfs, то есть и
+// из пакета собранной игры. tinyobj::ObjReader::ParseFromFile открывает файлы
+// сам и пакета не видит: в игре не грузилась ни одна .obj-модель. Разбор
+// идёт из строк (ParseFromString). false — .obj не читается.
+bool ReadObjWithMtl(const std::string& objPath, std::string& objText, std::string& mtlText);
+
 } // namespace sage::assets

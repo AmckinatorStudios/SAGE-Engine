@@ -2407,6 +2407,7 @@ struct ImGuiStyle
     float       ScrollbarRounding;          // Radius of grab corners for scrollbar.
     float       ScrollbarPadding;           // Padding of scrollbar grab within its frame (same for both axes).
     float       GrabMinSize;                // Minimum width/height of a grab box for slider/scrollbar.
+    float       CheckboxScale;              // [SAGE] Checkbox square as a fraction of the frame height (1.0 = stock ImGui). The row keeps the frame height; the square is centred in it.
     float       GrabRounding;               // Radius of grabs corners rounding. Set to 0.0f to have rectangular slider grabs.
     float       LogSliderDeadzone;          // The size in pixels of the dead-zone around zero on logarithmic sliders that cross zero.
     float       ImageRounding;              // Rounding of Image() calls.

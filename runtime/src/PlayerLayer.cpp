@@ -155,6 +155,17 @@ void PlayerLayer::OnAttach() {
     // работал только когда его запускали из его собственной папки — запуск
     // ярлыком или из папки игры валился с «не удалось открыть файл шейдера».
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
+    // ПАКЕТ — ПЕРВЫМ ДЕЛОМ, до шейдеров: собранная игра везёт в game.sagepak и
+    // проект, и собственные ресурсы движка (шейдеры, шрифт), россыпи рядом с
+    // exe больше нет. Его отсутствие не ошибка: так запускают игру из папки
+    // проекта во время разработки, и всё читается с диска (см. vfs).
+    {
+        const fs::path packFile = m_projectDir / "game.sagepak";
+        if (!sage::assets::vfs::Mount(packFile)) {
+            const fs::path beside = sage::ExecutableDir() / "game.sagepak";
+            sage::assets::vfs::Mount(beside);
+        }
+    }
     // (Сам поиск «рядом с бинарником» живёт в Shader::ReadFile — один раз на
     // все шейдеры движка, а не по копии в каждом месте загрузки.)
     m_shader.emplace("assets/shaders/lit.vert", "assets/shaders/lit.frag");
@@ -183,11 +194,6 @@ void PlayerLayer::OnAttach() {
     // запускают игру из папки проекта во время разработки, и всё читается с
     // диска (см. sage::assets::vfs).
     std::error_code ec;
-    const fs::path packFile = m_projectDir / "game.sagepak";
-    if (!sage::assets::vfs::Mount(packFile)) {
-        const fs::path beside = sage::ExecutableDir() / "game.sagepak";
-        sage::assets::vfs::Mount(beside);
-    }
 
     fs::path projectFile = m_projectDir / "project.sageproj";
     fs::current_path(m_projectDir, ec);
@@ -238,7 +244,16 @@ void PlayerLayer::OnAttach() {
     // База ассетов — до загрузки сцены: сцена спрашивает у неё актуальные пути
     // по GUID'ам, и пустая база означала бы, что все ссылки сломаны.
     sage::AssetDatabase::Instance().Clear();
-    sage::AssetDatabase::Instance().ScanProject(".");
+    // Собранная игра: оглавление базы лежит в пакете (сайдкаров .meta там
+    // нет). Сканировать диск рядом с exe — значит найти пару служебных файлов
+    // и объявить битой каждую ссылку сцены.
+    std::string assetIndex;
+    if (sage::assets::vfs::Mounted() &&
+        sage::assets::vfs::ReadText(sage::AssetDatabase::kIndexFile, assetIndex)) {
+        sage::AssetDatabase::Instance().LoadIndex(assetIndex);
+    } else {
+        sage::AssetDatabase::Instance().ScanProject(".");
+    }
 
     glfwSetWindowTitle(app.GetWindow().Handle(), m_projectName.c_str());
 

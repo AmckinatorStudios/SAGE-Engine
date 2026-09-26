@@ -1,3 +1,4 @@
+#include "sage/assets/Pack.h"
 #include "sage/assets/import/Convert.h"
 
 #include <algorithm>
@@ -117,7 +118,7 @@ ConvertResult ConvertTextureToNative(const std::string& sourcePath, const std::s
     // ориентацию отвечает загрузчик текстуры — иначе флип пришлось бы помнить
     // в двух местах.
     stbi_set_flip_vertically_on_load_thread(false);
-    unsigned char* pixels = stbi_load(sourcePath.c_str(), &w, &h, &channels, 4);
+    unsigned char* pixels = sage::assets::vfs::LoadImage(sourcePath, &w, &h, &channels, 4);
     if (!pixels) {
         r.Error = std::string("картинка не читается: ") +
                   (stbi_failure_reason() ? stbi_failure_reason() : "неизвестная причина");

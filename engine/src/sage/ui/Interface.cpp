@@ -1,4 +1,5 @@
 #include "sage/ui/Interface.h"
+#include "sage/assets/Pack.h"
 #include "sage/ui/UIPresets.h"
 
 #include <fstream>
@@ -116,12 +117,11 @@ bool Interface::SaveFile(const std::string& path, std::string& err) const {
 }
 
 bool Interface::LoadFile(const std::string& path, Interface& out, std::string& err) {
-    std::ifstream f(sage::PathFromUtf8(path), std::ios::binary);
-    if (!f) {
+    std::string text;   // через vfs — интерфейс едет в пакете
+    if (!sage::assets::vfs::ReadText(path, text)) {
         err = "нет файла: " + path;
         return false;
     }
-    const std::string text((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
     return FromJsonString(text, out, err);
 }
 

@@ -1,4 +1,5 @@
 #include "sage/render/ParticleEffectIO.h"
+#include "sage/assets/Pack.h"
 
 #include <fstream>
 #include <sstream>
@@ -378,14 +379,13 @@ bool SaveEffectFile(const std::string& path, const ParticleEffect& fx, std::stri
 }
 
 bool LoadEffectFile(const std::string& path, ParticleEffect& out, std::string* err) {
-    std::ifstream f(sage::PathFromUtf8(path), std::ios::binary);
-    if (!f) {
+    // Через vfs: в собранной игре эффект лежит в пакете.
+    std::string text;
+    if (!sage::assets::vfs::ReadText(path, text)) {
         if (err) *err = "не открылся: " + path;
         return false;
     }
-    std::stringstream ss;
-    ss << f.rdbuf();
-    return EffectFromJson(ss.str(), out, err);
+    return EffectFromJson(text, out, err);
 }
 
 } // namespace sage::fx

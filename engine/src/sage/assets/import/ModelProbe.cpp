@@ -1,5 +1,7 @@
 #include "sage/assets/import/ModelProbe.h"
+#include "sage/assets/Pack.h"
 
+#include <sstream>
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
@@ -27,8 +29,11 @@ std::string LowerExt(const std::string& path) {
 // Оглавление glTF: у .gltf это весь файл, у .glb — первый кусок (JSON).
 // Двоичные буферы и картинки не читаются вовсе.
 bool GltfHasSkins(const std::string& path) {
-    std::ifstream f(sage::PathFromUtf8(path), std::ios::binary);
-    if (!f) return false;
+    // Через vfs (пакет игры); файл целиком — оглавление в начале, а модель
+    // один раз читается всё равно следом.
+    std::string bytes;
+    if (!sage::assets::vfs::ReadText(path, bytes)) return false;
+    std::istringstream f(bytes, std::ios::binary);
     char magic[4] = {};
     f.read(magic, 4);
     std::string json;

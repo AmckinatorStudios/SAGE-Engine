@@ -1552,6 +1552,7 @@ ImGuiStyle::ImGuiStyle()
     ScrollbarRounding           = 9.0f;             // Radius of grab corners rounding for scrollbar
     ScrollbarPadding            = 2.0f;             // Padding of scrollbar grab within its frame (same for both axes)
     GrabMinSize                 = 12.0f;            // Minimum width/height of a grab box for slider/scrollbar
+    CheckboxScale               = 1.0f;             // [SAGE] Checkbox square relative to the frame height
     GrabRounding                = 0.0f;             // Radius of grabs corners rounding. Set to 0.0f to have rectangular slider grabs.
     LogSliderDeadzone           = 4.0f;             // The size in pixels of the dead-zone around zero on logarithmic sliders that cross zero.
     ImageRounding               = 0.0f;             // Rounding of Image() calls.
