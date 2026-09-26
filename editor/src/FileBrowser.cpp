@@ -7,6 +7,8 @@
 #include "AssetSlot.h"
 #include "EditorIcons.h"
 #include "EditorPrefs.h"
+#include "PathList.h"
+#include "sage/core/Paths.h"
 #include "PathScope.h"
 #include "Thumbnails.h"
 #include "ui/UI.h"
@@ -16,6 +18,7 @@
 #include "Localization.h"
 
 namespace fs = std::filesystem;
+namespace pathlist = sage::editor::pathlist;
 namespace covers = sage::editor::covers;
 
 namespace {
@@ -146,6 +149,11 @@ void FileBrowser::Open(const Config& config) {
         m_grid = sage::editor::prefs::GetBool("filebrowser.grid", false);
         m_viewLoaded = true;
     }
+    if (!m_listsLoaded) {
+        m_favorites = pathlist::Split(sage::editor::prefs::GetString("filebrowser.favorites", ""));
+        m_recent = pathlist::Split(sage::editor::prefs::GetString("filebrowser.recent", ""));
+        m_listsLoaded = true;
+    }
     m_cfg = config;
     m_error.clear();
     m_selected = -1;
@@ -262,6 +270,54 @@ void FileBrowser::GoTo(const fs::path& dir) {
     m_dir = fs::absolute(dir, ec).lexically_normal();
     m_selected = -1;
     Refresh();
+    // История — каждая папка, в которую зашли: «где я только что был» —
+    // ровно тот вопрос, с которым открывают диалог второй раз.
+    pathlist::Remember(m_recent, sage::PathToUtf8(m_dir), 12);
+    SaveLists();
+}
+
+void FileBrowser::SaveLists() const {
+    sage::editor::prefs::SetString("filebrowser.favorites", pathlist::Join(m_favorites));
+    sage::editor::prefs::SetString("filebrowser.recent", pathlist::Join(m_recent));
+}
+
+// Группа путей в быстром доступе. Только существующие и только в границе
+// диалога: кнопка в папку, которой нет, или туда, откуда выбирать нельзя, хуже
+// отсутствующей.
+void FileBrowser::DrawPathGroup(const char* title, const std::vector<std::string>& paths,
+                                bool favorites) {
+    std::error_code ec;
+    bool header = false;
+    std::string removeFav;
+    for (const std::string& utf8 : paths) {
+        const fs::path p = sage::PathFromUtf8(utf8);
+        if (!fs::is_directory(p, ec) || !WithinRoot(p)) continue;
+        if (!header) {
+            ImGui::Spacing();
+            ImGui::TextDisabled("%s", title);
+            ImGui::Separator();
+            header = true;
+        }
+        ImGui::PushID(utf8.c_str());
+        std::string label = sage::PathToUtf8(p.filename());
+        if (label.empty()) label = utf8;
+        const bool here = p == m_dir;
+        if (here) ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.78f, 0.35f, 1.0f));
+        if (EditorIcons::Button(favorites ? "folder-full" : "clock", label.c_str())) GoTo(p);
+        if (here) ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", utf8.c_str());
+        if (favorites) {
+            if (Sage::UI::MenuScope favMenu; ImGui::BeginPopupContextItem("##fav_menu")) {
+                if (EditorIcons::MenuItem("trash", T("Remove from favorites"))) removeFav = utf8;
+                ImGui::EndPopup();
+            }
+        }
+        ImGui::PopID();
+    }
+    if (!removeFav.empty()) {
+        pathlist::Toggle(m_favorites, removeFav);
+        SaveLists();
+    }
 }
 
 bool FileBrowser::PassesFilter(const fs::path& p) const {
@@ -305,6 +361,9 @@ void FileBrowser::Refresh() {
 
 void FileBrowser::DrawPlaces() {
     ImGui::BeginChild("##places", ImVec2(190, -ImGui::GetFrameHeightWithSpacing() * 2.2f), true);
+    // Избранное — первым: это места, которые человек выбрал сам.
+    DrawPathGroup(T("Favorites"), m_favorites, true);
+    DrawPathGroup(T("Recent"), m_recent, false);
     for (const Place& p : m_places) {
         if (p.IsGroup) {
             ImGui::Spacing();
@@ -348,7 +407,7 @@ void FileBrowser::DrawBreadcrumbs() {
         std::string label = parts[i].string();
         if (label.empty() || label == "/") label = "/";
         ImGui::PushID((int)i);
-        if (ImGui::SmallButton(label.c_str())) GoTo(acc);
+        if (ImGui::Button(label.c_str())) GoTo(acc);
         ImGui::PopID();
         if (i + 1 < parts.size()) {
             ImGui::SameLine(0.0f, 2.0f);
@@ -521,6 +580,20 @@ bool FileBrowser::Draw() {
                                 m_grid ? T("Rows: name and size") : T("Grid: covers"))) {
             m_grid = !m_grid;
             sage::editor::prefs::SetBool("filebrowser.grid", m_grid);
+        }
+        ImGui::SameLine();
+        // В избранное — нынешнюю папку одним щелчком; повторный — убрать.
+        {
+            const std::string here = sage::PathToUtf8(m_dir);
+            const bool fav = pathlist::Contains(m_favorites, here);
+            if (EditorIcons::Button(fav ? "folder-full" : "folder", fav ? T("In favorites") : T("To favorites"),
+                                    fav ? T("Remove this folder from favorites")
+                                        : T("Add this folder to favorites: it will be one click away "
+                                            "in every file dialog"),
+                                    fav)) {
+                pathlist::Toggle(m_favorites, here);
+                SaveLists();
+            }
         }
         ImGui::SameLine();
         ImGui::SetNextItemWidth(180);

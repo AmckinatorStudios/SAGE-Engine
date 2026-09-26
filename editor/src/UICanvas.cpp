@@ -542,7 +542,24 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
         const glm::vec2 ui = toUI(mouse);
         // Попадание — ТОЛЬКО в текущем интерфейсе: щелчок по холсту не должен
         // выбирать элемент чужого экрана, который сюда и не рисуется.
-        const int hit = sage::ui::HitTest(scene, ui.x, ui.y, screenW, screenH, host.UiScope());
+        int hit = sage::ui::HitTest(scene, ui.x, ui.y, screenW, screenH, host.UiScope());
+        // ЩЕЛЧОК ПО КНОПКЕ ВЫБИРАЕТ КНОПКУ, а не её надпись. Надпись —
+        // ребёнок во весь прямоугольник кнопки и лежит поверх, поэтому
+        // попадание всегда приходилось в неё: человек тянул ручки рамки,
+        // думая, что растягивает кнопку с девятиной, а растягивал подпись —
+        // кнопка оставалась прежней, а рамка уезжала за её край. Теперь
+        // первый щелчок берёт ближайший элемент управления (с реакцией на
+        // мышь), а внутрь — к надписи — ведёт повторный или двойной щелчок.
+        if (hit >= 0) {
+            const entt::entity owner = sage::ui::ControlOf(scene, scene.Get(hit).Entity());
+            const int control = owner != entt::null ? reg.get<IdComponent>(owner).Id : -1;
+            // Внутрь — двойным щелчком (или если надпись уже выбрана): щелчок
+            // по выбранной кнопке обязан её ТАЩИТЬ, а не перескакивать на
+            // надпись.
+            const bool drillIn = ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) ||
+                                 host.Selection().Contains(hit);
+            if (control >= 0 && control != hit && !drillIn) hit = control;
+        }
         if (hit < 0) {
             // Пустое место — рамка выделения. Прежде здесь просто сбрасывался
             // выбор, и выбрать десяток элементов можно было только кликами.

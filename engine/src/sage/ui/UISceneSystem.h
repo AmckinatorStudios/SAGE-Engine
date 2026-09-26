@@ -60,6 +60,12 @@ std::vector<entt::entity> InterfaceRoots(Scene& scene, entt::entity interfaceEnt
 // Отказ (false, ничего не меняется): родитель — сам элемент или его потомок
 // (элемент стал бы родителем самого себя), родитель — не элемент, родитель из
 // ЧУЖОГО интерфейса.
+// ЭЛЕМЕНТ УПРАВЛЕНИЯ, К КОТОРОМУ ОТНОСИТСЯ element: он сам, если ловит мышь,
+// иначе ближайший такой предок; entt::null — нет такого. Щелчок редактора по
+// надписи кнопки выбирает КНОПКУ: надпись лежит поверх во весь её
+// прямоугольник, и иначе ручки рамки растягивали бы надпись, а не кнопку.
+entt::entity ControlOf(Scene& scene, entt::entity element);
+
 bool CanReparent(Scene& scene, entt::entity element, entt::entity newParent);
 bool ReparentElement(Scene& scene, entt::entity element, entt::entity newParent);
 

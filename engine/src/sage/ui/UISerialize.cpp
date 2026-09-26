@@ -168,6 +168,7 @@ void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
     tj["locked"] = t->Locked;
     // Поведение в контейнере и стиль — только если заданы: у большинства
     // элементов их нет, и файл не должен разбухать нулями.
+    tj["skin"] = (int)t->Skin;
     if (t->Grow != 0.0f) tj["grow"] = t->Grow;
     if (t->IgnoreLayout) tj["ignoreLayout"] = true;
     if (!t->Style.empty()) tj["style"] = t->Style;
@@ -230,6 +231,9 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
         t.Visible = tj.value("visible", t.Visible);
         t.Active = tj.value("active", t.Active);
         t.Locked = tj.value("locked", t.Locked);
+        // Нет ключа — сцена сохранена до выбора оформления: своё, как было.
+        const int skin = tj.value("skin", (int)sage::ui::Element::SkinMode::Custom);
+        t.Skin = skin == 0 ? sage::ui::Element::SkinMode::Engine : sage::ui::Element::SkinMode::Custom;
         t.Grow = tj.value("grow", t.Grow);
         t.IgnoreLayout = tj.value("ignoreLayout", t.IgnoreLayout);
         t.Style = tj.value("style", t.Style);

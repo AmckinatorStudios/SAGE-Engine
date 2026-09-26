@@ -28,6 +28,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIDemos.h"
+#include "sage/ui/UIPart.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/UISceneSystem.h"
@@ -689,6 +690,8 @@ void CheckPressedLookReplacesFill(UIRenderer& ui) {
     GameObject e = Screen(scene, "Btn", {200.0f, 52.0f});
     Check(sage::ui::ApplyPreset(scene, e.Entity(), "Button"), "заготовка применилась");
     PlaceTopLeft(scene, e, {200.0f, 52.0f});
+    // Свои виды состояний — это СВОЁ оформление; у движка состояния подкраской.
+    scene.Registry().get<sage::ui::Element>(e.Entity()).Skin = sage::ui::Element::SkinMode::Custom;
     auto& act = scene.Registry().get<sage::ui::Interactable>(e.Entity());
     act.UsePressedLook = true;
     act.PressedLook.Color = {1.0f, 0.0f, 0.0f, 1.0f};
@@ -753,6 +756,32 @@ void CheckNineSliceCornersKeepTheirSize(UIRenderer& ui) {
     fs::remove_all(dir, ec);
 }
 
+// --- Оформление движка не слушает «своих» чисел --------------------------------------
+//
+// В оформлении движка скругление, рамку и тень задаёт тема: у панели со
+// скруглением 0 в своих полях угол всё равно скруглён. Переход на своё
+// оформление запекает вид движка — элемент на экране не меняется.
+void CheckEngineSkinOwnsTheShape(UIRenderer& ui) {
+    Scene scene("skin");
+    GameObject e = Screen(scene, "Panel", {200.0f, 100.0f});
+    Check(sage::ui::ApplyPreset(scene, e.Entity(), "Panel"), "заготовка применилась");
+    PlaceTopLeft(scene, e, {200.0f, 100.0f});
+    auto& reg = scene.Registry();
+    reg.get<sage::ui::Fill>(e.Entity()).Rounding = 0.0f;
+    reg.get<sage::ui::Fill>(e.Entity()).ShadowSize = 0.0f;
+    const double engineCorner = Covered(RenderUI(ui, scene), 0, 0, 2, 2);
+    sage::ui::BakeEngineSkin(reg, e.Entity());
+    reg.get<sage::ui::Element>(e.Entity()).Skin = sage::ui::Element::SkinMode::Custom;
+    const double bakedCorner = Covered(RenderUI(ui, scene), 0, 0, 2, 2);
+    reg.get<sage::ui::Fill>(e.Entity()).Rounding = 0.0f;
+    const double squareCorner = Covered(RenderUI(ui, scene), 0, 0, 2, 2);
+    std::printf("    оформление: угол движка %.2f, после запекания %.2f, своё без скругления %.2f\n",
+                engineCorner, bakedCorner, squareCorner);
+    Check(engineCorner < 0.5, "оформление движка скругляет угол само");
+    Check(bakedCorner < 0.5, "запекание сохраняет вид движка");
+    Check(squareCorner > 0.5, "своё оформление слушает своё скругление");
+}
+
 void RunUIChecks() {
     std::printf("\n--- Интерфейс игры ---\n");
     UIRenderer ui;
@@ -770,6 +799,7 @@ void RunUIChecks() {
     CheckLabelShadowAndOutline(ui);
     CheckPressedLookReplacesFill(ui);
     CheckNineSliceCornersKeepTheirSize(ui);
+    CheckEngineSkinOwnsTheShape(ui);
 }
 
 } // namespace sage::rendertest

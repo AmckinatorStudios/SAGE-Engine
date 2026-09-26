@@ -2301,6 +2301,15 @@
     "This object does not fit here": "Этот объект сюда не подходит",
     "the object is gone": "объекта больше нет",
     "Nothing — pick or drag an object": "Ничего — выберите или перетащите объект",
-    "Only an object with a Rigid Body can hold a joint": "Сустав держится только за объект с твёрдым телом"
+    "Only an object with a Rigid Body can hold a joint": "Сустав держится только за объект с твёрдым телом",
+    "Add this folder to favorites: it will be one click away in every file dialog": "Добавить папку в избранное: она будет в одном щелчке в каждом окне выбора файла",
+    "Engine style": "Стиль движка",
+    "Favorites": "Избранное",
+    "In favorites": "В избранном",
+    "Remove from favorites": "Убрать из избранного",
+    "Remove this folder from favorites": "Убрать эту папку из избранного",
+    "The engine draws the shape, border, shadow and states itself.\nYou choose only colours — nothing else to tune.": "Форму, рамку, тень и состояния рисует движок.\nВы выбираете только цвета — больше настраивать нечего.",
+    "To favorites": "В избранное",
+    "Your own pictures for every part and state, 9-slice, every parameter.\nStarts from the engine look, so nothing jumps.": "Свои картинки для каждой части и состояния, девятина, любой параметр.\nНачинается с вида движка — ничего не прыгает."
   }
 }

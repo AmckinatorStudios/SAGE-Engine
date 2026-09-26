@@ -21,6 +21,11 @@
    пикселей уезжала за правый край панели, где ImGui её обрезал, и нажатие до
    неё не доходило («кнопка не работает»). Кнопке без подписи есть свой вызов:
    EditorIcons::IconOnlyButton.
+
+3. ImGui::SmallButton в редакторе. У неё нет вертикальных полей: подпись
+   прижата к краям, кнопка ниже соседних полей и выглядит «сплющенной»
+   («Сохранить этот вид как стиль», «Править по картинке…»). В редакторе
+   кнопки одной высоты с полями — ImGui::Button или EditorIcons::Button.
 """
 import re
 import sys
@@ -34,6 +39,7 @@ END_COMBO = re.compile(r'ImGui::EndCombo\s*\(')
 END_POPUP = re.compile(r'ImGui::EndPopup\s*\(')
 # EditorIcons::Button("значок", "##подпись" — подпись скрывать нечем.
 ICON_BUTTON_HIDDEN = re.compile(r'EditorIcons::Button\s*\(\s*"[^"]*"\s*,\s*"##')
+SMALL_BUTTON = re.compile(r'ImGui::SmallButton\s*\(')
 
 
 def brace_delta(line):
@@ -48,6 +54,9 @@ def main():
         lines = path.read_text(encoding="utf-8").split("\n")
         rel = path.relative_to(ROOT)
         for i, line in enumerate(lines):
+            if SMALL_BUTTON.search(line.split("//")[0]) and str(rel).startswith("editor"):
+                problems.append(f"{rel}:{i+1}: ImGui::SmallButton — сплющенная кнопка без "
+                                f"вертикальных полей; в редакторе — ImGui::Button")
             if ICON_BUTTON_HIDDEN.search(line):
                 problems.append(f"{rel}:{i+1}: кнопка со значком получила подпись «##…» — "
                                 f"она будет напечатана и растянет кнопку; "

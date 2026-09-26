@@ -312,9 +312,9 @@ void InterfaceHierarchyPanel::DrawToolbar(EditorHost& host) {
         ImGui::EndPopup();
     }
 
-    ImGui::SameLine();
-    // Поиск — постоянно на виду, а не за кнопкой: в интерфейсе из сотни
-    // элементов он нужен чаще, чем создание.
+    // Поиск — постоянно на виду и СВОЕЙ СТРОКОЙ во всю ширину. В одной строке
+    // с двумя кнопками ему оставалась щель в несколько символов, и подсказка
+    // «Поиск элементов…» обрезалась на полуслове.
     ImGui::SetNextItemWidth(-1.0f);
     char buf[128];
     std::snprintf(buf, sizeof(buf), "%s", m_filter.c_str());

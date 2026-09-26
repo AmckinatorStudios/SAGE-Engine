@@ -234,6 +234,19 @@ void ScriptEngine::RegisterUIApi() {
         // В контейнере: доля свободного места и «стоять по своему якорю».
         "Grow", UI_FIELD(sage::ui::Element, Grow),
         "IgnoreLayout", UI_FIELD(sage::ui::Element, IgnoreLayout),
+        // Оформление: "engine" — движка (только цвета), "custom" — своё.
+        "Skin", sol::property(
+                    [](UIRef& r) {
+                        const sage::ui::Element* el = r.Peek<sage::ui::Element>();
+                        return std::string(el && el->Skin == sage::ui::Element::SkinMode::Engine ? "engine"
+                                                                                                : "custom");
+                    },
+                    [](UIRef& r, const std::string& mode) {
+                        if (!r.Alive()) return;
+                        r.Part<sage::ui::Element>().Skin = mode == "engine"
+                                                                ? sage::ui::Element::SkinMode::Engine
+                                                                : sage::ui::Element::SkinMode::Custom;
+                    }),
         // Файл стиля (.sageuistyle): смена пути кладёт новый стиль на следующем
         // кадре — версия сбрасывается.
         "Style", sol::property(

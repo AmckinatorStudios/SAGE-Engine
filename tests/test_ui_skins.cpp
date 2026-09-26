@@ -21,6 +21,7 @@
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UISerialize.h"
 #include "sage/ui/UIStyle.h"
+#include "PathList.h"
 
 namespace fs = std::filesystem;
 using sage::ui::UIRect;
@@ -449,4 +450,87 @@ TEST(UISkin_each_part_shows_few_settings_up_front) {
     CHECK_TRUE(hover.Tab != nullptr);
     CHECK_TRUE(hover.Requires && std::string(hover.Requires) == "fill");
     CHECK_TRUE(field("interactable", "hoverLook.color").Tab != nullptr);
+}
+
+// --- Оформление: движка или своё -------------------------------------------------------
+
+TEST(UISkin_engine_or_custom_skin_is_explicit) {
+    // Собранный кодом и прочитанный из старой сцены элемент — своего
+    // оформления: он обязан выглядеть так, как его настроили.
+    CHECK_TRUE(sage::ui::Element{}.Skin == sage::ui::Element::SkinMode::Custom);
+    // Новый из меню — оформления движка.
+    const sage::ui::Preset* button = sage::ui::FindPreset("Button");
+    CHECK_TRUE(button && button->Box.Skin == sage::ui::Element::SkinMode::Engine);
+
+    // В оформлении движка у вида только цвет.
+    const sage::ui::PartType* fill = sage::ui::FindPart("fill");
+    for (const auto& f : sage::ui::EditableFields(*fill->Fields)) {
+        const bool colour = std::string(f.Key) == "color";
+        if (colour) CHECK_FALSE(f.CustomOnly);
+        else if (!f.CustomOnly)
+            sagetest::ReportFail(__FILE__, __LINE__, std::string("поле подложки видно у движка: ") + f.Key);
+    }
+    for (const auto& f : sage::ui::EditableFields(*sage::ui::FindPart("interactable")->Fields))
+        if (std::string(f.Key) == "hoverLook.texture") CHECK_TRUE(f.CustomOnly);
+
+    // Запись и чтение; старая сцена без ключа — своё.
+    Scene scene("skin");
+    GameObject a = scene.CreateEmptyObject("A");
+    CHECK_TRUE(sage::ui::ApplyPreset(scene, a.Entity(), "Panel"));
+    std::unique_ptr<Scene> back = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    CHECK_TRUE(back != nullptr);
+    if (back)
+        CHECK_TRUE(back->Registry().get<sage::ui::Element>(back->FindByName("A").Entity()).Skin ==
+                   sage::ui::Element::SkinMode::Engine);
+    nlohmann::json j;
+    sage::ui::SaveElement(j, scene.Registry(), a.Entity());
+    j["element"].erase("skin");
+    Scene other("old");
+    GameObject b = other.CreateEmptyObject("B");
+    sage::ui::LoadElement(j, other.Registry(), b.Entity());
+    CHECK_TRUE(other.Registry().get<sage::ui::Element>(b.Entity()).Skin == sage::ui::Element::SkinMode::Custom);
+
+    // Запекание: панель получает форму движка, кнопка — свою.
+    sage::ui::BakeEngineSkin(scene.Registry(), a.Entity());
+    CHECK_NEAR(scene.Registry().get<sage::ui::Fill>(a.Entity()).Rounding, 10.0f, 1e-4f);
+    GameObject btn = scene.CreateEmptyObject("Btn");
+    CHECK_TRUE(sage::ui::ApplyPreset(scene, btn.Entity(), "Button"));
+    sage::ui::BakeEngineSkin(scene.Registry(), btn.Entity());
+    CHECK_NEAR(scene.Registry().get<sage::ui::Fill>(btn.Entity()).Rounding, 8.0f, 1e-4f);
+}
+
+TEST(UISkin_file_lists_remember_and_toggle) {
+    // Избранное и история папок диалога файлов.
+    namespace pl = sage::editor::pathlist;
+    std::vector<std::string> recent;
+    pl::Remember(recent, "/a", 3);
+    pl::Remember(recent, "/b", 3);
+    pl::Remember(recent, "/a", 3);   // повтор — наверх, без дубля
+    pl::Remember(recent, "/c", 3);
+    pl::Remember(recent, "/d", 3);   // сверх трёх — хвост отрезан
+    CHECK_EQ((int)recent.size(), 3);
+    CHECK_TRUE(recent[0] == "/d" && recent[1] == "/c" && recent[2] == "/a");
+    std::vector<std::string> fav;
+    CHECK_TRUE(pl::Toggle(fav, "/x"));
+    CHECK_TRUE(pl::Toggle(fav, "/y"));
+    CHECK_FALSE(pl::Toggle(fav, "/x"));
+    CHECK_TRUE(fav.size() == 1 && fav[0] == "/y");
+    CHECK_TRUE(pl::Split(pl::Join({"/п/папка", "/q"})) == std::vector<std::string>({"/п/папка", "/q"}));
+}
+
+TEST(UISkin_click_on_a_caption_belongs_to_its_button) {
+    // Щелчок по надписи кнопки на холсте редактора выбирает КНОПКУ: иначе
+    // ручки рамки растягивали надпись, а кнопка с девятиной оставалась прежней.
+    Scene scene("control");
+    const entt::entity hud = MakeInterface(scene);
+    GameObject button = MakeElement(scene, "Button", hud);
+    CHECK_TRUE(sage::ui::ApplyPreset(scene, button.Entity(), "Button"));
+    const HierarchyComponent* h = scene.Registry().try_get<HierarchyComponent>(button.Entity());
+    CHECK_TRUE(h && !h->Children.empty());
+    if (!h || h->Children.empty()) return;
+    const entt::entity caption = h->Children.front();
+    CHECK_TRUE(sage::ui::ControlOf(scene, caption) == button.Entity());
+    CHECK_TRUE(sage::ui::ControlOf(scene, button.Entity()) == button.Entity());
+    GameObject text = MakeElement(scene, "Plain", hud);
+    CHECK_TRUE(sage::ui::ControlOf(scene, text.Entity()) == entt::null);
 }

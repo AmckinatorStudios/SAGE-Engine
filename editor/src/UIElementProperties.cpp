@@ -264,7 +264,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                 // кнопка рядом ведёт туда, где это видно.
                 ImGui::DragFloat4(label, &ui::FieldAs<glm::vec4>(data, f).x, 1.0f, f.Min, f.Max);
                 host.TrackLastImGuiItem();
-                if (ImGui::SmallButton(T("Edit on the picture…"))) {
+                if (ImGui::Button(T("Edit on the picture…"))) {
                     // Окно правит ЭТОТ вид этого элемента вживую: какая часть и
                     // какое поле — знает само поле, картинку окно найдёт рядом.
                     EditorHost::NineSliceTarget target;
@@ -408,8 +408,14 @@ struct FieldView {
     const char* Tab = nullptr;   // nullptr — поля без вкладки; иначе только эта вкладка
 };
 
+// Оформление элемента, чьи поля сейчас рисуются: в оформлении движка поля
+// «только для своего» не показываются вовсе. Одно на кадр инспектора — он
+// рисует один элемент за раз.
+bool g_engineSkin = false;
+
 // Есть ли у элемента часть, без которой поле не имеет смысла.
 bool RequirementMet(const entt::registry& reg, entt::entity e, const ui::PartField& f) {
+    if (g_engineSkin && f.CustomOnly) return false;
     if (!f.Requires || !*f.Requires) return true;
     const ui::PartType* need = ui::FindPart(f.Requires);
     return need && need->Has && need->Has(reg, e);
@@ -573,6 +579,7 @@ bool TypeHasPart(const ui::Preset& t, const char* id) {
 void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int selected);
 void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, ui::Element& xf);
 void DrawGroupSettings(EditorHost& host, entt::entity e);
+void DrawSkinSwitch(EditorHost& host, entt::entity e, ui::Element& xf);
 
 } // namespace
 
@@ -672,6 +679,7 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
 
     ui::Element* xf = reg.try_get<ui::Element>(e);
     if (!xf) return;
+    g_engineSkin = xf->Skin == ui::Element::SkinMode::Engine;
 
     DrawOpenInInterfaceButton(host, obj);
 
@@ -764,6 +772,10 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
         const std::string typeTitle =
             xf->Type.empty() ? std::string(T("Look")) : std::string(T(xf->Type.c_str()));
         if (ImGui::CollapsingHeader(typeTitle.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+            // ОФОРМЛЕНИЕ: ДВИЖКА ИЛИ СВОЁ — первым, потому что от него
+            // зависит, какие поля ниже вообще есть.
+            DrawSkinSwitch(host, e, *xf);
+            g_engineSkin = xf->Skin == ui::Element::SkinMode::Engine;
             // СОСТОЯНИЯ КНОПКИ — ВКЛАДКАМИ: «обычная», «при наведении»,
             // «при нажатии»... Каждая вкладка — вид в одном состоянии, а не
             // двадцать полей всех состояний подряд.
@@ -891,7 +903,7 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
             for (const ui::PartType* p : extra) {
                 ImGui::PushID(p->Id);
                 ImGui::SeparatorText(T(p->Title));
-                if (ImGui::SmallButton(T("Remove"))) {
+                if (ImGui::Button(T("Remove"))) {
                     host.PushUndoSnapshot();
                     p->Remove(reg, e);
                     ImGui::PopID();
@@ -946,7 +958,7 @@ void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, u
         return false;
     };
     if (xf.Style.empty()) {
-        if (ImGui::SmallButton(T("Save this look as a style"))) {
+        if (ImGui::Button(T("Save this look as a style"))) {
             // Имя — по объекту, в папке styles проекта; занято — с номером.
             const fs::path root = assetslot::ProjectRoot(host);
             std::string base = obj.Name().empty() ? std::string("style") : obj.Name();
@@ -969,13 +981,13 @@ void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, u
                                       "changes them all."));
         return;
     }
-    if (ImGui::SmallButton(T("Save changes to the style"))) {
+    if (ImGui::Button(T("Save changes to the style"))) {
         if (save(xf.Style)) xf.StyleVersion = -1;
     }
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", T("Every element with this style takes the new look."));
     ImGui::SameLine();
-    if (ImGui::SmallButton(T("Detach"))) {
+    if (ImGui::Button(T("Detach"))) {
         host.PushUndoSnapshot();
         xf.Style.clear();
         xf.StyleVersion = -1;
@@ -1062,6 +1074,40 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
         DrawGroupSettings(host, e);
         ImGui::TreePop();
     }
+}
+
+// --- Оформление: движка или своё ---------------------------------------------------
+//
+// Две кнопки во всю ширину, а не список: выбор из двух, и видно оба сразу.
+// Переход к своему оформлению ЗАПЕКАЕТ вид движка в поля (BakeEngineSkin):
+// элемент на экране не меняется, а скругление, рамка и тень становятся теми
+// числами, от которых удобно отталкиваться.
+void DrawSkinSwitch(EditorHost& host, entt::entity e, ui::Element& xf) {
+    entt::registry& reg = host.CurrentScene().Registry();
+    const bool engine = xf.Skin == ui::Element::SkinMode::Engine;
+    const float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
+    auto choice = [&](const char* label, bool active) {
+        if (active) ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Accent));
+        const bool pressed = ImGui::Button(label, ImVec2(w, 0.0f));
+        if (active) ImGui::PopStyleColor();
+        return pressed && !active;
+    };
+    if (choice(T("Engine style"), engine)) {
+        host.PushUndoSnapshot();
+        xf.Skin = ui::Element::SkinMode::Engine;
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("The engine draws the shape, border, shadow and states itself.\n"
+                                  "You choose only colours — nothing else to tune."));
+    ImGui::SameLine();
+    if (choice(T("Custom"), !engine)) {
+        host.PushUndoSnapshot();
+        ui::BakeEngineSkin(reg, e);
+        xf.Skin = ui::Element::SkinMode::Custom;
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Your own pictures for every part and state, 9-slice, every parameter.\n"
+                                  "Starts from the engine look, so nothing jumps."));
 }
 
 // ПРОЗРАЧНОСТЬ И ВВОД ВСЕГО ПОДДЕРЕВА — общая настройка любого элемента, а не

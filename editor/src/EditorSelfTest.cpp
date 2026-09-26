@@ -70,6 +70,7 @@
 #include "sage/anim/PropertyAnimator.h"
 #include "sage/anim/PropertyClip.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UIPart.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/events/Events.h"
@@ -519,23 +520,32 @@ void EditorLayer::CheckUiInspectorFrame() {
         m_uiInspectorWait = 4;
         return;
     }
-    // Шаги 1..N — по типу на шаг: создать, выбрать, дать инспектору два кадра.
+    // Шаги 1..2N — по два на тип: создать (оформление движка) и перевести в
+    // своё оформление с видами состояний — у каждого свой инспектор.
     const int index = step - 1;
-    if (index < (int)presets.size()) {
-        GameObject e = CreateUIEntity(presets[(size_t)index].Name);
-        if (e.Valid()) {
-            m_selection.SetPrimary(e.Id());
-            // Состояния тоже: инспектор кнопки с включёнными видами состояний —
-            // самый длинный.
-            if (auto* act = m_scene->Registry().try_get<sage::ui::Interactable>(e.Entity())) {
-                act->UseHoverLook = act->UsePressedLook = true;
+    if (index < 2 * (int)presets.size()) {
+        const sage::ui::Preset& preset = presets[(size_t)(index / 2)];
+        if (index % 2 == 0) {
+            GameObject e = CreateUIEntity(preset.Name);
+            if (e.Valid()) {
+                m_selection.SetPrimary(e.Id());
+                if (preset.Name == "Panel") m_uiInspectorElement = e.Id();
             }
-            if (presets[(size_t)index].Name == "Panel") m_uiInspectorElement = e.Id();
+        } else if (GameObject e = m_scene->Get(m_selection.Primary()); e.Valid()) {
+            entt::registry& reg = m_scene->Registry();
+            if (sage::ui::Element* el = reg.try_get<sage::ui::Element>(e.Entity())) {
+                sage::ui::BakeEngineSkin(reg, e.Entity());
+                el->Skin = sage::ui::Element::SkinMode::Custom;
+            }
+            // Состояния тоже: инспектор кнопки с включёнными видами
+            // состояний — самый длинный.
+            if (auto* act = reg.try_get<sage::ui::Interactable>(e.Entity()))
+                act->UseHoverLook = act->UsePressedLook = true;
         }
         m_uiInspectorWait = 2;
         return;
     }
-    const int after = index - (int)presets.size();
+    const int after = index - 2 * (int)presets.size();
     if (after == 0) {
         // Окно девятины на подложке панели, и сразу узким.
         EditorHost::NineSliceTarget t;
