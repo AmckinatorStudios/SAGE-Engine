@@ -46,6 +46,8 @@ private:
     // текстурного неба они запечены в самих гранях, и ползунок «размер солнца»
     // там означал бы, что настройка есть, а действия у неё нет.
     void DrawSkySection(EditorHost& host, LightingEnvironment& env);
+    void DrawDiscTexture(EditorHost& host, const char* id, const char* label, std::string& path,
+                         int pick);
     // Окружающий свет: от неба или свои значения.
     void DrawAmbientSection(EditorHost& host, LightingEnvironment& env);
     // Строка про объект-солнце внутри настроек процедурного неба: время суток

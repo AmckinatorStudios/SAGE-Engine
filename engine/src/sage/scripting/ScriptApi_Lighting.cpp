@@ -3,6 +3,7 @@
 #include "sage/core/Config.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/LightSystem.h"
+#include "sage/render/SkyPresets.h"
 
 // ---------------------------------------------------------------------------
 // Освещение и отражения: sage.light.*, sage.reflect.*
@@ -61,8 +62,59 @@ void ScriptEngine::RegisterLightingApi() {
         "Moon", &SkyboxSettings::Moon,
         "MoonColor", &SkyboxSettings::MoonColor,
         "MoonSize", &SkyboxSettings::MoonSize,
-        "StarIntensity", &SkyboxSettings::StarIntensity
+        "StarIntensity", &SkyboxSettings::StarIntensity,
+        // Форма неба и облака (см. SkyboxSettings). Формы и стиль — строками:
+        // "round"/"square", "blocky"/"soft".
+        "GradientExponent", &SkyboxSettings::GradientExponent,
+        "HorizonSoftness", &SkyboxSettings::HorizonSoftness,
+        "HorizonOffset", &SkyboxSettings::HorizonOffset,
+        "Ground", &SkyboxSettings::Ground,
+        "GroundColor", &SkyboxSettings::GroundColor,
+        "NightGroundColor", &SkyboxSettings::NightGroundColor,
+        "GroundBlend", &SkyboxSettings::GroundBlend,
+        "SunBrightness", &SkyboxSettings::SunBrightness,
+        "SunGlow", &SkyboxSettings::SunGlow,
+        "MoonPhase", &SkyboxSettings::MoonPhase,
+        "SunTexture", &SkyboxSettings::SunTexture,
+        "MoonTexture", &SkyboxSettings::MoonTexture,
+        "PixelArt", &SkyboxSettings::PixelArt,
+        "StarDensity", &SkyboxSettings::StarDensity,
+        "StarSize", &SkyboxSettings::StarSize,
+        "SunShape", sol::property(
+            [](const SkyboxSettings& s) { return std::string(s.SunShape == SkyboxSettings::DiscShape::Square ? "square" : "round"); },
+            [](SkyboxSettings& s, const std::string& v) {
+                s.SunShape = v == "square" ? SkyboxSettings::DiscShape::Square : SkyboxSettings::DiscShape::Round;
+            }),
+        "MoonShape", sol::property(
+            [](const SkyboxSettings& s) { return std::string(s.MoonShape == SkyboxSettings::DiscShape::Square ? "square" : "round"); },
+            [](SkyboxSettings& s, const std::string& v) {
+                s.MoonShape = v == "square" ? SkyboxSettings::DiscShape::Square : SkyboxSettings::DiscShape::Round;
+            }),
+        "Clouds", &SkyboxSettings::Clouds,
+        "CloudStyle", sol::property(
+            [](const SkyboxSettings& s) { return std::string(s.CloudKind == SkyboxSettings::CloudStyle::Soft ? "soft" : "blocky"); },
+            [](SkyboxSettings& s, const std::string& v) {
+                s.CloudKind = v == "soft" ? SkyboxSettings::CloudStyle::Soft : SkyboxSettings::CloudStyle::Blocky;
+            }),
+        "CloudColor", &SkyboxSettings::CloudColor,
+        "NightCloudColor", &SkyboxSettings::NightCloudColor,
+        "CloudHeight", &SkyboxSettings::CloudHeight,
+        "CloudScale", &SkyboxSettings::CloudScale,
+        "CloudCoverage", &SkyboxSettings::CloudCoverage,
+        "CloudOpacity", &SkyboxSettings::CloudOpacity,
+        "CloudWind", &SkyboxSettings::CloudWind,
+        "CloudFade", &SkyboxSettings::CloudFade
     );
+    // Готовый вид неба одним вызовом: "default", "minecraft", "overcast".
+    // Меняет только вид процедурного неба — выбранные файлы текстурного неба
+    // остаются на месте.
+    Bind("light", "SetSkyPreset", "ApplySkyPreset", [this](const std::string& name) {
+        if (!m_scene) return false;
+        sage::render::SkyPreset preset;
+        if (!sage::render::ParseSkyPreset(name, preset)) return false;
+        sage::render::ApplySkyPreset(m_scene->Lighting.Skybox, preset);
+        return true;
+    });
     // Дальность теней — свойство МИРА, а не настроек качества: масштаб сцены
     // знает игра. Ноль означает «взять из настроек движка» (см.
     // sage::ShadowSettings).

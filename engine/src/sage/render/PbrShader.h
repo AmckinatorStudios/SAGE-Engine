@@ -716,8 +716,16 @@ vec3 SpecularIBL(vec3 N, vec3 V, vec3 albedo, float metallic, float rough, float
 
     vec3 env = vec3(0.0);
     if (uEnvEnabled) {
-        vec3 R = ParallaxCorrect(reflect(-V, N), worldPos);
+        vec3 Rw = reflect(-V, N);
+        vec3 R = ParallaxCorrect(Rw, worldPos);
         env = textureLod(uEnvMap, R, rough * uEnvMaxLod).rgb * uEnvIntensity;
+        // Затенение горизонтом. Карта нормалей наклоняет N, и отражённый луч
+        // уходит ПОД поверхность: из куба тогда читается то, что под полом, и
+        // на рельефе вспыхивают чужие пятна. Луч, ушедший за геометрическую
+        // нормаль, гасится (Jimenez/Lagarde).
+        vec3 Ng = ShadowNormal(N);
+        float horizon = clamp(1.0 + 1.3 * dot(Rw, Ng), 0.0, 1.0);
+        env *= horizon * horizon;
     }
     // Плоское — поверх куба: если оно есть, оно точнее.
     env = mix(env, planar, planarWeight);

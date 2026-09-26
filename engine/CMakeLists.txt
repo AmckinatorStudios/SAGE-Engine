@@ -80,6 +80,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/TextureGen.cpp
     src/sage/render/Reflection.cpp
     src/sage/render/SkyModel.cpp
+    src/sage/render/SkyPresets.cpp
     src/sage/render/SkyDraw.cpp
     src/sage/core/CrashHandler.cpp
     src/sage/core/SystemScheduler.cpp

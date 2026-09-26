@@ -225,6 +225,86 @@ TEST(Scene_roundtrip_preserves_height_fog) {
     CHECK_NEAR(g.SunExponent, 16.0f, 1e-5f);
 }
 
+// Форма процедурного неба и облака — часть сцены: небо в стиле Minecraft,
+// собранное в окружении, переживает сохранение целиком.
+TEST(Scene_roundtrip_preserves_sky_shape_and_clouds) {
+    Scene scene("SkyScene");
+    SkyboxSettings& s = scene.Lighting.Skybox;
+    s.Enabled = true;
+    s.GradientExponent = 0.8f;
+    s.HorizonSoftness = 0.0f;
+    s.HorizonOffset = -0.05f;
+    s.Ground = true;
+    s.GroundColor = {0.1f, 0.2f, 0.7f};
+    s.NightGroundColor = {0.01f, 0.0f, 0.02f};
+    s.GroundBlend = 0.02f;
+    s.SunShape = SkyboxSettings::DiscShape::Square;
+    s.MoonShape = SkyboxSettings::DiscShape::Square;
+    s.SunBrightness = 2.5f;
+    s.SunGlow = 0.0f;
+    s.MoonPhase = false;
+    s.SunTexture = "textures/sun.png";
+    s.MoonTexture = "textures/moon.png";
+    s.PixelArt = true;
+    s.StarDensity = 3.0f;
+    s.StarSize = 2.0f;
+    s.Clouds = true;
+    s.CloudKind = SkyboxSettings::CloudStyle::Soft;
+    s.CloudColor = {0.9f, 0.9f, 0.8f};
+    s.CloudHeight = 150.0f;
+    s.CloudScale = 16.0f;
+    s.CloudCoverage = 0.3f;
+    s.CloudOpacity = 0.6f;
+    s.CloudWind = {2.0f, -1.0f};
+    s.CloudFade = 800.0f;
+    std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    const SkyboxSettings& g = loaded->Lighting.Skybox;
+    CHECK_NEAR(g.GradientExponent, 0.8f, 1e-5f);
+    CHECK_NEAR(g.HorizonSoftness, 0.0f, 1e-5f);
+    CHECK_NEAR(g.HorizonOffset, -0.05f, 1e-5f);
+    CHECK_TRUE(g.Ground);
+    CHECK_NEAR(g.GroundColor.z, 0.7f, 1e-5f);
+    CHECK_NEAR(g.NightGroundColor.z, 0.02f, 1e-5f);
+    CHECK_NEAR(g.GroundBlend, 0.02f, 1e-5f);
+    CHECK_TRUE(g.SunShape == SkyboxSettings::DiscShape::Square);
+    CHECK_TRUE(g.MoonShape == SkyboxSettings::DiscShape::Square);
+    CHECK_NEAR(g.SunBrightness, 2.5f, 1e-5f);
+    CHECK_NEAR(g.SunGlow, 0.0f, 1e-5f);
+    CHECK_FALSE(g.MoonPhase);
+    CHECK_EQ(g.SunTexture, std::string("textures/sun.png"));
+    CHECK_EQ(g.MoonTexture, std::string("textures/moon.png"));
+    CHECK_TRUE(g.PixelArt);
+    CHECK_NEAR(g.StarDensity, 3.0f, 1e-5f);
+    CHECK_NEAR(g.StarSize, 2.0f, 1e-5f);
+    CHECK_TRUE(g.Clouds);
+    CHECK_TRUE(g.CloudKind == SkyboxSettings::CloudStyle::Soft);
+    CHECK_NEAR(g.CloudColor.z, 0.8f, 1e-5f);
+    CHECK_NEAR(g.CloudHeight, 150.0f, 1e-4f);
+    CHECK_NEAR(g.CloudScale, 16.0f, 1e-5f);
+    CHECK_NEAR(g.CloudCoverage, 0.3f, 1e-5f);
+    CHECK_NEAR(g.CloudOpacity, 0.6f, 1e-5f);
+    CHECK_NEAR(g.CloudWind.x, 2.0f, 1e-5f);
+    CHECK_NEAR(g.CloudWind.y, -1.0f, 1e-5f);
+    CHECK_NEAR(g.CloudFade, 800.0f, 1e-3f);
+}
+
+// Сцена, сохранённая до появления формы неба, открывается с прежним небом.
+TEST(Scene_old_sky_without_shape_keeps_defaults) {
+    Scene scene("OldSky");
+    scene.Lighting.Skybox.Enabled = true;
+    nlohmann::json j = nlohmann::json::parse(SceneSerializer::SaveToString(scene));
+    j["lighting"]["skybox"].erase("shape");
+    j["lighting"]["skybox"].erase("clouds");
+    std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(j.dump());
+    const SkyboxSettings def;
+    const SkyboxSettings& g = loaded->Lighting.Skybox;
+    CHECK_NEAR(g.GradientExponent, def.GradientExponent, 1e-6f);
+    CHECK_NEAR(g.HorizonSoftness, def.HorizonSoftness, 1e-6f);
+    CHECK_FALSE(g.Ground);
+    CHECK_FALSE(g.Clouds);
+    CHECK_TRUE(g.SunShape == SkyboxSettings::DiscShape::Round);
+}
+
 TEST(Scene_roundtrip_preserves_parent_hierarchy) {
     Scene scene("HierScene");
     GameObject parent = scene.CreateObject("Parent");

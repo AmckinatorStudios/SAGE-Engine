@@ -145,6 +145,8 @@ private:
     // Отражения кадра. Карта окружения переснимается только при смене цвета
     // неба (см. ReflectionSystem), поэтому в кадре это стоит ноль.
     sage::render::ReflectionSystem m_reflections;
+    // Зонды отражений кадра: привязка прохода держит на них указатель.
+    sage::render::ReflectionProbeSet m_probeSet;
     sage::render::PlanarReflection m_planar;
 
     // Состав и порядок кадра — см. sage/core/SystemScheduler.h. Игра может

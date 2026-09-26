@@ -334,6 +334,11 @@ void ScriptEngine::RegisterUIApi() {
         "WrapText", UI_FIELD(sage::ui::Label, Wrap),
         "AutoWidth", UI_FIELD(sage::ui::Label, AutoWidth),
         "PadX", UI_FIELD(sage::ui::Label, PadX),
+        // Тень и обводка текста (см. sage::ui::Label).
+        "TextShadowOffset", UI_FIELD(sage::ui::Label, ShadowOffset),
+        "TextShadowColor", UI_FIELD(sage::ui::Label, ShadowColor),
+        "TextOutline", UI_FIELD(sage::ui::Label, OutlineWidth),
+        "TextOutlineColor", UI_FIELD(sage::ui::Label, OutlineColor),
         // Картинка.
         "TexturePath", UI_FIELD(sage::ui::Image, Path),
         "Sprite", UI_FIELD(sage::ui::Image, Sprite),
@@ -452,6 +457,9 @@ void ScriptEngine::RegisterUIApi() {
             canvas.Mode = opts.get_or("scale", false) ? sage::ui::Canvas::Scale::ScaleWithSize
                                                       : sage::ui::Canvas::Scale::Pixels;
         }
+        // Целый масштаб для пиксельного интерфейса: {pixelScale = true, maxScale = 3}.
+        if (opts.get_or("pixelScale", false)) canvas.Mode = sage::ui::Canvas::Scale::IntegerFit;
+        canvas.MaxScale = opts.get_or("maxScale", canvas.MaxScale);
         if (opts["reference"].valid()) canvas.Reference = opts.get<glm::vec2>("reference");
         canvas.MatchWidthOrHeight = opts.get_or("match", canvas.MatchWidthOrHeight);
     });

@@ -53,9 +53,18 @@ UIRect Resolve(const Element& t, const UIRect& parent) {
 }
 
 float CanvasScale(const Canvas& canvas, glm::vec2 screen) {
-    if (canvas.Mode != Canvas::Scale::ScaleWithSize) return 1.0f;
+    if (canvas.Mode == Canvas::Scale::Pixels) return 1.0f;
     if (canvas.Reference.x <= 0.0f || canvas.Reference.y <= 0.0f) return 1.0f;
     if (screen.x <= 0.0f || screen.y <= 0.0f) return 1.0f;
+
+    if (canvas.Mode == Canvas::Scale::IntegerFit) {
+        // Наибольшее целое, при котором опорный экран помещается целиком, но
+        // не меньше единицы: окно меньше опорного не должно прятать интерфейс.
+        const float fit = std::min(screen.x / canvas.Reference.x, screen.y / canvas.Reference.y);
+        float k = std::max(1.0f, std::floor(fit + 1e-4f));
+        if (canvas.MaxScale > 0) k = std::min(k, (float)canvas.MaxScale);
+        return k;
+    }
 
     // Логарифмическое смешивание, а не линейное: интерфейс должен уменьшаться и
     // увеличиваться симметрично. При линейном среднем окно вдвое уже опорного
