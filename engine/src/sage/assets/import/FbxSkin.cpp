@@ -539,7 +539,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
             // кости. Прочитав блендеровский файл по Autodesk, мы умножали на
             // обратную кость дважды: персонаж в позе покоя схлопывался в комок
             // с торчащими во все стороны «лучами» (Universal Animation Library,
-            // FBX для Unity). Выбираем толкование, при котором мир меша
+            // FBX под другие движки). Выбираем толкование, при котором мир меша
             // сходится с тем, что на самом деле лежит в узлах файла.
             const glm::mat4 meshAutodesk = c.Transform;
             const glm::mat4 meshBlender = c.TransformLink * c.Transform;

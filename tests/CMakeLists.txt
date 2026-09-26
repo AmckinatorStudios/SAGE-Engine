@@ -62,6 +62,7 @@ add_executable(sage_tests
     test_interface.cpp
     test_savegame.cpp
     test_colorpicker.cpp
+    test_postchainui.cpp
     ../editor/src/PathScope.cpp
     ../editor/src/HotkeyScope.cpp
     ../editor/src/EditorSelection.cpp
@@ -69,6 +70,7 @@ add_executable(sage_tests
     ../editor/src/Project.cpp
     # Выбор цвета и то, на чём он стоит (подписи, отступы меню, тема).
     ../editor/src/ui/ColorPicker.cpp
+    ../editor/src/PostChainUi.cpp
     ../editor/src/ui/UI.cpp
     ../editor/src/ui/UIStyle.cpp
     ../editor/src/EditorTheme.cpp

@@ -145,21 +145,10 @@ struct EngineConfig {
     float VolumetricTemporalBlend = 0.9f; // доля истории в смеси (0.5..0.98)
     bool VolumetricDebug = false;   // показать поле видимости солнца вместо кадра
 
-    // --- Блик в объективе (см. render/LensFlare.h) ---
-    // Выключен по умолчанию: блик — сильное авторское заявление о том, что
-    // кадр снят камерой, и подходит он не всякой игре.
-    bool LensFlare = false;
-    float LensFlareIntensity = 1.0f;
-    int LensFlareGhosts = 6;            // переотражений в цепочке призраков
-    float LensFlareGhostSpacing = 0.32f;
-    float LensFlareGhostSize = 0.055f;
-    int LensFlareBlades = 6;            // лепестков диафрагмы (форма призрака)
-    float LensFlareHalo = 0.55f;
-    float LensFlareHaloRadius = 0.42f;
-    float LensFlareStarburst = 0.5f;
-    float LensFlareGlare = 0.45f;
-    float LensFlareChroma = 0.55f;
-    float LensFlareThreshold = 1.1f;    // яркость, начиная с которой это «солнце»
+    // БЛИКА В ОБЪЕКТИВЕ ЗДЕСЬ НЕТ: это звено пост-обработки камеры
+    // («Lens Flare», см. sage/render/PostProcessComponent.h). Пока он жил тут,
+    // выключатель компонента его не гасил, а в редакторе его нельзя было ни
+    // включить, ни настроить.
 
     // Отладочный вид кадра (см. render/DebugView.h): "none", "normals",
     // "cascades", "roughness"… Строкой, а не числом: число в файле настроек

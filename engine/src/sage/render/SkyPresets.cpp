@@ -6,7 +6,7 @@ namespace sage::render {
 
 const char* SkyPresetId(SkyPreset p) {
     switch (p) {
-        case SkyPreset::Minecraft: return "minecraft";
+        case SkyPreset::Blocky:    return "blocky";
         case SkyPreset::Overcast:  return "overcast";
         default:                   return "default";
     }
@@ -14,7 +14,7 @@ const char* SkyPresetId(SkyPreset p) {
 
 const char* SkyPresetLabel(SkyPreset p) {
     switch (p) {
-        case SkyPreset::Minecraft: return "Minecraft";
+        case SkyPreset::Blocky:    return "Blocky";
         case SkyPreset::Overcast:  return "Overcast";
         default:                   return "Default";
     }
@@ -32,7 +32,7 @@ bool ParseSkyPreset(const std::string& id, SkyPreset& out) {
 
 void ApplySkyPreset(SkyboxSettings& sky, SkyPreset p) {
     // Сначала — вид по умолчанию целиком: пресет не должен наследовать
-    // случайные остатки прошлого (облака от «пасмурно» на небе Minecraft).
+    // случайные остатки прошлого (облака от «пасмурно» на блочном небе).
     // Потом возвращаем то, что к виду не относится.
     const SkyboxSettings keep = sky;
     sky = SkyboxSettings{};
@@ -48,10 +48,10 @@ void ApplySkyPreset(SkyboxSettings& sky, SkyPreset p) {
     sky.RotationDeg = keep.RotationDeg;
 
     switch (p) {
-        case SkyPreset::Minecraft:
-            // Цвета — линейные значения тех, что у Minecraft в sRGB: небо
-            // равнин #78A7FF, туман у горизонта #C0D8FF, «пустота» под
-            // горизонтом — небо, умноженное на (0.2, 0.2, 0.6).
+        case SkyPreset::Blocky:
+            // Цвета — линейные значения sRGB-цветов: небо #78A7FF, дымка у
+            // горизонта #C0D8FF, «пустота» под горизонтом — небо, умноженное
+            // на (0.2, 0.2, 0.6).
             sky.TopColor = {0.188f, 0.386f, 1.0f};
             sky.HorizonColor = {0.527f, 0.686f, 1.0f};
             sky.NightTopColor = {0.0f, 0.0f, 0.004f};
@@ -79,8 +79,8 @@ void ApplySkyPreset(SkyboxSettings& sky, SkyPreset p) {
             sky.PixelArt = true;
             sky.StarDensity = 2.0f;
             sky.StarSize = 1.6f;
-            // Плоские блочные облака, как «быстрые» облака Minecraft: клетка
-            // 12 блоков, слой ~на 120 блоков выше глаз, дрейф по X.
+            // Плоские блочные облака: клетка 12 м, слой на 120 м выше глаз,
+            // медленный дрейф по X.
             sky.Clouds = true;
             sky.CloudKind = SkyboxSettings::CloudStyle::Blocky;
             sky.CloudColor = {1.0f, 1.0f, 1.0f};

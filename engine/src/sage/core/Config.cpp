@@ -229,18 +229,6 @@ bool EngineConfig::LoadFile(const std::string& path) {
     VolumetricTemporal = pp.value("volumetricTemporal", VolumetricTemporal);
     VolumetricTemporalBlend = pp.value("volumetricTemporalBlend", VolumetricTemporalBlend);
     CloudDensity       = pp.value("cloudDensity", CloudDensity);
-    LensFlare             = pp.value("lensFlare", LensFlare);
-    LensFlareIntensity    = pp.value("lensFlareIntensity", LensFlareIntensity);
-    LensFlareGhosts       = pp.value("lensFlareGhosts", LensFlareGhosts);
-    LensFlareGhostSpacing = pp.value("lensFlareGhostSpacing", LensFlareGhostSpacing);
-    LensFlareGhostSize    = pp.value("lensFlareGhostSize", LensFlareGhostSize);
-    LensFlareBlades       = pp.value("lensFlareBlades", LensFlareBlades);
-    LensFlareHalo         = pp.value("lensFlareHalo", LensFlareHalo);
-    LensFlareHaloRadius   = pp.value("lensFlareHaloRadius", LensFlareHaloRadius);
-    LensFlareStarburst    = pp.value("lensFlareStarburst", LensFlareStarburst);
-    LensFlareGlare        = pp.value("lensFlareGlare", LensFlareGlare);
-    LensFlareChroma       = pp.value("lensFlareChroma", LensFlareChroma);
-    LensFlareThreshold    = pp.value("lensFlareThreshold", LensFlareThreshold);
 
     auto sys = j.value("system", json::object());
     WorkerThreads       = sys.value("workerThreads", WorkerThreads);
@@ -289,13 +277,6 @@ std::string EngineConfig::ToJsonString() const {
         {"volumetricTemporal", VolumetricTemporal},
         {"volumetricTemporalBlend", VolumetricTemporalBlend},
         {"cloudDensity", CloudDensity},
-        {"lensFlare", LensFlare}, {"lensFlareIntensity", LensFlareIntensity},
-        {"lensFlareGhosts", LensFlareGhosts},
-        {"lensFlareGhostSpacing", LensFlareGhostSpacing},
-        {"lensFlareGhostSize", LensFlareGhostSize}, {"lensFlareBlades", LensFlareBlades},
-        {"lensFlareHalo", LensFlareHalo}, {"lensFlareHaloRadius", LensFlareHaloRadius},
-        {"lensFlareStarburst", LensFlareStarburst}, {"lensFlareGlare", LensFlareGlare},
-        {"lensFlareChroma", LensFlareChroma}, {"lensFlareThreshold", LensFlareThreshold},
     };
     j["system"] = {
         {"workerThreads", WorkerThreads}, {"multithreadedRender", MultithreadedRender},
@@ -365,9 +346,6 @@ void EngineConfig::ApplyEnvOverrides() {
     if (const char* v = std::getenv("SAGE_CLOUD_COVERAGE")) CloudCoverage = (float)std::atof(v);
     if (const char* v = std::getenv("SAGE_VOLUMETRIC_DEBUG")) VolumetricDebug = EnvBool(v, VolumetricDebug);
     if (const char* v = std::getenv("SAGE_DEBUG_VIEW")) DebugView = v;
-    if (const char* v = std::getenv("SAGE_LENS_FLARE")) LensFlare = EnvBool(v, LensFlare);
-    if (const char* v = std::getenv("SAGE_LENS_FLARE_INTENSITY"))
-        LensFlareIntensity = (float)std::atof(v);
 
     // Графика. SAGE_NO_SHADOWS оставлен для обратной совместимости (его
     // наличие ВЫКЛЮЧАЕТ проход); плюс явные SAGE_SHADOWS/…

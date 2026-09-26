@@ -201,7 +201,7 @@ TEST(Scene_string_roundtrip_entities_and_transforms) {
         CHECK_NEAR(loaded->Lighting.PointLights[0].Intensity, 1.7f, 1e-4);
 }
 
-// Высотный туман (как Exponential Height Fog в UE) — часть сцены: вид и все
+// Высотный туман — часть сцены: вид и все
 // его ручки переживают сохранение.
 TEST(Scene_roundtrip_preserves_height_fog) {
     Scene scene("FogScene");
@@ -225,7 +225,7 @@ TEST(Scene_roundtrip_preserves_height_fog) {
     CHECK_NEAR(g.SunExponent, 16.0f, 1e-5f);
 }
 
-// Форма процедурного неба и облака — часть сцены: небо в стиле Minecraft,
+// Форма процедурного неба и облака — часть сцены: блочное пиксельное небо,
 // собранное в окружении, переживает сохранение целиком.
 TEST(Scene_roundtrip_preserves_sky_shape_and_clouds) {
     Scene scene("SkyScene");

@@ -211,11 +211,11 @@ TEST(PostChain_default_is_a_working_chain) {
     const PostChain chain = PostChain::Default();
     CHECK_TRUE(chain.Compile().Ok);
     CHECK_TRUE(EffectOf(chain, "exposure") != nullptr);
-    CHECK_TRUE(EffectOf(chain, "autoexposure") != nullptr);   // адаптация глаза, как в UE5
+    CHECK_TRUE(EffectOf(chain, "autoexposure") != nullptr);   // адаптация глаза
     CHECK_TRUE(EffectOf(chain, "bloom") != nullptr);
     CHECK_TRUE(EffectOf(chain, "color") != nullptr);
     CHECK_TRUE(EffectOf(chain, "tonemap") != nullptr);
-    if (const PostEffect* t = EffectOf(chain, "tonemap")) CHECK_EQ(t->Int("mode", -1), 4);   // Unreal
+    if (const PostEffect* t = EffectOf(chain, "tonemap")) CHECK_EQ(t->Int("mode", -1), 4);   // Cinematic
     // А у самого звена — прежняя ACES: нетронутые сохранённые сцены не меняются.
     CHECK_EQ(MakePostEffect("tonemap").Int("mode", -1), 2);
     CHECK_TRUE(EffectOf(chain, "dof") == nullptr);
@@ -242,7 +242,7 @@ TEST(PostChain_effects_carry_their_own_settings) {
         CHECK_TRUE(mode != nullptr);
         if (mode) {
             CHECK_TRUE(mode->Type == PostParamType::Enum);
-            // Clamp/Reinhard/ACES/Filmic + Unreal/AgX/Neutral: новые только в конце.
+            // Clamp/Reinhard/ACES/Filmic + Cinematic/AgX/Neutral: новые только в конце.
             CHECK_EQ(mode->Options.size(), (size_t)7);
             if (mode->Options.size() == 7) CHECK_EQ(mode->Options[2], std::string("ACES"));
         }
@@ -403,4 +403,58 @@ TEST(PostProcess_two_cameras_keep_their_own_settings) {
     CHECK_TRUE(EffectOf(a, "grain") != nullptr);
     CHECK_TRUE(EffectOf(b, "grain") == nullptr);
     CHECK_NEAR(EffectOf(a, "exposure")->Float("exposure"), 1.5f, 1e-4);
+}
+
+// Компонент «Пост-обработка» — самостоятельный: на отдельном объекте он
+// действует на все камеры без своего, на камере — только на неё. Раньше он
+// работал лишь на камере: поставленный на отдельный объект, молча не делал
+// ничего.
+TEST(PostProcess_component_works_off_camera) {
+    using namespace sage::render;
+    Scene scene("Post");
+    GameObject cam = scene.CreateEmptyObject("Camera");
+    scene.Registry().emplace<CameraComponent>(cam.Entity());
+    GameObject volume = scene.CreateEmptyObject("PostVolume");
+    PostProcessComponent global;
+    global.Chain = PostChain{};
+    AddPostEffect(global.Chain, "vignette");
+    scene.Registry().emplace<PostProcessComponent>(volume.Entity(), global);
+
+    PostChain chain;
+    CHECK_TRUE(ResolvePostChain(scene, cam.Entity(), chain));      // камера без своего — берёт сцены
+    CHECK_EQ((int)chain.Effects.size(), 1);
+    CHECK_TRUE(ResolvePostChain(scene, entt::null, chain));        // вьюпорт без камеры — тоже
+
+    // Из двух компонентов сцены побеждает больший приоритет.
+    GameObject second = scene.CreateEmptyObject("PostVolume2");
+    PostProcessComponent strong;
+    strong.Chain = PostChain{};
+    strong.Priority = 5;
+    AddPostEffect(strong.Chain, "grain");
+    AddPostEffect(strong.Chain, "fxaa");
+    scene.Registry().emplace<PostProcessComponent>(second.Entity(), strong);
+    CHECK_TRUE(ResolvePostChain(scene, cam.Entity(), chain));
+    CHECK_EQ((int)chain.Effects.size(), 2);
+
+    // Свой компонент камеры главнее; выключенный — «кадр как есть».
+    PostProcessComponent own;
+    own.Enabled = false;
+    scene.Registry().emplace<PostProcessComponent>(cam.Entity(), own);
+    CHECK_FALSE(ResolvePostChain(scene, cam.Entity(), chain));
+    CHECK_TRUE(ActivePostComponent(scene, cam.Entity()) ==
+               scene.Registry().try_get<PostProcessComponent>(cam.Entity()));
+
+    // Выключенный компонент сцены не действует.
+    scene.Registry().remove<PostProcessComponent>(cam.Entity());
+    scene.Registry().get<PostProcessComponent>(second.Entity()).Enabled = false;
+    scene.Registry().get<PostProcessComponent>(volume.Entity()).Enabled = false;
+    CHECK_FALSE(ResolvePostChain(scene, cam.Entity(), chain));
+}
+
+// Блик в объективе — звено тракта, а не настройка проекта: его видно в
+// каталоге и он выключается вместе с остальными.
+TEST(PostEffect_lens_flare_is_a_chain_effect) {
+    const sage::render::PostEffectKind* k = sage::render::PostEffectCatalog::Instance().Find("lensflare");
+    CHECK_TRUE(k != nullptr);
+    if (k) CHECK_TRUE(k->Run != nullptr);
 }

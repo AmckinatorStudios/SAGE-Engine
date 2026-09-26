@@ -448,11 +448,13 @@ static LightComponent::Type LightTypeFromString(const std::string& text) {
 static void SavePostProcess(json& j, const sage::render::PostProcessComponent& component) {
     j["postProcess"] = sage::render::PostChainToJson(component.Chain);
     j["postProcess"]["enabled"] = component.Enabled;
+    j["postProcess"]["priority"] = component.Priority;
 }
 
 static sage::render::PostProcessComponent ParsePostProcess(const json& cj) {
     sage::render::PostProcessComponent component;
     component.Enabled = cj.value("enabled", true);
+    component.Priority = cj.value("priority", 0);
     component.Chain = sage::render::PostChainFromJson(cj);
     return component;
 }

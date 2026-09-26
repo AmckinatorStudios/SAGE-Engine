@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <memory>
 
 #include <glm/glm.hpp>
 
@@ -7,9 +8,11 @@
 #include "sage/render/ShadowMap.h"
 #include "sage/render/ShadowAtlas.h"
 #include "sage/render/Reflection.h"
+#include "sage/render/PostEffect.h"
 
 class Scene;
 struct LightingEnvironment;
+class Framebuffer;
 
 // ---------------------------------------------------------------------------
 // Готовые проходы сцены — то, что каждый потребитель движка писал у себя.
@@ -96,6 +99,40 @@ struct SceneColorInput {
 // они после, одной строкой на месте.
 sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& batch,
                                         const SceneColorInput& input);
+
+// БУФЕР СКОРОСТЕЙ ОДНОГО ВИДА — то, без чего смаз движения не работал.
+//
+// Проход скоростей в батче был, звено смаза умело его читать, но ни редактор,
+// ни игра буфер не рисовали: смаз шёл запасным путём «по глубине и матрице
+// прошлого кадра», то есть размазывал только движение камеры, а пролетающий
+// объект при неподвижной камере оставался резким. Вдобавок матрица прошлого
+// кадра была одна на исполнителя пост-обработки, а он обслуживал два вида
+// (вьюпорт и превью камеры), и каждый сравнивал себя с ЧУЖОЙ камерой.
+//
+// Здесь у вида своя цель и своя матрица прошлого кадра. Пиксели без геометрии
+// (небо) помечены синим каналом = 1: для них звено смаза берёт движение камеры
+// по глубине — иначе небо при повороте оставалось бы резким.
+class VelocityBuffer {
+public:
+    VelocityBuffer();
+    ~VelocityBuffer();
+
+    // Скорости объектов, собранных ПОСЛЕДНИМ RenderSceneColor этого батча.
+    // После вызова привязана цель буфера — вызывающий возвращает свою.
+    sage::rhi::TextureHandle Render(sage::ecs::RenderBatch& batch, const glm::mat4& view,
+                                    const glm::mat4& proj, int width, int height);
+    // Скачок (смена сцены, телепорт камеры): следующий кадр без смаза камеры.
+    void Reset() { m_hasPrev = false; }
+
+private:
+    std::unique_ptr<Framebuffer> m_target;
+    glm::mat4 m_prevViewProj{1.0f};
+    bool m_hasPrev = false;
+};
+
+// Нужен ли тракту буфер скоростей (включён смаз движения). Рисовать его
+// впустую — лишний проход геометрии в каждом кадре.
+bool ChainNeedsVelocity(const PostChain& chain);
 
 // Съёмка сцены в именованные текстуры (RenderTextureComponent): по проходу на
 // каждую сущность, которой это заказано. Зовётся ДО основного прохода кадра —

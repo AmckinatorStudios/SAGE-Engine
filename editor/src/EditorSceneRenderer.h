@@ -17,6 +17,7 @@
 #include "sage/render/GridRenderer.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/ShadowAtlas.h"
+#include "sage/render/ScenePasses.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/render/Reflection.h"
 #include "sage/render/ParticleSystem.h"
@@ -53,7 +54,13 @@ public:
     // Время сцены для собственных шейдеров материалов (uTime). Идёт и в режиме
     // правки, а не только в Play: анимированный материал должен шевелиться во
     // вьюпорте — иначе его не настроить, не запуская игру.
-    void Tick(float dt) { m_sceneTime += dt; }
+    // Шаг времени редактора. Заодно «прошлое» положение мира для смаза
+    // движения: зовётся ОДИН раз за кадр, до отрисовки видов — все виды кадра
+    // сравнивают мир с одним и тем же прошлым (см. RenderBatch::AdvanceVelocityHistory).
+    void Tick(float dt) {
+        m_sceneTime += dt;
+        m_batch.AdvanceVelocityHistory();
+    }
 
     void Init();
 
@@ -184,6 +191,10 @@ public:
     void ResetPostHistory() {
         if (m_postfx) m_postfx->ResetHistory();
         if (m_gamePostfx) m_gamePostfx->ResetHistory();
+        if (m_previewPostfx) m_previewPostfx->ResetHistory();
+        m_viewportVelocity.Reset();
+        m_gameVelocity.Reset();
+        m_batch.ResetVelocityHistory();
     }
 
     // Текстуры для ImGui-панелей: после PostFX — LDR-выход, иначе HDR-цвет FBO.
@@ -300,8 +311,14 @@ private:
     // собранной игре). Лениво: создаётся при первом кадре с UI-сущностями.
     std::unique_ptr<UIRenderer> m_ui;
     std::optional<sage::render::PostFX> m_postfx, m_gamePostfx;
+    // Своя у превью камеры: у исполнителя пост-обработки есть память кадра
+    // (адаптация глаза, матрица прошлого кадра для смаза), и общая с вьюпортом
+    // заставляла вьюпорт сравнивать себя с камерой превью — смаз шёл мимо.
+    std::optional<sage::render::PostFX> m_previewPostfx;
+    // Буферы скоростей для смаза движения — по одному на вид.
+    sage::render::VelocityBuffer m_viewportVelocity;
+    sage::render::VelocityBuffer m_gameVelocity;
     std::optional<sage::render::Volumetrics> m_volumetrics;
-    std::optional<sage::render::LensFlare> m_lensFlare;
     bool m_gamePostApplied = false;
     std::optional<DebugDraw> m_debugDraw;
     // Сетка пола — ШЕЙДЕРОМ, а не набором линий (sage::render::GridRenderer).

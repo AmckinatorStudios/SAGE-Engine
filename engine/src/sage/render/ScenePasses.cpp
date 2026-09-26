@@ -1,5 +1,7 @@
 #include "sage/render/ScenePasses.h"
 
+#include "sage/render/Framebuffer.h"
+
 #include <cmath>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -82,6 +84,43 @@ sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& ba
     sage::anim::DrawAnimatedModels(scene, input.View, input.Proj, input.ViewPos, *input.Env,
                                    input.Shadows, &input.Reflection, input.ShadingMode);
     return stats;
+}
+
+VelocityBuffer::VelocityBuffer() = default;
+VelocityBuffer::~VelocityBuffer() = default;
+
+sage::rhi::TextureHandle VelocityBuffer::Render(sage::ecs::RenderBatch& batch,
+                                                const glm::mat4& view, const glm::mat4& proj,
+                                                int width, int height) {
+    SAGE_PROFILE("Скорости");
+    if (width < 1 || height < 1) return {};
+    if (!m_target) m_target = std::make_unique<Framebuffer>(width, height);
+    else m_target->Resize(width, height);
+    const glm::mat4 viewProj = proj * view;
+    const glm::mat4 prev = m_hasPrev ? m_prevViewProj : viewProj;
+
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    m_target->Bind();
+    device.SetViewport(0, 0, width, height);
+    // Синий = 1 — «здесь нет геометрии» (см. заголовок): проход скоростей
+    // пишет в синий ноль.
+    device.SetClearColor(0.0f, 0.0f, 1.0f, 1.0f);
+    device.Clear(true, true);
+    device.SetBlend(false);
+    device.SetDepthTest(true);
+    device.SetDepthWrite(true);
+    device.SetCullMode(sage::rhi::CullMode::Back);
+    batch.RenderVelocity(viewProj, prev);
+
+    m_prevViewProj = viewProj;
+    m_hasPrev = true;
+    return m_target->ColorTexture();
+}
+
+bool ChainNeedsVelocity(const PostChain& chain) {
+    for (const PostEffect& e : chain.Effects)
+        if (e.Enabled && e.Kind == "motionblur" && e.Float("amount", 0.5f) > 0.001f) return true;
+    return false;
 }
 
 int RenderTextureViews(Scene& scene, sage::ecs::RenderBatch& batch,

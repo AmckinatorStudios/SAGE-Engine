@@ -623,7 +623,7 @@ void TestRoughReflectionSpread(FrameRenderer& r) {
 
 // Кадр «с солнцем в объективе». blocker — поставить ли перед солнцем стену.
 Image RenderFlareFrame(FrameRenderer& r, bool flareOn, bool blocker, bool behind,
-                       float& outMeanLuma) {
+                       float& outMeanLuma, bool viaChain = false) {
     constexpr int w = 256, h = 192;
     Framebuffer sceneFbo(w, h);
     Framebuffer output(w, h);
@@ -682,7 +682,7 @@ Image RenderFlareFrame(FrameRenderer& r, bool flareOn, bool blocker, bool behind
              CelestialsFromEnvironment(env));
     r.Batch.RenderColor(scene, view, proj, eye, env, ShadowBinding(r.Shadow, false), 0);
 
-    if (flareOn) {
+    if (flareOn && !viaChain) {
         sage::render::LensFlareSettings s;
         s.Enabled = true;
         s.Intensity = 1.0f;
@@ -694,10 +694,19 @@ Image RenderFlareFrame(FrameRenderer& r, bool flareOn, bool blocker, bool behind
     sage::render::PostChain fx = BaseChain();
     SetParam(fx, "tonemap", "vignette", 0.0f); // виньетка съедает призраки у края и мешает считать
     RemoveEffect(fx, "bloom");                 // свечение размазало бы разницу, которую мы меряем
+    if (viaChain) {
+        // Блик — звеном тракта камеры: включено звено — есть блик, выключено —
+        // нет. Солнце звену передаёт вызывающий.
+        AddEffect(fx, "lensflare");
+        for (sage::render::PostEffect& e : fx.Effects)
+            if (e.Kind == "lensflare") e.Enabled = flareOn;
+        r.Fx.SetLighting(&env);
+    }
     r.Fx.ResetHistory();
     r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h, proj, view, fx, &output, 0,
                 0, w, h);
 
+    r.Fx.SetLighting(nullptr);   // окружение локальное — указатель не должен пережить кадр
     output.Bind();
     Image img = Capture(w, h);
 
@@ -734,6 +743,19 @@ void TestLensFlare(FrameRenderer& r) {
     Check(std::abs(lumaBehind - lumaBehindOff) < 0.05f, "солнце за спиной блика не даёт");
 
     Report("lens_flare", CompareWithReference("lens_flare", on));
+
+    // Звеном тракта камеры — то же самое, и выключенное звено блика не даёт.
+    // Раньше блик жил в настройках проекта: выключатель компонента обработки
+    // его не гасил, а в редакторе его нельзя было ни включить, ни настроить.
+    float chainOn = 0.0f, chainOff = 0.0f, chainBlocked = 0.0f;
+    RenderFlareFrame(r, true, false, false, chainOn, /*viaChain=*/true);
+    RenderFlareFrame(r, false, false, false, chainOff, /*viaChain=*/true);
+    RenderFlareFrame(r, true, true, false, chainBlocked, /*viaChain=*/true);
+    std::printf("       звеном тракта: включено %.2f, выключено %.2f, за стеной %.2f\n", chainOn,
+                chainOff, chainBlocked);
+    Check(chainOn > chainOff + 1.0f, "звено «Lens Flare» добавляет блик");
+    Check(std::abs(chainOff - lumaOff) < 0.05f, "выключенное звено блика не даёт");
+    Check(std::abs(chainBlocked - lumaBlockedOff) < 0.35f, "звено гасит блик закрытого солнца");
 }
 
 // Швы куба — главный артефакт карт окружения. Грани снимаются по отдельности, и

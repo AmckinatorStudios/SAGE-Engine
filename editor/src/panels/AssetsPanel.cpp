@@ -1331,7 +1331,7 @@ void AssetsPanel::FinishImport(EditorHost& host) {
     RegisterImported(r);
     m_selected = r.Created;
     m_multi = {r.Created};
-    // Модели среди внесённого — сразу окно настроек импорта (как в Unreal):
+    // Модели среди внесённого — сразу окно настроек импорта:
     // ось, масштаб, листва задаются один раз на ассет, до того как модель
     // встанет в сцену неправильно.
     sage::editor::modelimport::Ask(sage::editor::modelimport::ModelsNeedingSettings(r.Created));

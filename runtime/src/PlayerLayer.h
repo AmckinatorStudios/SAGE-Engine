@@ -22,6 +22,7 @@
 #include "sage/render/ParticleSystem.h"
 #include "sage/render/PostFX.h"
 #include "sage/render/LensFlare.h"
+#include "sage/render/ScenePasses.h"
 #include "sage/render/Volumetrics.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/UIInteraction.h"
@@ -147,6 +148,8 @@ private:
     sage::render::ReflectionSystem m_reflections;
     // Зонды отражений кадра: привязка прохода держит на них указатель.
     sage::render::ReflectionProbeSet m_probeSet;
+    // Буфер скоростей для смаза движения (см. sage/render/ScenePasses.h).
+    sage::render::VelocityBuffer m_velocity;
     sage::render::PlanarReflection m_planar;
 
     // Состав и порядок кадра — см. sage/core/SystemScheduler.h. Игра может
@@ -175,7 +178,6 @@ private:
     std::optional<Framebuffer> m_sceneFbo;
     std::optional<sage::render::PostFX> m_postfx;
     std::optional<sage::render::Volumetrics> m_volumetrics;
-    std::optional<sage::render::LensFlare> m_lensFlare;
     // UI сцены (компоненты sage::ui из .sage) — рисуется поверх кадра; лениво,
     // создаётся при первом кадре со сценой, содержащей UI-сущности.
     std::unique_ptr<UIRenderer> m_ui;

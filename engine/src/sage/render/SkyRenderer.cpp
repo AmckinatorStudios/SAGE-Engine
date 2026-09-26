@@ -134,7 +134,7 @@ float DiscMask(vec2 p, float size, int shape, float facing) {
     return 1.0 - smoothstep(size - aa, size + aa, m);
 }
 
-// Картинка светила: сложением, как у Minecraft (чёрный фон — прозрачен).
+// Картинка светила: сложением (чёрный фон — прозрачен).
 vec3 DiscTexture(sampler2D map, vec2 p, float size, float facing) {
     if (facing <= 0.0) return vec3(0.0);
     vec2 uv = p / (2.0 * size) + 0.5;
@@ -162,7 +162,7 @@ void main() {
     float soften = uHorizonSoft > 1e-4 ? smoothstep(0.0, uHorizonSoft, y) : 1.0;
     vec3 col = mix(uHorizon, uTop, pow(t, uGradExp) * soften);
 
-    // Низ неба. Ниже горизонта — свой цвет (у Minecraft это тёмно-синяя
+    // Низ неба. Ниже горизонта — свой цвет (у блочного неба это тёмно-синяя
     // «пустота»), а не продолжение полосы горизонта до самого надира.
     if (uGround == 1) {
         float g = uGroundBlend > 1e-4 ? smoothstep(0.0, uGroundBlend, -y) : (y < 0.0 ? 1.0 : 0.0);

@@ -480,7 +480,7 @@ void DrawInterfaceProperties(EditorHost& host, GameObject obj) {
         host.TrackLastImGuiItem();
         ImGui::DragInt(T("Largest scale"), &info->Canvas.MaxScale, 0.05f, 0, 16);
         host.TrackLastImGuiItem();
-        EditorTheme::Hint(T("The largest whole number that fits the reference screen: pixel art stays crisp (like Minecraft's GUI scale). 0 — no limit"));
+        EditorTheme::Hint(T("The largest whole number that fits the reference screen: pixel art stays crisp. 0 — no limit"));
     }
 
     // Элементы правятся у САМИХ ЭЛЕМЕНТОВ. Сказано прямо, потому что именно

@@ -27,6 +27,7 @@
 #include "sage/ecs/DecalSystem.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ecs/RenderBatch.h"
+#include "sage/render/ScenePasses.h"
 #include "sage/render/Framebuffer.h"
 #include "sage/render/GridRenderer.h"
 #include "sage/render/LensFlare.h"
@@ -304,6 +305,7 @@ void TestNoPostFX(FrameRenderer& r, Scene& scene) {
 // видит человек.
 struct DofQuality {
     size_t Blurred = 0;   // пикселей, которые размытие тронуло заметно
+    double MeanTouched = 0.0; // среднее изменение пикселя, уровней
     double Jump999 = 0.0; // 99.9-й процентиль разрыва карты резкости
     double WorstJump = 0.0;
 };
@@ -340,7 +342,9 @@ DofQuality MeasureDofQuality(const Image& dof, const Image& sharp) {
     std::vector<double> jumps;
     for (int y = 1; y + 1 < h; ++y) {
         for (int x = 1; x + 1 < w; ++x) {
-            if (Touched(x, y) > 20.0) ++q.Blurred;
+            const double t = Touched(x, y);
+            if (t > 20.0) ++q.Blurred;
+            q.MeanTouched += t;
             const size_t i = (size_t)y * w + x;
             const double s0 = sharpness[i];
             const double d = std::max(std::max(std::abs(s0 - sharpness[i - 1]),
@@ -352,6 +356,7 @@ DofQuality MeasureDofQuality(const Image& dof, const Image& sharp) {
         }
     }
     if (!jumps.empty()) {
+        q.MeanTouched /= (double)jumps.size();
         std::sort(jumps.begin(), jumps.end());
         q.Jump999 = jumps[(size_t)((double)(jumps.size() - 1) * 0.999)];
     }
@@ -362,7 +367,11 @@ void TestDepthOfField(FrameRenderer& r, Scene& scene) {
     sage::render::PostChain fx = BaseChain();
     AddEffect(fx, "dof");
     SetParam(fx, "dof", "focus", 6.0f); // примерно на сфере
-    SetParam(fx, "dof", "aperture", 1.8f);
+    SetParam(fx, "dof", "aperture", 0.8f);
+    // Длинный объектив: кадр проверки мал (круг нерезкости считается в долях
+    // высоты кадра), и штатный объектив размывал бы его на пару пикселей.
+    SetParam(fx, "dof", "focalLength", 250.0f);
+    SetParam(fx, "dof", "maxRadius", 12.0f);
     const Image dof = RenderFrame(r, scene, PerspectiveProj(), fx, kW, kH);
     Report("scene_dof", CompareWithReference("scene_dof", dof));
 
@@ -396,7 +405,12 @@ void TestDepthOfField(FrameRenderer& r, Scene& scene) {
     const DofQuality qw = MeasureDofQuality(wide, sharp);
     std::printf("       радиус 28: размытых %zu, разрыв карты резкости 99.9%% %.1f худший %.1f\n",
                 qw.Blurred, qw.Jump999, qw.WorstJump);
-    Check(qw.Blurred > 3000, "на большом радиусе размытие заметно шире");
+    // «Шире» — это больше изменения по кадру в целом, а не больше пикселей с
+    // сильным перепадом: широкое размытие размазывает перепад тоньше, и
+    // счётчик «изменился больше чем на 20» от ширины как раз падает.
+    std::printf("       среднее изменение: радиус 12 — %.2f, радиус 28 — %.2f\n", q.MeanTouched,
+                qw.MeanTouched);
+    Check(qw.MeanTouched > q.MeanTouched * 1.1, "на большом радиусе размытие заметно шире");
     Check(qw.Jump999 < 7.0, "размытие не создаёт разрывов карты резкости");
     Check(qw.WorstJump < 16.0, "худший разрыв карты резкости в пределах допуска");
 }
@@ -1082,16 +1096,16 @@ void TestOutputEncodingAndCurves(FrameRenderer& r) {
     Check(std::abs(linear - 0.18f) < 0.02f, "линейный вывод оставляет значение как есть");
     Check(std::abs(gamma - 0.459f) < 0.02f, "вывод «гамма» — степенная кривая 2.2");
 
-    // Плёночная кривая UE5 держит средне-серый на месте (InMatch = OutMatch =
+    // Кинематографическая кривая держит средне-серый на месте (InMatch = OutMatch =
     // 0.18) и сжимает света: 16x ярче серого — всё ещё не белый в клип.
     const float ueGrey = FlatThroughChain(r, 0.18f, ToneOnly(4.0f, 2.0f));
     const float ueBright = FlatThroughChain(r, 2.88f, ToneOnly(4.0f, 2.0f));
     const float agxGrey = FlatThroughChain(r, 0.18f, ToneOnly(5.0f, 0.0f));
     const float neutralGrey = FlatThroughChain(r, 0.18f, ToneOnly(6.0f, 2.0f));
-    std::printf("       Unreal: серый %.3f, x16 %.3f; AgX серый %.3f; Neutral серый %.3f\n",
+    std::printf("       Cinematic: серый %.3f, x16 %.3f; AgX серый %.3f; Neutral серый %.3f\n",
                 ueGrey, ueBright, agxGrey, neutralGrey);
-    Check(std::abs(ueGrey - 0.18f) < 0.04f, "кривая Unreal держит средне-серый на месте");
-    Check(ueBright > 0.6f && ueBright < 0.99f, "кривая Unreal сжимает света, а не обрезает");
+    Check(std::abs(ueGrey - 0.18f) < 0.04f, "кинематографическая кривая держит средне-серый на месте");
+    Check(ueBright > 0.6f && ueBright < 0.99f, "кинематографическая кривая сжимает света, а не обрезает");
     Check(agxGrey > 0.3f && agxGrey < 0.7f, "AgX даёт среднюю яркость для серого");
     Check(std::abs(neutralGrey - 0.14f) < 0.04f, "Neutral не трогает цвета ниже плеча");
 }
@@ -1116,6 +1130,243 @@ void TestAutoExposure(FrameRenderer& r) {
     std::printf("       первый кадр в темноте после света: %.3f (привыкший глаз: %.3f)\n",
                 firstDark, dark);
     Check(firstDark < dark - 0.05f, "глаз привыкает к темноте не мгновенно");
+}
+
+// --- Автоэкспозиция не выжигает кадр с чёрным небом --------------------------
+//
+// Жалоба: лампа на полу, небо чёрное — и весь освещённый пол выгорел в белое,
+// а свечение обвело каждый предмет каймой. Замер брал простое среднее, и
+// пустота (70 % кадра) тянула его вниз: глаз вытягивал кадр до предела.
+// Здесь кадр — 70 % чёрного и 30 % серого 0.5: освещённая часть обязана выйти
+// такой же, как если бы весь кадр был серым 0.5, а не белой.
+void TestAutoExposureIgnoresVoid(FrameRenderer& r) {
+    const int w = 64, h = 64;
+    auto frameWithLit = [&](float litShare) {
+        std::vector<unsigned char> px((size_t)w * h * 4, 0);
+        const int litRows = (int)(h * litShare);
+        for (int y = 0; y < h; ++y)
+            for (int x = 0; x < w; ++x) {
+                unsigned char* p = &px[((size_t)y * w + x) * 4];
+                const bool lit = y < litRows;
+                p[0] = p[1] = p[2] = lit ? 128 : 0;
+                p[3] = 255;
+            }
+        sage::rhi::Texture2DDesc d;
+        d.Width = w; d.Height = h; d.Channels = 4;
+        d.FilterMode = sage::rhi::Filter::Nearest;
+        d.WrapMode = sage::rhi::Wrap::ClampEdge;
+        d.GenerateMipmaps = false;
+        return sage::rhi::GraphicsDevice::Get().CreateTexture2D(d, px.data());
+    };
+    sage::render::PostChain chain = ToneOnly(0.0f, 2.0f);   // обрезка, линейный вывод
+    AddEffect(chain, "autoexposure");
+    auto litValue = [&](float share) {
+        auto tex = frameWithLit(share);
+        Framebuffer output(w, h);
+        r.Fx.ResetHistory();
+        const glm::mat4 id(1.0f);
+        r.Fx.Render(tex->Handle(), sage::rhi::TextureHandle{}, w, h, id, id, chain, &output, 0, 0, w, h);
+        output.Bind();
+        const Image img = Capture(w, h);
+        // Строки Capture идут сверху вниз, а освещённые строки текстуры — снизу
+        // (строка 0 текстуры — низ кадра): берём середину нижней полосы.
+        const int y = h - 1 - (int)(h * share * 0.5f);
+        return img.Pixels[((size_t)y * w + w / 2) * 3] / 255.0f;
+    };
+    const float full = litValue(1.0f);
+    const float partial = litValue(0.3f);
+    std::printf("       серый 0.5: весь кадр %.3f, 30 %% кадра среди чёрного %.3f\n", full, partial);
+    Check(partial < 0.95f, "освещённое среди чёрного неба не выгорает в белое");
+    Check(std::abs(partial - full) < 0.12f, "чёрная пустота не меняет экспозицию освещённого");
+}
+
+// --- Смаз камеры по небу — и с буфером скоростей ---------------------------
+//
+// В редакторе и в игре смаз не работал вовсе: буфер скоростей никто не
+// рисовал. Теперь его рисует VelocityBuffer вида — и тут легко потерять
+// другое: у неба нет геометрии, в буфере скоростей там ноль, и небо при
+// повороте камеры осталось бы резким. Пиксели без геометрии помечены, и
+// для них звено смаза берёт движение камеры по глубине.
+//
+// Кадр — вертикальные полосы на «бесконечной» глубине (1.0), геометрии нет.
+// Камера поворачивается на 4°: полосы обязаны размазаться.
+void TestCameraMotionBlurOverSky(FrameRenderer& r) {
+    const int w = 128, h = 64;
+    std::vector<unsigned char> px((size_t)w * h * 4, 255);
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            unsigned char* p = &px[((size_t)y * w + x) * 4];
+            p[0] = p[1] = p[2] = ((x / 4) % 2) ? 230 : 20;
+        }
+    sage::rhi::Texture2DDesc d;
+    d.Width = w; d.Height = h; d.Channels = 4;
+    d.FilterMode = sage::rhi::Filter::Nearest;
+    d.WrapMode = sage::rhi::Wrap::ClampEdge;
+    d.GenerateMipmaps = false;
+    auto stripes = sage::rhi::GraphicsDevice::Get().CreateTexture2D(d, px.data());
+
+    Framebuffer depthOnly(w, h);   // глубина 1.0 — «бесконечность», как у неба
+    depthOnly.Bind();
+    sage::rhi::GraphicsDevice::Get().SetClearColor(0, 0, 0, 1);
+    sage::rhi::GraphicsDevice::Get().Clear(true, true);
+
+    // Пустая сцена: в буфер скоростей не попадёт ни одного объекта.
+    Scene empty("Sky");
+    sage::ecs::RenderBatch batch;
+    const LightingEnvironment env = sage::ecs::CollectLighting(empty);
+    batch.RenderColor(empty, glm::mat4(1.0f), glm::mat4(1.0f), glm::vec3(0.0f), env,
+                      ShadowBinding(), 0);
+
+    const glm::mat4 proj = glm::perspective(glm::radians(60.0f), (float)w / h, 0.1f, 100.0f);
+    const glm::mat4 view1 = glm::lookAt(glm::vec3(0.0f), glm::vec3(0, 0, -1), glm::vec3(0, 1, 0));
+    const glm::mat4 view2 = glm::rotate(glm::mat4(1.0f), glm::radians(4.0f), glm::vec3(0, 1, 0)) * view1;
+
+    sage::render::PostChain chain = ToneOnly(0.0f, 2.0f);
+    AddEffect(chain, "motionblur");
+    SetParam(chain, "motionblur", "amount", 1.0f);
+    sage::render::VelocityBuffer velocity;
+    auto frame = [&](const glm::mat4& view, const sage::render::PostChain& c) {
+        const sage::rhi::TextureHandle vel = velocity.Render(batch, view, proj, w, h);
+        Framebuffer out(w, h);
+        r.Fx.Render(stripes->Handle(), depthOnly.DepthTexture(), w, h, proj, view, c, &out, 0, 0,
+                    w, h, vel);
+        out.Bind();
+        return Capture(w, h);
+    };
+    r.Fx.ResetHistory();
+    velocity.Reset();
+    frame(view1, chain);                       // история: прошлый кадр — view1
+    const Image blurred = frame(view2, chain);  // повернулись
+    // Контраст полос: у резких — 210 уровней, у смазанных заметно меньше.
+    auto contrast = [&](const Image& img) {
+        int lo = 255, hi = 0;
+        const int y = h / 2;
+        for (int x = w / 4; x < w * 3 / 4; ++x) {
+            const int v = img.Pixels[((size_t)y * w + x) * 3];
+            lo = std::min(lo, v);
+            hi = std::max(hi, v);
+        }
+        return hi - lo;
+    };
+    const int c = contrast(blurred);
+    std::printf("       полосы неба при повороте камеры: контраст %d (резкие — 210)\n", c);
+    Check(c < 150, "небо без геометрии смазывается при повороте камеры (с буфером скоростей)");
+}
+
+// --- Глубина резкости: передний план расплывается ПОВЕРХ резкого фона --------
+//
+// Жалоба «ужасное качество, куча артефактов»: размытый ближний предмет
+// обрывался резкой кромкой по своему силуэту, потому что пиксель фона рядом с
+// ним резкий и смешивание шло по СВОЕЙ глубине пикселя. В оптике же передний
+// план расплывается за свой силуэт. Сцена: белый светящийся куб вблизи,
+// тёмная стена в фокусе. Пиксели стены у кромки куба обязаны посветлеть, а
+// стена вдали от куба — остаться какой была (без ореолов).
+void TestDepthOfFieldNearSpreads(FrameRenderer& r) {
+    const int w = 160, h = 120;
+    auto scene = std::make_unique<Scene>("DofNear");
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+    scene->Lighting.AmbientStrength = 0.0f;
+    scene->Lighting.Sun.Intensity = 0.0f;
+    scene->Lighting.Skybox.Enabled = false;
+    auto box = [&](const char* name, glm::vec3 pos, glm::vec3 size, glm::vec3 glow) {
+        GameObject o = scene->CreateObject(name);
+        o.GetTransform().Position = pos;
+        o.GetTransform().Scale = size;
+        o.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+        o.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+        auto m = std::make_shared<Material>();
+        m->Albedo = {0.0f, 0.0f, 0.0f};
+        m->Emissive = glow;
+        o.Renderer().MaterialPtr = m;
+    };
+    box("Wall", {0.0f, 0.0f, -10.0f}, {40.0f, 40.0f, 0.2f}, {0.08f, 0.08f, 0.08f});
+    box("Near", {-0.5f, 0.0f, -1.5f}, {1.0f, 3.0f, 0.2f}, {1.0f, 1.0f, 1.0f});   // правая кромка — x = 0
+
+    const glm::mat4 view = glm::lookAt(glm::vec3(0.0f), glm::vec3(0, 0, -1), glm::vec3(0, 1, 0));
+    const glm::mat4 proj = glm::perspective(glm::radians(50.0f), (float)w / h, 0.1f, 100.0f);
+    auto render = [&](bool dof) {
+        Framebuffer sceneFbo(w, h), out(w, h);
+        sceneFbo.Bind();
+        sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear(true, true);
+        const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+        r.Batch.RenderColor(*scene, view, proj, glm::vec3(0.0f), env, ShadowBinding(), 0);
+        sage::render::PostChain chain = ToneOnly(0.0f, 2.0f);
+        if (dof) {
+            AddEffect(chain, "dof");
+            SetParam(chain, "dof", "focus", 10.0f);
+            SetParam(chain, "dof", "aperture", 1.4f);
+            SetParam(chain, "dof", "focalLength", 150.0f);
+            SetParam(chain, "dof", "maxRadius", 16.0f);
+        }
+        r.Fx.ResetHistory();
+        r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h, proj, view, chain,
+                    &out, 0, 0, w, h);
+        out.Bind();
+        return Capture(w, h);
+    };
+    const Image sharp = render(false);
+    const Image blurred = render(true);
+    // Кромка куба — по резкому кадру: первый тёмный столбец средней строки.
+    const int y = h / 2;
+    auto at = [&](const Image& img, int x) { return (int)img.Pixels[((size_t)y * w + x) * 3]; };
+    int edge = -1;
+    for (int x = 1; x < w; ++x)
+        if (at(sharp, x - 1) > 128 && at(sharp, x) < 64) { edge = x; break; }
+    Check(edge > 0 && edge < w - 40, "кромка переднего предмета найдена");
+    if (edge <= 0 || edge >= w - 40) return;
+    const int nearBg = at(blurred, edge + 3), farBg = at(blurred, edge + 35), bg = at(sharp, edge + 35);
+    std::printf("       фон у кромки %d, фон вдали %d (резкий фон %d)\n", nearBg, farBg, bg);
+    Check(nearBg > farBg + 25, "размытый передний план расплывается поверх резкого фона");
+    Check(std::abs(farBg - bg) <= 4, "фон в фокусе вдали от предмета не тронут (нет ореолов)");
+}
+
+// --- Каждое звено работает, выключенное — молчит ---------------------------
+//
+// Жалоба: «не все эффекты отключаются и не все работают». Проверяется
+// каталог целиком: у каждого звена есть кадр, где оно заметно меняет
+// картинку, а выключенное звено (галка снята, звено в тракте осталось) не
+// меняет ничего. Смаз, адаптация глаза и блик проверяются своими тестами:
+// им нужно движение, время и солнце в кадре.
+void TestEveryEffectToggles(FrameRenderer& r, Scene& scene) {
+    const sage::render::PostChain base = ToneOnly(2.0f, 0.0f);
+    const Image plain = RenderFrame(r, scene, PerspectiveProj(), base, kW, kH);
+    auto meanDiff = [](const Image& a, const Image& b) {
+        long long sum = 0;
+        for (size_t i = 0; i < a.Pixels.size(); ++i) sum += std::abs((int)a.Pixels[i] - (int)b.Pixels[i]);
+        return (double)sum / (double)a.Pixels.size();
+    };
+    for (const sage::render::PostEffectKind* kind : sage::render::PostEffectCatalog::Instance().All()) {
+        const std::string& id = kind->Id;
+        if (id == "motionblur" || id == "autoexposure" || id == "lensflare" || id == "tonemap") continue;
+        sage::render::PostChain on = base;
+        AddEffect(on, id.c_str());
+        // Звенья, которые по умолчанию нейтральны, настраиваются на заметное.
+        if (id == "exposure") SetParam(on, id.c_str(), "exposure", 1.0f);
+        if (id == "color") SetParam(on, id.c_str(), "saturation", 0.0f);
+        // Свечение — только того, что ярче порога; в этой сцене ярче 1.0 нет
+        // ничего, и при штатном пороге звену законно нечего делать.
+        if (id == "bloom") SetParam(on, id.c_str(), "threshold", 0.2f);
+        if (id == "grading") {
+            for (sage::render::PostEffect& e : on.Effects)
+                if (e.Kind == id)
+                    if (sage::render::PostValue* v = e.Find("shadows")) { v->V[0] = 2.0f; v->V[2] = 0.3f; }
+        }
+        if (id == "dof") {
+            SetParam(on, id.c_str(), "focus", 1.0f);
+            SetParam(on, id.c_str(), "focalLength", 200.0f);
+        }
+        const Image withIt = RenderFrame(r, scene, PerspectiveProj(), on, kW, kH);
+        sage::render::PostChain off = on;
+        for (sage::render::PostEffect& e : off.Effects)
+            if (e.Kind == id) e.Enabled = false;
+        const Image withOff = RenderFrame(r, scene, PerspectiveProj(), off, kW, kH);
+        const double dOn = meanDiff(withIt, plain), dOff = meanDiff(withOff, plain);
+        std::printf("       %-12s включено %.3f, выключено %.3f\n", id.c_str(), dOn, dOff);
+        Check(dOn > 0.02, ("звено «" + id + "» меняет кадр").c_str());
+        Check(dOff < 0.001, ("выключенное звено «" + id + "» кадр не трогает").c_str());
+    }
 }
 
 // --- Высотный туман: плотнее у земли, реже вверху ---------------------------
@@ -1203,16 +1454,20 @@ void RunFrameChecks(FrameRenderer& r, Scene& scene) {
     TestPostSelfCheck(r);
     TestOutputEncodingAndCurves(r);
     TestAutoExposure(r);
+    TestAutoExposureIgnoresVoid(r);
     TestHeightFog(r);
     TestSceneOrthographic(r, scene);
     TestNoPostFX(r, scene);
     TestDepthOfField(r, scene);
+    TestDepthOfFieldNearSpreads(r);
+    TestEveryEffectToggles(r, scene);
     TestFxaa(r, scene);
     TestTransparentFaceOrder(r, scene);
     TestEmissive(r, scene);
     TestGrid(r, scene);
     TestDecals(r);
     TestObjectMotionBlur(r);
+    TestCameraMotionBlurOverSky(r);
     TestMsaa(r);
 }
 

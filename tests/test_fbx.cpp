@@ -316,7 +316,7 @@ TEST(Fbx_with_skin_loads_bones_weights_and_clips) {
 // Blender пишет Transform кластера ОТНОСИТЕЛЬНО КОСТИ (inverse(TransformLink) *
 // мир меша), а не мир меша, как Autodesk. Прочитанный по Autodesk, такой файл
 // умножался на обратную кость дважды: персонаж в позе покоя схлопывался в
-// комок с «лучами» (Universal Animation Library, FBX для Unity). И клип там
+// комок с «лучами» (библиотека анимаций, FBX под другие движки). И клип там
 // назван «Armature|Wave» — для человека и для Play("Wave") это «Wave».
 TEST(Fbx_blender_cluster_transform_keeps_the_rest_pose_in_place) {
     const std::string path = MakeFbx("sage_test_skin_blender.fbx", "--skin --blender-bind");
