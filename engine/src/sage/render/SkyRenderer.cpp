@@ -310,7 +310,7 @@ SkyCelestials CelestialsFromEnvironment(const LightingEnvironment& env) {
     c.MoonPhase = sky.MoonPhase;
     c.SunTexture = sky.SunTexture;
     c.MoonTexture = sky.MoonTexture;
-    c.PixelArt = sky.PixelArt;
+    c.Filtering = sky.Filtering;
     c.StarDensity = sky.StarDensity;
     c.StarSize = sky.StarSize;
     c.Clouds = sky.Clouds;
@@ -399,7 +399,7 @@ void SkyRenderer::Draw(const glm::mat4& view, const glm::mat4& proj,
         std::shared_ptr<Texture> tex;
         if (!path.empty()) {
             tex = ResourceManager::Instance().GetTexture(
-                path, sky.PixelArt ? TextureFilter::Nearest : TextureFilter::Bilinear,
+                path, sky.Filtering == sage::TextureFiltering::Nearest ? TextureFilter::Nearest : TextureFilter::Bilinear,
                 /*mipmaps*/ false, /*bleed*/ false, /*srgb*/ true);
         }
         m_shader->SetInt(sampler, unit);

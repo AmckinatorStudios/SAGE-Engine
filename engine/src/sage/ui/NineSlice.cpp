@@ -79,6 +79,33 @@ void LayOutAxis(SliceFill fill, float dstA, float dstB, float srcA, float srcB, 
 
 } // namespace
 
+std::vector<SliceQuad> SolveTiles(const SliceRequest& req, float tileW, float tileH) {
+    std::vector<SliceQuad> out;
+    if (req.DstW <= 0.0f || req.DstH <= 0.0f || req.SrcW <= 0.0f || req.SrcH <= 0.0f) return out;
+    if (tileW <= 0.0f || tileH <= 0.0f) return out;
+    // Предел числа копий — укрупнением плитки, а не обрывом ряда: обрыв
+    // оставил бы пустую полосу, укрупнение — просто более крупный рисунок.
+    const float cols = std::ceil(req.DstW / tileW), rows = std::ceil(req.DstH / tileH);
+    if (cols * rows > (float)kMaxTiles) {
+        const float k = std::sqrt(cols * rows / (float)kMaxTiles);
+        tileW *= k;
+        tileH *= k;
+    }
+    for (float y = 0.0f; y < req.DstH - 1e-3f; y += tileH) {
+        const float h = std::min(tileH, req.DstH - y);
+        for (float x = 0.0f; x < req.DstW - 1e-3f; x += tileW) {
+            const float w = std::min(tileW, req.DstW - x);
+            SliceQuad q;
+            q.DstX = req.DstX + x; q.DstY = req.DstY + y; q.DstW = w; q.DstH = h;
+            q.SrcX = req.SrcX; q.SrcY = req.SrcY;
+            q.SrcW = req.SrcW * (w / tileW);
+            q.SrcH = req.SrcH * (h / tileH);
+            out.push_back(q);
+        }
+    }
+    return out;
+}
+
 std::vector<SliceQuad> Solve(const NineSlice& slice, const SliceRequest& req) {
     std::vector<SliceQuad> quads;
     if (req.SrcW <= 0.0f || req.SrcH <= 0.0f || req.DstW <= 0.0f || req.DstH <= 0.0f) return quads;

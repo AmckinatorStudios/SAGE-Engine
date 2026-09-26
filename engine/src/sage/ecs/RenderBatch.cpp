@@ -121,7 +121,7 @@ void main() {
 }
 
 // --- Текстурный PBR-путь: albedo/normal-карты + TBN (нормал-маппинг) ---
-const char* kTexVert = R"(#version 330 core
+const std::string kTexVert = std::string(R"(#version 330 core
 layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aNormal;
 layout (location = 2) in vec2 aUV;
@@ -137,7 +137,7 @@ out vec2 vUV2;
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProjection;
-
+)") + sage::render::kUVTilingGlsl + R"(
 void main() {
     vec4 world = uModel * vec4(aPos, 1.0);
     FragPos = world.xyz;
@@ -149,7 +149,7 @@ void main() {
     vec3 B = cross(N, T) * aTangent.w;      // знак ориентации (handedness) UV-развёртки
     TBN = mat3(T, B, N);
     Normal = N;
-    TexCoords = aUV;
+    TexCoords = TiledUV(aUV, aNormal, uModel);
     vUV2 = aUV2;
     gl_Position = uProjection * uView * world;
 }
@@ -187,27 +187,37 @@ void main() {}
 // квадратом, хотя сам лист на экране вырезан по контуру. Порог, повтор и
 // сдвиг развёртки — те же, что у цветного прохода: тень обязана совпадать с
 // тем, что видно, до пикселя.
-const char* kDepthAlphaVert = R"(#version 330 core
+const std::string kDepthAlphaVert = std::string(R"(#version 330 core
 layout (location = 0) in vec3 aPos;
+layout (location = 1) in vec3 aNormal;
 layout (location = 2) in vec2 aUV;
 uniform mat4 uLightSpace;
 uniform mat4 uModel;
 out vec2 TexCoords;
+)") + sage::render::kUVTilingGlsl + R"(
 void main() {
-    TexCoords = aUV;
+    TexCoords = TiledUV(aUV, aNormal, uModel);
     gl_Position = uLightSpace * uModel * vec4(aPos, 1.0);
 }
 )";
 const char* kDepthAlphaFrag = R"(#version 330 core
 in vec2 TexCoords;
 uniform sampler2D uAlbedoMap;
-uniform vec2 uUVScale;
 uniform vec2 uUVOffset;
 uniform float uAlphaCutoff;
 void main() {
-    if (texture(uAlbedoMap, TexCoords * uUVScale + uUVOffset).a < uAlphaCutoff) discard;
+    if (texture(uAlbedoMap, TexCoords + uUVOffset).a < uAlphaCutoff) discard;
 }
 )";
+
+// Повтор развёртки — ОДНОЙ функцией на все проходы: режимов у него три, и
+// разбирать их у каждого значило бы показывать одну и ту же стену с разным
+// размером плитки в зависимости от того, каким путём её нарисовали. Размер
+// грани в мире шейдер берёт сам из uModel (kUVTilingGlsl).
+void UploadTiling(Shader& sh, const MaterialRender& render) {
+    sh.SetVec2("uUVScale", BaseTiling(render));
+    sh.SetInt("uUVWorld", render.Tiling == MaterialRender::TilingMode::WorldSize ? 1 : 0);
+}
 
 // Заливка пользовательских юниформ материала в программу. Тип берётся из
 // самого параметра: залить vec4 туда, где объявлен float, — молча ничего не
@@ -627,11 +637,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             // Свёрнутое значение, а не it.Mat->Albedo: тон экземпляра обязан
             // работать и на текстурном пути (см. TexturedItem в заголовке).
             tex.SetVec3("uAlbedoFactor", it.Color);
-            // Повтор считает ОБЩАЯ функция (Material.h): режимов у него три, и
-            // повторять их разбор у каждого прохода значило бы показывать одну
-            // и ту же стену с разным размером плитки в зависимости от того,
-            // каким путём её нарисовали.
-            tex.SetVec2("uUVScale", TilingFactor(it.Mat->Render, WorldScaleOf(it.Model)));
+            UploadTiling(tex, it.Mat->Render);
             tex.SetVec2("uUVOffset",
                         glm::vec2(it.Mat->Render.UVOffsetX, it.Mat->Render.UVOffsetY));
             tex.SetFloat("uMetallic", it.Mat->Metallic);
@@ -764,8 +770,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
                 // Тон и свечение — из инстанса (свёрнутые), как на всех
                 // остальных путях; см. TexturedItem в заголовке.
                 t.SetVec3("uAlbedoFactor", head.Inst.Color);
-                t.SetVec2("uUVScale",
-                          TilingFactor(head.Mat->Render, WorldScaleOf(head.Inst.Model)));
+                UploadTiling(t, head.Mat->Render);
                 t.SetVec2("uUVOffset",
                           glm::vec2(head.Mat->Render.UVOffsetX, head.Mat->Render.UVOffsetY));
                 t.SetFloat("uMetallic", head.Mat->Metallic);
@@ -1116,7 +1121,7 @@ void RenderBatch::RenderDepth(Scene& scene, const glm::mat4& lightMatrix) {
             da.SetMat4("uModel", it.Model);
             // Повтор и сдвиг — той же общей функцией, что и в цветном проходе
             // (Material.h): иначе вырез тени съехал бы относительно листа.
-            da.SetVec2("uUVScale", TilingFactor(it.Mat->Render, WorldScaleOf(it.Model)));
+            UploadTiling(da, it.Mat->Render);
             da.SetVec2("uUVOffset", glm::vec2(it.Mat->Render.UVOffsetX, it.Mat->Render.UVOffsetY));
             da.SetFloat("uAlphaCutoff", it.Mat->Render.AlphaCutoff);
             it.Mat->AlbedoTex->Bind(0);

@@ -137,7 +137,7 @@ TEST(texture_normal_and_data_maps_stay_exact) {
     }
 }
 
-TEST(texture_mips_are_generated_but_not_for_pixel_art) {
+TEST(texture_mips_are_generated_but_not_for_nearest_filtering) {
     const int w = 64, h = 64;
     const std::vector<uint8_t> src = MakeImage(w, h, false);
 
@@ -152,10 +152,10 @@ TEST(texture_mips_are_generated_but_not_for_pixel_art) {
     CHECK_EQ((int)t1.Levels.size(), 7);
     CHECK_EQ(s1.MipLevels, 7);
 
-    // Пиксель-арт: мипы на листе спрайтов подмешивают соседний спрайт по краям,
-    // поэтому для него они не строятся и блочное сжатие не применяется.
+    // Ближайший пиксель: мипы на листе спрайтов подмешивают соседний спрайт по
+    // краям, поэтому они не строятся и блочное сжатие не применяется.
     TextureWriteOptions art;
-    art.Intent = TextureIntent::PixelArt;
+    art.Intent = TextureIntent::Nearest;
     art.GenerateMips = true;
     Blob b = PackTexture(src.data(), w, h, art);
     TextureData t2;

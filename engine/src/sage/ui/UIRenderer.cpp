@@ -122,7 +122,8 @@ UIRenderer::UIRenderer()
     // это не ошибка.
     bool loaded = false;
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
-    if (!cfg.UiFont.empty()) loaded = SetFont(cfg.UiFont, cfg.UiFontPixelHeight, cfg.UiFontPixelArt);
+    if (!cfg.UiFont.empty()) loaded = SetFont(cfg.UiFont, cfg.UiFontPixelHeight,
+                                                cfg.UiFontFiltering == sage::TextureFiltering::Nearest);
     if (!loaded) {
         // EngineAssetPath — потому что «рядом с бинарником» и «в текущей папке»
         // это разные места: плеер уходит в папку проекта, и свой шрифт по
@@ -137,9 +138,9 @@ UIRenderer::UIRenderer()
     }
 }
 
-bool UIRenderer::SetFont(const std::string& path, float pixelHeight, bool pixelArt) {
+bool UIRenderer::SetFont(const std::string& path, float pixelHeight, bool nearest) {
     try {
-        m_font = Font::Load(path, pixelHeight, pixelArt);
+        m_font = Font::Load(path, pixelHeight, nearest);
         // Предупреждение о кириллице — один раз при загрузке. Пиксельные шрифты
         // из готовых наборов почти всегда только латинские, а надписи в игре
         // русские: без этой строки разработчик видит экран вопросительных знаков
@@ -413,6 +414,24 @@ void UIRenderer::ImageSliced(float x, float y, float w, float h, const Texture* 
     }
 }
 
+void UIRenderer::ImageTiled(float x, float y, float w, float h, const Texture* texture, Sprite src,
+                            float tileW, float tileH, glm::vec3 tint, float alpha) {
+    if (!texture || texture->Width() <= 0 || texture->Height() <= 0) return;
+    if (src.Whole()) src = Sprite{0.0f, 0.0f, (float)texture->Width(), (float)texture->Height()};
+    sage::ui::SliceRequest req;
+    req.SrcX = src.X; req.SrcY = src.Y; req.SrcW = src.W; req.SrcH = src.H;
+    req.DstX = x; req.DstY = y; req.DstW = w; req.DstH = h;
+    const std::vector<sage::ui::SliceQuad> quads = sage::ui::SolveTiles(req, tileW, tileH);
+    if (quads.empty()) return;
+    const float tw = (float)texture->Width(), th = (float)texture->Height();
+    CurrentSegment(texture).QuadCount += (int)quads.size();
+    for (const sage::ui::SliceQuad& q : quads) {
+        PushImageQuad(q.DstX, q.DstY, q.DstW, q.DstH,
+                      {q.SrcX / tw, SheetV(q.SrcY, th)},
+                      {(q.SrcX + q.SrcW) / tw, SheetV(q.SrcY + q.SrcH, th)}, tint, alpha);
+    }
+}
+
 void UIRenderer::PushFreeQuad(const glm::vec2 p[4], const glm::vec3 c[4], const float a[4]) {
     for (int i = 0; i < 4; ++i) {
         unsigned char r = static_cast<unsigned char>(glm::clamp(c[i].r, 0.0f, 1.0f) * 255.0f);
@@ -541,10 +560,10 @@ float UIRenderer::BoldOffset(float scale, const Font* font) const {
     return glm::max(1.0f, f->LineHeight(FontScale(scale, f)) * 0.035f);
 }
 
-const Font* UIRenderer::LoadFont(const std::string& path, float pixelHeight, bool pixelArt) {
+const Font* UIRenderer::LoadFont(const std::string& path, float pixelHeight, bool nearest) {
     if (path.empty()) return nullptr;
     const std::string key =
-        path + "|" + std::to_string((int)pixelHeight) + "|" + (pixelArt ? "1" : "0");
+        path + "|" + std::to_string((int)pixelHeight) + "|" + (nearest ? "1" : "0");
     auto it = m_fontCache.find(key);
     if (it != m_fontCache.end()) return it->second.get();
     std::unique_ptr<Font> font;
@@ -562,7 +581,7 @@ const Font* UIRenderer::LoadFont(const std::string& path, float pixelHeight, boo
             const std::string engineFile = sage::EngineAssetPath(path);
             if (std::filesystem::exists(engineFile, ec)) file = engineFile;
         }
-        font = Font::Load(file, pixelHeight, pixelArt);
+        font = Font::Load(file, pixelHeight, nearest);
     } catch (const std::exception& e) {
         // Жалуемся ОДИН раз на файл: запись кладётся пустой, и следующий кадр
         // уже ничего не пытается открыть. Иначе битый путь у надписи на экране

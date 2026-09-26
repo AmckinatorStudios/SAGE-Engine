@@ -1,4 +1,5 @@
 #pragma once
+#include "sage/render/TextureFiltering.h"
 #include <glm/glm.hpp>
 #include <glm/trigonometric.hpp>
 #include <string>
@@ -232,8 +233,8 @@ struct SkyboxSettings {
     // как у пиксельных солнца и луны.
     std::string SunTexture;
     std::string MoonTexture;
-    // Пиксельная графика: картинки светил без сглаживания.
-    bool PixelArt = false;
+    // Фильтрация картинок светил: Nearest — чёткие пиксели без сглаживания.
+    sage::TextureFiltering Filtering = sage::TextureFiltering::Smooth;
     // Звёзды: доля неба, занятая звёздами (1 — как было) и их размер.
     float StarDensity = 1.0f;
     float StarSize = 1.0f;

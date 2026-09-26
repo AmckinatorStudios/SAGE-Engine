@@ -64,7 +64,7 @@ constexpr int kGlyphPadding = 8;
 
 } // namespace
 
-std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight, bool pixelArt) {
+std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight, bool nearest) {
     std::ifstream file(path, std::ios::binary);
     if (!file) {
         throw std::runtime_error("Font: не удалось открыть файл шрифта: " + path);
@@ -189,13 +189,13 @@ std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight, boo
     desc.Channels = 1;
     // Пиксельному шрифту и то и другое во вред: сглаживание размазывает
     // однопиксельные штрихи, мип-уровни съедают их совсем.
-    desc.FilterMode = pixelArt ? sage::rhi::Filter::Nearest : sage::rhi::Filter::Trilinear;
+    desc.FilterMode = nearest ? sage::rhi::Filter::Nearest : sage::rhi::Filter::Trilinear;
     desc.WrapMode = sage::rhi::Wrap::ClampEdge;
-    desc.GenerateMipmaps = !pixelArt;
+    desc.GenerateMipmaps = !nearest;
     font->m_atlas = sage::rhi::GraphicsDevice::Get().CreateTexture2D(desc, atlas.data());
 
-    font->m_pixelArt = pixelArt;
-    LOG_INFO("Font") << "Загружен шрифт " << path << (pixelArt ? " [пиксельный] (" : " (")
+    font->m_nearest = nearest;
+    LOG_INFO("Font") << "Загружен шрифт " << path << (nearest ? " [ближайший пиксель] (" : " (")
                      << (int)pixelHeight
                      << "px, глифов " << font->m_glyphs.size() << ")";
     return font;

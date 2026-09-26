@@ -847,6 +847,34 @@ vec3 ShadePBR(vec3 N, vec3 fragPos, vec3 albedo, float metallic, float rough) {
 )GLSL";
 
 
+// ПОВТОР РАЗВЁРТКИ — В ВЕРШИННОМ ШЕЙДЕРЕ, ПО ГРАНИ.
+//
+// Режим «на метр» (MaterialRender::TilingMode::WorldSize) умножает повтор на
+// размер объекта — но размер у каждой ГРАНИ свой: у куба 4 x 1 x 2 передняя
+// грань тянется на 4 x 1, боковая на 2 x 1, верхняя на 4 x 2. Одно число на
+// весь объект, посчитанное на процессоре, было верным лишь для одной стороны.
+// Здесь пара осей выбирается по нормали вершины в пространстве модели (доли
+// |n|, чтобы у скруглённых форм пары плавно перетекали), а масштаб — из самой
+// матрицы модели. Копия на процессоре — sage::render::TilingFactor.
+//
+// Встраивается в вершинный шейдер, у которого есть uModel (или своя матрица).
+inline const char* kUVTilingGlsl = R"GLSL(
+// Повтор материала: одно число на обе оси или пара (BaseTiling).
+uniform vec2 uUVScale;
+// true — повтор «на метр»: умножается на размер грани в мире.
+uniform bool uUVWorld;
+vec2 TiledUV(vec2 uv, vec3 localNormal, mat4 model) {
+    vec2 k = uUVScale;
+    if (uUVWorld) {
+        vec3 s = max(vec3(length(model[0].xyz), length(model[1].xyz), length(model[2].xyz)), vec3(0.0001));
+        vec3 w = abs(localNormal);
+        w /= max(w.x + w.y + w.z, 0.0001);
+        k *= w.x * s.zy + w.y * s.xz + w.z * s.xy;
+    }
+    return uv * k;
+}
+)GLSL";
+
 // ФРАГМЕНТНАЯ СТАДИЯ ТЕКСТУРНОГО PBR — ОДНА НА ВЕСЬ ДВИЖОК.
 //
 // Её собирают ДВА пути: статический текстурный меш (ecs/RenderBatch) и
@@ -874,10 +902,9 @@ uniform bool uLightmapEnabled;
 uniform sampler2D uLightmap;
 
 uniform vec3 uAlbedoFactor;
-// Повтор текстуры по развёртке (см. MaterialRender::UVScale*). Умножается
-// ЗДЕСЬ, а не в вершинном шейдере: TBN и вторая развёртка (лайтмапа) повтора
-// не знают и знать не должны — лайтмапа уникальна на объект по построению.
-uniform vec2 uUVScale;
+// Повтор текстуры приходит УЖЕ в TexCoords: его считает вершинный шейдер
+// (kUVTilingGlsl), потому что зависит он от грани. Вторая развёртка
+// (лайтмапа) повтора не знает и знать не должна — она уникальна на объект.
 // Сдвиг развёртки (доли текстуры). Складывается ПОСЛЕ умножения на повтор:
 // сдвиг задают в плитках («на треть плитки правее»), а не в долях грани, —
 // иначе смысл числа менялся бы при каждой смене повтора.
@@ -923,7 +950,7 @@ uniform sampler2D uEmissiveMap;
 uniform bool uHasEmissive;
 )") + kPbrSharedGlsl + R"(
 void main() {
-    vec2 uv = TexCoords * uUVScale + uUVOffset;
+    vec2 uv = TexCoords + uUVOffset;
     vec4 base = vec4(uAlbedoFactor, 1.0);
     if (uHasAlbedo) base *= texture(uAlbedoMap, uv);
     // Отсечение по альфе — ДО всей остальной работы: отброшенный пиксель не

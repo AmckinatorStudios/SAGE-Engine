@@ -229,7 +229,7 @@ bool ImportBlockbench(const std::string& path, ImportedScene& out, std::string& 
             ImportedMaterial m;
             m.Name = t.value("name", "texture");
             m.AlbedoTexture = t.value("relative_path", t.value("path", std::string()));
-            m.Roughness = 1.0f;   // пиксель-арт: блик на нём выглядит инородно
+            m.Roughness = 1.0f;   // рисунок по пикселям: блик на нём выглядит инородно
             out.Materials.push_back(std::move(m));
         }
     }

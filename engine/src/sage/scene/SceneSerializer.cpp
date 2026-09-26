@@ -201,7 +201,7 @@ static json LightingToJson(const LightingEnvironment& lighting) {
         sh["moonPhase"] = s.MoonPhase;
         sh["sunTexture"] = s.SunTexture;
         sh["moonTexture"] = s.MoonTexture;
-        sh["pixelArt"] = s.PixelArt;
+        sh["filtering"] = sage::TextureFilteringKey(s.Filtering);
         sh["starDensity"] = s.StarDensity;
         sh["starSize"] = s.StarSize;
         json& cl = j["skybox"]["clouds"];
@@ -364,7 +364,12 @@ static LightingEnvironment LightingFromJson(const json& root) {
             s.MoonPhase = sh.value("moonPhase", s.MoonPhase);
             s.SunTexture = sh.value("sunTexture", s.SunTexture);
             s.MoonTexture = sh.value("moonTexture", s.MoonTexture);
-            s.PixelArt = sh.value("pixelArt", s.PixelArt);
+            // Фильтрация — словом. Старые сцены писали галку «pixelArt»:
+            // читается как Nearest, чтобы небо не поменяло вид при загрузке.
+            if (sh.contains("filtering") && sh["filtering"].is_string())
+                sage::TextureFilteringFromKey(sh["filtering"].get<std::string>(), s.Filtering);
+            else if (sh.value("pixelArt", false))
+                s.Filtering = sage::TextureFiltering::Nearest;
             s.StarDensity = sh.value("starDensity", s.StarDensity);
             s.StarSize = sh.value("starSize", s.StarSize);
         }
@@ -889,7 +894,7 @@ static sage::scene::LegacyElement ParseUIElement(const json& uj) {
     if (uj.contains("sprite")) u.Sprite = Vec4FromJson(uj["sprite"], u.Sprite);
     if (uj.contains("sliceBorder")) u.SliceBorder = Vec4FromJson(uj["sliceBorder"], u.SliceBorder);
     u.PixelScale = uj.value("pixelScale", u.PixelScale);
-    u.PixelArt = uj.value("pixelArt", u.PixelArt);
+    u.Nearest = uj.value("pixelArt", u.Nearest);   // ключ старого формата
     if (uj.contains("spriteHover")) u.SpriteHover = Vec4FromJson(uj["spriteHover"], u.SpriteHover);
     if (uj.contains("spritePressed"))
         u.SpritePressed = Vec4FromJson(uj["spritePressed"], u.SpritePressed);
@@ -905,10 +910,9 @@ static sage::scene::LegacyElement ParseUIElement(const json& uj) {
     u.AutoWidth = uj.value("autoWidth", u.AutoWidth);
     // Текстура картинки — рантайм, из кэша (nullptr при ошибке — заглушка цветом).
     if (!u.TexturePath.empty()) {
-        // Пиксель-арт грузится ближайшим соседом и без мипмапов — иначе набор
-        // спрайтов размывается, а мипмапы ЛИСТА подмешивают в края соседний
-        // спрайт.
-        u.Tex = u.PixelArt
+        // Фильтрация «ближайший пиксель» — без мипмапов: иначе набор спрайтов
+        // размывается, а мипмапы ЛИСТА подмешивают в края соседний спрайт.
+        u.Tex = u.Nearest
                     ? ResourceManager::Instance().GetTexture(u.TexturePath, TextureFilter::Nearest,
                                                              /*mipmaps=*/false)
                     : ResourceManager::Instance().GetTexture(u.TexturePath);

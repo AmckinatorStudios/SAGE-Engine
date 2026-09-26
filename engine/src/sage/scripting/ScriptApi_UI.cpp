@@ -316,8 +316,7 @@ void ScriptEngine::RegisterUIApi() {
         // такая же обычная просьба, как в редакторе.
         "Font", UI_FIELD(sage::ui::Label, Font),
         "FontPixelHeight", UI_FIELD(sage::ui::Label, FontPixelHeight),
-        // Фильтрация строкой: "smooth" или "nearest". Движок не знает жанра
-        // «пиксель-арт», он знает ближайшего соседа (см. TextureFiltering).
+        // Фильтрация строкой: "smooth" или "nearest" (см. TextureFiltering).
         "FontSnapPixels", UI_FIELD(sage::ui::Label, FontSnapPixels),
         "FontFilter", sol::property(
                           [](UIRef& r) {
@@ -375,6 +374,8 @@ void ScriptEngine::RegisterUIApi() {
         "SpritePressed", UI_FIELD(sage::ui::Image, SpritePressed),
         "SliceBorder", UI_FIELD(sage::ui::Image, SliceBorder),
         "PixelScale", UI_FIELD(sage::ui::Image, PixelScale),
+        // Замощение: копий по ширине и высоте (vec2; 0 по оси — своим размером).
+        "Repeat", UI_FIELD(sage::ui::Image, Repeat),
         "SnapPixels", UI_FIELD(sage::ui::Image, SnapPixels),
         "Filter", sol::property(
                       [](UIRef& r) {
@@ -515,7 +516,7 @@ void ScriptEngine::RegisterUIApi() {
         canvas.MatchWidthOrHeight = opts.get_or("match", canvas.MatchWidthOrHeight);
     });
 
-    // Картинка UI-элемента: путь + признак пиксель-арта. Отдельной функцией, а
+    // Картинка UI-элемента: путь + резкая ли фильтрация. Отдельной функцией, а
     // не полем TexturePath, потому что путь без ЗАГРУЗКИ ничего не рисует, а
     // загрузить надо с правильной фильтрацией — из скрипта об этом помнить
     // незачем.
@@ -524,9 +525,7 @@ void ScriptEngine::RegisterUIApi() {
         if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return;
         sage::ui::Image& im = obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity());
         im.Path = path;
-        // Второй аргумент — РЕЗКАЯ ли фильтрация (ближайший сосед). Прежде он
-        // назывался «пиксель-арт», то есть обещал знание о жанре картинки,
-        // которого у движка нет.
+        // Второй аргумент — РЕЗКАЯ ли фильтрация (ближайший пиксель).
         im.Filtering = sharp.value_or(false) ? sage::ui::TextureFiltering::Nearest
                                              : sage::ui::TextureFiltering::Smooth;
         // "rt:<имя>" — картинка, которую движок рисует сам (см. render/
@@ -584,7 +583,7 @@ void ScriptEngine::RegisterUIApi() {
         return true;
     });
 
-    // Повторять тянущиеся куски вместо растягивания. Для пиксель-арта и узоров
+    // Повторять тянущиеся куски вместо растягивания. Для рисунка по пикселям и узоров
     // это единственный правильный ответ: орнамент из 16 пикселей, растянутый на
     // 300, превращается в мыло.
     Bind("ui", "SetSliceTiled", "SetUISliceTiled", [](GameObject& obj, bool tiled) {

@@ -78,7 +78,12 @@ void ScriptEngine::RegisterLightingApi() {
         "MoonPhase", &SkyboxSettings::MoonPhase,
         "SunTexture", &SkyboxSettings::SunTexture,
         "MoonTexture", &SkyboxSettings::MoonTexture,
-        "PixelArt", &SkyboxSettings::PixelArt,
+        // Фильтрация картинок светил словом: «smooth» или «nearest».
+        "Filtering", sol::property(
+                         [](const SkyboxSettings& s) { return std::string(sage::TextureFilteringKey(s.Filtering)); },
+                         [](SkyboxSettings& s, const std::string& key) {
+                             sage::TextureFilteringFromKey(key, s.Filtering);
+                         }),
         "StarDensity", &SkyboxSettings::StarDensity,
         "StarSize", &SkyboxSettings::StarSize,
         "Clouds", &SkyboxSettings::Clouds,

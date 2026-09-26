@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include "sage/render/TextureFiltering.h"
 
 // ---------------------------------------------------------------------------
 // EngineConfig — единый гибкий конфиг движка: окно, дисплей и качество графики.
@@ -112,8 +113,9 @@ struct EngineConfig {
     // шрифт, и высота запекания у него своя — сглаженный контур ей не идёт.
     std::string UiFont;
     float UiFontPixelHeight = 48.0f;
-    // Шрифт нарисован по пикселям: атлас без сглаживания и целый масштаб.
-    bool UiFontPixelArt = false;
+    // Фильтрация атласа шрифта. Nearest — чёткие пиксели без сглаживания и
+    // целый масштаб (шрифт нарисован по пикселям).
+    sage::TextureFiltering UiFontFiltering = sage::TextureFiltering::Smooth;
 
     // --- Объёмный свет и облака (бета, см. render/Volumetrics.h) ---
     // Выключено по умолчанию: это самый дорогой проход кадра, и игра включает

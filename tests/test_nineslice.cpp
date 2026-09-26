@@ -9,6 +9,7 @@
 // ===========================================================================
 #include "TestFramework.h"
 
+#include "sage/ui/ImageFit.h"
 #include "sage/ui/NineSlice.h"
 #include "sage/ui/components/Visual.h"
 
@@ -289,4 +290,57 @@ TEST(ImageMode_tile_keeps_the_border_out_of_it) {
     img.SliceBorder = {8.0f, 8.0f, 8.0f, 8.0f};
     img.Fit = sage::ui::Image::Mode::Tile;
     CHECK_TRUE(img.DrawSlice().Empty());
+}
+
+// --- Замощение заданным числом копий ----------------------------------------
+//
+// «Повторить три раза по ширине и дважды по высоте» — плитка становится долей
+// элемента. Раньше замощение умело только «своим размером», и число копий
+// приходилось подбирать размером пикселя под каждый размер элемента.
+TEST(Tile_repeat_count_splits_the_element_into_copies) {
+    float tw = 0.0f, th = 0.0f;
+    sage::ui::TileSize(16.0f, 16.0f, 3.0f, 2.0f, 300.0f, 100.0f, 1.0f, tw, th);
+    CHECK_NEAR(tw, 100.0f, 1e-4f);
+    CHECK_NEAR(th, 50.0f, 1e-4f);
+
+    SliceRequest req;
+    req.SrcW = 16.0f; req.SrcH = 16.0f;
+    req.DstW = 300.0f; req.DstH = 100.0f;
+    const std::vector<SliceQuad> q = sage::ui::SolveTiles(req, tw, th);
+    CHECK_EQ((int)q.size(), 6);
+    for (const SliceQuad& s : q) {
+        CHECK_NEAR(s.DstW, 100.0f, 1e-3f);
+        CHECK_NEAR(s.DstH, 50.0f, 1e-3f);
+        CHECK_NEAR(s.SrcW, 16.0f, 1e-3f);   // каждая копия — картинка целиком
+    }
+}
+
+// Дробное число копий ОБРЕЗАЕТ последнюю — вместе с куском исходника, — а не
+// сжимает её: сжатая плитка выдала бы шов.
+TEST(Tile_fractional_repeat_cuts_the_last_copy) {
+    float tw = 0.0f, th = 0.0f;
+    sage::ui::TileSize(16.0f, 16.0f, 2.5f, 1.0f, 250.0f, 40.0f, 1.0f, tw, th);
+    SliceRequest req;
+    req.SrcW = 16.0f; req.SrcH = 16.0f;
+    req.DstW = 250.0f; req.DstH = 40.0f;
+    const std::vector<SliceQuad> q = sage::ui::SolveTiles(req, tw, th);
+    CHECK_EQ((int)q.size(), 3);
+    CHECK_NEAR(q[2].DstW, 50.0f, 1e-3f);
+    CHECK_NEAR(q[2].SrcW, 8.0f, 1e-3f);   // половина исходника на половину плитки
+}
+
+// Ноль по оси — своим размером (как было): старые сцены не меняют вид. А
+// плитка в доли пикселя не заливает буфер миллионами квадов.
+TEST(Tile_zero_repeat_keeps_own_size_and_count_is_capped) {
+    float tw = 0.0f, th = 0.0f;
+    sage::ui::TileSize(16.0f, 8.0f, 0.0f, 4.0f, 320.0f, 64.0f, 2.0f, tw, th);
+    CHECK_NEAR(tw, 32.0f, 1e-4f);   // 16 пикселей исходника x 2
+    CHECK_NEAR(th, 16.0f, 1e-4f);   // 64 / 4
+
+    SliceRequest req;
+    req.SrcW = 16.0f; req.SrcH = 16.0f;
+    req.DstW = 4000.0f; req.DstH = 4000.0f;
+    const std::vector<SliceQuad> q = sage::ui::SolveTiles(req, 0.5f, 0.5f);
+    CHECK_TRUE(!q.empty());
+    CHECK_TRUE((int)q.size() <= sage::ui::kMaxTiles + 200);
 }

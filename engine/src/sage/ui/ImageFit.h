@@ -76,4 +76,15 @@ inline float SlicedPixelScale(float pixelScale, bool snapPixels, float canvasSca
     return k;
 }
 
+// РАЗМЕР ПЛИТКИ ЗАМОЩЕНИЯ на экране, по осям отдельно. repeat — сколько копий
+// уложить по ширине и высоте элемента (дробное — последняя обрезается); 0 по
+// оси — плитка своим размером (исходник x pixelScale), как было всегда.
+// Раздельно по осям, потому что «три раза по ширине» и «своим размером по
+// высоте» — законная пара: полоса-орнамент вдоль длинной кнопки.
+inline void TileSize(float srcW, float srcH, float repeatX, float repeatY, float rectW, float rectH,
+                     float pixelScale, float& tileW, float& tileH) {
+    tileW = repeatX > 0.0f ? rectW / repeatX : srcW * pixelScale;
+    tileH = repeatY > 0.0f ? rectH / repeatY : srcH * pixelScale;
+}
+
 } // namespace sage::ui

@@ -635,7 +635,7 @@ void DrawInterfaceProperties(EditorHost& host, GameObject obj) {
     // размер экрана весь экран. Пока это поле жило на корневом элементе, два
     // корня одного интерфейса могли спорить о масштабе.
     ImGui::SeparatorText(T("Canvas"));
-    const char* kModes[] = {T("Pixels"), T("Scale to reference"), T("Whole-number scale (pixel art)")};
+    const char* kModes[] = {T("Pixels"), T("Scale to reference"), T("Whole-number scale")};
     int mode = (int)info->Canvas.Mode;
     if (ImGui::Combo(T("Scale mode"), &mode, kModes, 3)) {
         host.PushUndoSnapshot();
@@ -659,7 +659,7 @@ void DrawInterfaceProperties(EditorHost& host, GameObject obj) {
         host.TrackLastImGuiItem();
         ImGui::DragInt(T("Largest scale"), &info->Canvas.MaxScale, 0.05f, 0, 16);
         host.TrackLastImGuiItem();
-        EditorTheme::Hint(T("The largest whole number that fits the reference screen: pixel art stays crisp. 0 — no limit"));
+        EditorTheme::Hint(T("The largest whole number that fits the reference screen: every source pixel stays the same size. 0 — no limit"));
     }
 
     // Элементы правятся у САМИХ ЭЛЕМЕНТОВ. Сказано прямо, потому что именно

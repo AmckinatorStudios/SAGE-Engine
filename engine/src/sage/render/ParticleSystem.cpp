@@ -633,7 +633,8 @@ void ParticleSystem::Impl::EnsureGpu() {
 
 const TextureEntry* ParticleSystem::Impl::TextureFor(const ParticleEffect& fx) {
     if (fx.Texture.empty() && fx.Frames.empty()) return nullptr;
-    std::string key = fx.PixelArt ? "px|" : "sm|";
+    const bool nearest = fx.Filtering == sage::TextureFiltering::Nearest;
+    std::string key = nearest ? "px|" : "sm|";
     if (!fx.Frames.empty()) {
         for (const std::string& f : fx.Frames) key += f + "\n";
     } else {
@@ -643,12 +644,12 @@ const TextureEntry* ParticleSystem::Impl::TextureFor(const ParticleEffect& fx) {
     if (it != Textures.end()) return it->second.Tex ? &it->second : nullptr;
 
     TextureEntry e;
-    const TextureFilter filter = fx.PixelArt ? TextureFilter::Nearest : TextureFilter::Bilinear;
+    const TextureFilter filter = nearest ? TextureFilter::Nearest : TextureFilter::Bilinear;
     if (fx.Frames.empty()) {
         // Лист кадров без мип-уровней: на мелком уровне соседние кадры
         // смешиваются, и по краю частицы проступает чужой кадр.
         const bool sheet = fx.TilesX > 1 || fx.TilesY > 1;
-        e.Tex = ResourceManager::Instance().GetTexture(fx.Texture, filter, !sheet && !fx.PixelArt, false, true);
+        e.Tex = ResourceManager::Instance().GetTexture(fx.Texture, filter, !sheet && !nearest, false, true);
         e.Tiles = glm::vec2((float)std::max(fx.TilesX, 1), (float)std::max(fx.TilesY, 1));
     } else {
         // КАДРЫ ОТДЕЛЬНЫМИ ФАЙЛАМИ — склеиваем в лист. Наборы часто приходят

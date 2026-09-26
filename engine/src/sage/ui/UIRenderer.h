@@ -72,7 +72,7 @@ public:
 
     // Заменить шрифт своим (.ttf/.otf). true при успехе; при ошибке шрифт не
     // меняется (лог + возврат false). pixelHeight — базовый размер запекания.
-    bool SetFont(const std::string& path, float pixelHeight = 48.0f, bool pixelArt = false);
+    bool SetFont(const std::string& path, float pixelHeight = 48.0f, bool nearest = false);
     // Загружен ли настоящий TrueType-шрифт (иначе — stb_easy_font fallback).
     bool HasFont() const { return m_font != nullptr; }
 
@@ -183,6 +183,10 @@ public:
     void ImageSliced(float x, float y, float w, float h, const Texture* texture, Sprite src,
                      const sage::ui::NineSlice& slice, float scale,
                      glm::vec3 tint = glm::vec3(1.0f), float alpha = 1.0f);
+    // Замощение плиткой tileW x tileH экранных пикселей (см. ui::SolveTiles):
+    // «повторить N раз» по осям отдельно.
+    void ImageTiled(float x, float y, float w, float h, const Texture* texture, Sprite src,
+                    float tileW, float tileH, glm::vec3 tint = glm::vec3(1.0f), float alpha = 1.0f);
 
     // --- Формы (v3) --------------------------------------------------------
     // Круг и кольцо — частный случай скруглённого прямоугольника с радиусом в
@@ -225,7 +229,7 @@ public:
     // не открылся (о причине — один раз в лог, дальше молча: иначе битый путь
     // залил бы лог по строке на кадр).
     const Font* LoadFont(const std::string& path, float pixelHeight = 48.0f,
-                         bool pixelArt = false);
+                         bool nearest = false);
 
     // Текст с левым верхним углом в (x, y). scale 1.0 — "родные" ~7px глифы,
     // на практике для читаемости используем 1.5–2.5. alpha — прозрачность.

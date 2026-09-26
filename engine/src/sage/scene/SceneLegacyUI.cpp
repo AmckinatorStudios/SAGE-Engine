@@ -51,9 +51,8 @@ void Decompose(const LegacyElement& flat, entt::registry& reg, entt::entity e) {
         image.Sprite = flat.Sprite;
         image.SliceBorder = flat.SliceBorder;
         image.PixelScale = flat.PixelScale;
-        // Старое поле «пиксель-арт» — это и была резкая фильтрация
-        // (см. sage::ui::TextureFiltering).
-        image.Filtering = flat.PixelArt ? TextureFiltering::Nearest : TextureFiltering::Smooth;
+        // Старая галка — это и была резкая фильтрация (sage::TextureFiltering).
+        image.Filtering = flat.Nearest ? TextureFiltering::Nearest : TextureFiltering::Smooth;
         image.SpriteHover = flat.SpriteHover;
         image.SpritePressed = flat.SpritePressed;
         image.Tex = flat.Tex;
