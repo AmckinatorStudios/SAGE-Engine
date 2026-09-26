@@ -193,8 +193,8 @@ void EnvironmentPanel::DrawSkySection(EditorHost& host, LightingEnvironment& env
         if (ImGui::Checkbox(T("Own colour below the horizon"), &sky.Ground)) host.PushUndoSnapshot();
         if (ImGui::IsItemHovered()) {
             ImGui::SetTooltip("%s", T("Off — the horizon colour goes down to the nadir.\n"
-                                      "On — its own colour below the horizon (the deep blue\n"
-                                      "void of Minecraft)."));
+                                      "On — its own colour below the horizon (for example\n"
+                                      "a deep blue void)."));
         }
         if (sky.Ground) {
             Sage::UI::ColorField3(T("Below horizon"), &sky.GroundColor.x); host.TrackLastImGuiItem();
@@ -482,7 +482,7 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     DrawAmbientSection(host, env);
 
     if (EditorTheme::SectionHeader("cone", T("Fog" "###Fog"), ImGuiTreeNodeFlags_DefaultOpen, nullptr,
-                                   T("Air of the scene: linear distance fog or exponential height fog as in Unreal"))) {
+                                   T("Air of the scene: linear distance fog or exponential height fog"))) {
         if (ImGui::Checkbox(T("Enable Fog"), &env.Fog.Enabled)) host.PushUndoSnapshot();
         const char* kinds[] = {T("Linear"), T("Exponential height")};
         int kind = (int)env.Fog.Kind;

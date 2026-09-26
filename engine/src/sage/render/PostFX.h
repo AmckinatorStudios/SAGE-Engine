@@ -56,8 +56,9 @@ struct PostScratch {
     std::unique_ptr<sage::rhi::RenderTarget> Ao, AoBlur;
     // Свечение: bright-pass в Bright, две итерации размытия через BloomA/BloomB.
     std::unique_ptr<sage::rhi::RenderTarget> Bright, BloomA, BloomB;
-    // Глубина резкости: половинные префильтр и сбор.
-    std::unique_ptr<sage::rhi::RenderTarget> DofPrep, DofBlur;
+    // Глубина резкости (половинные): префильтр, дальний план, досягаемость
+    // ближнего (два прохода максимума) и слой ближнего плана.
+    std::unique_ptr<sage::rhi::RenderTarget> DofPrep, DofBlur, DofNearMaxA, DofNearMaxB, DofNear;
 
     // Пул целей под запись для звеньев. Ключ — делитель разрешения (1, 2, 4):
     // эффекту вроде свечения нужна половинная цель, и она у него своя, а не
@@ -78,6 +79,9 @@ struct PostScratch {
     // 1x1). Две цели по очереди: новая считается из старой, а писать в ту же
     // текстуру, из которой читаешь, нельзя.
     std::unique_ptr<sage::rhi::RenderTarget> Adapt[2];
+    // Блик в объективе (звено «Lens Flare»): его маленькие цели и геометрия.
+    // shared_ptr — чтобы этот заголовок не тянул за собой LensFlare.h.
+    std::shared_ptr<class LensFlare> Flare;
     int AdaptIndex = 0;
     bool HasAdapt = false;
     float AdaptTime = 0.0f;
@@ -128,6 +132,11 @@ public:
         m_scratch.HasAdapt = false;
     }
 
+    // Освещение кадра для звеньев, которым нужно солнце (блик в объективе).
+    // Держится указателем до следующего вызова: окружение живёт у вызывающего
+    // весь кадр. nullptr — такие звенья пропускаются с причиной в логе.
+    void SetLighting(const LightingEnvironment* env) { m_lighting = env; }
+
     // Копирует готовую картинку в цель вывода (FBO вьюпорта либо экран), в
     // прямоугольник (outX,outY,outW,outH). Тем же проходом, которым
     // заканчивается тракт.
@@ -176,6 +185,7 @@ private:
                                        int h = 0);
 
     PostScratch m_scratch;
+    const LightingEnvironment* m_lighting = nullptr;
 };
 
 } // namespace sage::render

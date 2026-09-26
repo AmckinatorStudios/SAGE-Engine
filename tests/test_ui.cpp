@@ -706,8 +706,8 @@ TEST(sky_shape_reaches_renderer_with_time_of_day) {
 
 TEST(sky_presets_parse_and_keep_textured_sky) {
     sage::render::SkyPreset p = sage::render::SkyPreset::Default;
-    CHECK_TRUE(sage::render::ParseSkyPreset("minecraft", p));
-    CHECK_TRUE(p == sage::render::SkyPreset::Minecraft);
+    CHECK_TRUE(sage::render::ParseSkyPreset("blocky", p));
+    CHECK_TRUE(p == sage::render::SkyPreset::Blocky);
     CHECK_FALSE(sage::render::ParseSkyPreset("mars", p));
 
     SkyboxSettings sky;
@@ -715,21 +715,21 @@ TEST(sky_presets_parse_and_keep_textured_sky) {
     sky.Kind = SkyboxSettings::Source::Image;
     sky.Intensity = 1.7f;
     sky.DayNight = false;
-    sage::render::ApplySkyPreset(sky, sage::render::SkyPreset::Minecraft);
+    sage::render::ApplySkyPreset(sky, sage::render::SkyPreset::Blocky);
     // Пресет — это ВИД процедурного неба: выбранная картинка, яркость и смена
     // суток остаются решениями автора.
     CHECK_TRUE(sky.Kind == SkyboxSettings::Source::Procedural);
     CHECK_EQ(sky.ImagePath, std::string("sky/space.png"));
     CHECK_NEAR(sky.Intensity, 1.7f, 1e-6f);
     CHECK_FALSE(sky.DayNight);
-    // Узнаваемые приметы Minecraft.
+    // Узнаваемые приметы блочного неба.
     CHECK_TRUE(sky.Ground);
     CHECK_TRUE(sky.Clouds);
     CHECK_TRUE(sky.CloudKind == SkyboxSettings::CloudStyle::Blocky);
     CHECK_TRUE(sky.SunShape == SkyboxSettings::DiscShape::Square);
     CHECK_NEAR(sky.SunGlow, 0.0f, 1e-6f);
 
-    // «По умолчанию» возвращает прежний вид целиком — без облаков Minecraft.
+    // «По умолчанию» возвращает прежний вид целиком — без блочных облаков.
     sage::render::ApplySkyPreset(sky, sage::render::SkyPreset::Default);
     const SkyboxSettings def;
     CHECK_FALSE(sky.Clouds);
@@ -935,7 +935,7 @@ TEST(UI2_masks_intersect_and_never_go_negative) {
 }
 
 TEST(UI2_canvas_integer_scale_for_pixel_art) {
-    // Пиксельный интерфейс (Minecraft) масштабируется ЦЕЛЫМ числом: при
+    // Пиксельный интерфейс масштабируется ЦЕЛЫМ числом: при
     // дробном одни пиксели картинки выходят двумя экранными, соседние одним.
     sage::ui::Canvas c;
     c.Mode = sage::ui::Canvas::Scale::IntegerFit;

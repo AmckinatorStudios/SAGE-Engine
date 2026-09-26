@@ -4,6 +4,8 @@
 #include "sage/core/Log.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/render/SkyPresets.h"
+#include "sage/render/PostProcessComponent.h"
+#include "sage/ecs/CameraView.h"
 
 // ---------------------------------------------------------------------------
 // Освещение и отражения: sage.light.*, sage.reflect.*
@@ -105,7 +107,7 @@ void ScriptEngine::RegisterLightingApi() {
         "CloudWind", &SkyboxSettings::CloudWind,
         "CloudFade", &SkyboxSettings::CloudFade
     );
-    // Готовый вид неба одним вызовом: "default", "minecraft", "overcast".
+    // Готовый вид неба одним вызовом: "default", "blocky", "overcast".
     // Меняет только вид процедурного неба — выбранные файлы текстурного неба
     // остаются на месте.
     Bind("light", "SetSkyPreset", "ApplySkyPreset", [this](const std::string& name) {
@@ -267,23 +269,44 @@ void ScriptEngine::RegisterLightingApi() {
     // решает это игра. У «Корабля» он живёт ровно на восходе и закате, когда
     // солнце низко и смотришь на него в упор, — днём в зените он был бы
     // грязью на весь кадр.
-    Bind("lensflare", "Set", "SetLensFlare", [](sol::table t) {
-        sage::EngineConfig& cfg = sage::EngineConfig::Get();
-        cfg.LensFlare = t.get_or("enabled", cfg.LensFlare);
-        cfg.LensFlareIntensity = t.get_or("intensity", cfg.LensFlareIntensity);
-        cfg.LensFlareGhosts = t.get_or("ghosts", cfg.LensFlareGhosts);
-        cfg.LensFlareGhostSpacing = t.get_or("ghostSpacing", cfg.LensFlareGhostSpacing);
-        cfg.LensFlareGhostSize = t.get_or("ghostSize", cfg.LensFlareGhostSize);
-        cfg.LensFlareBlades = t.get_or("blades", cfg.LensFlareBlades);
-        cfg.LensFlareHalo = t.get_or("halo", cfg.LensFlareHalo);
-        cfg.LensFlareHaloRadius = t.get_or("haloRadius", cfg.LensFlareHaloRadius);
-        cfg.LensFlareStarburst = t.get_or("starburst", cfg.LensFlareStarburst);
-        cfg.LensFlareGlare = t.get_or("glare", cfg.LensFlareGlare);
-        cfg.LensFlareChroma = t.get_or("chroma", cfg.LensFlareChroma);
-        cfg.LensFlareThreshold = t.get_or("threshold", cfg.LensFlareThreshold);
+    //
+    // Блик — звено пост-обработки камеры («Lens Flare»). Скрипт правит его в том
+    // компоненте, что обрабатывает главную камеру; нет компонента — он
+    // заводится на главной камере с одним этим звеном.
+    Bind("lensflare", "Set", "SetLensFlare", [this](sol::table t) {
+        if (!m_scene) return;
+        const entt::entity cam = sage::ecs::PrimaryCameraEntity(*m_scene);
+        sage::render::PostProcessComponent* pp = sage::render::ActivePostComponent(*m_scene, cam);
+        if (!pp) {
+            if (cam == entt::null) return;
+            sage::render::PostProcessComponent fresh;
+            fresh.Chain = sage::render::PostChain{};
+            pp = &m_scene->Registry().emplace<sage::render::PostProcessComponent>(cam, fresh);
+        }
+        sage::render::PostEffect* fx = nullptr;
+        for (sage::render::PostEffect& e : pp->Chain.Effects)
+            if (e.Kind == "lensflare") { fx = &e; break; }
+        if (!fx) {
+            fx = &sage::render::AddPostEffect(pp->Chain, "lensflare");
+            fx->Enabled = false;
+        }
+        fx->Enabled = t.get_or("enabled", fx->Enabled);
+        static const char* kKeys[] = {"intensity", "ghosts", "ghostSpacing", "ghostSize", "blades",
+                                      "halo", "haloRadius", "starburst", "glare", "chroma",
+                                      "threshold"};
+        for (const char* key : kKeys) {
+            if (!t[key].valid()) continue;
+            if (sage::render::PostValue* v = fx->Find(key)) v->V[0] = t.get<float>(key);
+        }
     });
-    Bind("lensflare", "Enabled", "LensFlareEnabled", []() -> bool {
-        return sage::EngineConfig::Get().LensFlare;
+    Bind("lensflare", "Enabled", "LensFlareEnabled", [this]() -> bool {
+        if (!m_scene) return false;
+        sage::render::PostChain chain;
+        if (!sage::render::ResolvePostChain(*m_scene, sage::ecs::PrimaryCameraEntity(*m_scene), chain))
+            return false;
+        for (const sage::render::PostEffect& e : chain.Effects)
+            if (e.Kind == "lensflare" && e.Enabled) return true;
+        return false;
     });
 }
 

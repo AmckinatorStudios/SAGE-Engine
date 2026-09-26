@@ -211,27 +211,26 @@ Shader& FlareShader() {
 
 } // namespace
 
-LensFlareSettings LensFlareFromConfig(const sage::EngineConfig& cfg) {
-    LensFlareSettings f;
-    f.Enabled = cfg.LensFlare;
-    f.Intensity = cfg.LensFlareIntensity;
-    f.Ghosts = cfg.LensFlareGhosts;
-    f.GhostSpacing = cfg.LensFlareGhostSpacing;
-    f.GhostSize = cfg.LensFlareGhostSize;
-    f.ApertureBlades = cfg.LensFlareBlades;
-    f.Halo = cfg.LensFlareHalo;
-    f.HaloRadius = cfg.LensFlareHaloRadius;
-    f.Starburst = cfg.LensFlareStarburst;
-    f.Glare = cfg.LensFlareGlare;
-    f.Chroma = cfg.LensFlareChroma;
-    f.Threshold = cfg.LensFlareThreshold;
-    return f;
-}
 
 void LensFlare::Render(Framebuffer& target, sage::rhi::TextureHandle sceneColor,
                        sage::rhi::TextureHandle sceneDepth, int w, int h, const glm::mat4& proj,
                        const glm::mat4& view, const LightingEnvironment& env,
                        const LensFlareSettings& s) {
+    RenderInto([&target] { target.Bind(); }, sceneColor, sceneDepth, w, h, proj, view, env, s);
+}
+
+void LensFlare::Render(sage::rhi::RenderTarget& target, sage::rhi::TextureHandle sceneColor,
+                       sage::rhi::TextureHandle sceneDepth, int w, int h, const glm::mat4& proj,
+                       const glm::mat4& view, const LightingEnvironment& env,
+                       const LensFlareSettings& s) {
+    RenderInto([&target] { target.Bind(); }, sceneColor, sceneDepth, w, h, proj, view, env, s);
+}
+
+void LensFlare::RenderInto(const std::function<void()>& bindTarget,
+                           sage::rhi::TextureHandle sceneColor,
+                           sage::rhi::TextureHandle sceneDepth, int w, int h,
+                           const glm::mat4& proj, const glm::mat4& view,
+                           const LightingEnvironment& env, const LensFlareSettings& s) {
     if (!s.Enabled || s.Intensity <= 0.0f) return;
     if (!sceneColor.Valid() || !sceneDepth.Valid() || w < 8 || h < 8) return;
 
@@ -290,7 +289,7 @@ void LensFlare::Render(Framebuffer& target, sage::rhi::TextureHandle sceneColor,
     m_fsTri->DrawArrays(3);
 
     // --- Проход 2: блик поверх кадра ---
-    target.Bind();
+    bindTarget();
     device.SetViewport(0, 0, w, h);
     device.SetBlend(true);
     device.SetBlendMode(GraphicsDevice::BlendMode::Additive);

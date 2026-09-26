@@ -185,7 +185,17 @@ static void DrawPostProcessSection(EditorHost& host, entt::registry& reg, entt::
     // Общий выключатель — отдельно от удаления компонента: «посмотреть, как без
     // обработки» делают ежеминутно, и терять ради этого настройки нельзя.
     if (ImGui::Checkbox(T("Enabled"), &component->Enabled)) host.PushUndoSnapshot();
-    EditorTheme::Hint(T("off — this camera shows the frame as it is"));
+    EditorTheme::Hint(T("off — every effect of this component is off"));
+    // Где лежит — там и действует (см. PostProcessComponent.h): на камере —
+    // только её кадр, на любом другом объекте — все камеры без своего.
+    if (reg.all_of<CameraComponent>(entity)) {
+        ImGui::TextDisabled("%s", T("Applies to this camera only"));
+    } else {
+        ImGui::TextDisabled("%s", T("Applies to every camera of the scene without its own"));
+        ImGui::DragInt(T("Priority"), &component->Priority, 0.1f, -100, 100);
+        host.TrackLastImGuiItem();
+        EditorTheme::Hint(T("Of several scene-wide components the higher priority wins"));
+    }
 
     // Откат и пометку «сцена изменена» редактор делает САМ, по каждому виджету:
     // у дискретной правки — снимок, у протяжки — отслеживание.

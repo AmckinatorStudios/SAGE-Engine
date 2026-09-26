@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <memory>
 
 #include <glm/glm.hpp>
@@ -71,7 +72,6 @@ struct LensFlareSettings {
     float Threshold = 1.1f;
 };
 
-LensFlareSettings LensFlareFromConfig(const sage::EngineConfig& cfg);
 
 class LensFlare {
 public:
@@ -89,8 +89,18 @@ public:
                 sage::rhi::TextureHandle sceneDepth, int w, int h, const glm::mat4& proj,
                 const glm::mat4& view, const LightingEnvironment& env,
                 const LensFlareSettings& s);
+    // То же в цель пост-обработки: блик — звено тракта камеры («Lens Flare»).
+    void Render(sage::rhi::RenderTarget& target, sage::rhi::TextureHandle sceneColor,
+                sage::rhi::TextureHandle sceneDepth, int w, int h, const glm::mat4& proj,
+                const glm::mat4& view, const LightingEnvironment& env,
+                const LensFlareSettings& s);
 
 private:
+    void RenderInto(const std::function<void()>& bindTarget, sage::rhi::TextureHandle sceneColor,
+                    sage::rhi::TextureHandle sceneDepth, int w, int h, const glm::mat4& proj,
+                    const glm::mat4& view, const LightingEnvironment& env,
+                    const LensFlareSettings& s);
+
     std::unique_ptr<sage::rhi::Geometry> m_fsTri;
     std::unique_ptr<sage::rhi::RenderTarget> m_visible;   // 1x1: доля видимого солнца
 };

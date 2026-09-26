@@ -14,7 +14,7 @@ namespace sage::scripting::detail {
 
 // Навешивает на usertype GameObject единый набор аксессоров к компоненту C:
 //   entity:HasX()    -> bool  (есть ли компонент)
-//   entity:GetX()    -> C | nil (Unity-семантика: nil, если компонента нет)
+//   entity:GetX()    -> C | nil (nil, если компонента нет)
 //   entity:AddX()    -> C     (создаёт при отсутствии и отдаёт ссылкой для правки)
 //   entity:RemoveX()          (снимает компонент)
 // Так один шаблон закрывает Light/Camera/RigidBody/Collider/ParticleEmitter/…

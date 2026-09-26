@@ -644,6 +644,10 @@ void PlayerLayer::OnUpdate(float dt) {
     // и забыть другой.
     const float scale = m_scripts ? m_scripts->FrameTimeScale() : 1.0f;
     const float scaledDt = dt * scale;
+    // Положение мира до шага — «прошлое» для смаза движения: кадр ниже сравнит
+    // с ним то, куда всё сдвинулось. Сдвигается и на паузе: иначе застывший
+    // кадр вечно помнил бы последнее движение и оставался смазанным.
+    m_batch.AdvanceVelocityHistory();
     if (!m_paused && scaledDt > 0.0f) {
         // Сеть — ДО систем кадра и по НЕмасштабированному времени: транспорт
         // живёт в реальных секундах (таймауты, темп снапшотов), и замедление
@@ -1108,6 +1112,14 @@ void PlayerLayer::OnRender() {
         }
         color.ShadingMode = (int)debugView;
         sage::render::RenderSceneColor(*m_scene, m_batch, color);
+        // Скорости — сразу после геометрии (см. VelocityBuffer).
+        sage::rhi::TextureHandle velocity;
+        if (usePost && sage::render::ChainNeedsVelocity(cameraChain)) {
+            velocity = m_velocity.Render(m_batch, view, proj, m_sceneFbo->Width(),
+                                         m_sceneFbo->Height());
+            m_sceneFbo->Bind();
+            device.SetViewport(0, 0, m_sceneFbo->Width(), m_sceneFbo->Height());
+        }
 
         // Частицы (billboard) — camRight/Up берём из матрицы вида.
         if (m_particles) m_particles->DrawFromView(view, proj);
@@ -1139,17 +1151,6 @@ void PlayerLayer::OnRender() {
                                   m_sceneTime);
         }
 
-        // Блик в объективе — ПОСЛЕ объёма: облако, закрывшее солнце, обязано
-        // погасить и блик, а до объёма его в кадре ещё нет. И до пост-обработки:
-        // блик должен пройти через bloom и тон-маппинг вместе со всем кадром.
-        if (usePost && cfg.LensFlare) {
-            m_sceneFbo->Resolve();
-            if (!m_lensFlare) m_lensFlare.emplace();
-            m_lensFlare->Render(*m_sceneFbo, m_sceneFbo->ColorTexture(),
-                                m_sceneFbo->DepthTexture(), m_sceneFbo->Width(),
-                                m_sceneFbo->Height(), proj, view, env,
-                                sage::render::LensFlareFromConfig(cfg));
-        }
 
         if (usePost) {
             m_sceneFbo->Resolve(); // MSAA -> обычные текстуры (без MSAA — пустышка)
@@ -1160,10 +1161,12 @@ void PlayerLayer::OnRender() {
             device.SetViewport(0, 0, window.Width(), window.Height());
             device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
             device.Clear();
+            // Солнце — звену «Lens Flare» (блик — часть тракта камеры).
+            m_postfx->SetLighting(&env);
             m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
                              m_sceneFbo->Width(), m_sceneFbo->Height(), proj, view,
                              cameraChain,
-                             /*output=*/nullptr, vpX, vpY, vpW, vpH);
+                             /*output=*/nullptr, vpX, vpY, vpW, vpH, velocity);
         }
         };
         m_frame.AddPass(std::move(pass));

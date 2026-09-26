@@ -1,6 +1,7 @@
 #include "sage/render/PostFX.h"
 
 #include <chrono>
+#include <cmath>
 
 #include "sage/core/Log.h"
 #include "sage/core/Profiler.h"
@@ -11,6 +12,7 @@
 
 #include <glm/gtc/matrix_inverse.hpp>
 
+#include "sage/render/LensFlare.h"
 #include "sage/render/Shader.h"
 #include "sage/rhi/GraphicsDevice.h"
 
@@ -249,173 +251,212 @@ void main() {
 }
 )";
 
-// --- Глубина резкости: три прохода вместо одного ----------------------------
+// --- Глубина резкости: ближний и дальний планы раздельно ----------------------
 //
-// ЧТО БЫЛО НЕ ТАК. Один проход брал 24 выборки по спирали на ПОЛНОМ разрешении,
-// с радиусом до uMaxRadius пикселей. При радиусе 12 это шаг около 2.4 пикселя:
-// диск покрыт выборками РЕЖЕ, чем в нём пикселей. Отсюда обе жалобы разом —
-// «пикселизация» (узор выборки виден как сетка, и он ОДИНАКОВ во всех пикселях,
-// поэтому складывается в регулярную структуру) и «артефакты» (источник не был
-// предварительно отфильтрован, и выборка попадала на отдельную деталь, а не на
-// её среднее, — резкая картинка под размытием заворачивалась).
+// ЧТО БЫЛО НЕ ТАК. Один круг нерезкости на пиксель и одно смешивание «резкое
+// или размытое» по СОБСТВЕННОЙ глубине пикселя. Ближний размытый предмет на
+// фоне резкой стены обрывался резкой кромкой: пиксель стены рядом с ним
+// резкий, и размытие переднего плана за свой силуэт не выходило, — а в
+// настоящей оптике передний план расплывается ПОВЕРХ фона. Плюс ореолы:
+// половинная размытая картинка поднималась билинейно и на силуэтах тащила
+// чужой цвет. И настроек было три — фокус, диафрагма, потолок радиуса.
 //
-// Три прохода делают то же, что делают настоящие движки: размывают на
-// ПОЛОВИННОМ разрешении — радиус в его пикселях вдвое меньше, а выборок столько
-// же, то есть шаг вдвое плотнее, — и предварительно фильтруют источник, чтобы
-// высокие частоты не заворачивались.
+// Теперь как у кинематографической глубины резкости:
+//   1. prep   (1/2): цвет 2x2 + ЗНАКОВЫЙ круг нерезкости (минус — ближний план)
+//   2. near max (1/2, два прохода): наибольший ближний круг в округе — чтобы
+//      знать, куда дотягивается размытие переднего плана
+//   3. far    (1/2): сбор дальнего плана; ближние сэмплы в него не идут, и
+//      резкий передний предмет не растекается по размытому фону
+//   4. near   (1/2): сбор ближнего плана С РАДИУСОМ ОКРУГИ и долей покрытия в
+//      альфе — это слой, который ложится поверх всего остального
+//   5. compose (1/1): резкое -> дальнее по своему кругу -> ближний слой поверх
 //
-//   1. prep:    половинное разрешение: цвет 2x2 + круг нерезкости в альфе
-//   2. blur:    половинное разрешение: сбор по диску, вес по CoC САМОГО сэмпла
-//   3. compose: полное разрешение: плавное смешивание резкого и размытого
-//
-// Разрешение ПОЛОВИННОЕ, а не четвертное: при четвертном радиус в пикселях
-// рабочего буфера падает примерно до трёх, и на силуэтах становится видна
-// блочность подъёма из низкого разрешения — та же болезнь, от которой уходим.
-const char* kDofPrepFrag = R"(#version 330 core
-in vec2 vUV;
-out vec4 FragColor;
-
-uniform sampler2D uScene;   // цвет сцены, полное разрешение
-uniform sampler2D uDepth;   // глубина сцены, полное разрешение
+// Круг нерезкости — по тонкой линзе, как у камеры: фокусное расстояние (мм),
+// диафрагма (f-число), дистанция фокуса и глубина резкого слоя, раздельная
+// сила ближнего и дальнего размытия и потолок радиуса. Фокус — вручную или
+// по центру кадра.
+const char* kDofCommon = R"(
+uniform sampler2D uDepth;
 uniform mat4 uInvProj;
-uniform vec2 uFullTexel;    // 1/размер кадра
-uniform float uFocus;       // расстояние до плоскости фокуса, единицы мира
-uniform float uAperture;    // f-число
-uniform float uMaxRadius;   // потолок радиуса, пиксели ПОЛНОГО разрешения
+uniform float uFocus;        // м
+uniform int uAutoFocus;      // 1 — фокус по центру кадра
+uniform float uFocusRange;   // м: толщина резкого слоя вокруг фокуса
+uniform float uAperture;     // f-число
+uniform float uFocalLength;  // мм
+uniform float uNearScale, uFarScale;
+uniform float uMaxRadius;    // потолок радиуса, пиксели ПОЛНОГО кадра
+uniform float uFullHeight;   // высота полного кадра, пиксели
 
-// Расстояние от камеры вдоль взгляда (положительное).
-float LinearDepth(vec2 uv) {
+float LinearDepthAt(vec2 uv) {
     float d = texture(uDepth, uv).r;
     vec4 c = uInvProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
     return -c.z / c.w;
 }
 
-// Радиус круга нерезкости в пикселях.
-//
-// Считается по РАЗНИЦЕ ОБРАТНЫХ РАССТОЯНИЙ (диоптрий), а не по относительному
-// отклонению: именно так ведёт себя тонкая линза. Разница принципиальная —
-// |d - focus| / d уже при полуторакратном удалении от плоскости фокуса упирается
-// в потолок, и весь фон превращается в кашу; |1/focus - 1/d| растёт плавно и
-// насыщается только на действительно далёких планах. Диафрагма делит результат:
-// f/1.4 размывает сильно, f/16 оставляет резким почти всё.
-float Coc(float depth) {
-    float diopters = abs(1.0 / max(uFocus, 1e-3) - 1.0 / max(depth, 1e-3));
-    return clamp(diopters * (15.0 / max(uAperture, 0.7)), 0.0, 1.0) * uMaxRadius;
+float FocusDistance() {
+    if (uAutoFocus == 0) return uFocus;
+    // Ближайшее из пяти точек центра: фокус на предмете в центре, а не на
+    // фоне, проглядывающем между его краями.
+    float d = LinearDepthAt(vec2(0.5));
+    d = min(d, LinearDepthAt(vec2(0.48, 0.5)));
+    d = min(d, LinearDepthAt(vec2(0.52, 0.5)));
+    d = min(d, LinearDepthAt(vec2(0.5, 0.48)));
+    d = min(d, LinearDepthAt(vec2(0.5, 0.52)));
+    return d;
 }
 
+// Знаковый радиус круга нерезкости в пикселях полного кадра (минус — ближе
+// фокуса). Тонкая линза: c = A·f·(d − s) / (d·(s − f)), A = f / N; кадр
+// высотой 24 мм, как у полнокадровой камеры.
+float SignedCoc(float depth, float focus) {
+    float f = max(uFocalLength, 1.0) * 0.001;
+    float s = max(focus, f * 1.5);
+    float band = max(uFocusRange, 0.0) * 0.5;
+    // Резкий слой: всё, что ближе к фокусу чем band, в фокусе.
+    float d = depth < s ? min(depth + band, s) : max(depth - band, s);
+    float A = f / max(uAperture, 0.5);
+    float c = A * f * (d - s) / (max(d, 1e-3) * (s - f));
+    float px = c / 0.024 * uFullHeight * 0.5;
+    px *= px < 0.0 ? uNearScale : uFarScale;
+    return clamp(px, -uMaxRadius, uMaxRadius);
+}
+)";
+
+const char* kDofPrepFrag = R"(
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform vec2 uFullTexel;
 void main() {
-    // Префильтр 2x2 по углам своего текселя: размытие на половинном разрешении
-    // читает соседей крупными шагами, и без префильтра мелкая текстура и кромки
-    // «звенят» — это и читалось как пикселизация размытой части кадра.
+    // Префильтр 2x2 по углам своего текселя: без него мелкая текстура и
+    // кромки под размытием «звенят».
     vec2 o = uFullTexel * 0.5;
     vec3 c = texture(uScene, vUV + vec2(-o.x, -o.y)).rgb
            + texture(uScene, vUV + vec2( o.x, -o.y)).rgb
            + texture(uScene, vUV + vec2(-o.x,  o.y)).rgb
            + texture(uScene, vUV + vec2( o.x,  o.y)).rgb;
-    // CoC пишем в альфу и СРАЗУ в пикселях половинного разрешения: дальше его
-    // читает проход, который в этом разрешении и работает.
-    FragColor = vec4(c * 0.25, Coc(LinearDepth(vUV)) * 0.5);
+    float focus = FocusDistance();
+    // Круг — БЛИЖАЙШЕЙ из четырёх точек: на силуэте переднего предмета
+    // половинный пиксель обязан принадлежать ему, а не фону за ним.
+    float d = min(min(LinearDepthAt(vUV + vec2(-o.x, -o.y)), LinearDepthAt(vUV + vec2(o.x, -o.y))),
+                  min(LinearDepthAt(vUV + vec2(-o.x, o.y)), LinearDepthAt(vUV + vec2(o.x, o.y))));
+    FragColor = vec4(c * 0.25, SignedCoc(d, focus));
 }
 )";
 
-// Сбор по диску на половинном разрешении.
-//
-// Число выборок берётся от радиуса, а не фиксировано: качество размытия держит
-// ПЛОТНОСТЬ выборок (шаг не больше текселя), а не их количество само по себе.
-// При радиусе R шаг равен R/sqrt(N), то есть N ~ R^2 — отсюда квадрат в формуле.
-// Верхняя граница нужна потому, что uMaxDiameter приходит из настроек, то есть
-// от человека, и без неё один ползунок превращал бы кадр в слайд-шоу.
-const char* kDofBlurFrag = R"(#version 330 core
+// Наибольший ближний круг в округе — раздельным максимумом (сначала по
+// горизонтали, потом по вертикали). Радиус окна — потолок радиуса.
+const char* kDofNearMaxFrag = R"(#version 330 core
 in vec2 vUV;
 out vec4 FragColor;
+uniform sampler2D uSrc;
+uniform vec2 uStep;       // тексель вдоль оси
+uniform int uReach;       // сколько текселей в каждую сторону
+uniform int uFromPrep;    // 1 — источник prep (знаковый круг в альфе)
+void main() {
+    float m = 0.0;
+    for (int i = -32; i <= 32; ++i) {
+        if (i < -uReach || i > uReach) continue;
+        vec4 s = texture(uSrc, vUV + uStep * float(i));
+        // Ближний круг — в ПОЛОВИННЫХ пикселях, как читает сбор.
+        float n = uFromPrep == 1 ? max(-s.a, 0.0) * 0.5 : s.r;
+        // Дотягивается ли круг этого текселя сюда.
+        if (n >= abs(float(i))) m = max(m, n);
+    }
+    FragColor = vec4(m, 0.0, 0.0, 1.0);
+}
+)";
 
-uniform sampler2D uPrep;   // цвет + CoC (альфа), половинное разрешение
-uniform vec2 uTexel;       // 1/(w/2), 1/(h/2)
-
+// Сбор по диску на половинном разрешении: спираль по золотому углу, число
+// выборок растёт с радиусом (плотность шага не хуже текселя), с потолком по
+// качеству.
+const char* kDofGatherFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uPrep;     // цвет + знаковый круг (полные пиксели)
+uniform sampler2D uNearMax;  // наибольший ближний круг округи (половинные пиксели)
+uniform vec2 uTexel;         // тексель половинного буфера
+uniform int uNear;           // 0 — дальний план, 1 — ближний
+uniform int uMaxSamples;
 void main() {
     vec4 center = texture(uPrep, vUV);
-    // Половина пикселя половинного разрешения — размывать нечего. Это не тот
-    // жёсткий порог, что стоял раньше: решение «резко или размыто» принимает
-    // проход 3, и принимает его ПЛАВНО, поэтому видимой границы здесь не будет.
-    if (center.a <= 0.5) {
-        FragColor = vec4(center.rgb, 1.0);
+    float radius = uNear == 1 ? texture(uNearMax, vUV).r
+                              : max(center.a, 0.0) * 0.5;
+    if (radius < 0.5) {
+        FragColor = uNear == 1 ? vec4(0.0) : vec4(center.rgb, 1.0);
         return;
     }
-
-    float coc = center.a;
-    int n = clamp(int(coc * coc * 1.5), 12, 64);
-
-    vec3 sum = center.rgb;
-    float weight = 1.0;
+    int n = clamp(int(radius * radius * 1.2), 12, uMaxSamples);
+    vec3 sum = vec3(0.0);
+    float wsum = 0.0;
+    if (uNear == 0) { sum = center.rgb; wsum = 1.0; }
     const float kGolden = 2.39996323;
-    for (int i = 0; i < 64; ++i) {
+    for (int i = 0; i < 128; ++i) {
         if (i >= n) break;
-        // Спираль по золотому углу: равномерное покрытие диска без таблиц.
         float fi = (float(i) + 0.5) / float(n);
         float ang = float(i) * kGolden;
-        float r = sqrt(fi) * coc;
-        // Выборку прижимаем к кадру: за его границей текстура повторяет крайний
-        // ряд пикселей, и размытие втягивало в кадр растянутые полосы.
+        float r = sqrt(fi) * radius;
         vec2 suv = clamp(vUV + vec2(cos(ang), sin(ang)) * r * uTexel,
                          uTexel * 0.5, vec2(1.0) - uTexel * 0.5);
         vec4 s = texture(uPrep, suv);
-        // Сэмпл участвует ровно настолько, насколько его СОБСТВЕННЫЙ круг
-        // нерезкости дотягивается сюда. Так резкий передний план не размазывается
-        // по фону (его CoC мал), а размытый фон попадает в размытие целиком.
-        //
-        // Раньше здесь стояло сравнение ГЛУБИН и бинарный выбор веса (1.0 или
-        // smoothstep): на силуэте это давало ступеньку — ту самую резкую границу,
-        // которая читается как ореол вокруг предмета.
-        float w = clamp(s.a / max(r, 0.5), 0.0, 1.0);
+        // Свой круг сэмпла (половинные пиксели) — и только своего плана:
+        // резкий передний предмет не растекается по размытому фону, а фон не
+        // попадает в слой переднего плана.
+        float own = uNear == 1 ? max(-s.a, 0.0) * 0.5 : max(s.a, 0.0) * 0.5;
+        float w = clamp(own - r + 1.0, 0.0, 1.0);
         sum += s.rgb * w;
-        weight += w;
+        wsum += w;
     }
-    FragColor = vec4(sum / weight, 1.0);
+    if (uNear == 1) {
+        // Доля покрытия — это и есть прозрачность слоя переднего плана: на
+        // кромке размытого предмета половина выборок его, половина нет.
+        float cover = clamp(wsum / float(n) * 1.5, 0.0, 1.0);
+        // ПРЕДУМНОЖЕННЫЙ цвет: слой половинный и поднимается билинейно, и на
+        // его краю пустые тексели (цвет 0, покрытие 0) иначе подмешивали бы
+        // чёрное к цвету — по границе ближнего плана шла тёмная полоса.
+        FragColor = vec4(wsum > 1e-4 ? sum / wsum * cover : vec3(0.0), cover);
+    } else {
+        FragColor = vec4(sum / max(wsum, 1e-4), 1.0);
+    }
 }
 )";
 
-// Смешивание резкой картинки полного разрешения с размытой половинного.
-//
-// Отдельный проход, а не слияние с первым: смешивать надо РЕЗКУЮ картинку, а
-// префильтр прохода 1 её уже усреднил. Здесь же считается и CoC — на полном
-// разрешении, по которому и решается, где пары пикселей резкости нет вовсе.
-const char* kDofCompositeFrag = R"(#version 330 core
+// Сведение на полном разрешении.
+const char* kDofCompositeFrag = R"(
 in vec2 vUV;
 out vec4 FragColor;
+uniform sampler2D uScene;   // резкая картинка, полное разрешение
+uniform sampler2D uFar;     // дальний план, половинное
+uniform sampler2D uNearLayer; // ближний слой (rgb + покрытие), половинное
+uniform int uShowFocus;
+uniform vec2 uHalfTexel;    // тексель половинных слоёв
 
-uniform sampler2D uScene;    // резкая картинка, полное разрешение
-uniform sampler2D uBlurred;  // размытая, половинное разрешение (читается билинейно)
-uniform sampler2D uDepth;
-uniform mat4 uInvProj;
-uniform float uFocus;
-uniform float uAperture;
-uniform float uMaxRadius;
-
-float LinearDepth(vec2 uv) {
-    float d = texture(uDepth, uv).r;
-    vec4 c = uInvProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
-    return -c.z / c.w;
-}
-
-float Coc(float depth) {
-    float diopters = abs(1.0 / max(uFocus, 1e-3) - 1.0 / max(depth, 1e-3));
-    return clamp(diopters * (15.0 / max(uAperture, 0.7)), 0.0, 1.0) * uMaxRadius;
+// Подъём половинного слоя ЧЕТЫРЬМЯ билинейными выборками (шатёр 4x4), а не
+// одной: одна выборка поднимает его блоками 2x2, и на косой границе двух
+// размытых планов (пол и стена вдали) шла лесенка.
+vec4 Upsample(sampler2D tex) {
+    vec2 o = uHalfTexel * 0.5;
+    return 0.25 * (texture(tex, vUV + vec2(-o.x, -o.y)) + texture(tex, vUV + vec2(o.x, -o.y)) +
+                   texture(tex, vUV + vec2(-o.x, o.y)) + texture(tex, vUV + vec2(o.x, o.y)));
 }
 
 void main() {
     vec3 sharp = texture(uScene, vUV).rgb;
-    float coc = Coc(LinearDepth(vUV));
-
-    // Переход РАСТЯНУТ на пару пикселей вместо порога «coc > 0.75». Порог делил
-    // кадр на резкую и размытую половины с разрывом производной: вокруг
-    // плоскости фокуса была видна ступенька-контур, а не мягкий переход.
-    //
-    // В фокусе резкость при этом не теряется: при coc < 0.5 подмешивается РОВНО
-    // исходный пиксель, а до coc = 1.0 размытый буфер вообще равен резкому
-    // (проход 2 на таком радиусе не работает). Поэтому «мыльности» в плоскости
-    // фокуса эта правка не добавляет.
-    float t = smoothstep(0.5, 2.5, coc);
-    FragColor = vec4(mix(sharp, texture(uBlurred, vUV).rgb, t), 1.0);
+    float coc = SignedCoc(LinearDepthAt(vUV), FocusDistance());
+    // Дальний план — по СОБСТВЕННОМУ кругу пикселя, переход растянут на пару
+    // пикселей: резкость плоскости фокуса не теряется, ступеньки нет.
+    float t = smoothstep(1.0, 3.0, max(coc, 0.0));
+    vec3 col = mix(sharp, Upsample(uFar).rgb, t);
+    // Ближний слой — ПОВЕРХ всего: передний план расплывается за свой силуэт.
+    vec4 nearLayer = Upsample(uNearLayer);   // предумноженный
+    col = col * (1.0 - nearLayer.a) + nearLayer.rgb;
+    if (uShowFocus == 1) {
+        // Разбор: в фокусе — зелёный, ближе — синий, дальше — оранжевый.
+        float k = clamp(abs(coc) / 8.0, 0.0, 1.0);
+        vec3 tint = coc < -0.5 ? vec3(0.2, 0.4, 1.0) : (coc > 0.5 ? vec3(1.0, 0.55, 0.1) : vec3(0.2, 1.0, 0.3));
+        col = mix(col, tint * max(dot(col, vec3(0.333)), 0.15) * 2.0, mix(0.35, 0.7, k));
+    }
+    FragColor = vec4(col, 1.0);
 }
 )";
 
@@ -438,34 +479,47 @@ uniform mat4 uPrevViewProj;  // view-projection ПРОШЛОГО кадра
 uniform float uAmount;
 uniform int uSamples;
 uniform int uUseVelocity;    // 1 — брать вектор из буфера скоростей
+uniform float uMaxLen;       // потолок длины смаза, доля кадра
+
+// Движение камеры для пикселя: мировая точка из глубины, спроецированная
+// матрицей прошлого кадра. Мир при этом считается неподвижным.
+bool CameraVelocity(out vec2 v) {
+    float d = texture(uDepth, vUV).r;
+    vec4 clip = vec4(vUV * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+    vec4 world = uInvViewProj * clip;
+    if (abs(world.w) < 1e-6) return false;
+    world /= world.w;
+    vec4 prevClip = uPrevViewProj * world;
+    if (prevClip.w < 1e-6) return false;   // за камерой
+    vec2 prevUV = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
+    v = vUV - prevUV;
+    return true;
+}
 
 void main() {
-    vec2 velocity;
+    vec2 velocity = vec2(0.0);
 
     if (uUseVelocity == 1) {
         // Готовый вектор из прохода геометрии: он уже учитывает и движение
-        // камеры, и собственное движение объекта.
-        velocity = texture(uVelocity, vUV).xy * uAmount;
-    } else {
-        // Запасной путь без буфера скоростей: мир считается неподвижным, и
-        // смаз получается только от камеры (см. комментарий к PostFX::Render).
-        float d = texture(uDepth, vUV).r;
-
-        vec4 clip = vec4(vUV * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
-        vec4 world = uInvViewProj * clip;
-        if (abs(world.w) < 1e-6) { FragColor = texture(uScene, vUV); return; }
-        world /= world.w;
-
-        vec4 prevClip = uPrevViewProj * world;
-        if (prevClip.w < 1e-6) { FragColor = texture(uScene, vUV); return; } // за камерой
-        vec2 prevUV = (prevClip.xy / prevClip.w) * 0.5 + 0.5;
-
-        velocity = (vUV - prevUV) * uAmount;
+        // камеры, и собственное движение объекта. Синий = 1 — геометрии тут
+        // нет (небо, фон): берём движение камеры, иначе небо при повороте
+        // оставалось бы резким, а края предметов на нём — смазанными.
+        vec4 v = texture(uVelocity, vUV);
+        if (v.b > 0.5) {
+            if (!CameraVelocity(velocity)) { FragColor = texture(uScene, vUV); return; }
+        } else {
+            velocity = v.xy;
+        }
+    } else if (!CameraVelocity(velocity)) {
+        // Запасной путь без буфера скоростей: смаз только от камеры.
+        FragColor = texture(uScene, vUV);
+        return;
     }
+    velocity *= uAmount;
 
     // Потолок длины: резкий рывок камеры иначе размазал бы кадр целиком, и
     // вместо смаза получилась бы каша.
-    const float kMaxLen = 0.05;
+    float kMaxLen = max(uMaxLen, 1e-4);
     float len = length(velocity);
     if (len < 1e-5) { FragColor = texture(uScene, vUV); return; }
     if (len > kMaxLen) velocity *= kMaxLen / len;
@@ -649,10 +703,22 @@ void main() { FragColor = vec4(texture(uScene, vUV).rgb * exp2(uEV), 1.0); }
 )";
 
 // --- Автоэкспозиция (адаптация глаза) ----------------------------------------
-// Замер: средняя log2-яркость кадра по сетке 24x24 с весом к центру — так же
-// меряет UE по умолчанию («центрально-взвешенный»): небо по краям кадра не
-// должно затемнять героя в середине. Результат плавно догоняет прошлое
-// значение: светлеет глаз быстрее, чем темнеет, как у человека.
+// Замер — ГИСТОГРАММА log2-яркости по сетке 32x32 с весом к центру
+// («центрально-взвешенный» замер фотокамеры: небо по краям кадра не должно
+// затемнять героя в середине). Из неё берётся среднее между процентилями
+// «Low/High Percent»: самые тёмные углы и самые яркие блики (лампа, солнце в
+// кадре) не раскачивают экспозицию всего кадра.
+//
+// ЧЁРНОЕ В ЗАМЕР НЕ ВХОДИТ. Раньше мерилось простое среднее, и пустота (чёрное
+// небо, фон без неба) тянула его вниз: сцена, где 70 % кадра — чёрное небо, а
+// остальное освещено лампой, считалась «очень тёмной», глаз вытягивал её до
+// предела — в сотни раз, — и всё освещённое выгорало в белое, а свечение
+// обводило каждый предмет светящейся каймой. У пустоты нет яркости, к которой
+// можно привыкнуть: пиксели темнее «Black Level» просто не голосуют. Кадр,
+// где не голосует никто, оставляет адаптацию как была.
+//
+// Результат плавно догоняет прошлое значение: светлеет глаз быстрее, чем
+// темнеет, как у человека.
 const char* kAutoExposureMeterFrag = R"(#version 330 core
 in vec2 vUV;
 out vec4 FragColor;
@@ -664,29 +730,57 @@ uniform float uSpeedUp;
 uniform float uSpeedDown;
 uniform float uMinEV;
 uniform float uMaxEV;
+uniform float uLow;        // доля самых тёмных, что отбрасывается (0..1)
+uniform float uHigh;       // доля, выше которой — отбрасывается (0..1)
+uniform float uBlack;      // log2 яркости, ниже которой пиксель не голосует
+uniform float uNeutral;    // значение адаптации «без поправки» (для пустого кадра)
+const int kBins = 64;
+const float kHistMin = -16.0, kHistMax = 16.0;
 void main() {
-    float sum = 0.0, wsum = 0.0;
-    for (int y = 0; y < 24; ++y) {
-        for (int x = 0; x < 24; ++x) {
-            vec2 uv = (vec2(float(x), float(y)) + 0.5) / 24.0;
+    float hist[kBins];
+    for (int i = 0; i < kBins; ++i) hist[i] = 0.0;
+    float total = 0.0;
+    for (int y = 0; y < 32; ++y) {
+        for (int x = 0; x < 32; ++x) {
+            vec2 uv = (vec2(float(x), float(y)) + 0.5) / 32.0;
             vec3 c = textureLod(uScene, uv, 0.0).rgb;
-            float l = max(dot(c, vec3(0.2126, 0.7152, 0.0722)), 1e-5);
+            float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+            if (!(l > 0.0)) continue;            // и NaN тоже
+            float ev = log2(l);
+            if (ev < uBlack) continue;
             vec2 d = uv - 0.5;
             float w = exp(-dot(d, d) * 5.0);
-            sum += log2(l) * w;
-            wsum += w;
+            float t = clamp((ev - kHistMin) / (kHistMax - kHistMin), 0.0, 0.9999);
+            hist[int(t * float(kBins))] += w;
+            total += w;
         }
     }
-    float ev = clamp(sum / max(wsum, 1e-5), uMinEV, uMaxEV);
-    float prev = uHasPrev == 1 ? texture(uPrev, vec2(0.5)).r : ev;
+    float prev = uHasPrev == 1 ? texture(uPrev, vec2(0.5)).r : uNeutral;
+    float target = prev;
+    if (total > 1e-4) {
+        float lo = total * clamp(min(uLow, uHigh), 0.0, 0.99);
+        float hi = total * clamp(max(uLow, uHigh), 0.01, 1.0);
+        float acc = 0.0, sum = 0.0, used = 0.0;
+        for (int i = 0; i < kBins; ++i) {
+            float a0 = acc, a1 = acc + hist[i];
+            acc = a1;
+            float part = max(0.0, min(a1, hi) - max(a0, lo));
+            float center = kHistMin + (float(i) + 0.5) * (kHistMax - kHistMin) / float(kBins);
+            sum += center * part;
+            used += part;
+        }
+        target = used > 1e-5 ? sum / used : prev;
+    }
+    float ev = clamp(target, uMinEV, uMaxEV);
+    if (uHasPrev == 0) { FragColor = vec4(ev, 0.0, 0.0, 1.0); return; }
     float speed = ev > prev ? uSpeedUp : uSpeedDown;
-    float k = uHasPrev == 1 ? 1.0 - exp(-uDt * max(speed, 0.0)) : 1.0;
+    float k = 1.0 - exp(-uDt * max(speed, 0.0));
     FragColor = vec4(mix(prev, ev, k), 0.0, 0.0, 1.0);
 }
 )";
 
 // Применение: средне-серый 18 % кадра приводится к 18 % на экране, плюс
-// компенсация автора в ступенях (у UE5 по умолчанию она +1).
+// компенсация автора в ступенях (по умолчанию +1).
 const char* kAutoExposureApplyFrag = R"(#version 330 core
 in vec2 vUV;
 out vec4 FragColor;
@@ -779,15 +873,15 @@ vec3 Filmic(vec3 x) {
     return clamp(v / w, 0.0, 1.0);
 }
 
-// --- Unreal Engine 5: плёночная кривая по умолчанию -------------------------
-// Та же формула, что FilmToneMap в UE (TonemapCommon.ush), с настройками
-// проекта по умолчанию: Slope 0.88, Toe 0.55, Shoulder 0.26, BlackClip 0,
-// WhiteClip 0.04. Кривая строится в логарифме яркости в пространстве ACES AP1:
-// там насыщенные цвета выгорают к белому, а не к «кислотному» оттенку, — это
-// и делает картинку UE мягкой в светах. Глоу и красная поправка RRT опущены:
-// они меняют оттенок едва заметно, а стоят двух лишних матриц.
+// --- Кинематографическая плёночная кривая -----------------------------------
+// Параметрическая кривая «носок — прямая — плечо» (Slope 0.88, Toe 0.55,
+// Shoulder 0.26, BlackClip 0, WhiteClip 0.04), построенная в логарифме
+// яркости в пространстве ACES AP1: там насыщенные цвета выгорают к белому, а
+// не к «кислотному» оттенку, — это и делает картинку мягкой в светах. Глоу и
+// красная поправка RRT опущены: они меняют оттенок едва заметно, а стоят двух
+// лишних матриц.
 vec3 MulRows(vec3 r0, vec3 r1, vec3 r2, vec3 v) { return vec3(dot(r0, v), dot(r1, v), dot(r2, v)); }
-vec3 UnrealFilmic(vec3 lin) {
+vec3 CinematicFilm(vec3 lin) {
     const float Slope = 0.88, Toe = 0.55, Shoulder = 0.26, BlackClip = 0.0, WhiteClip = 0.04;
     const vec3 Y = vec3(0.2722287, 0.6740818, 0.0536895);   // яркость в AP1
     vec3 ap1 = MulRows(vec3(0.61319, 0.33951, 0.04737), vec3(0.07021, 0.91634, 0.01345),
@@ -808,7 +902,7 @@ vec3 UnrealFilmic(vec3 lin) {
     toe = mix(straight, toe, vec3(lessThan(logc, vec3(ToeMatch))));
     shoulder = mix(straight, shoulder, vec3(greaterThan(logc, vec3(ShoulderMatch))));
     vec3 t = clamp((logc - ToeMatch) / (ShoulderMatch - ToeMatch), 0.0, 1.0);
-    // При настройках UE по умолчанию стык плеча лежит ЛЕВЕЕ стыка носка, и
+    // При этих настройках стык плеча лежит ЛЕВЕЕ стыка носка, и
     // смешивание разворачивается — без этой строки средне-серый уезжал на
     // плечо и темнел до 0.14.
     if (ShoulderMatch < ToeMatch) t = 1.0 - t;
@@ -820,7 +914,7 @@ vec3 UnrealFilmic(vec3 lin) {
     return clamp(srgb, 0.0, 1.0);
 }
 
-// --- AgX (Blender 4): мягкие света, честный переход насыщенного в белый ----
+// --- AgX: мягкие света, честный переход насыщенного в белый ----------------
 // Приближение полиномом (Benjamin Wrensch), вывод — линейный цвет дисплея.
 vec3 AgX(vec3 lin) {
     const mat3 inMat = mat3(0.842479062253094, 0.0423282422610123, 0.0423756549057051,
@@ -873,7 +967,7 @@ void main() {
     if (uMode == 1)      c = Reinhard(hdr);
     else if (uMode == 2) c = ACES(hdr);
     else if (uMode == 3) c = Filmic(hdr);
-    else if (uMode == 4) c = UnrealFilmic(hdr);
+    else if (uMode == 4) c = CinematicFilm(hdr);
     else if (uMode == 5) c = AgX(hdr);
     else if (uMode == 6) c = PbrNeutral(hdr);
     else                 c = clamp(hdr, 0.0, 1.0); // без кривой: просто обрезка
@@ -977,9 +1071,16 @@ void main() { FragColor = vec4(texture(uScene, vUV).rgb, 1.0); }
 
 Shader& SsaoShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kSsaoFrag, "PostFX.SSAO")); return *s; }
 Shader& AoBlurShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kAoBlurFrag, "PostFX.AOBlur")); return *s; }
-Shader& DofPrepShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kDofPrepFrag, "PostFX.DoFPrep")); return *s; }
-Shader& DofBlurShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kDofBlurFrag, "PostFX.DoFBlur")); return *s; }
-Shader& DofCompositeShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kDofCompositeFrag, "PostFX.DoFComposite")); return *s; }
+// Общий блок круга нерезкости подставляется в оба шейдера, которым он нужен:
+// считай его каждый по-своему — и граница «в фокусе» у prep и у сведения
+// разошлась бы.
+std::string DofSource(const char* body) {
+    return std::string("#version 330 core\n") + kDofCommon + body;
+}
+Shader& DofPrepShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, DofSource(kDofPrepFrag).c_str(), "PostFX.DoFPrep")); return *s; }
+Shader& DofNearMaxShader()   { static Shader* s = new Shader(Shader::FromSource(kFsVert, kDofNearMaxFrag, "PostFX.DoFNearMax")); return *s; }
+Shader& DofGatherShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kDofGatherFrag, "PostFX.DoFGather")); return *s; }
+Shader& DofCompositeShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, DofSource(kDofCompositeFrag).c_str(), "PostFX.DoFComposite")); return *s; }
 Shader& MotionShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kMotionFrag, "PostFX.MotionBlur")); return *s; }
 Shader& BrightShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBrightFrag, "PostFX.Bright")); return *s; }
 Shader& BlurShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kBlurFrag, "PostFX.Blur")); return *s; }
@@ -1080,6 +1181,19 @@ PostParamDesc EnumParam(const char* name, const char* label, int def,
     return p;
 }
 
+// Галка: включить/выключить часть звена.
+PostParamDesc BoolParam(const char* name, const char* label, bool def, const char* hint) {
+    PostParamDesc p;
+    p.Name = name;
+    p.Label = label;
+    p.Type = PostParamType::Bool;
+    p.Min = 0.0f;
+    p.Max = 1.0f;
+    p.Default[0] = def ? 1.0f : 0.0f;
+    p.Hint = hint ? hint : "";
+    return p;
+}
+
 // Подпись-разделитель внутри списка параметров звена. Значения у неё нет:
 // это способ сгруппировать настройки, не заводя вложенных структур.
 PostParamDesc Heading(const char* label) {
@@ -1155,52 +1269,88 @@ void RunDepthOfField(PostContext& ctx, const PostEffect& e) {
     PostScratch& sc = *ctx.Scratch;
     const int hw = std::max(1, ctx.Width / 2), hh = std::max(1, ctx.Height / 2);
     RenderTarget* prep = Keep(sc.DofPrep, hw, hh);
-    RenderTarget* blurred = Keep(sc.DofBlur, hw, hh);
+    RenderTarget* farT = Keep(sc.DofBlur, hw, hh);
+    RenderTarget* nearA = Keep(sc.DofNearMaxA, hw, hh);
+    RenderTarget* nearB = Keep(sc.DofNearMaxB, hw, hh);
+    RenderTarget* nearT = Keep(sc.DofNear, hw, hh);
     RenderTarget* out = PostAcquireTarget(ctx, 1);
 
-    const float focus = glm::max(e.Float("focus", 10.0f), 0.01f);
-    const float aperture = glm::max(e.Float("aperture", 2.8f), 0.7f);
-    const float maxRadius = glm::max(e.Float("maxRadius", 12.0f), 0.0f);
+    const float maxRadius = glm::clamp(e.Float("maxRadius", 16.0f), 0.0f, 64.0f);
     const glm::mat4 invProj = glm::inverse(ctx.Proj);
+    auto setCommon = [&](Shader& sh) {
+        sh.SetInt("uDepth", 1);
+        sh.SetMat4("uInvProj", invProj);
+        sh.SetFloat("uFocus", glm::max(e.Float("focus", 10.0f), 0.01f));
+        sh.SetInt("uAutoFocus", e.Int("focusMode", 0) == 1 ? 1 : 0);
+        sh.SetFloat("uFocusRange", glm::max(e.Float("focusRange", 0.0f), 0.0f));
+        sh.SetFloat("uAperture", glm::max(e.Float("aperture", 2.8f), 0.5f));
+        sh.SetFloat("uFocalLength", glm::clamp(e.Float("focalLength", 85.0f), 1.0f, 1000.0f));
+        sh.SetFloat("uNearScale", glm::max(e.Float("nearBlur", 1.0f), 0.0f));
+        sh.SetFloat("uFarScale", glm::max(e.Float("farBlur", 1.0f), 0.0f));
+        sh.SetFloat("uMaxRadius", maxRadius);
+        sh.SetFloat("uFullHeight", (float)ctx.Height);
+        device.BindTexture2D(1, ctx.SceneDepth);
+    };
+    static const int kSamples[] = {32, 64, 128};
+    const int maxSamples = kSamples[glm::clamp(e.Int("quality", 1), 0, 2)];
+    const glm::vec2 halfTexel(1.0f / (float)hw, 1.0f / (float)hh);
 
-    // Префильтр источника + круг нерезкости в альфу.
+    // 1. Префильтр + знаковый круг.
     prep->Bind();
     Shader& dprep = DofPrepShader();
     dprep.Use();
     dprep.SetInt("uScene", 0);
-    dprep.SetInt("uDepth", 1);
     device.BindTexture2D(0, ctx.Color);
-    device.BindTexture2D(1, ctx.SceneDepth);
-    dprep.SetMat4("uInvProj", invProj);
+    setCommon(dprep);
     dprep.SetVec2("uFullTexel", glm::vec2(1.0f / (float)ctx.Width, 1.0f / (float)ctx.Height));
-    dprep.SetFloat("uFocus", focus);
-    dprep.SetFloat("uAperture", aperture);
-    dprep.SetFloat("uMaxRadius", maxRadius);
     DrawFullscreen(ctx);
 
-    // Сбор по диску на половинном разрешении.
-    blurred->Bind();
-    Shader& dblur = DofBlurShader();
-    dblur.Use();
-    dblur.SetInt("uPrep", 0);
+    // 2. Досягаемость ближнего плана: максимум по горизонтали, затем по вертикали.
+    const int reach = glm::clamp((int)std::ceil(maxRadius * 0.5f), 1, 32);
+    Shader& nmax = DofNearMaxShader();
+    nmax.Use();
+    nmax.SetInt("uSrc", 0);
+    nmax.SetInt("uReach", reach);
+    nearA->Bind();
     device.BindTexture2D(0, prep->ColorTextureHandle());
-    dblur.SetVec2("uTexel", glm::vec2(1.0f / (float)hw, 1.0f / (float)hh));
+    nmax.SetVec2("uStep", glm::vec2(halfTexel.x, 0.0f));
+    nmax.SetInt("uFromPrep", 1);
+    DrawFullscreen(ctx);
+    nearB->Bind();
+    device.BindTexture2D(0, nearA->ColorTextureHandle());
+    nmax.SetVec2("uStep", glm::vec2(0.0f, halfTexel.y));
+    nmax.SetInt("uFromPrep", 0);
     DrawFullscreen(ctx);
 
-    // Плавное смешивание резкого с размытым на полном разрешении.
+    // 3–4. Дальний и ближний планы.
+    Shader& gather = DofGatherShader();
+    gather.Use();
+    gather.SetInt("uPrep", 0);
+    gather.SetInt("uNearMax", 1);
+    gather.SetVec2("uTexel", halfTexel);
+    gather.SetInt("uMaxSamples", maxSamples);
+    device.BindTexture2D(0, prep->ColorTextureHandle());
+    device.BindTexture2D(1, nearB->ColorTextureHandle());
+    farT->Bind();
+    gather.SetInt("uNear", 0);
+    DrawFullscreen(ctx);
+    nearT->Bind();
+    gather.SetInt("uNear", 1);
+    DrawFullscreen(ctx);
+
+    // 5. Сведение.
     out->Bind();
     Shader& dcomp = DofCompositeShader();
     dcomp.Use();
     dcomp.SetInt("uScene", 0);
-    dcomp.SetInt("uBlurred", 1);
-    dcomp.SetInt("uDepth", 2);
+    dcomp.SetInt("uFar", 2);
+    dcomp.SetInt("uNearLayer", 3);
+    dcomp.SetInt("uShowFocus", e.Bool("showFocus", false) ? 1 : 0);
+    dcomp.SetVec2("uHalfTexel", halfTexel);
     device.BindTexture2D(0, ctx.Color);
-    device.BindTexture2D(1, blurred->ColorTextureHandle());
-    device.BindTexture2D(2, ctx.SceneDepth);
-    dcomp.SetMat4("uInvProj", invProj);
-    dcomp.SetFloat("uFocus", focus);
-    dcomp.SetFloat("uAperture", aperture);
-    dcomp.SetFloat("uMaxRadius", maxRadius);
+    device.BindTexture2D(2, farT->ColorTextureHandle());
+    device.BindTexture2D(3, nearT->ColorTextureHandle());
+    setCommon(dcomp);
     DrawFullscreen(ctx);
 
     PostSetColor(ctx, out->ColorTextureHandle(), /*ldr=*/false);
@@ -1240,8 +1390,57 @@ void RunMotionBlur(PostContext& ctx, const PostEffect& e) {
     sh.SetMat4("uPrevViewProj", ctx.Scratch->PrevViewProj);
     sh.SetFloat("uAmount", amount);
     sh.SetInt("uSamples", glm::clamp(e.Int("samples", 12), 2, 32));
+    sh.SetFloat("uMaxLen", glm::clamp(e.Float("maxLength", 5.0f), 0.1f, 25.0f) * 0.01f);
     DrawFullscreen(ctx);
 
+    PostSetColor(ctx, out->ColorTextureHandle(), /*ldr=*/false);
+}
+
+// --- Звено «Lens Flare»: блик солнца в объективе ----------------------------
+// Раньше жил в НАСТРОЙКАХ ПРОЕКТА и рисовался мимо тракта камеры: выключатель
+// компонента «Пост-обработка» его не гасил, а в редакторе его нельзя было ни
+// включить, ни настроить. Теперь это звено, как все остальные.
+void RunLensFlare(PostContext& ctx, const PostEffect& e) {
+    if (!ctx.Lighting) {
+        OnceLog("звено «Lens Flare» пропущено: кадру не передано освещение (PostFX::SetLighting)");
+        return;
+    }
+    const float intensity = e.Float("intensity", 1.0f);
+    if (intensity <= 0.0f) return;
+    PostScratch& sc = *ctx.Scratch;
+    if (!sc.Flare) sc.Flare = std::make_shared<LensFlare>();
+    GraphicsDevice& device = Dev(ctx);
+
+    // Копия кадра в свою цель, блик — поверх неё сложением.
+    RenderTarget* out = PostAcquireTarget(ctx, 1);
+    out->Bind();
+    Shader& copy = CopyShader();
+    copy.Use();
+    copy.SetInt("uScene", 0);
+    device.BindTexture2D(0, ctx.Color);
+    DrawFullscreen(ctx);
+
+    LensFlareSettings s;
+    s.Enabled = true;
+    s.Intensity = intensity;
+    s.Ghosts = glm::clamp(e.Int("ghosts", 6), 0, 12);
+    s.GhostSpacing = e.Float("ghostSpacing", 0.32f);
+    s.GhostSize = e.Float("ghostSize", 0.055f);
+    s.ApertureBlades = glm::clamp(e.Int("blades", 6), 0, 12);
+    s.Halo = e.Float("halo", 0.55f);
+    s.HaloRadius = e.Float("haloRadius", 0.42f);
+    s.Starburst = e.Float("starburst", 0.5f);
+    s.Glare = e.Float("glare", 0.45f);
+    s.Chroma = e.Float("chroma", 0.55f);
+    s.Threshold = e.Float("threshold", 1.1f);
+    // Видимость солнца — по кадру СЦЕНЫ, а не по уже обработанному: порог
+    // «это солнце» задан в яркости сцены, до экспозиции.
+    sc.Flare->Render(*out, ctx.SceneColor, ctx.SceneDepth, ctx.Width, ctx.Height, ctx.Proj,
+                     ctx.View, *ctx.Lighting, s);
+    // Блик возвращает тест глубины — тракт работает без него.
+    device.SetDepthTest(false);
+    device.SetBlend(false);
+    device.SetViewport(0, 0, ctx.Width, ctx.Height);
     PostSetColor(ctx, out->ColorTextureHandle(), /*ldr=*/false);
 }
 
@@ -1360,6 +1559,11 @@ void RunAutoExposure(PostContext& ctx, const PostEffect& e) {
     const float minEv = e.Float("minEV", -8.0f), maxEv = e.Float("maxEV", 10.0f);
     meter.SetFloat("uMinEV", glm::min(minEv, maxEv));
     meter.SetFloat("uMaxEV", glm::max(minEv, maxEv));
+    meter.SetFloat("uLow", glm::clamp(e.Float("lowPercent", 10.0f), 0.0f, 99.0f) * 0.01f);
+    meter.SetFloat("uHigh", glm::clamp(e.Float("highPercent", 90.0f), 1.0f, 100.0f) * 0.01f);
+    meter.SetFloat("uBlack", e.Float("blackLevel", -10.0f));
+    // «Без поправки» — адаптация, при которой кадр не меняется: 0.18·2^(c−a) = 1.
+    meter.SetFloat("uNeutral", e.Float("compensation", 1.0f) + std::log2(0.18f));
     device.BindTexture2D(0, ctx.Color);
     device.BindTexture2D(1, sc.Adapt[prev]->ColorTextureHandle());
     DrawFullscreen(ctx);
@@ -1530,15 +1734,22 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
         PostEffectKind k;
         k.Id = "autoexposure";
         k.Label = "Auto Exposure";
-        k.Hint = "Адаптация глаза, как в UE5: кадр сам подстраивается под яркость сцены —\n"
+        k.Hint = "Адаптация глаза: кадр сам подстраивается под яркость сцены —\n"
                  "в пещере светлеет, на солнце темнеет, плавно";
         k.Stage = PostStage::Exposure;
         k.Params = {Param("compensation", "Compensation", 1.0f, -4.0f, 4.0f,
-                          "Поправка в ступенях: +1 — вдвое светлее (у UE5 по умолчанию +1)"),
+                          "Поправка в ступенях: +1 — вдвое светлее"),
                     Param("minEV", "Min Brightness", -8.0f, -16.0f, 16.0f,
                           "Темнее этого (log2 яркости) сцену не вытягивать"),
                     Param("maxEV", "Max Brightness", 10.0f, -16.0f, 16.0f,
                           "Ярче этого (log2 яркости) сцену не притушивать"),
+                    Param("lowPercent", "Low Percent", 10.0f, 0.0f, 99.0f,
+                          "Сколько процентов самых тёмных точек кадра не учитывать"),
+                    Param("highPercent", "High Percent", 90.0f, 1.0f, 100.0f,
+                          "Выше какого процента яркости точки не учитывать (блики, лампы)"),
+                    Param("blackLevel", "Black Level", -10.0f, -16.0f, 0.0f,
+                          "Точки темнее этого (log2 яркости) — пустота: не участвуют в замере.\n"
+                          "Иначе чёрное небо заставляет глаз вытягивать кадр в белое"),
                     Param("speedUp", "Speed Up", 3.0f, 0.0f, 20.0f,
                           "Как быстро глаз привыкает к свету (1/с)"),
                     Param("speedDown", "Speed Down", 1.0f, 0.0f, 20.0f,
@@ -1567,9 +1778,21 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
         k.Needs = PostNeeds::HdrColor | PostNeeds::Depth;
         k.Stage = PostStage::Depth;
         k.Params = {
-            Param("focus", "Focus Distance", 10.0f, 0.05f, 200.0f, "Расстояние до плоскости фокуса"),
-            Param("aperture", "Aperture", 2.8f, 0.7f, 16.0f, "f-число: меньше — сильнее размытие"),
-            Param("maxRadius", "Max Radius", 12.0f, 0.0f, 64.0f, "Потолок радиуса в пикселях")};
+            EnumParam("focusMode", "Focus", 0, {"Manual", "Screen centre"},
+                      "Вручную — на дистанции ниже; по центру — на предмет в центре кадра"),
+            Param("focus", "Focus Distance", 10.0f, 0.05f, 1000.0f, "Расстояние до плоскости фокуса, м"),
+            Param("focusRange", "Focus Range", 0.0f, 0.0f, 100.0f,
+                  "Толщина резкого слоя вокруг фокуса, м: всё внутри — резкое"),
+            Param("aperture", "Aperture", 2.8f, 0.7f, 22.0f, "f-число: меньше — сильнее размытие"),
+            Param("focalLength", "Focal Length", 85.0f, 10.0f, 300.0f,
+                  "Фокусное расстояние объектива, мм: длиннее — сильнее размытие фона"),
+            Param("nearBlur", "Near Blur", 1.0f, 0.0f, 4.0f, "Сила размытия ближе фокуса (0 — нет)"),
+            Param("farBlur", "Far Blur", 1.0f, 0.0f, 4.0f, "Сила размытия дальше фокуса (0 — нет)"),
+            Param("maxRadius", "Max Radius", 16.0f, 0.0f, 64.0f, "Потолок радиуса в пикселях"),
+            EnumParam("quality", "Quality", 1, {"Low", "Medium", "High"},
+                      "Сколько выборок на пиксель размытия: выше — ровнее боке, дороже"),
+            BoolParam("showFocus", "Show Focus", false,
+                      "Раскрасить кадр: в фокусе — зелёный, ближе — синий, дальше — оранжевый")};
         k.Run = RunDepthOfField;
         catalog.Register(std::move(k));
     }
@@ -1580,9 +1803,37 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
         k.Hint = "Смаз движения камеры (и объектов, если у кадра есть буфер скоростей)";
         k.Needs = PostNeeds::HdrColor | PostNeeds::Depth;
         k.Stage = PostStage::Depth;
-        k.Params = {Param("amount", "Amount", 0.5f, 0.0f, 1.0f, "Доля вектора смещения за кадр"),
-                    Param("samples", "Samples", 12.0f, 2.0f, 32.0f, "Выборок вдоль вектора")};
+        k.Params = {Param("amount", "Amount", 0.5f, 0.0f, 1.0f,
+                          "Доля движения за кадр, которую размазать (выдержка затвора)"),
+                    Param("samples", "Samples", 12.0f, 2.0f, 32.0f, "Выборок вдоль вектора"),
+                    Param("maxLength", "Max Length", 5.0f, 0.1f, 25.0f,
+                          "Потолок длины смаза, % ширины кадра")};
         k.Run = RunMotionBlur;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
+        k.Id = "lensflare";
+        k.Label = "Lens Flare";
+        k.Hint = "Блик солнца в объективе: призраки, ореол, лучи. Гаснет, когда солнце\n"
+                 "закрыто предметом или ушло за кадр";
+        k.Needs = PostNeeds::HdrColor | PostNeeds::Depth;
+        k.Stage = PostStage::Depth;
+        k.Params = {Param("intensity", "Intensity", 1.0f, 0.0f, 4.0f, "Сила блика"),
+                    Param("ghosts", "Ghosts", 6.0f, 0.0f, 12.0f, "Сколько переотражений"),
+                    Param("ghostSpacing", "Ghost Spacing", 0.32f, 0.05f, 1.0f,
+                          "Шаг призраков по линии «солнце — центр кадра»"),
+                    Param("ghostSize", "Ghost Size", 0.055f, 0.01f, 0.3f, "Размер первого призрака"),
+                    Param("blades", "Aperture Blades", 6.0f, 0.0f, 12.0f,
+                          "Лепестков диафрагмы: форма призраков (0 — круглые)"),
+                    Param("halo", "Halo", 0.55f, 0.0f, 2.0f, "Сила кольца"),
+                    Param("haloRadius", "Halo Radius", 0.42f, 0.05f, 1.0f, "Радиус кольца"),
+                    Param("starburst", "Starburst", 0.5f, 0.0f, 2.0f, "Лучи вокруг солнца"),
+                    Param("glare", "Glare", 0.45f, 0.0f, 2.0f, "Мягкое свечение вокруг солнца"),
+                    Param("chroma", "Chroma", 0.55f, 0.0f, 2.0f, "Радужность призраков"),
+                    Param("threshold", "Threshold", 1.1f, 0.0f, 16.0f,
+                          "Яркость, начиная с которой пиксель — это солнце")};
+        k.Run = RunLensFlare;
         catalog.Register(std::move(k));
     }
     {
@@ -1639,11 +1890,11 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
         // номер, и вставка в середину молча сменила бы им кривую.
         // Умолчание звена — ACES, как было: сохранённые сцены не хранят
         // нетронутые значения, и смена умолчания молча перекрасила бы их.
-        // Кривую UE5 получает НОВАЯ камера (см. PostChain::Default).
+        // Кинематографическую кривую получает НОВАЯ камера (см. PostChain::Default).
         k.Params = {EnumParam("mode", "Mode", 2,
-                              {"Clamp", "Reinhard", "ACES", "Filmic", "Unreal", "AgX", "Neutral"},
+                              {"Clamp", "Reinhard", "ACES", "Filmic", "Cinematic", "AgX", "Neutral"},
                               "Кривая света: чем переводить HDR в картинку.\n"
-                              "Unreal — плёночная кривая UE5 (у новой камеры), AgX — как в Blender 4,\n"
+                              "Cinematic — мягкая плёночная кривая (у новой камеры), AgX — мягкие света,\n"
                               "Neutral — Khronos PBR Neutral: цвет материала без искажений"),
                     EnumParam("output", "Output", 0, {"sRGB", "Gamma", "Linear"},
                               "Кодирование для экрана: sRGB — стандарт мониторов,\n"
@@ -1710,9 +1961,8 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
 // звеньев и их параметры заданы прямо выше.
 //
 // Что в нём есть: экспозиция, адаптация глаза, свечение, цвет и тон-маппинг
-// плёночной кривой UE5 (у самого звена умолчание ACES — ради старых сцен). То есть то, что делает картинку
-// картинкой: так настроена новая камера в Unreal Engine 5, и кадр «как в UE»
-// получается без единой правки. Чего нет: глубины резкости, смаза, зерна,
+// кинематографической кривой (у самого звена умолчание ACES — ради старых
+// сцен). То есть то, что делает картинку картинкой, без единой правки. Чего нет: глубины резкости, смаза, зерна,
 // аберрации — эффектов, которые нужны НЕ всегда и которые человек добавляет
 // осознанно. Компонент, приезжающий со всем сразу, пришлось бы первым делом
 // раздевать.
@@ -1723,7 +1973,7 @@ PostChain PostChain::Default() {
     chain.Effects.push_back(MakePostEffect("bloom"));
     chain.Effects.push_back(MakePostEffect("color"));
     PostEffect tonemap = MakePostEffect("tonemap");
-    if (PostValue* mode = tonemap.Find("mode")) mode->V[0] = 4.0f;   // Unreal
+    if (PostValue* mode = tonemap.Find("mode")) mode->V[0] = 4.0f;   // Cinematic
     chain.Effects.push_back(std::move(tonemap));
     return chain;
 }
@@ -1747,6 +1997,9 @@ void PostFX::EnsureTargets(int w, int h) {
     // размера не подходит ни одному звену.
     m_scratch.DofPrep.reset();
     m_scratch.DofBlur.reset();
+    m_scratch.DofNearMaxA.reset();
+    m_scratch.DofNearMaxB.reset();
+    m_scratch.DofNear.reset();
     m_scratch.Pool.clear();
     m_scratch.HasPrevFrame = false;
 }
@@ -1844,6 +2097,7 @@ void PostFX::Render(sage::rhi::TextureHandle sceneColor, sage::rhi::TextureHandl
     ctx.Color = sceneColor;
     ctx.ColorIsLdr = false;
     ctx.Scratch = &m_scratch;
+    ctx.Lighting = m_lighting;
     // Время — от первого кадра процесса, а не от начала эпохи: у секунд с 1970
     // года не хватает точности float, и зерно плёнки застывало бы на месте.
     {

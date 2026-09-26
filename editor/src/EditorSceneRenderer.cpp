@@ -39,6 +39,7 @@ void EditorSceneRenderer::Init() {
     m_postfx.emplace();
     m_gamePostFbo.emplace(m_gameW, m_gameH);
     m_gamePostfx.emplace();
+    m_previewPostfx.emplace();
     m_debugDraw.emplace();
     m_sky.emplace();
     m_particles.emplace();
@@ -590,6 +591,20 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
         shadingMode = (int)mode - 1;
     }
     DrawLit(scene, env, outView, outProj, eye, shadingMode, wireframe, /*viewId=*/slot);
+    // Скорости — СРАЗУ после геометрии: проход берёт список видимого у
+    // последнего цветного прохода батча, и любой другой проход между ними
+    // подменил бы его чужим.
+    sage::rhi::TextureHandle viewportVelocity;
+    {
+        sage::render::PostChain chain;
+        if (primary && mode == EditorRenderMode::Shaded && !viewOverride.Use &&
+            sage::render::ResolvePostChain(scene, sage::ecs::PrimaryCameraEntity(scene), chain) &&
+            sage::render::ChainNeedsVelocity(chain)) {
+            viewportVelocity = m_viewportVelocity.Render(m_batch, outView, outProj, w, h);
+            sceneFbo.Bind();
+            device.SetViewport(0, 0, w, h);
+        }
+    }
     m_particles->Draw(camera, outView, outProj);
 
     GameObject selectedObj = scene.Get(selectedId);
@@ -604,14 +619,6 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
                               m_sceneTime, /*viewId=*/slot);
     }
 
-    // Блик — после объёма, чтобы облако его гасило, и до пост-обработки, чтобы
-    // он прошёл через bloom вместе с кадром.
-    if (cfg.LensFlare) {
-        sceneFbo.Resolve();
-        if (!m_lensFlare) m_lensFlare.emplace();
-        m_lensFlare->Render(sceneFbo, sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h,
-                            outProj, outView, env, sage::render::LensFlareFromConfig(cfg));
-    }
 
     // Силуэты ВСЕХ выбранных объектов в масочный буфер (до поста, свой FBO).
     if (!selection.empty()) RenderOutlineMask(scene, selection, outView, outProj, w, h);
@@ -643,9 +650,10 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     if (viewportWantsPost && mode == EditorRenderMode::Shaded && !viewOverride.Use &&
         PostWorks()) {
         postFbo.Resize(w, h);
+        m_postfx->SetLighting(&env);   // солнце — звену «Lens Flare»
         m_postfx->Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), sceneFbo.Width(),
                          sceneFbo.Height(), outProj, outView, viewportChain,
-                         /*output=*/&postFbo, 0, 0, w, h);
+                         /*output=*/&postFbo, 0, 0, w, h, viewportVelocity);
         postApplied = true;
     }
     // ГОТОВЫЙ КАДР ВОЗВРАЩАЕТСЯ В БУФЕР СЦЕНЫ — и дальше всё рисуется в него.
@@ -847,7 +855,8 @@ void EditorSceneRenderer::RenderCameraPreview(Scene& scene, const LightingEnviro
     if (sage::render::ResolvePostChain(scene, camera, previewChain) && PostWorks()) {
         EnsureFramebuffer(m_previewPostFbo, m_previewW, m_previewH);
         m_previewPostFbo->Resize(m_previewW, m_previewH);
-        m_postfx->Render(m_previewFbo->ColorTexture(), m_previewFbo->DepthTexture(),
+        m_previewPostfx->SetLighting(&env);
+        m_previewPostfx->Render(m_previewFbo->ColorTexture(), m_previewFbo->DepthTexture(),
                          m_previewFbo->Width(), m_previewFbo->Height(), frame.Proj, frame.View,
                          previewChain,
                          /*output=*/&*m_previewPostFbo, 0, 0, m_previewW,
@@ -917,6 +926,15 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     // Игровое окно — всегда Shaded, без гизмо (как увидит игрок).
     DrawLit(scene, env, view, proj, camPos, /*shadingMode=*/0, /*wireframe=*/false,
             /*viewId=*/kGameViewId);
+    sage::rhi::TextureHandle gameVelocity;
+    sage::render::PostChain gameChain;
+    const bool gameWantsPost =
+        sage::render::ResolvePostChain(scene, sage::ecs::PrimaryCameraEntity(scene), gameChain);
+    if (gameWantsPost && sage::render::ChainNeedsVelocity(gameChain)) {
+        gameVelocity = m_gameVelocity.Render(m_batch, view, proj, m_gameW, m_gameH);
+        m_gameFbo->Bind();
+        device.SetViewport(0, 0, m_gameW, m_gameH);
+    }
     m_particles->DrawFromView(view, proj);
 
     // Отладочная графика игры (Debug:DrawLine) — и в панели Game тоже: она
@@ -936,34 +954,24 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     // которая обещает показать игру, показывала третью картинку, не совпадающую
     // ни с редактором, ни с игрой; и «в редакторе тёмно, а в игре нормально»
     // начиналось именно с этого расхождения.
-    if (cfg.Volumetrics || cfg.LensFlare) {
-        if (cfg.Volumetrics) {
-            m_gameFbo->Resolve();
-            if (!m_volumetrics) m_volumetrics.emplace();
-            m_volumetrics->Render(*m_gameFbo, m_gameFbo->DepthTexture(), m_gameW, m_gameH, proj,
-                                  view, camPos, env, FrameShadows(),
-                                  sage::render::VolumetricsFromConfig(cfg), m_sceneTime,
-                                  /*viewId=*/kGameViewId);
-        }
-        if (cfg.LensFlare) {
-            m_gameFbo->Resolve();
-            if (!m_lensFlare) m_lensFlare.emplace();
-            m_lensFlare->Render(*m_gameFbo, m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),
-                                m_gameW, m_gameH, proj, view, env,
-                                sage::render::LensFlareFromConfig(cfg));
-        }
+    if (cfg.Volumetrics) {
+        m_gameFbo->Resolve();
+        if (!m_volumetrics) m_volumetrics.emplace();
+        m_volumetrics->Render(*m_gameFbo, m_gameFbo->DepthTexture(), m_gameW, m_gameH, proj,
+                              view, camPos, env, FrameShadows(),
+                              sage::render::VolumetricsFromConfig(cfg), m_sceneTime,
+                              /*viewId=*/kGameViewId);
     }
 
     m_gameFbo->Resolve();   // MSAA -> обычные текстуры (без MSAA — пустышка)
 
     m_gamePostApplied = false;
-    sage::render::PostChain gameChain;
-    if (sage::render::ResolvePostChain(scene, sage::ecs::PrimaryCameraEntity(scene), gameChain) &&
-        PostWorks()) {
+    if (gameWantsPost && PostWorks()) {
         m_gamePostFbo->Resize(m_gameW, m_gameH);
+        m_gamePostfx->SetLighting(&env);
         m_gamePostfx->Render(m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),
                              m_gameFbo->Width(), m_gameFbo->Height(), proj, view, gameChain,
-                             /*output=*/&*m_gamePostFbo, 0, 0, m_gameW, m_gameH);
+                             /*output=*/&*m_gamePostFbo, 0, 0, m_gameW, m_gameH, gameVelocity);
         m_gamePostApplied = true;
     }
 

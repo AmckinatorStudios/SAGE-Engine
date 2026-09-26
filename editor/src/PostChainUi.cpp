@@ -23,6 +23,12 @@ void DrawParam(EditorHost* host, sage::render::PostEffect& effect,
     PostValue* value = effect.Find(desc.Name.c_str());
     if (!value) return;
     const char* label = T(desc.Label);
+    // Своя область имён на каждый параметр. Подпись параметра совпадает с
+    // подписью эффекта («Экспозиция» у звена и у его ползунка), и в одной
+    // области ImGui это ОДИН идентификатор на два виджета: ImGui ругался
+    // «conflicting ID», а щелчок по ползунку снимал галку эффекта.
+    ImGui::PushID(desc.Name.empty() ? desc.Label.c_str() : desc.Name.c_str());
+    struct PopOnExit { ~PopOnExit() { ImGui::PopID(); } } popOnExit;
 
     // Подпись звена и параметра приходит из ДВИЖКА — строкой во время работы, а
     // не литералом здесь. T() такую строку переводит (ключ — сам английский
@@ -152,11 +158,23 @@ bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const
             for (size_t i = 0; i < chain.Effects.size(); ++i)
                 if (chain.Effects[i].Kind == kind->Id) { index = (int)i; break; }
 
-            bool on = index >= 0 && chain.Effects[(size_t)index].Enabled;
+            // Включено — если включена ХОТЬ ОДНА копия звена. Старые сцены и
+            // скрипты могли положить звено в тракт дважды, а галка правила
+            // только первую копию: снимаешь её — эффект остаётся, вторая
+            // копия продолжает работать.
+            bool on = false;
+            for (const PostEffect& e : chain.Effects)
+                if (e.Kind == kind->Id && e.Enabled) on = true;
             if (ImGui::Checkbox(T(kind->Label), &on)) {
                 if (host) host->PushUndoSnapshot();
                 if (index >= 0) {
-                    chain.Effects[(size_t)index].Enabled = on;
+                    for (PostEffect& e : chain.Effects)
+                        if (e.Kind == kind->Id) e.Enabled = on;
+                    if (on) {
+                        // Правится первая включённая копия — её и показываем.
+                        for (size_t i = 0; i < chain.Effects.size(); ++i)
+                            if (chain.Effects[i].Kind == kind->Id) { index = (int)i; break; }
+                    }
                 } else if (on) {
                     // Место в списке роли не играет — когда звено выполнится,
                     // решает его этап.

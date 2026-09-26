@@ -978,7 +978,7 @@ TEST(DecodeToMono_rejects_garbage) {
 
 // --- Синонимы имён костей при ретаргете ------------------------------------
 // Библиотеки анимаций и модели делают разные люди по разным соглашениям:
-// Unreal зовёт бедро thigh_l, Blender — UpperLeg.L, Mixamo — LeftUpLeg.
+// Одни зовут бедро thigh_l, другие — UpperLeg.L, третьи — LeftUpLeg.
 // Совпадение по буквам находит только руки и голову, и анимация выходит без ног.
 TEST(Retarget_matches_bones_across_naming_conventions) {
     using namespace sage::anim;

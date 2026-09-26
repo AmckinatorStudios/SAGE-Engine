@@ -128,7 +128,7 @@ constexpr int kFilteredMips = 6;
 
 SkyCelestials ReflectedSky(const LightingEnvironment& env) {
     // Форма неба, низ и облака — те же, что в кадре: иначе вода под небом
-    // Minecraft отражала бы небо движка по умолчанию.
+    // с блочным небом отражала бы небо движка по умолчанию.
     SkyCelestials c = CelestialsFromEnvironment(env);
     // Диски светил в куб НЕ идут. Солнце уже даёт блик прямым светом (см.
     // PbrContrib), и его диск в отражении — второй блик рядом с первым; к тому

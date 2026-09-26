@@ -155,8 +155,9 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     // Держать её ещё и здесь значило бы иметь две системы, где половина
     // настроек работает глобально, а половина через компонент.
     if (EditorTheme::SectionHeader("camera", T("Post Processing" "###Post Processing"))) {
-        ImGui::TextWrapped("%s", T("Post processing is a camera component: select the camera "
-                                   "and add \"Post Processing\" in the Inspector."));
+        ImGui::TextWrapped("%s", T("Post processing is a component: on a camera it processes that "
+                                   "camera, on any other object — every camera of the scene. Add "
+                                   "\"Post Processing\" in the Inspector."));
     }
 
     // ОБЪЁМНЫЙ СВЕТ ПОКА УБРАН ИЗ РЕДАКТОРА.
