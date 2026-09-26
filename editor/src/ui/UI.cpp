@@ -276,7 +276,7 @@ void Badge(const char* text, Role role) {
     ImGui::PushStyleColor(ImGuiCol_Text, col);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ui.SpacingSM, 0.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, ui.CornerRadiusSmall);
-    ImGui::SmallButton(text);
+    ImGui::Button(text);
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor(4);
 }

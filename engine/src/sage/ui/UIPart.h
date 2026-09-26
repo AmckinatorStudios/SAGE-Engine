@@ -166,6 +166,10 @@ struct PartField {
     // фильтрации атласа шрифта, — и нужное (текст, цвет) терялось среди
     // тех, что трогают раз в жизни проекта.
     bool Advanced = false;
+    // Только для СВОЕГО оформления (Element::SkinMode::Custom). В оформлении
+    // движка скругление, рамку, тень, картинки и виды состояний задаёт движок,
+    // и поля эти не показываются вовсе — а не показываются бездействующими.
+    bool CustomOnly = false;
     // Вкладка состояния («On hover», «When pressed»...): поля вида кнопки в
     // разных состояниях показываются вкладками, а не одной простынёй.
     const char* Tab = nullptr;
@@ -203,6 +207,10 @@ struct PartDrawContext {
     bool OwnerHovered = false;
     bool OwnerPressed = false;
     bool OwnerEnabled = true;
+
+    // Оформление движка (Element::SkinMode::Engine): части берут у себя только
+    // цвет, остальное — из общей темы движка (см. EngineLook в UIParts.cpp).
+    bool EngineSkin = false;
 
     UIRenderer* Ui = nullptr;
 
@@ -409,6 +417,13 @@ const std::vector<PartField>& LookFieldsOf(const PartField& lookField);
 // Все поля части для редактора: вид (Kind::Look) остаётся одной записью-
 // заголовком, за которой сразу идут его раскрытые поля.
 std::vector<PartField> EditableFields(const std::vector<PartField>& fields);
+
+// --- Оформление движка ---------------------------------------------------------
+//
+// Переход «оформление движка -> своё»: виды частей элемента получают те самые
+// значения, которыми движок их рисовал (скругление, рамка, градиент, тень), —
+// элемент не меняется на экране, а поля теперь его и можно править дальше.
+void BakeEngineSkin(entt::registry& reg, entt::entity e);
 
 template <class T> T& FieldAs(void* data, const PartField& f) {
     return *reinterpret_cast<T*>(static_cast<char*>(data) + f.Offset);

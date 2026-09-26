@@ -133,12 +133,12 @@ bool DrawSettings(ModelLoader::ImportSettings& s, bool* overwriteMaterials) {
     changed |= ImGui::DragFloat3(T("Rotation (degrees)"), &s.Rotation.x, 1.0f, -360.0f, 360.0f, "%.0f");
     // Самая частая беда чужой модели — ось Z вверх (3ds Max, старые экспортёры):
     // модель лежит на боку. Одна кнопка вместо поиска правильного угла.
-    if (ImGui::SmallButton(T("Z up -> Y up"))) {
+    if (ImGui::Button(T("Z up -> Y up"))) {
         s.Rotation = glm::vec3(-90.0f, 0.0f, 0.0f);
         changed = true;
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton(T("Reset rotation"))) {
+    if (ImGui::Button(T("Reset rotation"))) {
         s.Rotation = glm::vec3(0.0f);
         changed = true;
     }

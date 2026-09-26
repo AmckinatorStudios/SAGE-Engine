@@ -85,7 +85,7 @@ void InspectorPanel::DrawSunSection(EditorHost& host, GameObject obj) {
                              "the frame."));
         if (sun != entt::null) {
             ImGui::SameLine();
-            if (ImGui::SmallButton(T("Show the sun"))) {
+            if (ImGui::Button(T("Show the sun"))) {
                 const IdComponent* id = scene.Registry().try_get<IdComponent>(sun);
                 if (id) host.Selection().SetPrimary(id->Id);
             }
@@ -133,7 +133,7 @@ void InspectorPanel::DrawSunSection(EditorHost& host, GameObject obj) {
         // ровно тот путь, из-за которого «где настраивается солнце» и стало
         // вопросом. Правка чужая (свойства сцены), поэтому со снимком undo.
         ImGui::SameLine();
-        if (ImGui::SmallButton(T("Turn on"))) {
+        if (ImGui::Button(T("Turn on"))) {
             host.PushUndoSnapshot();
             env.Skybox.Enabled = true;
             env.Skybox.Celestials = true;
@@ -442,7 +442,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         EditorTheme::Hint(Hint2(T("Marked as static geometry for baked lighting"),
                                 T("Baking is temporarily unavailable in the editor")).c_str());
         ImGui::SameLine();
-        if (ImGui::SmallButton(T("Remove##gistatic"))) rmGiStatic = true;
+        if (ImGui::Button(T("Remove##gistatic"))) rmGiStatic = true;
     }
 
     // У этого компонента НЕТ ПОЛЕЙ: он флаг, и вся его настройка — есть он или
@@ -455,7 +455,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                                 T("Position, rotation, scale, color and primitive are replicated"))
                               .c_str());
         ImGui::SameLine();
-        if (ImGui::SmallButton(T("Remove##netreplicated"))) rmNet = true;
+        if (ImGui::Button(T("Remove##netreplicated"))) rmNet = true;
     }
 
     if (reg.all_of<ScriptComponent>(obj.Entity()) && EditorTheme::SectionHeader("script", T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen, &rmScript,
@@ -697,7 +697,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                     host.TrackLastImGuiItem();
                     ImGui::DragFloat3(T("Rotation"), &p.EulerDeg.x, 0.5f);
                     host.TrackLastImGuiItem();
-                    if (ImGui::SmallButton(T("Remove Part"))) removePart = pi;
+                    if (ImGui::Button(T("Remove Part"))) removePart = pi;
                     ImGui::TreePop();
                 }
                 ImGui::PopID();
@@ -1105,7 +1105,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                     if (g.Resolved && g.EndJoint < 0)
                         ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Danger), "%s",
                                            T("bone not found in skeleton"));
-                    if (ImGui::SmallButton(T("Remove Goal"))) remove = gi;
+                    if (ImGui::Button(T("Remove Goal"))) remove = gi;
                     ImGui::TreePop();
                 }
                 ImGui::PopID();

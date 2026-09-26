@@ -198,6 +198,7 @@ void DrawElement(const entt::registry& reg, entt::entity e, const UIRect& r, flo
     c.OwnerHovered = owner && owner->Runtime.Hovered;
     c.OwnerPressed = owner && owner->Runtime.Pressed;
     c.OwnerEnabled = !owner || owner->Enabled;
+    c.EngineSkin = box && box->Skin == Element::SkinMode::Engine;
 
     for (const PartType& p : Parts()) {
         if (!p.Draw || !p.Has || !p.Has(reg, e)) continue;
@@ -547,6 +548,15 @@ std::vector<entt::entity> SortedInterfaces(Scene& scene) {
         return (ia ? ia->Id : 0) < (ib ? ib->Id : 0);
     });
     return out;
+}
+
+entt::entity ControlOf(Scene& scene, entt::entity element) {
+    entt::registry& reg = scene.Registry();
+    for (entt::entity up = element; up != entt::null && reg.valid(up); up = scene.ParentOf(up)) {
+        if (!reg.all_of<Element>(up)) break;   // граница интерфейса
+        if (reg.all_of<Interactable>(up)) return up;
+    }
+    return entt::null;
 }
 
 bool CanReparent(Scene& scene, entt::entity element, entt::entity newParent) {

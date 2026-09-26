@@ -212,7 +212,7 @@ void DrawRedockButton(const char* id, ImGuiWindow* w) {
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
                          ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing |
                          ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoNav)) {
-        if (ImGui::SmallButton(T("Back to the editor"))) SetDetached(id, false);
+        if (ImGui::Button(T("Back to the editor"))) SetDetached(id, false);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("Returns the panel to a tab of the main window"));
     }

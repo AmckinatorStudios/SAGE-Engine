@@ -262,6 +262,7 @@ std::vector<Preset> BuildPresets() {
         child.Box.Margin = {0.0f, 0.0f, 0.0f, 0.0f};
         child.HasLabel = true;
         child.LabelStyle.Text = text;
+        child.Box.Skin = Element::SkinMode::Engine;
         return child;
     };
 
@@ -270,6 +271,9 @@ std::vector<Preset> BuildPresets() {
         out.back().Name = name;
         out.back().Box.Anchor = UIAnchor::Center;
         out.back().Box.Position = {0.0f, 0.0f};
+        // Новый элемент из меню — в оформлении движка: сразу выглядит
+        // собранно, а из настроек у него только то, что правят всегда.
+        out.back().Box.Skin = Element::SkinMode::Engine;
         return out.back();
     };
 

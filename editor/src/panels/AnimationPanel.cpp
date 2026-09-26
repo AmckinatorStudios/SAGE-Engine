@@ -339,7 +339,7 @@ void AnimationPanel::DrawOwnerBar(EditorHost& host) {
     ImGui::SameLine();
     GameObject sel = host.SelectedObject();
     ImGui::BeginDisabled(!sel.Valid() || m_clip.Imported);
-    if (ImGui::SmallButton(T("Put on the selected object"))) BindTo(host, sel);
+    if (ImGui::Button(T("Put on the selected object"))) BindTo(host, sel);
     ImGui::EndDisabled();
     if (!sel.Valid()) {
         ImGui::SameLine();
@@ -373,7 +373,7 @@ void AnimationPanel::DrawToolbar(EditorHost& host) {
         // Его играет компонент Animation, и сказано это прямо.
         if (m_skeletal) {
             ImGui::TextDisabled("%s", T("A skeletal clip: the Animation component plays it."));
-        } else if (ImGui::SmallButton(T("Make it mine"))) {
+        } else if (ImGui::Button(T("Make it mine"))) {
             m_clip.Imported = false;
             m_clip.Name += " (custom)";
             m_path.clear();   // сохранится как новый файл, чужой не тронем

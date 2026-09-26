@@ -417,7 +417,7 @@ bool PickerBody(float rgb[3], float* alpha, const float* original, float width) 
         auto mode = [&](const char* text, int m) {
             const bool on = g_channelMode == m;
             if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
-            if (ImGui::SmallButton(text)) g_channelMode = m;
+            if (ImGui::Button(text)) g_channelMode = m;
             if (on) ImGui::PopStyleColor();
         };
         mode(T("RGB"), 0);

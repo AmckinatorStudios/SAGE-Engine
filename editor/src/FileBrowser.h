@@ -177,4 +177,13 @@ private:
         bool IsGroup = false;
     };
     std::vector<Place> m_places;
+
+    // ИЗБРАННОЕ И ИСТОРИЯ ПАПОК — общие на все диалоги и между запусками
+    // (editor_prefs.json). Папку с текстурами набора, в которую ходят десятки
+    // раз за вечер, раньше каждый раз искали от диска заново.
+    std::vector<std::string> m_favorites;   // пути UTF-8
+    std::vector<std::string> m_recent;      // последние папки, свежие сверху
+    bool m_listsLoaded = false;
+    void SaveLists() const;
+    void DrawPathGroup(const char* title, const std::vector<std::string>& paths, bool favorites);
 };

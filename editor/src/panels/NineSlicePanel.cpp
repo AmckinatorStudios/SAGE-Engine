@@ -496,7 +496,7 @@ void NineSlicePanel::DrawPreview(const Live& live) {
     ImGui::DragFloat2("##ns_size", &m_previewSize.x, 1.0f, 8.0f, 4096.0f, "%.0f");
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", T("Preview size. It starts at the size of the element."));
-    if (live.Bound && ImGui::SmallButton(T("Element size"))) m_previewSize = live.ElementSize;
+    if (live.Bound && ImGui::Button(T("Element size"))) m_previewSize = live.ElementSize;
 
     // Предпросмотр ВПИСЫВАЕТСЯ в доступную ширину: крупный элемент показан
     // уменьшенным целиком, а не вылезает за окно.

@@ -1651,7 +1651,7 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
                           "only the .meta sidecar could have caught a rename made outside the editor."));
                 }
             }
-            if (ImGui::SmallButton(T("Rescan project"))) {
+            if (ImGui::Button(T("Rescan project"))) {
                 sage::AssetDatabase::Instance().ClearBroken();
                 sage::AssetDatabase::Instance().ScanProject(project.Dir().string());
             }

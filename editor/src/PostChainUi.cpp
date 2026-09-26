@@ -209,7 +209,7 @@ bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const
         ImGui::SeparatorText(T("Unknown effect"));
         ImGui::TextDisabled("%s", chain.Effects[i].Kind.c_str());
         ImGui::SameLine();
-        if (ImGui::SmallButton(T("Remove"))) removeAt = (int)i;
+        if (ImGui::Button(T("Remove"))) removeAt = (int)i;
         ImGui::PopID();
     }
     if (removeAt >= 0) {

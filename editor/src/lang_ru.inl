@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2301.
+// Язык: Русский. Строк: 2310.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -262,6 +262,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Добавить дочерний эффект"},
     {"Add the prefab as a child",
      "Добавить префаб дочерним объектом"},
+    {"Add this folder to favorites: it will be one click away in every file dialog",
+     "Добавить папку в избранное: она будет в одном щелчке в каждом окне выбора файла"},
     {"Add variable",
      "Добавить переменную"},
     {"Add via Entity > Create Light; type/params in Inspector",
@@ -1410,6 +1412,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "К концу"},
     {"End Color",
      "Конечный цвет"},
+    {"Engine style",
+     "Стиль движка"},
     {"Engine version",
      "Версия движка"},
     {"Enter a file name",
@@ -1508,6 +1512,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Размытие дальнего плана"},
     {"Far Clip",
      "Дальняя плоскость"},
+    {"Favorites",
+     "Избранное"},
     {"File",
      "Файл"},
     {"File cannot be read",
@@ -1958,6 +1964,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Импорт: "},
     {"Imported — read only",
      "Из модели — только чтение"},
+    {"In favorites",
+     "В избранном"},
     {"In the container",
      "В контейнере"},
     {"Info",
@@ -3178,6 +3186,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Убрать кадр"},
     {"Remove from Launcher",
      "Убрать из списка"},
+    {"Remove from favorites",
+     "Убрать из избранного"},
     {"Remove sub-emitter",
      "Убрать дочерний эффект"},
     {"Remove the link",
@@ -3188,6 +3198,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Убрать этот компонент"},
     {"Remove this control",
      "Убрать эту привязку"},
+    {"Remove this folder from favorites",
+     "Убрать эту папку из избранного"},
     {"Removed from the list. The project itself is still on disk.",
      "Убрано из списка. Сам проект остался на диске."},
     {"Rename",
@@ -3954,6 +3966,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "В прошлый раз редактор закрылся не сам. Ниже — полный отчёт, записанный в тот момент: именно он нужен разработчику, чтобы найти причину."},
     {"The element stays where it is — only Offset is recomputed.",
      "Элемент остаётся на месте — пересчитывается только Offset."},
+    {"The engine draws the shape, border, shadow and states itself.\nYou choose only colours — nothing else to tune.",
+     "Форму, рамку, тень и состояния рисует движок.\nВы выбираете только цвета — больше настраивать нечего."},
     {"The engine's own format: loads without parsing and weighs less.\nThe source file stays where it is.",
      "Свой формат движка: грузится без разбора и весит меньше.\nИсходный файл остаётся на месте."},
     {"The file could not be read as an image",
@@ -4146,6 +4160,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Метки ещё не созрели — подождите несколько кадров."},
     {"Tint",
      "Тон"},
+    {"To favorites",
+     "В избранное"},
     {"To the start",
      "В начало"},
     {"Today",
@@ -4454,6 +4470,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Вернуть вопрос можно в Window -> Settings."},
     {"You can drop a model, a prefab or a material into the scene",
      "В сцену можно бросить модель, префаб или материал"},
+    {"Your own pictures for every part and state, 9-slice, every parameter.\nStarts from the engine look, so nothing jumps.",
+     "Свои картинки для каждой части и состояния, девятина, любой параметр.\nНачинается с вида движка — ничего не прыгает."},
     {"Z up -> Y up",
      "Z вверх -> Y вверх"},
     {"Zenith",

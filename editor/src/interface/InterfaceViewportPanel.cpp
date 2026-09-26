@@ -114,7 +114,7 @@ void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Canvas zoom (wheel over the canvas)"));
     ImGui::SameLine();
-    if (ImGui::SmallButton(T("1:1"))) { m_zoom = 1.0f; m_pan = ImVec2(0, 0); m_autoFit = false; }
+    if (ImGui::Button(T("1:1"))) { m_zoom = 1.0f; m_pan = ImVec2(0, 0); m_autoFit = false; }
     ImGui::SameLine();
     // Кнопка нажата — режим ВКЛЮЧЁН: она и показывает, вписан ли кадр сейчас.
     if (EditorIcons::IconOnlyButton("fit", T("Fit the frame into the panel"), m_autoFit))
@@ -148,17 +148,17 @@ void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
         // Готовые крайности: тёмный интерфейс смотрят на светлом, светлый — на
         // тёмном, и чаще всего нужен именно такой щелчок, а не подбор оттенка.
         bool preset = false;
-        if (ImGui::SmallButton(T("Dark"))) {
+        if (ImGui::Button(T("Dark"))) {
             tools.BackdropColor = glm::vec3(0.10f, 0.11f, 0.13f);
             preset = true;
         }
         ImGui::SameLine();
-        if (ImGui::SmallButton(T("Grey"))) {
+        if (ImGui::Button(T("Grey"))) {
             tools.BackdropColor = glm::vec3(0.50f, 0.50f, 0.52f);
             preset = true;
         }
         ImGui::SameLine();
-        if (ImGui::SmallButton(T("Light"))) {
+        if (ImGui::Button(T("Light"))) {
             tools.BackdropColor = glm::vec3(0.92f, 0.93f, 0.95f);
             preset = true;
         }
@@ -280,7 +280,7 @@ void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
         // ПОВЕРНУТЬ — ОДНОЙ КНОПКОЙ. Проверка «как это на телефоне боком»
         // делается постоянно, а руками это два поля, которые надо поменять
         // местами, не перепутав.
-        if (ImGui::SmallButton(T("Rotate the screen"))) {
+        if (ImGui::Button(T("Rotate the screen"))) {
             tools.PreviewSize = glm::ivec2(gh, gw);
             RequestFit();
         }

@@ -47,7 +47,7 @@ float AlphaOf(const PartDrawContext& c, float channelAlpha) {
     float a = channelAlpha * c.Alpha;
     if (!c.Enabled) {
         const Interactable* act = c.Sibling<Interactable>();
-        a *= act ? act->DisabledAlpha : 0.45f;
+        a *= (act && !c.EngineSkin) ? act->DisabledAlpha : 0.45f;
     }
     return a;
 }
@@ -58,8 +58,11 @@ glm::vec3 StateTint(const PartDrawContext& c, glm::vec3 base) {
     const Interactable* act = c.Sibling<Interactable>();
     if (!act) return base;
     if (!c.Enabled) return glm::mix(base, glm::vec3(1.0f) * 0.5f, 0.5f);
-    if (c.Pressed) return base * act->PressedBrightness;
-    if (c.Hovered) return glm::mix(base, glm::vec3(1.0f), act->HoverBrightness - 1.0f);
+    // Оформление движка — свои множители, одни на все элементы.
+    const float pressed = c.EngineSkin ? 0.85f : act->PressedBrightness;
+    const float hover = c.EngineSkin ? 1.15f : act->HoverBrightness;
+    if (c.Pressed) return base * pressed;
+    if (c.Hovered) return glm::mix(base, glm::vec3(1.0f), hover - 1.0f);
     return base;
 }
 
@@ -238,7 +241,7 @@ void DrawLookBorder(const PartDrawContext& c, const Look& look, const UIRect& r,
 const Look& StateLook(const PartDrawContext& c, const Look& normal, bool& stateTinted) {
     stateTinted = true;
     const Interactable* act = c.Sibling<Interactable>();
-    if (!act) return normal;
+    if (!act || c.EngineSkin) return normal;   // у движка состояния — подкраской
     const Look* chosen = nullptr;
     if (!c.Enabled) {
         if (act->UseDisabledLook) chosen = &act->DisabledLook;
@@ -273,6 +276,11 @@ void MarkAdvanced(std::vector<PartField>& v, std::initializer_list<const char*> 
         for (const char* k : keys)
             if (f.Key && std::string_view(f.Key) == k) f.Advanced = true;
 }
+void MarkCustomOnly(std::vector<PartField>& v, std::initializer_list<const char*> keys) {
+    for (PartField& f : v)
+        for (const char* k : keys)
+            if (f.Key && std::string_view(f.Key) == k) f.CustomOnly = true;
+}
 void MarkTab(std::vector<PartField>& v, const char* tab, const char* need,
              std::initializer_list<const char*> keys) {
     for (PartField& f : v)
@@ -281,6 +289,86 @@ void MarkTab(std::vector<PartField>& v, const char* tab, const char* need,
                 f.Tab = tab;
                 if (need) f.Requires = need;
             }
+}
+
+// --- Оформление движка ------------------------------------------------------------
+//
+// Одна тема на все элементы: человек задаёт ЦВЕТ, а форму, рамку, градиент и
+// тень движок выводит из него сам — по роли поверхности. Числа подобраны так,
+// чтобы кнопка, поле, панель и ползунок, поставленные рядом, выглядели одним
+// набором, а не четырьмя случайными прямоугольниками.
+enum class EngineRole { Panel, Button, Field, BarBack, BarFill, Track, SliderFill, Knob, Box, Check };
+
+Look EngineLook(const Look& src, EngineRole role) {
+    Look l;
+    l.Color = src.Color;
+    const glm::vec3 c(src.Color);
+    const float a = src.Color.a;
+    auto lighter = [&](float k, float alpha) { return glm::vec4(glm::mix(c, glm::vec3(1.0f), k), alpha); };
+    auto darker = [&](float k) { return glm::vec4(c * k, a); };
+    switch (role) {
+        case EngineRole::Panel:
+            l.Rounding = 10.0f;
+            l.BorderThickness = 1.0f;
+            l.BorderColor = lighter(0.18f, 0.45f * a);
+            l.Gradient = darker(0.86f);
+            l.ShadowSize = 12.0f;
+            l.ShadowColor = {0.0f, 0.0f, 0.0f, 0.30f * a};
+            break;
+        case EngineRole::Button:
+            l.Rounding = 8.0f;
+            l.BorderThickness = 1.0f;
+            l.BorderColor = lighter(0.30f, 0.70f * a);
+            l.Gradient = darker(0.78f);
+            l.ShadowSize = 5.0f;
+            l.ShadowColor = {0.0f, 0.0f, 0.0f, 0.30f * a};
+            break;
+        case EngineRole::Field:
+            l.Rounding = 6.0f;
+            l.BorderThickness = 1.0f;
+            l.BorderColor = lighter(0.25f, 0.60f * a);
+            break;
+        case EngineRole::BarBack:
+            l.Rounding = 64.0f;
+            l.BorderThickness = 1.0f;
+            l.BorderColor = lighter(0.20f, 0.45f * a);
+            break;
+        case EngineRole::BarFill:
+        case EngineRole::SliderFill:
+            l.Rounding = 64.0f;
+            l.Color = lighter(0.12f, a);
+            l.Gradient = darker(0.80f);
+            break;
+        case EngineRole::Track:
+            l.Rounding = 64.0f;
+            l.BorderThickness = 1.0f;
+            l.BorderColor = lighter(0.20f, 0.45f * a);
+            break;
+        case EngineRole::Knob:
+            l.Rounding = 64.0f;
+            l.BorderThickness = 2.0f;
+            l.BorderColor = {1.0f, 1.0f, 1.0f, 0.85f * a};
+            l.ShadowSize = 4.0f;
+            l.ShadowColor = {0.0f, 0.0f, 0.0f, 0.35f * a};
+            break;
+        case EngineRole::Box:
+            l.Rounding = 5.0f;
+            l.BorderThickness = 1.0f;
+            l.BorderColor = lighter(0.35f, 0.80f * a);
+            break;
+        case EngineRole::Check:
+            break;
+    }
+    return l;
+}
+
+// Роль подложки — по устройству элемента: поле ввода, кнопка, фон полосы или
+// просто панель.
+EngineRole FillRole(const PartDrawContext& c) {
+    if (c.Sibling<TextInput>()) return EngineRole::Field;
+    if (c.Sibling<Bar>()) return EngineRole::BarBack;
+    if (c.Sibling<Interactable>()) return EngineRole::Button;
+    return EngineRole::Panel;
 }
 
 // Таблица полей ОДНОГО вида — со смещениями от начала Look.
@@ -350,6 +438,10 @@ const std::vector<PartField>& LookFieldTable() {
         MarkAdvanced(v, {"sprite", "sliceCenterFill", "sliceEdgeFill", "sliceDrawCenter", "pixelScale",
                          "snapPixels", "filter", "gradient", "borderThickness", "borderColor",
                          "shadowSize", "shadowColor"});
+        // В оформлении движка у вида только цвет: форму, рамку, тень и
+        // картинку задаёт движок.
+        for (PartField& f : v)
+            if (std::string_view(f.Key) != "color") f.CustomOnly = true;
         return v;
     }();
     return f;
@@ -379,6 +471,9 @@ std::vector<PartField> ShiftLookFields(const char* prefix, size_t offset, const 
         if (owner) {
             f.Tab = owner->Tab;
             f.Requires = owner->Requires;
+            // Вид, который целиком только для своего оформления (вид при
+            // наведении), — и все его поля тоже.
+            if (owner->CustomOnly) f.CustomOnly = true;
         }
         f.Offset += offset;
         if (prefix && *prefix) {
@@ -410,10 +505,27 @@ const std::vector<PartField>& FillFields() {
     return f;
 }
 
+// Вид подложки сейчас: оформление движка (из цвета), свой вид состояния или
+// сама подложка. storage — куда положить посчитанный вид движка.
+const Look& FillLook(const PartDrawContext& c, const Fill& fill, Look& storage, bool& tinted) {
+    if (c.EngineSkin) {
+        tinted = true;
+        storage = EngineLook(fill, FillRole(c));
+        // Поле ввода в фокусе — рамка ярче: куда печатают, видно сразу.
+        if (c.Focused && c.Sibling<TextInput>()) {
+            storage.BorderThickness = 2.0f;
+            storage.BorderColor = glm::vec4(glm::mix(glm::vec3(fill.Color), glm::vec3(1.0f), 0.6f), 1.0f);
+        }
+        return storage;
+    }
+    return StateLook(c, fill, tinted);
+}
+
 void DrawFill(const PartDrawContext& c) {
     const Fill& fill = *static_cast<const Fill*>(c.Data);
     bool tinted = true;
-    const Look& look = StateLook(c, fill, tinted);
+    Look engine;
+    const Look& look = FillLook(c, fill, engine, tinted);
     const glm::vec3 rgb = tinted ? StateTint(c, glm::vec3(look.Color)) : glm::vec3(look.Color);
     // Свой вид недоступного состояния уже нарисован бледным — второй раз его
     // не бледнят.
@@ -426,14 +538,16 @@ void DrawFill(const PartDrawContext& c) {
 void DrawFillShadow(const PartDrawContext& c) {
     const Fill& fill = *static_cast<const Fill*>(c.Data);
     bool tinted = true;
-    const Look& look = StateLook(c, fill, tinted);
+    Look engine;
+    const Look& look = FillLook(c, fill, engine, tinted);
     DrawLookShadow(c, look, c.Rect, c.Alpha);
 }
 
 void DrawFillBorder(const PartDrawContext& c) {
     const Fill& fill = *static_cast<const Fill*>(c.Data);
     bool tinted = true;
-    const Look& look = StateLook(c, fill, tinted);
+    Look engine;
+    const Look& look = FillLook(c, fill, engine, tinted);
     DrawLookBorder(c, look, c.Rect, tinted ? AlphaOf(c, 1.0f) : c.Alpha);
 }
 
@@ -558,6 +672,7 @@ const std::vector<PartField>& BarFields() {
         };
         v[0].Content = true;
         MarkAdvanced(v, {"fillMode", "padding", "smoothing"});
+        MarkCustomOnly(v, {"fillMode", "padding"});
         return v;
     }();
     return f;
@@ -573,7 +688,9 @@ void DrawBarPart(const PartDrawContext& c) {
     const float t = std::clamp(BarShown(bar), 0.0f, 1.0f);
     if (t <= 0.0f) return;
 
-    const glm::vec4 pad = bar.Padding * c.Scale;
+    const glm::vec4 pad = (c.EngineSkin ? glm::vec4(3.0f) : bar.Padding) * c.Scale;
+    const Look engineFill = EngineLook(bar.Filled, EngineRole::BarFill);
+    const Look& filled = c.EngineSkin ? engineFill : bar.Filled;
     const UIRect inner{r.x + pad.x, r.y + pad.y, std::max(0.0f, r.w - pad.x - pad.z),
                        std::max(0.0f, r.h - pad.y - pad.w)};
     UIRect fillRect = inner;
@@ -592,13 +709,13 @@ void DrawBarPart(const PartDrawContext& c) {
     // ОТКРЫТЬ, А НЕ СЖАТЬ: картинка заполнения рисуется во всю полосу и
     // обрезается долей. Для плашки цветом разницы нет — сжатие честнее
     // скругляет край.
-    if (bar.Mode == Bar::FillMode::Reveal && bar.Filled.HasTexture()) {
+    if (!c.EngineSkin && bar.Mode == Bar::FillMode::Reveal && filled.HasTexture()) {
         c.Ui->PushClipRect(fillRect.x, fillRect.y, fillRect.w, fillRect.h);
-        DrawLook(c, bar.Filled, inner, /*tint=*/false);
+        DrawLook(c, filled, inner, /*tint=*/false);
         c.Ui->PopClipRect();
         return;
     }
-    DrawLook(c, bar.Filled, fillRect, /*tint=*/false);
+    DrawLook(c, filled, fillRect, /*tint=*/false);
 }
 
 // --- Значок -----------------------------------------------------------------
@@ -709,6 +826,9 @@ const std::vector<PartField>& LabelFields() {
     MarkAdvanced(v, {"font", "fontPixelHeight", "fontSnapPixels", "fontFilter", "autoWidth", "padX",
                      "shadowOffset", "shadowColor", "outline", "outlineColor", "stateColors",
                      "hoverColor", "pressedColor", "disabledColor"});
+    MarkCustomOnly(v, {"fontPixelHeight", "fontSnapPixels", "fontFilter", "shadowOffset", "shadowColor",
+                       "outline", "outlineColor", "stateColors", "hoverColor", "pressedColor",
+                       "disabledColor"});
     return v; }();
     return f;
 }
@@ -763,7 +883,7 @@ void DrawLabelPart(const PartDrawContext& c) {
     // Цвет по состоянию хозяина: надпись кнопки — её ребёнок, и светлеть
     // при наведении она должна вместе с кнопкой.
     glm::vec4 color = label.Color;
-    if (label.StateColors) {
+    if (label.StateColors && !c.EngineSkin) {
         if (!c.OwnerEnabled) color = label.DisabledColor;
         else if (c.OwnerPressed) color = label.PressedColor;
         else if (c.OwnerHovered) color = label.HoverColor;
@@ -799,9 +919,11 @@ void DrawLabelPart(const PartDrawContext& c) {
         return label.FontSnapPixels ? std::round(scaled) : scaled;
     };
     const glm::vec2 shadow{px(label.ShadowOffset.x), px(label.ShadowOffset.y)};
-    const bool hasShadow = (shadow.x != 0.0f || shadow.y != 0.0f) && label.ShadowColor.a > 0.0f;
+    // Тень и обводка — своё оформление; у движка текст чистый.
+    const bool hasShadow =
+        !c.EngineSkin && (shadow.x != 0.0f || shadow.y != 0.0f) && label.ShadowColor.a > 0.0f;
     const float outline = label.OutlineWidth > 0.0f ? std::max(px(label.OutlineWidth), 1.0f) : 0.0f;
-    const bool hasOutline = outline > 0.0f && label.OutlineColor.a > 0.0f;
+    const bool hasOutline = !c.EngineSkin && outline > 0.0f && label.OutlineColor.a > 0.0f;
     for (const std::string& line : lines) {
         if (!line.empty()) {
             const float x = AlignX(label.Horizontal, left, avail, ui.MeasureText(line, textScale, style));
@@ -873,6 +995,7 @@ const std::vector<PartField>& RangeFields() {
         // именем. В файл второй раз не пишется: один вид, одно место.
         v[10].EditorOnly = true;
         MarkAdvanced(v, {"trackThickness", "knobSize"});
+        MarkCustomOnly(v, {"trackThickness", "knobSize"});
         return v;
     }();
     return f;
@@ -890,9 +1013,21 @@ UIRect ToggleBox(const UIRect& r) {
 }
 
 void DrawRangePart(const PartDrawContext& c) {
-    const Range& range = *static_cast<const Range*>(c.Data);
+    const Range& source = *static_cast<const Range*>(c.Data);
     const UIRect& r = c.Rect;
     UIRenderer& ui = *c.Ui;
+    // Оформление движка: те же значение и цвета, но форма — из темы.
+    Range engine;
+    if (c.EngineSkin) {
+        engine = source;
+        engine.Track = EngineLook(source.Track, source.Toggle ? EngineRole::Box : EngineRole::Track);
+        engine.Filled = EngineLook(source.Filled, EngineRole::SliderFill);
+        engine.Knob = EngineLook(source.Knob, EngineRole::Knob);
+        engine.Check = EngineLook(source.Check, EngineRole::Check);
+        engine.TrackThickness = 0.28f;
+        engine.KnobSize = 1.0f;
+    }
+    const Range& range = c.EngineSkin ? engine : source;
 
     if (range.Toggle) {
         // Галка: квадратик у левого края СВОЕГО элемента. Подпись к нему —
@@ -957,6 +1092,7 @@ const std::vector<PartField>& TextInputFields() {
         };
         for (int i = 0; i < 4; ++i) v[(size_t)i].Content = true;
         MarkAdvanced(v, {"readOnly", "placeholderColor", "caretColor", "caretWidth"});
+        MarkCustomOnly(v, {"placeholderColor", "caretColor", "caretWidth"});
         return v;
     }();
     return f;
@@ -988,7 +1124,7 @@ void DrawTextInputPart(const PartDrawContext& c) {
     if (empty && !input.Placeholder.empty()) {
         // Подсказка бледнее содержимого — иначе пустое поле выглядит
         // заполненным, и человек стирает то, чего не вводил.
-        const bool own = input.PlaceholderColor.a > 0.0f;
+        const bool own = input.PlaceholderColor.a > 0.0f && !c.EngineSkin;
         const glm::vec3 prgb = own ? glm::vec3(input.PlaceholderColor) : rgb;
         const float pa = own ? input.PlaceholderColor.a : label->Color.a * 0.45f;
         ui.Text(left, y, textScale, prgb, input.Placeholder, AlphaOf(c, pa), style);
@@ -1007,8 +1143,9 @@ void DrawTextInputPart(const PartDrawContext& c) {
     // сбрасывается, чтобы курсор не пропал ровно тогда, когда на него смотрят.
     if (std::fmod(act->Runtime.CaretBlink, 1.0f) < 0.5f) {
         const float ch = ui.LineHeight(textScale, style) * 0.92f;
-        const bool own = input.CaretColor.a > 0.0f;
-        ui.Rect(cx, r.y + (r.h - ch) * 0.5f, std::max(input.CaretWidth * c.Scale, 1.0f), ch,
+        const bool own = input.CaretColor.a > 0.0f && !c.EngineSkin;
+        const float caretW = c.EngineSkin ? 2.0f : input.CaretWidth;
+        ui.Rect(cx, r.y + (r.h - ch) * 0.5f, std::max(caretW * c.Scale, 1.0f), ch,
                 own ? glm::vec3(input.CaretColor) : rgb,
                 AlphaOf(c, own ? input.CaretColor.a : label->Color.a));
     }
@@ -1077,6 +1214,10 @@ const std::vector<PartField>& InteractableFields() {
         MarkTab(v, SAGE_UI_TEXT("When disabled"), nullptr, {"disabledAlpha"});
         MarkTab(v, SAGE_UI_TEXT("When disabled"), "fill", {"useDisabledLook", "disabledLook"});
         MarkAdvanced(v, {"cursor"});
+        // Виды и подкраска состояний — своё оформление; у движка они свои.
+        MarkCustomOnly(v, {"hoverBrightness", "pressedBrightness", "disabledAlpha", "pressedOffset",
+                           "useHoverLook", "hoverLook", "usePressedLook", "pressedLook",
+                           "useFocusedLook", "focusedLook", "useDisabledLook", "disabledLook"});
         return v;
     }();
     return f;
@@ -1433,6 +1574,46 @@ void CopyField(const PartField& f, const void* src, void* dst) {
 }
 
 const std::vector<PartField>& LookFields() { return LookFieldTable(); }
+
+void BakeEngineSkin(entt::registry& reg, entt::entity e) {
+    // Роль подложки — тем же правилом, что при отрисовке.
+    PartDrawContext c;
+    c.Reg = &reg;
+    c.Entity = e;
+    if (Fill* fill = reg.try_get<Fill>(e)) {
+        const Look l = EngineLook(*fill, FillRole(c));
+        static_cast<Look&>(*fill) = l;
+    }
+    if (Bar* bar = reg.try_get<Bar>(e)) {
+        bar->Filled = EngineLook(bar->Filled, EngineRole::BarFill);
+        bar->Padding = glm::vec4(3.0f);
+        bar->Mode = Bar::FillMode::Stretch;
+    }
+    if (Range* r = reg.try_get<Range>(e)) {
+        r->Track = EngineLook(r->Track, r->Toggle ? EngineRole::Box : EngineRole::Track);
+        r->Filled = EngineLook(r->Filled, EngineRole::SliderFill);
+        r->Knob = EngineLook(r->Knob, EngineRole::Knob);
+        r->Check = EngineLook(r->Check, EngineRole::Check);
+        r->TrackThickness = 0.28f;
+        r->KnobSize = 1.0f;
+    }
+    if (Interactable* act = reg.try_get<Interactable>(e)) {
+        act->HoverBrightness = 1.15f;
+        act->PressedBrightness = 0.85f;
+        act->DisabledAlpha = 0.45f;
+        act->UseHoverLook = act->UsePressedLook = act->UseFocusedLook = act->UseDisabledLook = false;
+    }
+    if (Label* label = reg.try_get<Label>(e)) {
+        label->ShadowOffset = glm::vec2(0.0f);
+        label->OutlineWidth = 0.0f;
+        label->StateColors = false;
+    }
+    if (TextInput* in = reg.try_get<TextInput>(e)) {
+        in->CaretColor = glm::vec4(0.0f);
+        in->PlaceholderColor = glm::vec4(0.0f);
+        in->CaretWidth = 2.0f;
+    }
+}
 
 const std::vector<PartField>& LookFieldsOf(const PartField& lookField) {
     // Таблица на каждый вид строится один раз: редактор спрашивает её каждый
