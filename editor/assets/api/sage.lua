@@ -843,13 +843,20 @@ fx = nil
 ---@return number
 function sage.fx.AddBillboard(pos, size, texturePath) end
 ---@param id string
----@param config any
+---@param fx any
 ---@param pos Vec3
-function sage.fx.CreateStream(id, config, pos) end
----@param config any
+function sage.fx.CreateStream(id, fx, pos) end
+---@param fx any
 ---@param pos Vec3
 ---@param count number
-function sage.fx.Emit(config, pos, count) end
+function sage.fx.Emit(fx, pos, count) end
+---@param entity Entity
+---@param count number
+function sage.fx.EmitFrom(entity, count) end
+---@param path string
+function sage.fx.LoadEffect(path) end
+---@param entity Entity
+function sage.fx.Play(entity) end
 ---@param id number
 function sage.fx.RemoveBillboard(id) end
 ---@param id string
@@ -869,6 +876,9 @@ function sage.fx.SetStreamActive(id, active) end
 ---@param id string
 ---@param pos Vec3
 function sage.fx.SetStreamPosition(id, pos) end
+---@param entity Entity
+---@param clear boolean
+function sage.fx.Stop(entity, clear) end
 
 ---@class sage.game
 sage.game = {}
@@ -1703,6 +1713,8 @@ DisablePlanarReflection = sage.reflect.DisablePlanar
 ---@type fun(...): any
 EmitEvent = sage.events.Emit
 ---@type fun(...): any
+EmitFromObject = sage.fx.EmitFrom
+---@type fun(...): any
 EmitParticles = sage.fx.Emit
 ---@type fun(...): any
 EventCount = sage.events.Count
@@ -1785,6 +1797,8 @@ LoadGame = sage.save.Read
 ---@type fun(...): any
 LoadInputMapping = sage.input.LoadMapping
 ---@type fun(...): any
+LoadParticleEffect = sage.fx.LoadEffect
+---@type fun(...): any
 LoadScene = sage.scene.Load
 ---@type fun(...): any
 LoadUISlice = sage.ui.LoadSlice
@@ -1812,6 +1826,8 @@ PlayAnimation = sage.anim.Play
 PlayAnimationNamed = sage.anim.PlayNamed
 ---@type fun(...): any
 PlayMusic = sage.audio.PlayMusic
+---@type fun(...): any
+PlayParticles = sage.fx.Play
 ---@type fun(...): any
 PlaySound = sage.audio.PlaySound
 ---@type fun(...): any
@@ -2016,6 +2032,8 @@ StartCoroutine = sage.time.StartCoroutine
 Stop = sage.audio.Stop
 ---@type fun(...): any
 StopMusic = sage.audio.StopMusic
+---@type fun(...): any
+StopParticles = sage.fx.Stop
 ---@type fun(...): any
 SubmeshCount = sage.render.SubmeshCount
 ---@type fun(...): any

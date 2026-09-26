@@ -139,8 +139,10 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
         rp->Runtime.reset();
         rp->Dirty = true;
     }
-    if (auto* pe = dst.Registry()->try_get<ParticleEmitterComponent>(dst.Entity()))
-        pe->Accumulator = 0.0f;
+    if (auto* pe = dst.Registry()->try_get<ParticleEmitterComponent>(dst.Entity())) {
+        pe->PendingEmit = 0;
+        pe->RestartRequested = pe->ClearRequested = false;
+    }
 }
 
 namespace {

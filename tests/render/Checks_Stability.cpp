@@ -40,7 +40,6 @@
 #include "sage/ecs/RenderBatch.h"
 #include "sage/render/Framebuffer.h"
 #include "sage/render/GridRenderer.h"
-#include "sage/render/Particle.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/render/PostFX.h"
 #include "sage/render/ResourceManager.h"
@@ -541,7 +540,7 @@ void TestPassesRestoreBlendState(FrameRenderer& r, Scene& scene) {
     // включения смешивания (пустая система выходит раньше и ничего не трогает).
     check("частицы", [&] {
         ParticleSystem particles;
-        particles.Burst(ParticleEmitterConfig{}, glm::vec3(0.0f, 1.0f, 0.0f), 4);
+        particles.Burst(sage::fx::ParticleEffect{}, glm::vec3(0.0f, 1.0f, 0.0f), 4);
         particles.Update(0.016f);
         particles.DrawFromView(view, proj);
     });

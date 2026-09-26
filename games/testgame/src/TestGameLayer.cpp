@@ -19,7 +19,6 @@
 #include "sage/ecs/RenderSystem.h"
 #include "sage/anim/AnimationSystem.h"
 #include "sage/render/ParticleECS.h"
-#include "sage/render/ParticlePresets.h"
 #include "sage/render/LightingUpload.h"
 #include "sage/render/Material.h"
 #include "sage/render/ResourceManager.h"
@@ -392,8 +391,24 @@ void TestGameLayer::BuildRoomOne(Scene& scene) {
     GameObject torch = scene.CreateObject("Torch Fire");
     torch.GetTransform().Position = {-4.0f, 2.7f, -4.0f}; // над Pillar A
     {
+        // Огонь — данными самой игры: движок готовых эффектов не знает.
         ParticleEmitterComponent em;
-        em.Config = ParticlePresets::Fire();
+        sage::fx::ParticleEffect& f = em.Effect;
+        f.RateOverTime = 40.0f;
+        f.Shape = sage::fx::EmitShape::Cone;
+        f.Radius = 0.12f;
+        f.ConeAngle = 10.0f;
+        f.StartLifetime = {0.5f, 1.0f};
+        f.StartSpeed = {0.6f, 1.2f};
+        f.StartSize = {0.18f, 0.30f};
+        f.UseForces = true;
+        f.Force = {0.0f, 0.8f, 0.0f};
+        f.UseSizeOverLifetime = true;
+        f.SizeOverLifetime = sage::fx::Curve::Linear(1.0f, 0.2f);
+        f.UseColorOverLifetime = true;
+        f.ColorOverLifetime = sage::fx::Gradient::Fade({1.0f, 0.85f, 0.25f, 0.9f}, {0.8f, 0.15f, 0.05f, 0.0f});
+        f.Blend = sage::fx::BlendMode::Additive;
+        f.Intensity = 2.0f;
         scene.Registry().emplace<ParticleEmitterComponent>(torch.Entity(), em);
     }
 }
@@ -629,6 +644,7 @@ void TestGameLayer::OnAttach() {
 }
 
 void TestGameLayer::OnDetach() {
+    if (m_particles) m_particles->SetCollisionQuery({});   // запрос держит физику
     m_physics.reset(); // держит тела, ссылающиеся на сцену — снять до сцен
     m_sceneScripts.clear(); // скрипты держат ссылки на сцены/аудио — снять до них
     m_audio.reset();

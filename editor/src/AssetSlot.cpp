@@ -142,6 +142,7 @@ Kind KindOf(const fs::path& path) {
     if (ext == ".sageanim" || ext == ".sageclip") return Kind::Animation;
     if (ext == ".vert" || ext == ".frag" || ext == ".glsl") return Kind::Shader;
     if (ext == ".ttf" || ext == ".otf") return Kind::Font;
+    if (ext == ".sagefx") return Kind::Effect;
     // Модели спрашиваются у РЕЕСТРА импортёров, а не у списка здесь: движок
     // умеет .obj/.gltf/.glb/.fbx/.blend/.bbmodel и пополняется плагинами.
     if (ext == ".sagemesh" || ModelLoader::IsSupportedModel(path.string())) return Kind::Model;
@@ -166,6 +167,7 @@ const char* KindName(Kind kind) {
         case Kind::Shader:   return T("shader");
         case Kind::Folder:   return T("folder");
         case Kind::Font:     return T("font");
+        case Kind::Effect:   return T("particle effect");
         default:             return T("file");
     }
 }
@@ -183,6 +185,7 @@ const char* KindIcon(Kind kind) {
         case Kind::Shader:   return "shader";
         case Kind::Folder:   return "folder";
         case Kind::Font:     return "file";
+        case Kind::Effect:   return "particles";
         default:             return "file";
     }
 }
@@ -199,6 +202,7 @@ std::vector<std::string> Extensions(Kind kind) {
         case Kind::Animation: return {".sageanim", ".sageclip"};
         case Kind::Shader:   return {".vert", ".frag", ".glsl"};
         case Kind::Font:     return {".ttf", ".otf"};
+        case Kind::Effect:   return {".sagefx"};
         // У папки расширений нет: диалог выбирает КАТАЛОГ, а подсказка «поддер-
         // живаются…» в отказе остаётся пустой — перечислять там нечего.
         case Kind::Folder:   return {};

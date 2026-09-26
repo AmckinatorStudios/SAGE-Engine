@@ -27,6 +27,10 @@
 
 #include "EditorHost.h"
 #include "PostChainUi.h"
+#include "ParticleUi.h"
+#include "sage/render/ParticleEffectIO.h"
+#include "sage/assets/AssetDatabase.h"
+#include "sage/core/Paths.h"
 #include "VarsEditor.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/LightSystem.h"
@@ -43,7 +47,6 @@
 #include "sage/render/ModelLoader.h"
 #include "sage/render/ModelMaterial.h"
 #include "sage/assets/AssetDatabase.h"
-#include "sage/render/ParticlePresets.h"
 #include "sage/anim/PropertyAnimator.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/scene/Components.h"
@@ -1078,43 +1081,104 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
-    // --- Эмиттер частиц (огонь/дым/искры/…): пресеты + тонкая настройка ---
+    // --- Эмиттер частиц: весь эффект данными, без пресетов ---------------------
+    //
+    // Готовых «огня» и «дыма» нет: эффект собирается модулями (ParticleUi) или
+    // приходит файлом .sagefx — его можно загрузить сюда, а собранное здесь
+    // сохранить в файл и переиспользовать в других сценах.
     if (reg.all_of<ParticleEmitterComponent>(obj.Entity()) && EditorTheme::SectionHeader("particles", T("Particle Emitter" "###Particle Emitter"), ImGuiTreeNodeFlags_DefaultOpen, &rmEmitter)) {
         if (ParticleEmitterComponent* em = reg.try_get<ParticleEmitterComponent>(obj.Entity())) {
-            ParticleEmitterConfig& cfg = em->Config;
-            // Пресеты: применяют готовый конфиг, дальше его можно править.
-            const auto& presets = ParticlePresets::Registry();
-            std::string preview = (em->Preset >= 0 && em->Preset < (int)presets.size())
-                                      ? presets[em->Preset].Name : "Custom";
-            if (ImGui::BeginCombo("Preset", preview.c_str())) {
-                for (int i = 0; i < (int)presets.size(); ++i) {
-                    if (ImGui::Selectable(presets[i].Name, em->Preset == i)) {
-                        host.PushUndoSnapshot();
-                        em->Preset = i;
-                        cfg = presets[i].Make();
-                    }
-                }
-                ImGui::EndCombo();
+            bool playing = em->Playing;
+            if (ImGui::Checkbox(T("Playing"), &playing)) {
+                host.PushUndoSnapshot();
+                em->Playing = playing;
             }
-            ImGui::Checkbox(T("Active"), &em->Active);
             ImGui::SameLine();
-            ImGui::Checkbox(T("Continuous"), &em->Continuous);
-            if (em->Continuous) {
-                ImGui::DragFloat(T("Rate (p/s)"), &cfg.EmissionRate, 0.5f, 0.0f, 500.0f); host.TrackLastImGuiItem();
-            } else {
-                ImGui::DragInt(T("Burst Count"), &em->BurstCount, 1, 1, 500); host.TrackLastImGuiItem();
-                ImGui::DragFloat(T("Burst Interval"), &em->BurstInterval, 0.05f, 0.05f, 30.0f); host.TrackLastImGuiItem();
+            // Посмотреть эффект с начала, не трогая сцену: залпы, задержка и
+            // разогрев видны только на старте цикла.
+            if (ImGui::Button(T("Restart"))) em->RestartRequested = true;
+            ImGui::SameLine();
+            if (ImGui::Button(T("Clear"))) em->ClearRequested = true;
+
+            // Файл эффекта: загрузить в объект / сохранить объект в файл.
+            ImGui::TextUnformatted(T("Load from an effect file"));
+            std::string none;
+            const assetslot::Result load =
+                assetslot::Draw(host, "fxfile", assetslot::Kind::Effect, none, &m_preview,
+                                T("Drop a .sagefx here to copy it into this emitter"));
+            if (load.Changed && !load.Path.empty()) {
+                sage::fx::ParticleEffect loaded;
+                std::string err;
+                const std::string real = sage::AssetDatabase::Instance().LocatePath(load.Path);
+                if (sage::fx::LoadEffectFile(real, loaded, &err)) {
+                    host.PushUndoSnapshot();
+                    em->Effect = loaded;
+                    em->RestartRequested = true;
+                } else {
+                    LOG_ERROR("Editor") << "Эффект не загрузился: " << err;
+                }
             }
-            ImGui::DragFloatRange2("Speed", &cfg.SpeedMin, &cfg.SpeedMax, 0.05f, 0.0f, 50.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Gravity"), &cfg.Gravity, 0.05f, -30.0f, 30.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloatRange2("Lifetime", &cfg.LifetimeMin, &cfg.LifetimeMax, 0.02f, 0.02f, 20.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloatRange2("Start Size", &cfg.StartSizeMin, &cfg.StartSizeMax, 0.005f, 0.0f, 5.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloatRange2("End Size", &cfg.EndSizeMin, &cfg.EndSizeMax, 0.005f, 0.0f, 5.0f); host.TrackLastImGuiItem();
-            Sage::UI::ColorField4(T("Start Color"), &cfg.StartColor.x); host.TrackLastImGuiItem();
-            Sage::UI::ColorField4(T("End Color"), &cfg.EndColor.x); host.TrackLastImGuiItem();
-            ImGui::DragFloat3(T("Dir Min"), &cfg.DirectionMin.x, 0.02f); host.TrackLastImGuiItem();
-            ImGui::DragFloat3(T("Dir Max"), &cfg.DirectionMax.x, 0.02f); host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Spin"), &cfg.AngularVelocityMax, 0.05f, 0.0f, 20.0f); host.TrackLastImGuiItem();
+            if (load.BrowseRequested) {
+                FileBrowser::Config c;
+                c.Title = T("Choose a particle effect");
+                c.Filters = assetslot::Extensions(assetslot::Kind::Effect);
+                c.FilterLabel = T("Particle effects (*.sagefx)");
+                c.StartDir = c.Root = assetslot::ProjectRoot(host);
+                m_browser.Open(c);
+                m_browseTarget = nullptr;
+                m_browseLoadEffectEntity = obj.Id();
+                m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
+            }
+            if (ImGui::Button(T("Save as effect file..."))) {
+                FileBrowser::Config c;
+                c.Title = T("Save the particle effect");
+                c.Mode = FileBrowser::PickMode::SaveFile;
+                c.DefaultName = obj.Name() + ".sagefx";
+                c.Filters = assetslot::Extensions(assetslot::Kind::Effect);
+                c.FilterLabel = T("Particle effects (*.sagefx)");
+                c.StartDir = c.Root = assetslot::ProjectRoot(host);
+                m_browser.Open(c);
+                m_browseTarget = nullptr;
+                m_browseSaveEffectEntity = obj.Id();
+                m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
+            }
+            ImGui::Separator();
+
+            // Слоты картинок и файлов — крючками: сам редактор эффекта не знает
+            // ни о проекте, ни о диалогах (его проверяют модульные тесты).
+            sage::editor::ParticleUiHooks hooks;
+            hooks.BeforeEdit = [&host] { host.PushUndoSnapshot(); };
+            hooks.TrackItem = [&host] { host.TrackLastImGuiItem(); };
+            auto slot = [this, &host](const char* id, std::string& path, assetslot::Kind kind) {
+                const assetslot::Result r = assetslot::Draw(host, id, kind, path, &m_preview);
+                if (r.Changed) {
+                    host.PushUndoSnapshot();
+                    path = r.Path;
+                }
+                if (r.BrowseRequested) {
+                    FileBrowser::Config c;
+                    c.Title = kind == assetslot::Kind::Effect ? T("Choose a particle effect") : T("Choose a picture");
+                    c.Filters = assetslot::Extensions(kind);
+                    c.FilterLabel = kind == assetslot::Kind::Effect ? T("Particle effects (*.sagefx)") : T("Images");
+                    c.StartDir = c.Root = assetslot::ProjectRoot(host);
+                    m_browser.Open(c);
+                    m_browseTarget = &path;
+                    m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
+                }
+                return r.Changed;
+            };
+            hooks.TextureSlot = [slot](const char* id, std::string& path) {
+                return slot(id, path, assetslot::Kind::Texture);
+            };
+            hooks.EffectSlot = [slot](const char* id, std::string& path) {
+                return slot(id, path, assetslot::Kind::Effect);
+            };
+            hooks.FileExists = [](const std::string& ref) {
+                std::error_code ec;
+                return std::filesystem::exists(
+                    sage::PathFromUtf8(sage::AssetDatabase::Instance().LocatePath(ref)), ec);
+            };
+            sage::editor::DrawParticleEffect(em->Effect, hooks);
         }
     }
 
@@ -1395,11 +1459,9 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         // самой выпечкой, — она размечает всю сцену разом и по понятному
         // правилу.
         {"Particle Emitter", "Render", "particles",
-         "Fire, smoke, sparks", HasComp<ParticleEmitterComponent>,
+         "Rain, snow, smoke, fire, magic: any effect", HasComp<ParticleEmitterComponent>,
          [](entt::registry& reg, entt::entity e) {
-             ParticleEmitterComponent em;
-             em.Config = ParticlePresets::Registry()[0].Make(); // Fire
-             reg.emplace<ParticleEmitterComponent>(e, em);
+             reg.emplace<ParticleEmitterComponent>(e);
          }},
         {"Reflection Probe", "Render", "probe",
          "Captures the surroundings for reflections", HasComp<ReflectionProbeComponent>,

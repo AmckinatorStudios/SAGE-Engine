@@ -171,6 +171,9 @@ void EditorPlaySession::TeardownRuntime(const PlayContext& ctx, Scene* scene) {
     if (m_scripting) m_scripting->Shutdown();
     m_scripting.reset();
     m_scripts.reset();
+    // Частицы спрашивали физику о столкновениях — запрос держит указатель на
+    // неё, и снять его надо ДО того, как физики не станет.
+    if (ctx.Particles) ctx.Particles->SetCollisionQuery({});
     m_physics.reset();
     // Шина принадлежит СЦЕНЕ, а её сейчас заменят: указатель обязан уйти раньше.
     m_input.SetEventBus(nullptr);

@@ -49,6 +49,7 @@ add_executable(sage_tests
     test_fbx.cpp
     test_audio.cpp
     test_triggers.cpp
+    test_particles.cpp
     test_clipfile.cpp
     test_components_mesh_animation.cpp
     test_sky.cpp
@@ -72,6 +73,7 @@ add_executable(sage_tests
     # Выбор цвета и то, на чём он стоит (подписи, отступы меню, тема).
     ../editor/src/ui/ColorPicker.cpp
     ../editor/src/PostChainUi.cpp
+    ../editor/src/ParticleUi.cpp
     ../editor/src/ui/UI.cpp
     ../editor/src/ui/UIStyle.cpp
     ../editor/src/EditorTheme.cpp
