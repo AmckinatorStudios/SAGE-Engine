@@ -37,6 +37,24 @@ namespace {
 void PutElement(Scene& scene, GameObject obj, const sage::scene::LegacyElement& flat) {
     sage::scene::Decompose(flat, scene.Registry(), obj.Entity());
 }
+
+// Часть раскладки (маска, раскладка детей, прокрутка) видимого элемента из
+// старой сцены теперь живёт в КОНТЕЙНЕРЕ внутри него (NormalizeElements).
+// Проверка «пережила ли она запись» спрашивает и сам элемент, и такой
+// контейнер.
+template <class T>
+bool HasLayoutPart(const entt::registry& reg, entt::entity e) {
+    if (reg.all_of<T>(e)) return true;
+    if (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e))
+        for (entt::entity c : h->Children)
+            if (reg.all_of<T>(c)) {
+                const sage::ui::Preset* type =
+                    reg.all_of<sage::ui::Element>(c) ? sage::ui::FindPreset(reg.get<sage::ui::Element>(c).Type)
+                                                     : nullptr;
+                if (type && type->Container) return true;
+            }
+    return false;
+}
 sage::ui::State& StateOf(Scene& scene, GameObject obj) {
     return scene.Registry().get<sage::ui::Interactable>(obj.Entity()).Runtime;
 }
@@ -136,7 +154,7 @@ TEST(UI_component_serialization_roundtrip) {
 
     sage::ui::Bar bar;
     bar.Value = 0.42f;
-    bar.FillColor = {0.8f, 0.2f, 0.2f, 1.0f};
+    bar.SetFillColor({0.8f, 0.2f, 0.2f, 1.0f});
     bar.Grow = sage::ui::Bar::Direction::BottomToTop;
     bar.Smoothing = 4.0f;
     reg.emplace<sage::ui::Bar>(panel.Entity(), bar);
@@ -181,11 +199,11 @@ TEST(UI_component_serialization_roundtrip) {
     CHECK_TRUE(b2 != nullptr);
     if (b2) {
         CHECK_NEAR(b2->Value, 0.42f, 1e-4);
-        CHECK_NEAR(b2->FillColor.r, 0.8f, 1e-4);
+        CHECK_NEAR(b2->Filled.Color.r, 0.8f, 1e-4);
         CHECK_TRUE(b2->Grow == sage::ui::Bar::Direction::BottomToTop);
         CHECK_NEAR(b2->Smoothing, 4.0f, 1e-4);
     }
-    CHECK_TRUE(r2.all_of<sage::ui::Mask>(back.Entity()));
+    CHECK_TRUE(HasLayoutPart<sage::ui::Mask>(r2, back.Entity()));
     // Части, которых у элемента НЕТ, не появляются из ниоткуда: в этом и был
     // смысл разделения — у полосы не должно быть ни поля ввода, ни ползунка.
     CHECK_FALSE(r2.all_of<sage::ui::TextInput>(back.Entity()));
@@ -239,11 +257,11 @@ TEST(UI_old_flat_scene_migrates_to_components) {
         CHECK_FALSE(range->Toggle);
     }
     CHECK_TRUE(reg.all_of<sage::ui::Interactable>(obj.Entity()));
-    CHECK_TRUE(reg.all_of<sage::ui::Mask>(obj.Entity()));   // был флаг clipChildren
+    CHECK_TRUE(HasLayoutPart<sage::ui::Mask>(reg, obj.Entity()));   // был флаг clipChildren
     // Цвет заполнения ползунка жил в том же поле, что у полосы, и должен был
     // куда-то приехать: теперь акцентный цвет — поле САМОГО диапазона. Без
     // этого перенесённый ползунок молча позеленел бы в умолчание.
-    if (range) CHECK_NEAR(range->AccentColor.g, 0.7f, 1e-3f);
+    if (range) CHECK_NEAR(range->Knob.Color.g, 0.7f, 1e-3f);
     // И пустой полосы рядом с ним больше НЕ ЗАВОДИТСЯ: она существовала только
     // как место для этого цвета, а рисовалась бы теперь поверх дорожки.
     CHECK_FALSE(reg.all_of<sage::ui::Bar>(obj.Entity()));
@@ -771,7 +789,7 @@ TEST(UI_presets_are_the_same_everywhere) {
     // Полоса заполнена наполовину: пустая неотличима от панели, и человек
     // решает, что элемент не создался.
     GameObject bar = scene.CreateObject("Bar");
-    CHECK_TRUE(sage::ui::ApplyPreset(reg, bar.Entity(), "Bar"));
+    CHECK_TRUE(sage::ui::ApplyPreset(reg, bar.Entity(), "Progress Bar"));
     const auto* barPart = reg.try_get<sage::ui::Bar>(bar.Entity());
     CHECK_TRUE(barPart != nullptr);
     if (barPart) CHECK_TRUE(barPart->Value > 0.0f && barPart->Value < 1.0f);
@@ -886,7 +904,7 @@ TEST(UI2_layout_lays_children_out_by_itself) {
     row.Direction = sage::ui::Stack::Flow::Horizontal;
     row.Justify = sage::ui::Stack::Align::SpaceBetween;
     row.Padding = {0.0f, 0.0f, 0.0f, 0.0f};
-    row.StretchCross = false;
+    row.Cross = sage::ui::Stack::CrossAlign::Start;
     std::vector<sage::ui::LayoutSlot> two(2);
     two[0].Size = {100.0f, 30.0f};
     two[1].Size = {100.0f, 30.0f};
@@ -1009,16 +1027,21 @@ TEST(UI2_presets_build_real_elements) {
         }
     }
 
-    // Список — это маска плюс раскладка: то, что раньше собиралось вручную из
-    // пяти сущностей и отдельного скрипта прокрутки.
-    const sage::ui::Preset* list = sage::ui::FindPreset("Vertical List");
+    // Прокручиваемый список — КОНТЕЙНЕР: маска, прокрутка и раскладка, и
+    // ничего видимого. Подложку ему даёт панель-родитель.
+    const sage::ui::Preset* list = sage::ui::FindPreset("Scroll View");
     CHECK_TRUE(list != nullptr);
-    if (list) CHECK_TRUE(list->HasMask && list->HasStack);
+    if (list) {
+        CHECK_TRUE(list->Container);
+        CHECK_TRUE(list->HasMask && list->HasStack && list->HasScroll);
+        CHECK_FALSE(list->HasFill);
+    }
 
-    // Полноэкранная подложка растягивается, а не задана числом.
+    // «Экрана» как типа больше нет: старое имя ведёт к панели.
     const sage::ui::Preset* screen = sage::ui::FindPreset("Screen");
     CHECK_TRUE(screen != nullptr);
-    if (screen) CHECK_TRUE(screen->Box.Mode == sage::ui::Element::Stretch::Both);
+    if (screen) CHECK_TRUE(screen->Name == "Panel");
+    for (const sage::ui::Preset& p : sage::ui::Presets()) CHECK_TRUE(p.Name != "Screen");
 
     CHECK_TRUE(sage::ui::FindPreset("нет такой") == nullptr);
     CHECK_TRUE(sage::ui::PresetNames().size() >= 8);
@@ -1039,7 +1062,7 @@ TEST(UI2_a_range_carries_its_own_colours) {
         CHECK_FALSE(box->HasFill);   // иначе заливка легла бы на весь ряд
         CHECK_FALSE(box->HasLabel);  // подпись — отдельный объект-ребёнок
         CHECK_EQ(box->Children.size(), (size_t)1);
-        CHECK_TRUE(box->RangeValue.BorderThickness > 0.0f);
+        CHECK_TRUE(box->RangeValue.Track.BorderThickness > 0.0f);
     }
     const sage::ui::Preset* slider = sage::ui::FindPreset("Slider");
     CHECK_TRUE(slider != nullptr);
@@ -1048,8 +1071,8 @@ TEST(UI2_a_range_carries_its_own_colours) {
         CHECK_FALSE(slider->HasFill);
         // Цвета есть у самого диапазона, а не «где-то рядом»: дорожка тёмная,
         // акцент — видимый, и оба меняются в инспекторе своей части.
-        CHECK_TRUE(slider->RangeValue.TrackColor.a > 0.0f);
-        CHECK_TRUE(slider->RangeValue.AccentColor.a > 0.0f);
+        CHECK_TRUE(slider->RangeValue.Track.Color.a > 0.0f);
+        CHECK_TRUE(slider->RangeValue.Knob.Color.a > 0.0f);
     }
 
     // И это переживает запись на диск: цвета — обычные поля части.
@@ -1057,7 +1080,7 @@ TEST(UI2_a_range_carries_its_own_colours) {
     GameObject e = scene.CreateObject("Volume");
     CHECK_TRUE(sage::ui::ApplyPreset(scene, e.Entity(), "Slider"));
     sage::ui::Range& r = scene.Registry().get<sage::ui::Range>(e.Entity());
-    r.AccentColor = {0.9f, 0.4f, 0.1f, 1.0f};
+    r.Knob.Color = {0.9f, 0.4f, 0.1f, 1.0f};
     std::unique_ptr<Scene> back =
         SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
     CHECK_TRUE(back != nullptr);
@@ -1065,8 +1088,8 @@ TEST(UI2_a_range_carries_its_own_colours) {
         GameObject loaded = back->FindByName("Volume");
         CHECK_TRUE(loaded.Valid());
         const sage::ui::Range& lr = back->Registry().get<sage::ui::Range>(loaded.Entity());
-        CHECK_NEAR(lr.AccentColor.r, 0.9f, 1e-4f);
-        CHECK_NEAR(lr.AccentColor.g, 0.4f, 1e-4f);
+        CHECK_NEAR(lr.Knob.Color.r, 0.9f, 1e-4f);
+        CHECK_NEAR(lr.Knob.Color.g, 0.4f, 1e-4f);
     }
 }
 
@@ -1245,7 +1268,7 @@ TEST(UI_demo_survives_a_scene_round_trip) {
     CHECK_TRUE(apply != nullptr);
     if (apply) CHECK_EQ(apply->Action, std::string("apply_settings"));
     // Раскладка панели тоже пережила файл — иначе строки разъехались бы.
-    CHECK_TRUE(back->Registry().all_of<sage::ui::Stack>(back->FindByName("SettingsPanel").Entity()));
+    CHECK_TRUE(HasLayoutPart<sage::ui::Stack>(back->Registry(), back->FindByName("SettingsPanel").Entity()));
 }
 
 // Холст пересчитывает вёрстку под размер экрана — и попадание курсором обязано
@@ -1699,7 +1722,7 @@ TEST(Element_hidden_keeps_its_place_but_disabled_falls_out) {
     stack.Direction = sage::ui::Stack::Flow::Vertical;
     stack.Spacing = 10.0f;
     stack.Padding = {0.0f, 0.0f, 0.0f, 0.0f};
-    stack.StretchCross = false;
+    stack.Cross = sage::ui::Stack::CrossAlign::Start;
     scene.Registry().emplace<sage::ui::Stack>(panel.Entity(), stack);
 
     int order = 0;
@@ -1916,7 +1939,7 @@ TEST(ui_infer_type_reads_a_hand_built_element) {
 
     GameObject empty = scene.CreateEmptyObject("Пусто");
     reg.emplace<sage::ui::Element>(empty.Entity());
-    CHECK_TRUE(sage::ui::InferType(reg, empty.Entity()) == "Empty");
+    CHECK_TRUE(sage::ui::InferType(reg, empty.Entity()) == "Group");
 }
 
 TEST(ui_infer_type_prefers_the_most_specific_set) {
@@ -1933,27 +1956,36 @@ TEST(ui_infer_type_prefers_the_most_specific_set) {
     CHECK_TRUE(sage::ui::InferType(reg, input.Entity()) == "Input Field");
 }
 
-TEST(ui_parts_split_into_type_and_capabilities) {
-    // ГРАНИЦА ОБЪЯВЛЕНА САМОЙ ЧАСТЬЮ, а не списком в редакторе. Подложка,
-    // надпись и картинка — устройство типа: их не включают, они и ЕСТЬ тип.
-    // Маска, реакция, раскладка и прокрутка — добавки к любому типу.
-    auto isExtra = [](const char* id) {
+TEST(ui_parts_split_into_elements_and_containers) {
+    // «Возможностей», которые включают галкой у любого элемента, больше нет.
+    // Часть либо устройство видимого элемента, либо часть КОНТЕЙНЕРА
+    // (невидимой раскладки детей) — и это объявляет сама часть.
+    auto isContainer = [](const char* id) {
         const sage::ui::PartType* p = sage::ui::FindPart(id);
-        return p && p->Extra;
+        return p && p->Container;
     };
-    CHECK_TRUE(isExtra("mask"));
-    CHECK_TRUE(isExtra("interactable"));
-    CHECK_TRUE(isExtra("layout"));
-    CHECK_TRUE(isExtra("scroll"));
+    CHECK_TRUE(isContainer("mask"));
+    CHECK_TRUE(isContainer("layout"));
+    CHECK_TRUE(isContainer("scroll"));
+    CHECK_FALSE(isContainer("interactable"));
+    CHECK_FALSE(isContainer("fill"));
+    CHECK_FALSE(isContainer("label"));
+    CHECK_FALSE(isContainer("image"));
+    CHECK_FALSE(isContainer("bar"));
 
-    auto isOwn = [](const char* id) {
-        const sage::ui::PartType* p = sage::ui::FindPart(id);
-        return p && !p->Extra;
-    };
-    CHECK_TRUE(isOwn("fill"));
-    CHECK_TRUE(isOwn("label"));
-    CHECK_TRUE(isOwn("image"));
-    CHECK_TRUE(isOwn("bar"));
+    // У каждого типа — ровно один род: у контейнера нет ничего видимого, у
+    // элемента нет раскладки детей. Смешанный тип и был «мешком галок».
+    for (const sage::ui::Preset& p : sage::ui::Presets()) {
+        const bool visual = p.HasFill || p.HasLabel || p.HasImage || p.HasBar || p.HasRange ||
+                            p.HasInput || p.HasIcon || p.HasInteractable;
+        const bool layout = p.HasStack || p.HasMask || p.HasScroll;
+        if (p.Container) {
+            if (visual) sagetest::ReportFail(__FILE__, __LINE__, "контейнер с видимой частью: " + p.Name);
+        } else {
+            if (layout) sagetest::ReportFail(__FILE__, __LINE__, "элемент с раскладкой детей: " + p.Name);
+            if (!visual) sagetest::ReportFail(__FILE__, __LINE__, "элемент без видимой части: " + p.Name);
+        }
+    }
 }
 
 TEST(ui_every_preset_declares_a_category_and_an_icon) {

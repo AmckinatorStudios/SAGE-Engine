@@ -15,6 +15,9 @@
 // утверждение, которое от драйвера не зависит.
 // ---------------------------------------------------------------------------
 #include "Fixture.h"
+#include <filesystem>
+#include <vector>
+#include "stb_image_write.h"
 
 #include <cmath>
 #include <cstdio>
@@ -215,9 +218,9 @@ void CheckRangeColourIsItsOwn(UIRenderer& ui) {
     PlaceTopLeft(scene, e, {(float)kUiW, 40.0f});
     sage::ui::Range& r = scene.Registry().get<sage::ui::Range>(e.Entity());
     r.Value = 1.0f;                              // заполнено целиком
-    r.AccentColor = {0.1f, 0.1f, 0.1f, 1.0f};    // тёмный акцент
+    r.Filled.Color = r.Knob.Color = {0.1f, 0.1f, 0.1f, 1.0f};    // тёмное заполнение
     const Image dark = RenderUI(ui, scene);
-    r.AccentColor = {0.2f, 1.0f, 0.4f, 1.0f};    // яркий акцент
+    r.Filled.Color = r.Knob.Color = {0.2f, 1.0f, 0.4f, 1.0f};    // яркое заполнение
     const Image bright = RenderUI(ui, scene);
 
     const double a = Luma(dark, 4, 16, kUiW - 4, 24);
@@ -677,6 +680,79 @@ void CheckLabelShadowAndOutline(UIRenderer& ui) {
     Check(rightmost(shadowed, true) >= rightmost(shadowed, false) + 3, "тень сдвинута вправо");
 }
 
+// --- Свой вид нажатой кнопки заменяет подложку -------------------------------
+//
+// Кнопка из набора текстур нарисована трижды: обычная, подсвеченная, нажатая.
+// Вид состояния рисуется ЦЕЛИКОМ вместо подложки, а не подкрашивает её.
+void CheckPressedLookReplacesFill(UIRenderer& ui) {
+    Scene scene("pressed");
+    GameObject e = Screen(scene, "Btn", {200.0f, 52.0f});
+    Check(sage::ui::ApplyPreset(scene, e.Entity(), "Button"), "заготовка применилась");
+    PlaceTopLeft(scene, e, {200.0f, 52.0f});
+    auto& act = scene.Registry().get<sage::ui::Interactable>(e.Entity());
+    act.UsePressedLook = true;
+    act.PressedLook.Color = {1.0f, 0.0f, 0.0f, 1.0f};
+    act.PressedLook.Rounding = 0.0f;
+    auto red = [](const Image& img) {
+        const size_t i = ((size_t)6 * img.Width + 6) * 3;
+        return glm::ivec3(img.Pixels[i], img.Pixels[i + 1], img.Pixels[i + 2]);
+    };
+    const glm::ivec3 up = red(RenderUI(ui, scene));
+    act.Runtime.Pressed = true;
+    const glm::ivec3 down = red(RenderUI(ui, scene));
+    std::printf("    нажатая кнопка: обычная (%d,%d,%d), нажатая (%d,%d,%d)\n", up.r, up.g, up.b, down.r,
+                down.g, down.b);
+    Check(up.r < 120, "обычная кнопка — своего цвета");
+    Check(down.r > 200 && down.g < 60 && down.b < 60, "нажатая кнопка рисуется своим видом");
+}
+
+// --- Девятина: угол своего размера на высоком элементе ------------------------
+//
+// Картинка 16x16: углы 4x4 красные, края зелёные, середина синяя. На панели
+// 200x120 без заданного размера пикселя угол обязан остаться 4x4. Раньше
+// масштаб подгонялся под высоту (120/16 = 7.5), и угол раздувался до 30
+// пикселей — «девятина не работает».
+void CheckNineSliceCornersKeepTheirSize(UIRenderer& ui) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "sage_nineslice_check";
+    fs::create_directories(dir);
+    std::vector<unsigned char> px(16 * 16 * 4);
+    for (int y = 0; y < 16; ++y)
+        for (int x = 0; x < 16; ++x) {
+            const bool edgeX = x < 4 || x >= 12, edgeY = y < 4 || y >= 12;
+            unsigned char* d = &px[((size_t)y * 16 + x) * 4];
+            d[0] = (edgeX && edgeY) ? 255 : 0;                       // угол — красный
+            d[1] = (edgeX != edgeY) ? 255 : 0;                       // край — зелёный
+            d[2] = (!edgeX && !edgeY) ? 255 : 0;                     // середина — синяя
+            d[3] = 255;
+        }
+    const std::string file = (dir / "frame.png").string();
+    stbi_write_png(file.c_str(), 16, 16, 4, px.data(), 16 * 4);
+
+    Scene scene("nine");
+    GameObject e = Screen(scene, "Frame", {200.0f, 120.0f});
+    auto& fill = scene.Registry().emplace<sage::ui::Fill>(e.Entity());
+    fill.Color = {1, 1, 1, 1};
+    fill.Texture = file;
+    fill.Fit = (int)sage::ui::Image::Mode::NineSlice;
+    fill.SliceBorder = {4, 4, 4, 4};
+    fill.Filtering = sage::ui::TextureFiltering::Nearest;
+    const Image img = RenderUI(ui, scene);
+    auto at = [&](int x, int y) {
+        const size_t i = ((size_t)y * img.Width + x) * 3;
+        return glm::ivec3(img.Pixels[i], img.Pixels[i + 1], img.Pixels[i + 2]);
+    };
+    const glm::ivec3 corner = at(1, 1), topEdge = at(12, 1), leftEdge = at(1, 12), mid = at(100, 60);
+    std::printf("    девятина: угол (%d,%d,%d), верхний край (%d,%d,%d), середина (%d,%d,%d)\n", corner.r,
+                corner.g, corner.b, topEdge.r, topEdge.g, topEdge.b, mid.r, mid.g, mid.b);
+    Check(corner.r > 200 && corner.g < 60, "девятина: угол нарисован");
+    Check(topEdge.g > 200 && topEdge.r < 60, "девятина: в 12 пикселях от угла уже край, а не угол");
+    Check(leftEdge.g > 200 && leftEdge.r < 60, "девятина: угол не растянут по высоте");
+    Check(mid.b > 200, "девятина: середина растянута");
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
 void RunUIChecks() {
     std::printf("\n--- Интерфейс игры ---\n");
     UIRenderer ui;
@@ -692,6 +768,8 @@ void RunUIChecks() {
     CheckSharpFontStillFollowsTheSize(ui);
     CheckImageRotates(ui);
     CheckLabelShadowAndOutline(ui);
+    CheckPressedLookReplacesFill(ui);
+    CheckNineSliceCornersKeepTheirSize(ui);
 }
 
 } // namespace sage::rendertest

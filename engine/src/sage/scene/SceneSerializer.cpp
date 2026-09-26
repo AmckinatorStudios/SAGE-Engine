@@ -19,6 +19,7 @@
 #include "sage/assets/AssetDatabase.h"
 #include "sage/scene/SceneLegacyUI.h"
 #include "sage/ui/UIPart.h"
+#include "sage/ui/UIPresets.h"
 #include "sage/ui/UISerialize.h"
 #include "sage/scene/SceneJson.h"
 #include "sage/scene/SceneValueJson.h"
@@ -1451,6 +1452,9 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
     for (const auto& [childId, parentId] : parentLinks) scene->SetParentById(childId, parentId);
 
     scene->SetNextId(maxId + 1);
+    // Интерфейс старого вида (раскладка «галкой» у видимого элемента, старые
+    // имена типов) — к нынешнему. После SetNextId: деление заводит объекты.
+    sage::ui::NormalizeElements(*scene);
     scene->Lighting = LightingFromJson(root);
     scene->Reflections = ReflectionsFromJson(root);
     if (root.contains("gi")) scene->GI = GIFromJson(root["gi"]);

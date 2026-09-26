@@ -1285,7 +1285,7 @@ TEST(Scripting_ui_layout_canvas_and_group_are_reachable) {
     CHECK_EQ(layout.Columns, 5);
     CHECK_NEAR(layout.Spacing, 6.0f, 1e-4f);
     CHECK_NEAR(layout.Padding.w, 3.0f, 1e-4f);
-    CHECK_FALSE(layout.StretchCross);
+    CHECK_TRUE(layout.Cross == sage::ui::Stack::CrossAlign::Start);
     CHECK_TRUE(layout.FitContent);
 
     const auto& canvas = scene.Registry().get<sage::ui::Canvas>(e);

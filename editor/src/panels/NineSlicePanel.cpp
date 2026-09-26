@@ -3,21 +3,24 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
+
+#include "imgui_internal.h" // MarkItemEdited: перетаскивание линии — одна запись в истории
 
 #include "../AssetSlot.h"
 #include "../EditorHost.h"
-#include "../EditorIcons.h"
 #include "../Localization.h"
-#include "../Project.h"
 
-#include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Texture.h"
 #include "sage/scene/Scene.h"
+#include "sage/ui/ImageFit.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UIPart.h"
 
 namespace fs = std::filesystem;
+namespace ui = sage::ui;
 
 using sage::ui::NineSlice;
 using sage::ui::SliceFill;
@@ -26,121 +29,253 @@ using sage::ui::SliceRequest;
 
 namespace {
 
-// Оттенки для трёх ролей куска. Не «красиво», а по делу: из чего состоит
-// нарезка, должно читаться с картинки без легенды. Углы — самое важное (они не
-// тянутся вовсе), поэтому у них самый заметный оттенок.
-constexpr ImU32 kCornerTint = IM_COL32(255, 196, 64, 46);
-constexpr ImU32 kEdgeTint = IM_COL32(96, 176, 255, 34);
-constexpr ImU32 kCenterTint = IM_COL32(128, 255, 160, 22);
-constexpr ImU32 kGuide = IM_COL32(255, 210, 90, 220);
+// Три роли куска — три цвета, те же в легенде. Углы — самое важное (они не
+// тянутся вовсе), поэтому у них самый заметный.
+constexpr ImU32 kCornerTint = IM_COL32(255, 196, 64, 70);
+constexpr ImU32 kEdgeTint = IM_COL32(96, 176, 255, 55);
+constexpr ImU32 kCenterTint = IM_COL32(128, 255, 160, 40);
+constexpr ImU32 kGuide = IM_COL32(255, 210, 90, 230);
 constexpr ImU32 kGuideHot = IM_COL32(255, 255, 255, 255);
 
-// Толщина полосы захвата направляющей в ЭКРАННЫХ пикселях. Не в пикселях
-// картинки: на увеличении 16x пиксель картинки занимает полэкрана, а на
-// «вписать» — треть экранного, и в обоих случаях за направляющую надо
-// попадать одинаково легко.
-constexpr float kGrabPx = 5.0f;
+// Полоса захвата линии — в ЭКРАННЫХ пикселях: за линию одинаково легко
+// взяться и на увеличении 16x, и на «вписать».
+constexpr float kGrabPx = 6.0f;
 
-// Шахматка под прозрачностью: у рамок интерфейса прозрачные углы — норма, и
-// на сплошном фоне их край не виден вовсе.
 void DrawCheckers(ImDrawList* dl, ImVec2 a, ImVec2 b, float cell) {
     dl->AddRectFilled(a, b, IM_COL32(58, 58, 62, 255));
     for (float y = a.y; y < b.y; y += cell) {
-        for (float x = a.x + (std::fmod((y - a.y) / cell, 2.0f) < 1.0f ? 0.0f : cell);
-             x < b.x; x += cell * 2.0f) {
+        const bool odd = std::fmod((y - a.y) / cell, 2.0f) >= 1.0f;
+        for (float x = a.x + (odd ? cell : 0.0f); x < b.x; x += cell * 2.0f)
             dl->AddRectFilled({x, y}, {std::min(x + cell, b.x), std::min(y + cell, b.y)},
                               IM_COL32(74, 74, 79, 255));
-        }
     }
+}
+
+const ui::PartField* FindField(const std::vector<ui::PartField>& fields, const std::string& key) {
+    for (const ui::PartField& f : fields)
+        if (f.Key && key == f.Key) return &f;
+    return nullptr;
+}
+
+// «hoverLook.sliceBorder» -> «hoverLook.»; «sliceBorder» -> «».
+std::string PrefixOf(const std::string& borderKey) {
+    const std::string tail = "sliceBorder";
+    if (borderKey.size() >= tail.size() &&
+        borderKey.compare(borderKey.size() - tail.size(), tail.size(), tail) == 0)
+        return borderKey.substr(0, borderKey.size() - tail.size());
+    return {};
+}
+
+// Поля одного вида нарезки внутри части: у картинки ключи свои («path»,
+// «mode»), у вида — «texture», «fit» с приставкой. Ищутся по таблице части,
+// а не списком в редакторе: у части игры с девятиной окно заработает само.
+struct SliceFields {
+    const ui::PartField* Border = nullptr;
+    const ui::PartField* Center = nullptr;
+    const ui::PartField* Edge = nullptr;
+    const ui::PartField* DrawCenter = nullptr;
+    const ui::PartField* Sprite = nullptr;
+    const ui::PartField* Path = nullptr;
+    const ui::PartField* Fit = nullptr;
+    const ui::PartField* PixelScale = nullptr;
+    const ui::PartField* Snap = nullptr;
+    const ui::PartField* LookHeader = nullptr;
+};
+
+SliceFields Locate(const std::vector<ui::PartField>& fields, const std::string& borderKey) {
+    const std::string pre = PrefixOf(borderKey);
+    SliceFields s;
+    s.Border = FindField(fields, borderKey);
+    s.Center = FindField(fields, pre + "sliceCenterFill");
+    s.Edge = FindField(fields, pre + "sliceEdgeFill");
+    s.DrawCenter = FindField(fields, pre + "sliceDrawCenter");
+    s.Sprite = FindField(fields, pre + "sprite");
+    s.Path = FindField(fields, pre + "texture");
+    if (!s.Path) s.Path = FindField(fields, pre + "path");
+    s.Fit = FindField(fields, pre + "fit");
+    if (!s.Fit) s.Fit = FindField(fields, pre + "mode");
+    s.PixelScale = FindField(fields, pre + "pixelScale");
+    s.Snap = FindField(fields, pre + "snapPixels");
+    if (!pre.empty()) s.LookHeader = FindField(fields, pre.substr(0, pre.size() - 1));
+    return s;
 }
 
 } // namespace
 
-void NineSlicePanel::OpenFor(const std::string& imagePath) {
-    if (imagePath != m_path) LoadImage(imagePath);
+void NineSlicePanel::OpenFor(const EditorHost::NineSliceTarget& target) {
+    m_target = target;
+    if (target.ElementId == 0 && target.ImagePath != m_filePath) {
+        m_filePath = target.ImagePath;
+        m_fileSlice = NineSlice{};
+        // Описание рядом с картинкой подхватывается само.
+        NineSlice loaded;
+        std::string err;
+        if (!m_filePath.empty() && NineSlice::LoadFile(NineSlice::SidecarPath(m_filePath), loaded, err))
+            m_fileSlice = loaded;
+    }
+    m_zoom = 0.0f;
+    m_pan = ImVec2(0.0f, 0.0f);
+    m_previewSize = glm::vec2(0.0f);
+    m_status.clear();
 }
 
 void NineSlicePanel::ForgetProject() {
-    m_path.clear();
+    m_target = {};
+    m_filePath.clear();
+    m_fileSlice = NineSlice{};
+    m_texPath.clear();
     m_tex.reset();
-    m_slice = NineSlice{};
     m_status.clear();
 }
 
-void NineSlicePanel::LoadImage(const std::string& path) {
-    m_path = path;
-    m_tex = path.empty() ? nullptr : ResourceManager::Instance().GetTexture(path);
-    m_slice = NineSlice{};
-    m_zoom = 0.0f; // пересчитается под размер холста при первом кадре
-    m_pan = ImVec2(0.0f, 0.0f);
-    m_status.clear();
-    if (path.empty()) return;
+void NineSlicePanel::EnsureTexture(const std::string& path) {
+    if (path == m_texPath && (m_tex || path.empty())) return;
+    m_texPath = path;
+    // Ближайшим соседом и без мипмапов: считать пиксели угла на размытой
+    // картинке нельзя.
+    m_tex = path.empty() ? nullptr
+                         : ResourceManager::Instance().GetTexture(path, TextureFilter::Nearest, false);
+    m_zoom = 0.0f;
+}
 
-    // Описание, лежащее рядом с картинкой, подхватывается САМО. Иначе первое,
-    // что делал бы человек после выбора файла, — вспоминал, что надо нажать
-    // «Загрузить», и до тех пор правил бы нули поверх готовой нарезки.
-    NineSlice loaded;
-    std::string err;
-    if (NineSlice::LoadFile(NineSlice::SidecarPath(path), loaded, err)) {
-        m_slice = loaded;
-        m_status = T("Loaded the description next to the picture");
+bool NineSlicePanel::Read(EditorHost& host, Live& out) {
+    out = Live{};
+    if (m_target.ElementId != 0) {
+        Scene& scene = host.CurrentScene();
+        entt::registry& reg = scene.Registry();
+        GameObject obj = scene.Get(m_target.ElementId);
+        const ui::PartType* part = ui::FindPart(m_target.PartId);
+        if (obj.Valid() && part && part->Fields && part->Has(reg, obj.Entity())) {
+            const void* data = part->Get(reg, obj.Entity());
+            const std::vector<ui::PartField> fields = ui::EditableFields(*part->Fields);
+            const SliceFields f = Locate(fields, m_target.BorderKey);
+            if (data && f.Border) {
+                out.Bound = true;
+                out.Slice.SetBorder(ui::FieldAs<glm::vec4>(data, *f.Border));
+                if (f.Center) out.Slice.CenterFill = (SliceFill)ui::FieldAs<int>(data, *f.Center);
+                if (f.Edge) out.Slice.EdgeFill = (SliceFill)ui::FieldAs<int>(data, *f.Edge);
+                if (f.DrawCenter) out.Slice.DrawCenter = ui::FieldAs<bool>(data, *f.DrawCenter);
+                if (f.Sprite) out.Sprite = ui::FieldAs<glm::vec4>(data, *f.Sprite);
+                if (f.Path) out.Path = ui::FieldAs<std::string>(data, *f.Path);
+                const float ps = f.PixelScale ? ui::FieldAs<float>(data, *f.PixelScale) : 0.0f;
+                const bool snap = f.Snap && ui::FieldAs<bool>(data, *f.Snap);
+                out.PixelScale = ui::SlicedPixelScale(ps, snap, 1.0f);
+                if (const ui::Element* el = reg.try_get<ui::Element>(obj.Entity()))
+                    out.ElementSize = (el->Resolved.x > 0.0f && el->Resolved.y > 0.0f) ? el->Resolved
+                                                                                    : el->Size;
+                out.Title = obj.Name() + "  \xe2\x80\xba  " + T(part->Title);
+                if (f.LookHeader) out.Title += std::string("  \xe2\x80\xba  ") + T(f.LookHeader->Label);
+                return true;
+            }
+        }
+        // Элемента или вида больше нет (удалили, сменили тип) — остаётся
+        // картинка, которую правили: закрывать окно посреди работы незачем.
+        m_filePath = out.Path.empty() ? m_texPath : out.Path;
+        m_target.ElementId = 0;
     }
+    out.Path = m_filePath;
+    out.Slice = m_fileSlice;
+    out.PixelScale = 1.0f;
+    out.Title = T("A picture, without an element");
+    return true;
+}
+
+void NineSlicePanel::Write(EditorHost& host, const NineSlice& slice) {
+    if (m_target.ElementId == 0) {
+        m_fileSlice = slice;
+        return;
+    }
+    Scene& scene = host.CurrentScene();
+    entt::registry& reg = scene.Registry();
+    GameObject obj = scene.Get(m_target.ElementId);
+    const ui::PartType* part = ui::FindPart(m_target.PartId);
+    if (!obj.Valid() || !part || !part->Fields || !part->Has(reg, obj.Entity())) return;
+    void* data = part->GetMutable(reg, obj.Entity());
+    const std::vector<ui::PartField> fields = ui::EditableFields(*part->Fields);
+    const SliceFields f = Locate(fields, m_target.BorderKey);
+    if (!data || !f.Border) return;
+    ui::FieldAs<glm::vec4>(data, *f.Border) = slice.Border();
+    if (f.Center) ui::FieldAs<int>(data, *f.Center) = (int)slice.CenterFill;
+    if (f.Edge) ui::FieldAs<int>(data, *f.Edge) = (int)slice.EdgeFill;
+    if (f.DrawCenter) ui::FieldAs<bool>(data, *f.DrawCenter) = slice.DrawCenter;
+    // Правят девятину — значит, режим девятины: иначе числа меняются, а
+    // элемент остаётся растянутым, и это выглядит как «не работает».
+    if (f.Fit) ui::FieldAs<int>(data, *f.Fit) = (int)ui::Image::Mode::NineSlice;
 }
 
 void NineSlicePanel::Draw(EditorHost& host, bool& open) {
     if (!open) return;
-    ImGui::SetNextWindowSize(ImVec2(940.0f, 560.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(900.0f, 560.0f), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(420.0f, 300.0f), ImVec2(FLT_MAX, FLT_MAX));
     if (!ImGui::Begin(T("9-slice editor###NineSlice"), &open)) {
         ImGui::End();
         return;
     }
 
-    DrawToolbar(host);
+    Live live;
+    Read(host, live);
+    EnsureTexture(live.Path);
+
+    DrawHeader(host, live);
     ImGui::Separator();
 
-    // Картинка слева, числа и предпросмотр справа. Картинка получает всё
-    // оставшееся место: считать пиксели уголка — то, ради чего окно открыли.
-    const float rightWidth = 320.0f;
-    const float canvasWidth = std::max(240.0f, ImGui::GetContentRegionAvail().x - rightWidth - 8.0f);
-
-    ImGui::BeginChild("##slice_canvas", ImVec2(canvasWidth, 0.0f), true,
-                      ImGuiWindowFlags_NoScrollWithMouse);
-    DrawCanvas(host);
-    ImGui::EndChild();
-
-    ImGui::SameLine();
-    ImGui::BeginChild("##slice_side", ImVec2(0.0f, 0.0f), false);
-    DrawFields(host);
-    ImGui::Separator();
-    DrawPreview();
-    ImGui::EndChild();
-
+    // Таблица из двух столбцов: картинка и всё остальное. Ширину делит сама
+    // таблица, а каждый столбец — дочернее окно своего размера с прокруткой:
+    // содержимое не может вылезти за окно ни при какой ширине.
+    const ImVec2 avail = ImGui::GetContentRegionAvail();
+    if (avail.y > 40.0f &&
+        ImGui::BeginTable("##ns_layout", 2,
+                          ImGuiTableFlags_Resizable | ImGuiTableFlags_SizingStretchProp |
+                              ImGuiTableFlags_BordersInnerV)) {
+        ImGui::TableSetupColumn("canvas", ImGuiTableColumnFlags_WidthStretch, 0.62f);
+        ImGui::TableSetupColumn("side", ImGuiTableColumnFlags_WidthStretch, 0.38f);
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        const float h = ImGui::GetContentRegionAvail().y;
+        if (ImGui::BeginChild("##ns_canvas", ImVec2(0.0f, h), ImGuiChildFlags_None,
+                              ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse)) {
+            DrawCanvas(host, live, ImGui::GetContentRegionAvail());
+        }
+        ImGui::EndChild();
+        ImGui::TableSetColumnIndex(1);
+        if (ImGui::BeginChild("##ns_side", ImVec2(0.0f, h))) DrawSide(host, live);
+        ImGui::EndChild();
+        ImGui::EndTable();
+    }
     ImGui::End();
 }
 
-void NineSlicePanel::DrawToolbar(EditorHost& host) {
-    // Картинка выбирается СЛОТОМ, как любой ассет в редакторе (см. AssetSlot.h):
-    // её можно бросить сюда из панели ассетов.
-    const assetslot::Result r =
-        assetslot::Draw(host, "##slice_image", assetslot::Kind::Texture, m_path, nullptr,
-                        T("Drop a picture here"));
-    if (r.Changed) LoadImage(r.Path);
+void NineSlicePanel::DrawHeader(EditorHost& host, Live& live) {
+    ImGui::TextUnformatted(T("Editing:"));
+    ImGui::SameLine();
+    ImGui::TextColored(ImVec4(1.0f, 0.85f, 0.45f, 1.0f), "%s", live.Title.c_str());
 
+    if (!live.Bound) {
+        // Без элемента картинка выбирается слотом, как любой ассет.
+        const assetslot::Result r = assetslot::Draw(host, "##ns_image", assetslot::Kind::Texture,
+                                                    m_filePath, nullptr, T("Drop a picture here"));
+        if (r.Changed) {
+            EditorHost::NineSliceTarget t;
+            t.ImagePath = r.Path;
+            OpenFor(t);
+            Read(host, live);
+            EnsureTexture(live.Path);
+        }
+    }
     if (!m_tex) {
-        ImGui::TextDisabled("%s", T("Pick a picture: a frame, a panel, a button from a UI set."));
+        ImGui::TextDisabled("%s", T("No picture: pick one in the element's look, or drop it here."));
         return;
     }
 
-    ImGui::SameLine();
     if (ImGui::Button(T("Guess"))) {
-        // Догадка по самой картинке. Предложение, а не ответ: результат виден
-        // на холсте и правится направляющими.
         NineSlice guess;
-        if (sage::ui::GuessBorderFromFile(m_path, guess)) {
-            guess.CenterFill = m_slice.CenterFill;
-            guess.EdgeFill = m_slice.EdgeFill;
-            guess.DrawCenter = m_slice.DrawCenter;
-            m_slice = guess;
+        if (ui::GuessBorderFromFile(live.Path, guess)) {
+            guess.CenterFill = live.Slice.CenterFill;
+            guess.EdgeFill = live.Slice.EdgeFill;
+            guess.DrawCenter = live.Slice.DrawCenter;
+            host.PushUndoSnapshot();
+            Write(host, guess);
+            host.PushUndoSnapshot();
             m_status = T("Guessed from the picture — check and correct");
         } else {
             m_status = T("Could not guess: the picture has no plain border");
@@ -148,291 +283,251 @@ void NineSlicePanel::DrawToolbar(EditorHost& host) {
     }
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", T("Looks for plain strips along the edges — the corners."));
-
     ImGui::SameLine();
     if (ImGui::Button(T("Save .sage9"))) {
         std::string err;
-        if (m_slice.SaveFile(NineSlice::SidecarPath(m_path), err)) {
+        if (live.Slice.SaveFile(NineSlice::SidecarPath(live.Path), err))
             m_status = T("Saved next to the picture");
-            host.SetStatusMessage(T("9-slice saved: ") + fs::path(m_path).filename().string());
-        } else {
+        else
             m_status = T("Could not save: ") + err;
-        }
     }
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("The description lives next to the picture, so one cut\n"
-                                  "serves every element that uses it."));
-
+        ImGui::SetTooltip("%s", T("The cut is kept next to the picture, so any other element\n"
+                                  "can load it with one click."));
     ImGui::SameLine();
     if (ImGui::Button(T("Load .sage9"))) {
         NineSlice loaded;
         std::string err;
-        if (NineSlice::LoadFile(NineSlice::SidecarPath(m_path), loaded, err)) {
-            m_slice = loaded;
+        if (NineSlice::LoadFile(NineSlice::SidecarPath(live.Path), loaded, err)) {
+            host.PushUndoSnapshot();
+            Write(host, loaded);
+            host.PushUndoSnapshot();
             m_status = T("Loaded next to the picture");
         } else {
             m_status = T("No description next to the picture");
         }
     }
-
-    ImGui::SameLine();
-    // Применение к выбранному — правка сцены, значит через историю отката.
-    GameObject sel = host.SelectedObject();
-    const bool canApply = sel.Valid() &&
-                          host.CurrentScene().Registry().try_get<sage::ui::Image>(sel.Entity());
-    ImGui::BeginDisabled(!canApply);
-    if (ImGui::Button(T("Apply to selection"))) {
-        host.PushUndoSnapshot();
-        sage::ui::Image& img = host.CurrentScene().Registry().get<sage::ui::Image>(sel.Entity());
-        img.Path = m_path;
-        img.Tex = m_tex;
-        img.SetSlice(m_slice);
-        // И РЕЖИМ ТОЖЕ. Подобрать нарезку и не увидеть её на элементе — это и
-        // есть «инструмент не работает»: числа применились, а картинка как
-        // была растянутой, так и осталась, потому что режим остался прежним.
-        img.Fit = sage::ui::Image::Mode::NineSlice;
-        m_status = T("Applied to the selected element");
-    }
-    ImGui::EndDisabled();
-    if (!canApply && ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Select an element with a Picture part."));
-
     if (!m_status.empty()) {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", m_status.c_str());
     }
 }
 
-void NineSlicePanel::DrawCanvas(EditorHost& host) {
-    if (!m_tex) {
+void NineSlicePanel::DrawCanvas(EditorHost& host, Live& live, ImVec2 size) {
+    if (!m_tex || size.x < 16.0f || size.y < 16.0f) {
         ImGui::TextDisabled("%s", T("No picture."));
         return;
     }
-    const float iw = (float)m_tex->Width(), ih = (float)m_tex->Height();
-    if (iw <= 0.0f || ih <= 0.0f) return;
+    const float tw = (float)m_tex->Width(), th = (float)m_tex->Height();
+    if (tw <= 0.0f || th <= 0.0f) return;
+    // Кусок листа, который режем: нарезка считается ОТ НЕГО, а не от файла.
+    const bool whole = live.Sprite.z <= 0.0f || live.Sprite.w <= 0.0f;
+    const float sx = whole ? 0.0f : live.Sprite.x, sy = whole ? 0.0f : live.Sprite.y;
+    const float iw = whole ? tw : live.Sprite.z, ih = whole ? th : live.Sprite.w;
 
-    const ImVec2 area = ImGui::GetContentRegionAvail();
-    if (area.x < 16.0f || area.y < 16.0f) return;
-
-    // «Вписать» считается один раз при загрузке: дальше масштаб принадлежит
-    // человеку, и пересчитывать его на каждом изменении размера окна значило бы
-    // сбрасывать увеличение, на котором он как раз считает пиксели.
-    if (m_zoom <= 0.0f) m_zoom = std::max(1.0f, std::floor(std::min(area.x / iw, area.y / ih)));
-
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 origin = ImGui::GetCursorScreenPos();
-
-    ImGui::InvisibleButton("##slice_area", area,
+    ImGui::InvisibleButton("##ns_area", size,
                            ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
+    host.TrackLastImGuiItem();
+    const ImGuiID areaId = ImGui::GetItemID();
     const bool hovered = ImGui::IsItemHovered();
+    const bool active = ImGui::IsItemActive();
+    const bool activated = ImGui::IsItemActivated();
+    const ImVec2 origin = ImGui::GetItemRectMin();
     const ImVec2 mouse = ImGui::GetIO().MousePos;
 
-    // Колесо — увеличение ВОКРУГ КУРСОРА: иначе интересующий уголок уезжает за
-    // край ровно в тот момент, когда к нему присматриваются.
-    if (hovered) {
-        const float wheel = ImGui::GetIO().MouseWheel;
-        if (wheel != 0.0f) {
-            const float before = m_zoom;
-            m_zoom = std::clamp(m_zoom * (wheel > 0.0f ? 1.25f : 0.8f), 0.25f, 32.0f);
-            const ImVec2 anchor(mouse.x - origin.x - m_pan.x, mouse.y - origin.y - m_pan.y);
-            m_pan.x -= anchor.x * (m_zoom / before - 1.0f);
-            m_pan.y -= anchor.y * (m_zoom / before - 1.0f);
-        }
+    if (m_zoom <= 0.0f) {
+        m_zoom = std::max(0.25f, std::min((size.x - 24.0f) / iw, (size.y - 24.0f) / ih));
+        if (m_zoom >= 1.0f) m_zoom = std::floor(m_zoom);
+        m_pan = ImVec2((size.x - iw * m_zoom) * 0.5f, (size.y - ih * m_zoom) * 0.5f);
     }
-    // Средняя кнопка — сдвиг. Не правая: правая в редакторе везде значит
-    // «контекстное меню», и отнимать её у одной панели нельзя.
-    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
+    // Колесо — увеличение вокруг курсора; средняя кнопка — сдвиг.
+    if (hovered && ImGui::GetIO().MouseWheel != 0.0f) {
+        const float before = m_zoom;
+        m_zoom = std::clamp(m_zoom * (ImGui::GetIO().MouseWheel > 0.0f ? 1.25f : 0.8f), 0.25f, 48.0f);
+        const ImVec2 at(mouse.x - origin.x - m_pan.x, mouse.y - origin.y - m_pan.y);
+        m_pan.x -= at.x * (m_zoom / before - 1.0f);
+        m_pan.y -= at.y * (m_zoom / before - 1.0f);
+    }
+    if (active && ImGui::IsMouseDragging(ImGuiMouseButton_Middle)) {
         m_pan.x += ImGui::GetIO().MouseDelta.x;
         m_pan.y += ImGui::GetIO().MouseDelta.y;
     }
 
-    const ImVec2 imgA(origin.x + m_pan.x, origin.y + m_pan.y);
-    const ImVec2 imgB(imgA.x + iw * m_zoom, imgA.y + ih * m_zoom);
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 areaB(origin.x + size.x, origin.y + size.y);
+    dl->PushClipRect(origin, areaB, true);
+    dl->AddRectFilled(origin, areaB, IM_COL32(34, 34, 38, 255));
+    const ImVec2 a(origin.x + m_pan.x, origin.y + m_pan.y);
+    const ImVec2 b(a.x + iw * m_zoom, a.y + ih * m_zoom);
+    if (m_showCheckers) DrawCheckers(dl, a, b, std::max(4.0f, m_zoom * 4.0f));
+    // V переворачивается: у текстуры движка начало координат внизу.
+    dl->AddImage((ImTextureID)(std::intptr_t)m_tex->NativeHandle(), a, b,
+                 ImVec2(sx / tw, 1.0f - sy / th), ImVec2((sx + iw) / tw, 1.0f - (sy + ih) / th));
 
-    dl->PushClipRect(origin, ImVec2(origin.x + area.x, origin.y + area.y), true);
-    if (m_showCheckers) DrawCheckers(dl, imgA, imgB, std::max(4.0f, m_zoom * 4.0f));
-    dl->AddImage((ImTextureID)(std::intptr_t)m_tex->NativeHandle(), imgA, imgB,
-                 ImVec2(0, 1), ImVec2(1, 0));
-
-    // --- закраска девяти зон -------------------------------------------------
-    const float l = std::clamp(m_slice.Left, 0.0f, iw);
-    const float r = std::clamp(m_slice.Right, 0.0f, iw - l);
-    const float t = std::clamp(m_slice.Top, 0.0f, ih);
-    const float b = std::clamp(m_slice.Bottom, 0.0f, ih - t);
-    const float gx[4] = {imgA.x, imgA.x + l * m_zoom, imgB.x - r * m_zoom, imgB.x};
-    const float gy[4] = {imgA.y, imgA.y + t * m_zoom, imgB.y - b * m_zoom, imgB.y};
-    for (int row = 0; row < 3; ++row) {
+    NineSlice& s = live.Slice;
+    const float l = std::clamp(s.Left, 0.0f, iw), r = std::clamp(s.Right, 0.0f, iw - l);
+    const float t = std::clamp(s.Top, 0.0f, ih), bt = std::clamp(s.Bottom, 0.0f, ih - t);
+    const float gx[4] = {a.x, a.x + l * m_zoom, b.x - r * m_zoom, b.x};
+    const float gy[4] = {a.y, a.y + t * m_zoom, b.y - bt * m_zoom, b.y};
+    for (int row = 0; row < 3; ++row)
         for (int col = 0; col < 3; ++col) {
             if (gx[col + 1] <= gx[col] || gy[row + 1] <= gy[row]) continue;
-            const bool corner = (row != 1) && (col != 1);
-            const bool center = (row == 1) && (col == 1);
-            if (center && !m_slice.DrawCenter) continue;
+            const bool corner = row != 1 && col != 1;
+            const bool center = row == 1 && col == 1;
+            if (center && !s.DrawCenter) continue;
             dl->AddRectFilled({gx[col], gy[row]}, {gx[col + 1], gy[row + 1]},
                               corner ? kCornerTint : (center ? kCenterTint : kEdgeTint));
         }
-    }
 
-    // --- направляющие: подсветка ближайшей и перетаскивание -------------------
-    //
-    // Направляющие — главное в этом окне, поэтому за них можно взяться и когда
-    // они сошлись в одну точку: ближайшая выбирается по расстоянию, а не по
-    // порядку проверки.
-    float* edges[4] = {&m_slice.Left, &m_slice.Top, &m_slice.Right, &m_slice.Bottom};
+    // Линии: ближайшая к курсору подсвечивается и берётся мышью.
     const float lines[4] = {gx[1], gy[1], gx[2], gy[2]};
     const bool vertical[4] = {true, false, true, false};
-
-    int hot = -1;
-    if (hovered && m_dragEdge < 0) {
+    int hot = m_dragEdge;
+    if (hot < 0 && hovered) {
         float best = kGrabPx;
         for (int i = 0; i < 4; ++i) {
             const float d = std::fabs((vertical[i] ? mouse.x : mouse.y) - lines[i]);
             if (d <= best) { best = d; hot = i; }
         }
     }
-    if (m_dragEdge >= 0) hot = m_dragEdge;
-    if (hot >= 0)
-        ImGui::SetMouseCursor(vertical[hot] ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
-
-    if (hot >= 0 && ImGui::IsItemActivated() && ImGui::IsMouseDown(ImGuiMouseButton_Left))
-        m_dragEdge = hot;
-    if (m_dragEdge >= 0 && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-        m_dragEdge = -1;
-        // Правка записана в историю один раз, на отпускании: тащат
-        // направляющую десятки кадров, и запись на каждый кадр означала бы
-        // десятки шагов Ctrl+Z на одно движение.
-        host.PushUndoSnapshot();
-    }
-
-    if (m_dragEdge >= 0) {
-        // Значение считается ОТ КРАЯ картинки и округляется до целого пикселя
-        // ИСХОДНИКА: нарезка по половине пикселя показывает на экране шов.
+    if (hot >= 0) ImGui::SetMouseCursor(vertical[hot] ? ImGuiMouseCursor_ResizeEW : ImGuiMouseCursor_ResizeNS);
+    if (activated && hot >= 0 && ImGui::IsMouseDown(ImGuiMouseButton_Left)) m_dragEdge = hot;
+    if (m_dragEdge >= 0 && !ImGui::IsMouseDown(ImGuiMouseButton_Left)) m_dragEdge = -1;
+    if (m_dragEdge >= 0 && active) {
+        // Целые пиксели исходника: нарезка по полпикселя даёт на экране шов.
         const int i = m_dragEdge;
-        const float px = vertical[i] ? (mouse.x - imgA.x) / m_zoom : (mouse.y - imgA.y) / m_zoom;
+        const float px = vertical[i] ? (mouse.x - a.x) / m_zoom : (mouse.y - a.y) / m_zoom;
         const float fromEdge = (i == 2) ? iw - px : (i == 3) ? ih - px : px;
         const float limit = (i == 0 || i == 2) ? iw : ih;
-        *edges[i] = std::clamp(std::round(fromEdge), 0.0f, limit);
+        float* edge[4] = {&s.Left, &s.Top, &s.Right, &s.Bottom};
+        const float v = std::clamp(std::round(fromEdge), 0.0f, limit);
+        if (v != *edge[i]) {
+            *edge[i] = v;
+            Write(host, s);
+            ImGui::MarkItemEdited(areaId);   // одна запись истории на всё движение
+        }
     }
-
     for (int i = 0; i < 4; ++i) {
-        const ImU32 col = (i == hot) ? kGuideHot : kGuide;
-        const float thick = (i == hot) ? 2.0f : 1.0f;
-        if (vertical[i]) dl->AddLine({lines[i], imgA.y}, {lines[i], imgB.y}, col, thick);
-        else dl->AddLine({imgA.x, lines[i]}, {imgB.x, lines[i]}, col, thick);
+        const ImU32 col = i == hot ? kGuideHot : kGuide;
+        const float thick = i == hot ? 2.5f : 1.5f;
+        if (vertical[i]) dl->AddLine({lines[i], origin.y}, {lines[i], areaB.y}, col, thick);
+        else dl->AddLine({origin.x, lines[i]}, {areaB.x, lines[i]}, col, thick);
     }
-    dl->AddRect(imgA, imgB, IM_COL32(255, 255, 255, 60));
-    dl->PopClipRect();
-
-    // Подпись — снизу слева, поверх холста: размер картинки и увеличение нужны
-    // постоянно, а отдельная строка под холстом отъедала бы у него высоту.
+    dl->AddRect(a, b, IM_COL32(255, 255, 255, 70));
     char info[128];
-    std::snprintf(info, sizeof(info), "%dx%d  %.0f%%", m_tex->Width(), m_tex->Height(),
-                  m_zoom * 100.0f);
-    dl->AddText({origin.x + 6.0f, origin.y + area.y - 18.0f}, IM_COL32(210, 210, 215, 200), info);
+    std::snprintf(info, sizeof(info), "%.0fx%.0f  %.0f%%", iw, ih, m_zoom * 100.0f);
+    dl->AddText({origin.x + 6.0f, areaB.y - 18.0f}, IM_COL32(210, 210, 215, 210), info);
+    dl->PopClipRect();
 }
 
-void NineSlicePanel::DrawFields(EditorHost& host) {
-    ImGui::TextUnformatted(T("Fixed corners, in pixels of the source"));
-    const float iw = m_tex ? (float)m_tex->Width() : 4096.0f;
-    const float ih = m_tex ? (float)m_tex->Height() : 4096.0f;
+void NineSlicePanel::DrawSide(EditorHost& host, Live& live) {
+    NineSlice s = live.Slice;
+    const float iw = m_tex ? (float)(live.Sprite.z > 0.0f ? live.Sprite.z : m_tex->Width()) : 4096.0f;
+    const float ih = m_tex ? (float)(live.Sprite.w > 0.0f ? live.Sprite.w : m_tex->Height()) : 4096.0f;
 
-    // Числа и направляющие связаны в обе стороны: правка здесь двигает линии на
-    // холсте, перетаскивание линии меняет число. Одно состояние, два способа
-    // его править — а не две копии, которые придётся синхронизировать.
-    bool edited = false;
-    edited |= ImGui::DragFloat(T("Left##9l"), &m_slice.Left, 0.25f, 0.0f, iw, "%.0f");
-    host.TrackLastImGuiItem();
-    edited |= ImGui::DragFloat(T("Top##9t"), &m_slice.Top, 0.25f, 0.0f, ih, "%.0f");
-    host.TrackLastImGuiItem();
-    edited |= ImGui::DragFloat(T("Right##9r"), &m_slice.Right, 0.25f, 0.0f, iw, "%.0f");
-    host.TrackLastImGuiItem();
-    edited |= ImGui::DragFloat(T("Bottom##9b"), &m_slice.Bottom, 0.25f, 0.0f, ih, "%.0f");
-    host.TrackLastImGuiItem();
+    ImGui::SeparatorText(T("Fixed edges, source pixels"));
+    // Целые числа: у нарезки не бывает долей пикселя.
+    int v[4] = {(int)s.Left, (int)s.Top, (int)s.Right, (int)s.Bottom};
+    const char* names[4] = {T("Left"), T("Top"), T("Right"), T("Bottom")};
+    const int limits[4] = {(int)iw, (int)ih, (int)iw, (int)ih};
+    bool changed = false;
+    ImGui::PushItemWidth(-ImGui::CalcTextSize(T("Bottom")).x - 12.0f);
+    for (int i = 0; i < 4; ++i) {
+        ImGui::PushID(i);
+        if (ImGui::DragInt(names[i], &v[i], 0.2f, 0, limits[i])) changed = true;
+        host.TrackLastImGuiItem();
+        ImGui::PopID();
+    }
+    if (changed) {
+        s.Left = (float)v[0]; s.Top = (float)v[1]; s.Right = (float)v[2]; s.Bottom = (float)v[3];
+        Write(host, s);
+    }
 
-    ImGui::Spacing();
-    ImGui::TextUnformatted(T("How the stretching pieces are filled"));
+    ImGui::SeparatorText(T("Stretching pieces"));
     const char* fills[] = {T("Stretch"), T("Repeat")};
-    int center = (int)m_slice.CenterFill;
-    if (ImGui::Combo(T("Middle##9cf"), &center, fills, 2)) m_slice.CenterFill = (SliceFill)center;
-    int edge = (int)m_slice.EdgeFill;
-    if (ImGui::Combo(T("Edges##9ef"), &edge, fills, 2)) m_slice.EdgeFill = (SliceFill)edge;
+    int center = (int)s.CenterFill, edge = (int)s.EdgeFill;
+    if (ImGui::Combo(T("Middle"), &center, fills, 2)) {
+        s.CenterFill = (SliceFill)center;
+        Write(host, s);
+        host.PushUndoSnapshot();
+    }
+    if (ImGui::Combo(T("Edges"), &edge, fills, 2)) {
+        s.EdgeFill = (SliceFill)edge;
+        Write(host, s);
+        host.PushUndoSnapshot();
+    }
     if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Repeat is the only right answer for pixel art and patterns:\n"
-                                  "an ornament of 16 pixels stretched to 300 turns to mush."));
+        ImGui::SetTooltip("%s", T("Repeat keeps an ornament crisp; stretch smears it."));
+    if (ImGui::Checkbox(T("Draw the middle"), &s.DrawCenter)) {
+        Write(host, s);
+        host.PushUndoSnapshot();
+    }
+    ImGui::PopItemWidth();
+    ImGui::Checkbox(T("Checkerboard under transparency"), &m_showCheckers);
 
-    ImGui::Checkbox(T("Draw the middle##9dc"), &m_slice.DrawCenter);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("An outline frame has no middle — what is under\n"
-                                  "the element shows through."));
-    ImGui::Checkbox(T("Checkerboard under transparency##9chk"), &m_showCheckers);
-    (void)edited;
+    // Легенда — те же три цвета, что на картинке.
+    ImGui::SeparatorText(T("What stretches"));
+    auto legend = [](ImU32 col, const char* text) {
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        const float h = ImGui::GetTextLineHeight();
+        ImGui::Dummy(ImVec2(h, h));
+        ImGui::GetWindowDrawList()->AddRectFilled(p, ImVec2(p.x + h, p.y + h), col | IM_COL32(0, 0, 0, 255));
+        ImGui::SameLine();
+        ImGui::TextWrapped("%s", text);
+    };
+    legend(kCornerTint, T("Corners — never stretch"));
+    legend(kEdgeTint, T("Edges — stretch along one side"));
+    legend(kCenterTint, T("Middle — stretches both ways"));
+
+    live.Slice = s;
+    DrawPreview(live);
 }
 
-void NineSlicePanel::DrawPreview() {
-    ImGui::TextUnformatted(T("Preview — drag the corner to resize"));
+void NineSlicePanel::DrawPreview(const Live& live) {
+    ImGui::SeparatorText(T("Preview"));
     if (!m_tex) {
         ImGui::TextDisabled("%s", T("No picture."));
         return;
     }
+    if (m_previewSize.x <= 0.0f || m_previewSize.y <= 0.0f)
+        m_previewSize = (live.ElementSize.x > 0.0f && live.ElementSize.y > 0.0f) ? live.ElementSize
+                                                                                 : glm::vec2(240.0f, 96.0f);
+    ImGui::SetNextItemWidth(-FLT_MIN);
+    ImGui::DragFloat2("##ns_size", &m_previewSize.x, 1.0f, 8.0f, 4096.0f, "%.0f");
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Preview size. It starts at the size of the element."));
+    if (live.Bound && ImGui::SmallButton(T("Element size"))) m_previewSize = live.ElementSize;
 
-    ImGui::SliderFloat(T("Pixel scale##9ps"), &m_previewScale, 0.25f, 8.0f, "%.2fx");
-
-    const ImVec2 area = ImGui::GetContentRegionAvail();
-    const ImVec2 origin = ImGui::GetCursorScreenPos();
-    if (area.x < 40.0f || area.y < 40.0f) return;
-
-    // Размер предпросмотра не может стать меньше самой рамки: там она начинает
-    // ужиматься, и видно уже не нарезку, а её аварийное поведение. Нижняя
-    // граница — ровно сумма полей, чтобы дотащить ДО неё было можно.
-    const glm::vec2 minSize = sage::ui::MinimumSize(m_slice, m_previewScale);
-    m_previewSize.x = std::clamp(m_previewSize.x, std::max(8.0f, minSize.x), area.x - 4.0f);
-    m_previewSize.y = std::clamp(m_previewSize.y, std::max(8.0f, minSize.y), area.y - 4.0f);
-
+    // Предпросмотр ВПИСЫВАЕТСЯ в доступную ширину: крупный элемент показан
+    // уменьшенным целиком, а не вылезает за окно.
+    const float availW = std::max(40.0f, ImGui::GetContentRegionAvail().x);
+    const float k = std::min(1.0f, std::min(availW / m_previewSize.x, 320.0f / m_previewSize.y));
+    const ImVec2 box(m_previewSize.x * k, m_previewSize.y * k);
+    ImGui::InvisibleButton("##ns_preview", box);
+    const ImVec2 a = ImGui::GetItemRectMin();
+    const ImVec2 b = ImGui::GetItemRectMax();
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec2 a = origin;
-    const ImVec2 b(a.x + m_previewSize.x, a.y + m_previewSize.y);
     if (m_showCheckers) DrawCheckers(dl, a, b, 8.0f);
 
-    // Рисуется ТЕМ ЖЕ решателем, что и в игре (sage::ui::Solve). Не «похоже
-    // нарисовано в редакторе»: предпросмотр, считающий по своим правилам, — это
-    // второй источник правды, и расходиться с игрой он начинает в первый же
-    // день.
+    // Тем же решателем, что и в игре (sage::ui::Solve): предпросмотр по своим
+    // правилам — второй источник правды.
+    const float tw = (float)m_tex->Width(), th = (float)m_tex->Height();
+    const bool whole = live.Sprite.z <= 0.0f || live.Sprite.w <= 0.0f;
     SliceRequest req;
-    req.SrcW = (float)m_tex->Width();
-    req.SrcH = (float)m_tex->Height();
-    req.DstX = a.x; req.DstY = a.y;
-    req.DstW = m_previewSize.x; req.DstH = m_previewSize.y;
-    req.Scale = m_previewScale;
-
-    const float tw = req.SrcW, th = req.SrcH;
+    req.SrcX = whole ? 0.0f : live.Sprite.x;
+    req.SrcY = whole ? 0.0f : live.Sprite.y;
+    req.SrcW = whole ? tw : live.Sprite.z;
+    req.SrcH = whole ? th : live.Sprite.w;
+    req.DstX = a.x; req.DstY = a.y; req.DstW = box.x; req.DstH = box.y;
+    req.Scale = live.PixelScale * k;
     const ImTextureID id = (ImTextureID)(std::intptr_t)m_tex->NativeHandle();
-    for (const SliceQuad& q : sage::ui::Solve(m_slice, req)) {
-        // V переворачивается: у текстуры движка начало координат внизу, у ImGui
-        // — вверху.
+    dl->PushClipRect(a, b, true);
+    for (const SliceQuad& q : ui::Solve(live.Slice, req)) {
         const ImVec2 uv0(q.SrcX / tw, 1.0f - q.SrcY / th);
         const ImVec2 uv1((q.SrcX + q.SrcW) / tw, 1.0f - (q.SrcY + q.SrcH) / th);
         dl->AddImage(id, {q.DstX, q.DstY}, {q.DstX + q.DstW, q.DstY + q.DstH}, uv0, uv1);
     }
+    dl->PopClipRect();
     dl->AddRect(a, b, IM_COL32(255, 255, 255, 70));
-
-    // Уголок изменения размера — там же, где у окон системы, и той же формы:
-    // объяснять, за что тянуть, не приходится.
-    const ImVec2 gripA(b.x - 14.0f, b.y - 14.0f);
-    ImGui::SetCursorScreenPos(gripA);
-    ImGui::InvisibleButton("##9grip", ImVec2(14.0f, 14.0f));
-    const bool gripHot = ImGui::IsItemHovered() || ImGui::IsItemActive();
-    if (gripHot) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNWSE);
-    if (ImGui::IsItemActive()) {
-        m_previewSize.x += ImGui::GetIO().MouseDelta.x;
-        m_previewSize.y += ImGui::GetIO().MouseDelta.y;
-    }
-    for (int i = 0; i < 3; ++i) {
-        const float o = 4.0f + (float)i * 4.0f;
-        dl->AddLine({b.x - o, b.y - 2.0f}, {b.x - 2.0f, b.y - o},
-                    gripHot ? IM_COL32(255, 255, 255, 220) : IM_COL32(200, 200, 205, 140), 1.5f);
-    }
-
-    char info[96];
-    std::snprintf(info, sizeof(info), "%.0f x %.0f", m_previewSize.x, m_previewSize.y);
-    dl->AddText({a.x + 4.0f, b.y + 2.0f}, IM_COL32(210, 210, 215, 200), info);
-    ImGui::SetCursorScreenPos(ImVec2(a.x, b.y + 20.0f));
+    if (k < 0.999f) ImGui::TextDisabled(T("Shown at %.0f%%"), k * 100.0f);
 }

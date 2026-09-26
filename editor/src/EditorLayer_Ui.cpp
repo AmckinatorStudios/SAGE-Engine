@@ -258,35 +258,55 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     ImGui::SetWindowFocus("Viewport");
 }
 
-// Help > About SAGE — версия движка + таблица версий ВСЕХ подсистем (пока все
-// v1). Единый источник — sage::EngineSystems() (тот же список, что в лог старта).
+// Help > About SAGE — КОРОТКО: что это за программа, какая версия и как
+// скопировать её для сообщения об ошибке.
+//
+// Здесь была таблица из трёх десятков подсистем с версиями «v1» у каждой —
+// на весь экран и без ответа на вопрос, зачем окно открыли. Открывают его за
+// двумя вещами: узнать версию и передать её вместе с сообщением о проблеме.
+// Список подсистем остался — свёрнутым, для того самого сообщения.
 void EditorLayer::DrawAboutWindow() {
     if (!m_showAbout) return;
-    ImGui::SetNextWindowSize(ImVec2(560, 520), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(T("About SAGE" "###About SAGE"), &m_showAbout)) { ImGui::End(); return; }
+    ImGui::SetNextWindowSize(ImVec2(440, 0), ImGuiCond_Appearing);
+    if (!ImGui::Begin(T("About SAGE" "###About SAGE"), &m_showAbout,
+                      ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse)) {
+        ImGui::End();
+        return;
+    }
 
     ImGui::Text(T("SAGE Engine %s"), kSageEngineVersion);
-    ImGui::TextDisabled("%s", T("A modular 3D engine: ECS, RHI, PBR, physics, scripting, UI."));
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 420.0f);
+    ImGui::TextDisabled("%s", T("An engine and editor for making games: scenes, 3D, physics, sound, "
+                                "interface and Lua scripts."));
+    ImGui::PopTextWrapPos();
     ImGui::Spacing();
-    const auto& systems = sage::EngineSystems();
-    ImGui::Text(T("Subsystems: %zu (all v1)"), systems.size());
-    ImGui::Separator();
 
-    if (ImGui::BeginTable("##systems", 3,
-                          ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
-                          ImGuiTableFlags_ScrollY)) {
-        ImGui::TableSetupColumn("System", ImGuiTableColumnFlags_WidthFixed, 150.0f);
-        ImGui::TableSetupColumn("Ver", ImGuiTableColumnFlags_WidthFixed, 44.0f);
-        ImGui::TableSetupColumn("Summary", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableHeadersRow();
-        for (const sage::SystemVersion& s : systems) {
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn(); ImGui::TextUnformatted(s.Name);
-            ImGui::TableNextColumn();
-            ImGui::TextColored(ImVec4(0.55f, 0.8f, 1.0f, 1.0f), "%s", s.Tag().c_str());
-            ImGui::TableNextColumn(); ImGui::TextDisabled("%s", s.Summary);
+    const auto& systems = sage::EngineSystems();
+    // Строка для сообщения об ошибке: версия и набор подсистем — ровно то, что
+    // спросят первым делом.
+    if (ImGui::Button(T("Copy version for a bug report"))) {
+        std::string text = std::string("SAGE Engine ") + kSageEngineVersion + "\n";
+        for (const sage::SystemVersion& sys : systems) text += std::string(sys.Name) + " " + sys.Tag() + "\n";
+        ImGui::SetClipboardText(text.c_str());
+        SetStatusMessage(T("Version copied"));
+    }
+
+    if (ImGui::CollapsingHeader(T("Subsystems"))) {
+        if (ImGui::BeginTable("##systems", 2,
+                              ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                  ImGuiTableFlags_ScrollY,
+                              ImVec2(420.0f, 220.0f))) {
+            ImGui::TableSetupColumn("System", ImGuiTableColumnFlags_WidthFixed, 140.0f);
+            ImGui::TableSetupColumn("Summary", ImGuiTableColumnFlags_WidthStretch);
+            for (const sage::SystemVersion& sys : systems) {
+                ImGui::TableNextRow();
+                ImGui::TableNextColumn();
+                ImGui::TextUnformatted(sys.Name);
+                ImGui::TableNextColumn();
+                ImGui::TextDisabled("%s", sys.Summary);
+            }
+            ImGui::EndTable();
         }
-        ImGui::EndTable();
     }
     ImGui::End();
 }

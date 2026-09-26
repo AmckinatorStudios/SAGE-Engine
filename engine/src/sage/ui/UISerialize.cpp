@@ -30,6 +30,7 @@ namespace {
 
 void SaveField(json& out, const void* data, const sage::ui::PartField& f) {
     using K = sage::ui::PartField::Kind;
+    if (f.EditorOnly) return;   // второе имя того же поля: пишется под первым
     switch (f.Type) {
         case K::Bool: out[f.Key] = sage::ui::FieldAs<bool>(data, f); break;
         case K::Int: out[f.Key] = sage::ui::FieldAs<int>(data, f); break;
@@ -44,10 +45,20 @@ void SaveField(json& out, const void* data, const sage::ui::PartField& f) {
         case K::Bindings:
             out[f.Key] = BindingsToJson(sage::ui::FieldAs<sage::events::Bindings>(data, f));
             break;
+        // Вид — вложенным объектом по своей таблице: дорожка, ручка, вид при
+        // наведении пишутся одними и теми же ключами.
+        case K::Look: {
+            json lj = json::object();
+            const sage::ui::Look& look = sage::ui::FieldAs<sage::ui::Look>(data, f);
+            for (const sage::ui::PartField& lf : sage::ui::LookFields()) SaveField(lj, &look, lf);
+            out[f.Key] = lj;
+            break;
+        }
     }
 }
 
 void LoadField(const json& in, void* data, const sage::ui::PartField& f) {
+    if (f.EditorOnly) return;
     if (!in.contains(f.Key)) return; // нет ключа — остаётся значение по умолчанию
     using K = sage::ui::PartField::Kind;
     const json& v = in[f.Key];
@@ -85,6 +96,53 @@ void LoadField(const json& in, void* data, const sage::ui::PartField& f) {
         case K::Bindings:
             BindingsFromJson(v, sage::ui::FieldAs<sage::events::Bindings>(data, f));
             break;
+        case K::Look:
+            if (v.is_object()) {
+                sage::ui::Look& look = sage::ui::FieldAs<sage::ui::Look>(data, f);
+                for (const sage::ui::PartField& lf : sage::ui::LookFields()) LoadField(v, &look, lf);
+            }
+            break;
+    }
+}
+
+// --- СТАРЫЕ КЛЮЧИ ЧАСТЕЙ ---------------------------------------------------------
+//
+// У ползунка и галки были цвета «дорожки» и «акцента», у полосы — один цвет
+// заполнения, у раскладки — галка «растягивать поперёк». Теперь это виды и
+// перечисление; сцена, сохранённая раньше, обязана открыться с тем же видом.
+// Переводится, только если нового ключа в файле нет: сохранённое уже новой
+// версией не трогается.
+void UpgradeLegacyKeys(const std::string& id, const json& pj, void* data) {
+    using namespace sage::ui;
+    auto has = [&pj](const char* k) { return pj.contains(k); };
+    if (id == "range") {
+        Range& r = *static_cast<Range*>(data);
+        if (has("track")) return;
+        if (has("trackColor")) r.Track.Color = Vec4FromJson(pj["trackColor"], r.Track.Color);
+        if (has("accentColor")) {
+            const glm::vec4 accent = Vec4FromJson(pj["accentColor"], r.Filled.Color);
+            r.Filled.Color = r.Knob.Color = r.Check.Color = accent;
+        }
+        const float border = pj.value("borderThickness", 0.0f);
+        const glm::vec4 borderColor =
+            has("borderColor") ? Vec4FromJson(pj["borderColor"], glm::vec4(0.0f)) : glm::vec4(0.0f);
+        r.Track.BorderThickness = r.Knob.BorderThickness = border;
+        r.Track.BorderColor = r.Knob.BorderColor = borderColor;
+        // Дорожка ползунка была «таблеткой» (скругление в половину толщины),
+        // квадратик галки — со своим скруглением.
+        if (r.Toggle) r.Track.Rounding = pj.value("rounding", r.Track.Rounding);
+        else r.Track.Rounding = r.Filled.Rounding = 64.0f;
+    } else if (id == "bar") {
+        Bar& b = *static_cast<Bar*>(data);
+        if (has("filled") || !has("fillColor")) return;
+        // Заполнение рисовалось градиентом от светлее к темнее — так и остаётся.
+        b.SetFillColor(Vec4FromJson(pj["fillColor"], b.Filled.Color));
+    } else if (id == "layout") {
+        Stack& st = *static_cast<Stack*>(data);
+        if (has("cross") || !has("stretchCross")) return;
+        const json& v = pj["stretchCross"];
+        st.Cross = (v.is_boolean() && !v.get<bool>()) ? Stack::CrossAlign::Start
+                                                      : Stack::CrossAlign::Stretch;
     }
 }
 
@@ -108,6 +166,11 @@ void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
     tj["visible"] = t->Visible;
     tj["active"] = t->Active;
     tj["locked"] = t->Locked;
+    // Поведение в контейнере и стиль — только если заданы: у большинства
+    // элементов их нет, и файл не должен разбухать нулями.
+    if (t->Grow != 0.0f) tj["grow"] = t->Grow;
+    if (t->IgnoreLayout) tj["ignoreLayout"] = true;
+    if (!t->Style.empty()) tj["style"] = t->Style;
     // Resolved не пишется: это след последнего кадра, а не настройка.
 
     for (const sage::ui::PartType& p : sage::ui::Parts()) {
@@ -167,6 +230,9 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
         t.Visible = tj.value("visible", t.Visible);
         t.Active = tj.value("active", t.Active);
         t.Locked = tj.value("locked", t.Locked);
+        t.Grow = tj.value("grow", t.Grow);
+        t.IgnoreLayout = tj.value("ignoreLayout", t.IgnoreLayout);
+        t.Style = tj.value("style", t.Style);
     }
     reg.emplace_or_replace<sage::ui::Element>(e, t);
 
@@ -180,6 +246,7 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
         if (!data) continue;
         const json& pj = uj[p.Id];
         for (const sage::ui::PartField& f : *p.Fields) LoadField(pj, data, f);
+        UpgradeLegacyKeys(p.Id, pj, data);
     }
 
     // Картинке нужен рантайм-указатель на текстуру: путь в файле есть, а
@@ -193,6 +260,20 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
 // открывается с уже играющим звуком, которого никто не запускал.
 
 } // namespace
+
+void SavePartFields(json& out, const void* data, const std::vector<PartField>& fields, bool styleOnly) {
+    for (const PartField& f : fields) {
+        if (styleOnly && (f.Content || f.Hidden)) continue;
+        SaveField(out, data, f);
+    }
+}
+
+void LoadPartFields(const json& in, void* data, const std::vector<PartField>& fields, bool styleOnly) {
+    for (const PartField& f : fields) {
+        if (styleOnly && (f.Content || f.Hidden)) continue;
+        LoadField(in, data, f);
+    }
+}
 
 bool SaveElement(json& out, const entt::registry& reg, entt::entity e) {
     if (!reg.try_get<sage::ui::Element>(e)) return false;

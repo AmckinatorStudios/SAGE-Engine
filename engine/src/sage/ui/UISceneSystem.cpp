@@ -1,5 +1,6 @@
 #include "UISceneSystem.h"
 #include "sage/ui/UISerialize.h"
+#include "sage/ui/UIStyle.h"
 #include "sage/ui/UIPart.h"
 
 #include "sage/ui/UI.h"
@@ -158,13 +159,33 @@ void DrawElement(const entt::registry& reg, entt::entity e, const UIRect& r, flo
     // него семь, и заставить каждого знать про поворот значит получить семь
     // мест, где про него забудут.
     const Element* box = reg.try_get<Element>(e);
+
+    // ХОЗЯИН СОСТОЯНИЯ — сам элемент, если он ловит мышь, иначе ближайший
+    // такой предок. Надпись кнопки — её ребёнок: светлеть при наведении и
+    // «проваливаться» при нажатии она должна вместе с кнопкой.
+    const Interactable* owner = act;
+    for (entt::entity up = e; !owner;) {
+        const HierarchyComponent* h = reg.try_get<HierarchyComponent>(up);
+        if (!h || h->Parent == entt::null || !reg.valid(h->Parent) || !reg.all_of<Element>(h->Parent))
+            break;
+        up = h->Parent;
+        owner = reg.try_get<Interactable>(up);
+    }
+    UIRect rect = r;
+    // Сдвиг содержимого нажатой кнопки — детям, не ей самой: у неё меняется
+    // вид, а надпись «проваливается» на пару пикселей вместе с картинкой.
+    if (owner && owner != act && owner->Runtime.Pressed && owner->Enabled) {
+        rect.x += owner->PressedOffset.x * scale;
+        rect.y += owner->PressedOffset.y * scale;
+    }
+
     const bool rotated = box && std::fabs(box->Rotation) > 0.0001f;
-    if (rotated) ui.PushRotation({r.x + r.w * 0.5f, r.y + r.h * 0.5f}, box->Rotation);
+    if (rotated) ui.PushRotation({rect.x + rect.w * 0.5f, rect.y + rect.h * 0.5f}, box->Rotation);
 
     PartDrawContext c;
     c.Reg = &reg;
     c.Entity = e;
-    c.Rect = r;
+    c.Rect = rect;
     c.Scale = scale;
     c.Alpha = alpha;
     c.Ui = &ui;
@@ -174,6 +195,9 @@ void DrawElement(const entt::registry& reg, entt::entity e, const UIRect& r, flo
     c.Pressed = act && act->Runtime.Pressed;
     c.Focused = act && act->Runtime.Focused;
     c.Enabled = !act || act->Enabled;
+    c.OwnerHovered = owner && owner->Runtime.Hovered;
+    c.OwnerPressed = owner && owner->Runtime.Pressed;
+    c.OwnerEnabled = !owner || owner->Enabled;
 
     for (const PartType& p : Parts()) {
         if (!p.Draw || !p.Has || !p.Has(reg, e)) continue;
@@ -335,12 +359,23 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
     // Раскладка: контейнер сам расставляет детей. Их якоря при этом не
     // работают — в том и смысл, что позиции считает родитель.
     if (const Stack* layout = reg.try_get<Stack>(ent)) {
+        // Ребёнок «вне раскладки» стоит по своему якорю, как вне контейнера:
+        // значок-метка в углу карточки списка не должен занимать строку.
+        std::vector<entt::entity> free;
+        kids.erase(std::remove_if(kids.begin(), kids.end(),
+                                  [&](entt::entity k) {
+                                      if (!reg.get<Element>(k).IgnoreLayout) return false;
+                                      free.push_back(k);
+                                      return true;
+                                  }),
+                   kids.end());
         std::vector<LayoutSlot> slots(kids.size());
         auto measure = [&] {
             for (size_t i = 0; i < kids.size(); ++i) {
                 const Element& kt = reg.get<Element>(kids[i]);
                 slots[i].Size = ResolveSize(kt, r);
                 if (ui) slots[i].Size = MeasuredWidth(reg, kids[i], slots[i].Size, *ui);
+                slots[i].Grow = kt.Grow;
             }
         };
         measure();
@@ -360,8 +395,14 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
             // кончается там же, где последний ребёнок, и он вылезает наружу.
             const glm::vec2 padded{content.x + layout->Padding.x + layout->Padding.z,
                                    content.y + layout->Padding.y + layout->Padding.w};
+            // С переносом ряд растёт ВНИЗ (ширину задаёт контейнер, строки
+            // добавляются), а столбец — вбок.
+            const bool wrapRow = layout->Wrap && layout->Direction == Stack::Flow::Horizontal;
+            const bool wrapCol = layout->Wrap && layout->Direction == Stack::Flow::Vertical;
             const glm::vec2 fitted =
-                layout->Direction == Stack::Flow::Horizontal
+                wrapRow   ? glm::vec2{r.w, padded.y}
+                : wrapCol ? glm::vec2{padded.x, r.h}
+                : layout->Direction == Stack::Flow::Horizontal
                     ? glm::vec2{padded.x, r.h}
                     : (layout->Direction == Stack::Flow::Vertical ? glm::vec2{r.w, padded.y}
                                                                    : padded);
@@ -385,6 +426,10 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
             SolveSubtree(scene, kids[i], r, ui, childClipped, childClip, myAlpha, myInteractive,
                          &kr, includeHidden, out);
         }
+        const UIRect shifted{r.x + shift.x, r.y + shift.y, r.w, r.h};
+        for (entt::entity k : free)
+            SolveSubtree(scene, k, shifted, ui, childClipped, childClip, myAlpha, myInteractive,
+                         nullptr, includeHidden, out);
         return;
     }
 
@@ -504,6 +549,27 @@ std::vector<entt::entity> SortedInterfaces(Scene& scene) {
     return out;
 }
 
+bool CanReparent(Scene& scene, entt::entity element, entt::entity newParent) {
+    entt::registry& reg = scene.Registry();
+    if (element == entt::null || !reg.valid(element) || !IsElement(reg, element)) return false;
+    if (newParent == entt::null) return true;
+    if (!reg.valid(newParent) || newParent == element || !IsElement(reg, newParent)) return false;
+    // Сам себе предок: новый родитель лежит внутри переносимого.
+    for (entt::entity a = newParent; a != entt::null && reg.valid(a); a = scene.ParentOf(a))
+        if (a == element) return false;
+    return InterfaceOf(scene, newParent) == InterfaceOf(scene, element);
+}
+
+bool ReparentElement(Scene& scene, entt::entity element, entt::entity newParent) {
+    if (!CanReparent(scene, element, newParent)) return false;
+    // «В корень» — под интерфейс, которому элемент принадлежит (если его нет —
+    // элемент и так живёт в корне сцены).
+    const entt::entity target = newParent != entt::null ? newParent : InterfaceOf(scene, element);
+    if (scene.ParentOf(element) == target) return true;
+    scene.SetParent(element, target);
+    return scene.ParentOf(element) == target;
+}
+
 std::vector<entt::entity> InterfaceRoots(Scene& scene, entt::entity interfaceEntity) {
     std::vector<entt::entity> roots;
     entt::registry& reg = scene.Registry();
@@ -544,7 +610,7 @@ std::vector<ElementRect> SolveSceneRects(Scene& scene, int screenW, int screenH,
         if (parent != entt::null && reg.valid(parent)) {
             for (const Solved& p : items)
                 if (p.Entity == parent) { e.Parent = p.Rect; break; }
-            e.InLayout = reg.all_of<Stack>(parent);
+            e.InLayout = reg.all_of<Stack>(parent) && !reg.get<Element>(it.Entity).IgnoreLayout;
         }
         out.push_back(e);
     }
@@ -565,6 +631,9 @@ void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH, const U
     // инспекторе, перетаскивание файла, отмена, скрипт), а загрузка жила
     // только в чтении сцены: картинка появлялась лишь после Play/Stop.
     scene.Registry().view<Image>().each([](Image& im) { EnsureImageTexture(im); });
+    // Стили из файлов — туда же: правка .sageuistyle видна сразу, без
+    // перезапуска сцены.
+    ApplyStyles(scene);
 
     const std::vector<Solved> items =
         SolveScene(scene, &ui, screenW, screenH, /*includeHidden=*/false, scope);

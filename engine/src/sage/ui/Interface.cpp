@@ -1,4 +1,5 @@
 #include "sage/ui/Interface.h"
+#include "sage/ui/UIPresets.h"
 
 #include <fstream>
 #include <iterator>
@@ -151,6 +152,9 @@ std::vector<entt::entity> Instantiate(Scene& scene, const Interface& ui, entt::e
     // элемента корней не даёт: корень там перестаёт быть корнем.
     const bool exposeRoots = !(parent != entt::null && reg.valid(parent) && reg.all_of<Element>(parent));
     for (const InterfaceNode& n : ui.Roots) Build(scene, n, container, roots, exposeRoots);
+    // Ресурс, сохранённый до разделения элементов и контейнеров, приходит со
+    // старыми типами — приводим так же, как сцену.
+    NormalizeElements(scene);
     return roots;
 }
 

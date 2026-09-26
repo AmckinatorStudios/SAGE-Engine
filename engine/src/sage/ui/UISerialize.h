@@ -1,4 +1,6 @@
 #pragma once
+#include <vector>
+
 #include <nlohmann/json.hpp>
 
 #include <entt/entt.hpp>
@@ -20,6 +22,15 @@
 namespace sage::ui {
 
 struct Image;
+struct PartField;
+
+// Поля ОДНОЙ части по её таблице — в JSON и обратно. Общие для сцены и для
+// файла стиля (UIStyle.h): styleOnly пропускает содержимое (текст, значение,
+// действие) и поля старых сцен, которые в инспекторе не показываются.
+void SavePartFields(nlohmann::json& out, const void* data, const std::vector<PartField>& fields,
+                    bool styleOnly = false);
+void LoadPartFields(const nlohmann::json& in, void* data, const std::vector<PartField>& fields,
+                    bool styleOnly = false);
 
 // Элемент и все его компоненты в JSON-объект вида {"element": {...}, "fill": {...}}.
 // Возвращает false, если у сущности нет Element — записывать нечего.

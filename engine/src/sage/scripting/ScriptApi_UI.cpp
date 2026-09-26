@@ -231,6 +231,22 @@ void ScriptEngine::RegisterUIApi() {
         "Size", UI_FIELD(sage::ui::Element, Size),
         "Rotation", UI_FIELD(sage::ui::Element, Rotation),
         "Order", UI_FIELD(sage::ui::Element, Order),
+        // В контейнере: доля свободного места и «стоять по своему якорю».
+        "Grow", UI_FIELD(sage::ui::Element, Grow),
+        "IgnoreLayout", UI_FIELD(sage::ui::Element, IgnoreLayout),
+        // Файл стиля (.sageuistyle): смена пути кладёт новый стиль на следующем
+        // кадре — версия сбрасывается.
+        "Style", sol::property(
+                     [](UIRef& r) {
+                         const sage::ui::Element* el = r.Peek<sage::ui::Element>();
+                         return el ? el->Style : std::string();
+                     },
+                     [](UIRef& r, const std::string& path) {
+                         if (!r.Alive()) return;
+                         sage::ui::Element& el = r.Part<sage::ui::Element>();
+                         el.Style = path;
+                         el.StyleVersion = -1;
+                     }),
         "Visible", UI_FIELD(sage::ui::Element, Visible),
         "Active", UI_FIELD(sage::ui::Element, Active),
         // Растяжение и поля: «на весь экран с отступом 24» задаётся здесь, а не
@@ -359,7 +375,17 @@ void ScriptEngine::RegisterUIApi() {
                                                 : sage::ui::TextureFiltering::Smooth;
                       }),
         // Полоса и значок.
-        "BarFillColor", UI_FIELD(sage::ui::Bar, FillColor),
+        // Цвет заполнения — цвет его вида (sage::ui::Bar::Filled); имя свойства
+        // прежнее, скрипты игр им пользуются.
+        "BarFillColor", sol::property(
+                            [](UIRef& r) {
+                                const sage::ui::Bar* b = r.Peek<sage::ui::Bar>();
+                                return b ? b->Filled.Color : sage::ui::Bar{}.Filled.Color;
+                            },
+                            [](UIRef& r, const glm::vec4& c) {
+                                if (!r.Alive()) return;
+                                r.Part<sage::ui::Bar>().SetFillColor(c);
+                            }),
         "Icon", UI_FIELD(sage::ui::Icon, Name),
         "IconColor", UI_FIELD(sage::ui::Icon, Color),
         // Размер значка в пикселях; 0 — «во всю высоту элемента», как было.
@@ -432,8 +458,20 @@ void ScriptEngine::RegisterUIApi() {
         layout.Justify = AlignFromName(opts.get_or<std::string>("justify", "start"));
         layout.Spacing = opts.get_or("spacing", layout.Spacing);
         layout.Padding = PaddingFrom(opts.get<sol::object>("padding"), layout.Padding);
-        layout.Columns = std::max(1, opts.get_or("columns", layout.Columns));
-        layout.StretchCross = opts.get_or("stretch", layout.StretchCross);
+        layout.Columns = std::max(0, opts.get_or("columns", layout.Columns));
+        // «stretch» — прежняя галка «растягивать поперёк»; «cross» — то же
+        // словом: start / center / end / stretch.
+        if (opts["stretch"].valid())
+            layout.Cross = opts.get<bool>("stretch") ? sage::ui::Stack::CrossAlign::Stretch
+                                                     : sage::ui::Stack::CrossAlign::Start;
+        if (opts["cross"].valid()) {
+            const std::string c = opts.get<std::string>("cross");
+            layout.Cross = c == "center" ? sage::ui::Stack::CrossAlign::Center
+                           : c == "end"  ? sage::ui::Stack::CrossAlign::End
+                           : c == "start" ? sage::ui::Stack::CrossAlign::Start
+                                          : sage::ui::Stack::CrossAlign::Stretch;
+        }
+        layout.Wrap = opts.get_or("wrap", layout.Wrap);
         layout.FitContent = opts.get_or("fit", layout.FitContent);
     });
     Bind("ui", "ClearLayout", "ClearUILayout", [](GameObject& obj) {

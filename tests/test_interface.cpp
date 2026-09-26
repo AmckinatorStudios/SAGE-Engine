@@ -200,7 +200,7 @@ TEST(Interface_presets_build_from_elements_and_components) {
 
     // Пустой — тоже заготовка, и без единого компонента: им собирают всё
     // остальное.
-    const sage::ui::Preset* empty = sage::ui::FindPreset("Empty");
+    const sage::ui::Preset* empty = sage::ui::FindPreset("Group");
     CHECK_TRUE(empty != nullptr);
     if (empty) {
         CHECK_FALSE(empty->HasFill);
@@ -210,7 +210,7 @@ TEST(Interface_presets_build_from_elements_and_components) {
     }
 
     // Запрошенный набор Add/Create на месте.
-    for (const char* name : {"Empty", "Text", "Image", "Button", "Input Field"}) {
+    for (const char* name : {"Group", "Text", "Image", "Button", "Input Field"}) {
         if (!sage::ui::FindPreset(name))
             sagetest::ReportFail(__FILE__, __LINE__, std::string("нет заготовки: ") + name);
     }

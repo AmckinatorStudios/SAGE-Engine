@@ -10,6 +10,7 @@
 
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
+#include "../EditorTheme.h"
 #include "../HotkeyScope.h"
 #include "InterfaceWidgets.h"
 #include "../Localization.h"
@@ -184,8 +185,12 @@ void InterfaceHierarchyPanel::Draw(EditorHost& host, bool& open) {
                                          ImGui::GetID("##ui_tree_root_drop"))) {
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kDragPayload)) {
             const entt::entity dragged = *(const entt::entity*)p->Data;
-            host.PushUndoSnapshot();
-            scene.SetParent(dragged, entt::null);
+            // «В корень» — это корень ИНТЕРФЕЙСА, а не сцены (см. ReparentElement):
+            // раньше элемент уезжал из интерфейса и пропадал из дерева.
+            if (ui::CanReparent(scene, dragged, entt::null)) {
+                host.PushUndoSnapshot();
+                ui::ReparentElement(scene, dragged, entt::null);
+            }
         }
         ImGui::EndDragDropTarget();
     }
@@ -268,36 +273,42 @@ void InterfaceHierarchyPanel::DrawToolbar(EditorHost& host) {
     // Создание — единственная кнопка, которой здесь место постоянно: всё
     // остальное относится к УЖЕ ВЫБРАННОМУ и потому живёт в меню по правой
     // кнопке, где оно и ожидается.
-    if (EditorIcons::Button("plus", T("Create"), T("Add an element"))) ImGui::OpenPopup("##ui_create");
-    if (Sage::UI::MenuScope createMenu; ImGui::BeginPopup("##ui_create")) {
-        // СПИСОК ТИПОВ, РАЗБИТЫЙ ПО КАТЕГОРИЯМ, а не тринадцать строк подряд.
-        //
-        // Тринадцать имён в столбик читают целиком: «Grid» и «Vertical List»
-        // рядом ничем не отличаются, пока не вспомнишь, что делает каждый.
-        // Разделы отвечают на вопрос, с которым сюда и приходят: мне нужна
-        // основа, орган управления, контейнер или целый экран.
-        //
-        // Категория и значок живут В САМОЙ ЗАГОТОВКЕ (sage::ui::Preset), а не
-        // здесь: список типов — это и есть меню создания, и разбиение на
-        // разделы, написанное отдельно от него, однажды потеряет новый тип.
+    // ЭЛЕМЕНТЫ И КОНТЕЙНЕРЫ — РАЗНЫМИ КНОПКАМИ. Элемент — то, что видно
+    // (кнопка, текст, картинка); контейнер — невидимая раскладка детей (ряд,
+    // столбец, сетка, прокрутка). В одном списке они читались как «ещё один
+    // элемент», и «столбец» создавали, чтобы получить панель с фоном.
+    //
+    // Категория и значок живут В САМОЙ ЗАГОТОВКЕ (sage::ui::Preset), а не
+    // здесь: список типов — это и есть меню создания.
+    auto typeMenu = [&](bool containers) {
         std::string category;
         for (const ui::Preset& preset : ui::Presets()) {
-            if (preset.Category != category) {
+            if (preset.Container != containers) continue;
+            if (!containers && preset.Category != category) {
                 category = preset.Category;
                 ImGui::SeparatorText(T(category.c_str()));
             }
-            // Имя типа переводится, а создаётся элемент по английскому ключу:
-            // перевод — это то, что видно, а не то, что хранится.
+            // Имя типа переводится, а создаётся элемент по английскому ключу.
             if (EditorIcons::MenuItem(preset.Icon, T(preset.Name.c_str()))) {
                 host.PushUndoSnapshot();
                 GameObject created = host.CreateUIEntity(preset.Name);
                 if (created.Valid()) host.Selection().SetPrimary(created.Id());
             }
-            // Пояснение — подсказкой, а не второй строкой в пункте: строка
-            // удвоила бы высоту меню, а читают её один раз, при знакомстве.
-            if (preset.Hint && ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", T(preset.Hint));
+            if (preset.Hint && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(preset.Hint));
         }
+    };
+    if (EditorIcons::Button("plus", T("Element"), T("Add a visible element: text, button, picture...")))
+        ImGui::OpenPopup("##ui_create");
+    if (Sage::UI::MenuScope createMenu; ImGui::BeginPopup("##ui_create")) {
+        typeMenu(false);
+        ImGui::EndPopup();
+    }
+    ImGui::SameLine();
+    if (EditorIcons::Button("layout", T("Container"),
+                            T("Add an invisible layout: row, column, grid, scroll view...")))
+        ImGui::OpenPopup("##ui_create_container");
+    if (Sage::UI::MenuScope containerMenu; ImGui::BeginPopup("##ui_create_container")) {
+        typeMenu(true);
         ImGui::EndPopup();
     }
 
@@ -338,9 +349,14 @@ void InterfaceHierarchyPanel::DropGap(EditorHost& host, Scene& scene, entt::enti
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kDragPayload)) {
             const entt::entity dragged = *(const entt::entity*)p->Data;
-            host.PushUndoSnapshot();
-            scene.SetParent(dragged, parent);
-            PlaceBefore(host, scene, dragged, before, parent);
+            // Перенос, от которого сцена отказалась (в собственного потомка),
+            // не должен и переставлять порядок: элемент попал бы в список
+            // чужих соседей, оставаясь на старом месте.
+            if (dragged != before && ui::CanReparent(scene, dragged, parent)) {
+                host.PushUndoSnapshot();
+                ui::ReparentElement(scene, dragged, parent);
+                PlaceBefore(host, scene, dragged, before, parent);
+            }
         }
         // Линия под курсором: без неё непонятно, куда именно ляжет элемент.
         const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
@@ -468,9 +484,14 @@ bool InterfaceHierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::ent
         // до чтения имени, ровно как объекты сцены в списке слева.
         const ui::Preset* type = ui::FindPreset(box->Type);
         const ImU32 textCol = ImGui::GetColorU32(dim ? ImGuiCol_TextDisabled : ImGuiCol_Text);
+        // Контейнер — значком ДРУГОГО цвета: он невидим в игре, и в дереве
+        // его отличают от видимых элементов с первого взгляда.
+        const ImU32 iconCol = (type && type->Container && !dim)
+                                  ? ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::Accent))
+                                  : textCol;
         EditorIcons::DrawLabeled(ImGui::GetWindowDrawList(), ImVec2(rowPos.x + indent, rowPos.y),
                                  ImGui::GetTextLineHeight(), type ? type->Icon : "ui-empty",
-                                 textCol, name ? name->Name.c_str() : "Element", textCol);
+                                 iconCol, name ? name->Name.c_str() : "Element", textCol);
 
         DrawRowToggles(host, *box, rowPos);
     }
@@ -498,12 +519,19 @@ bool InterfaceHierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::ent
             ImGui::EndDragDropSource();
         }
         if (ImGui::BeginDragDropTarget()) {
-            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kDragPayload)) {
-                const entt::entity dragged = *(const entt::entity*)p->Data;
-                host.PushUndoSnapshot();
-                // Сцена сама не даст сделать элемент ребёнком собственного
-                // потомка — цикл в иерархии это зависание, а не кривая картинка.
-                scene.SetParent(dragged, e);
+            // Запретный бросок (на себя или своего потомка) виден сразу: строка
+            // не подсвечивается как цель, и отпускание ничего не делает.
+            const ImGuiPayload* peek = ImGui::GetDragDropPayload();
+            const bool allowed = !peek || !peek->IsDataType(kDragPayload) ||
+                                 ui::CanReparent(scene, *(const entt::entity*)peek->Data, e);
+            if (allowed) {
+                if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(kDragPayload)) {
+                    const entt::entity dragged = *(const entt::entity*)p->Data;
+                    host.PushUndoSnapshot();
+                    ui::ReparentElement(scene, dragged, e);
+                }
+            } else if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
+                ImGui::SetTooltip("%s", T("An element cannot go inside itself"));
             }
             ImGui::EndDragDropTarget();
         }
@@ -586,7 +614,7 @@ void InterfaceHierarchyPanel::DrawContextMenu(EditorHost& host, Scene& scene, en
         if (EditorIcons::MenuItem("up", T("Detach to root"), nullptr,
                                   scene.ParentOf(e) != entt::null)) {
             host.PushUndoSnapshot();
-            scene.SetParent(e, entt::null);
+            ui::ReparentElement(scene, e, entt::null);
         }
         ImGui::Separator();
         if (EditorIcons::MenuItem("trash", T("Delete"), "Del")) host.DeleteSelected();

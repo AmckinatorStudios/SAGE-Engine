@@ -140,9 +140,16 @@ public:
     // Короткое сообщение в статус-баре (обратная связь панелей/плагинов).
     virtual void SetStatusMessage(const std::string& message) = 0;
 
-    // Открыть редактор девятины на этой картинке (кнопка у поля с пометкой
-    // PartField::Widget::NineSliceBorder). Пустой путь просто открывает окно.
-    virtual void OpenNineSliceEditor(const std::string& imagePath) = 0;
+    // Открыть редактор девятины (кнопка у поля с пометкой
+    // PartField::Widget::NineSliceBorder). С элементом — правит нарезку ЭТОГО
+    // элемента вживую; без него — только картинку и её .sage9.
+    struct NineSliceTarget {
+        int ElementId = 0;        // 0 — без элемента
+        std::string PartId;       // часть: "image", "fill", "range", "interactable"...
+        std::string BorderKey;    // ключ поля нарезки: "sliceBorder", "hoverLook.sliceBorder"
+        std::string ImagePath;    // картинка, если элемента нет
+    };
+    virtual void OpenNineSliceEditor(const NineSliceTarget& target) = 0;
 
     // Открыть клип в инструменте анимации. Двойной щелчок по файлу — то же
     // действие, что «открыть сцену» или «поставить префаб»: файл знает, чем

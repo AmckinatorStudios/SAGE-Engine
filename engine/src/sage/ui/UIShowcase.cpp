@@ -6,6 +6,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UIPresets.h"
 
 namespace sage::ui {
 
@@ -117,7 +118,7 @@ int BuildShowcase(Scene& scene) {
     UI weightBar = Panel(UIAnchor::BottomLeft, {18, 14}, {336, 20}, {0.10f, 0.11f, 0.15f, 1.0f}, 6.0f);
     weightBar.HasBar = true;
     weightBar.BarStyle.Value = 0.62f;
-    weightBar.BarStyle.FillColor = {0.90f, 0.60f, 0.25f, 1.0f};
+    weightBar.BarStyle.SetFillColor({0.90f, 0.60f, 0.25f, 1.0f});
     MakeUI(scene, "WeightBar", weightBar, inv);
 
     // ======================= ДЕРЕВО НАВЫКОВ (слева) =======================
@@ -183,6 +184,7 @@ int BuildShowcase(Scene& scene) {
         MakeUI(scene, std::string("Skill_") + n.Name, node, skills);
     }
 
+    NormalizeElements(scene);   // типы собранным кодом элементам
     return root.Id();
 }
 

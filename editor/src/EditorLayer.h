@@ -154,9 +154,9 @@ public:
         m_animation.RequestFocus();
         m_animation.OpenClip(*this, clipPath);
     }
-    void OpenNineSliceEditor(const std::string& imagePath) override {
+    void OpenNineSliceEditor(const NineSliceTarget& target) override {
         m_showNineSlice = true;
-        m_nineSlice.OpenFor(imagePath);
+        m_nineSlice.OpenFor(target);
     }
 
     // --- EditorHost: undo/redo ---
@@ -393,6 +393,9 @@ private:
     void CheckWorkspaceDockFrame();
     // Разрешение предпросмотра правит кадр, а не проект (см. .cpp).
     void CheckPreviewResolutionFrame();
+    // Инспектор каждого типа интерфейса и окно девятины (в том числе узкое)
+    // рисуются без единой претензии ImGui (см. .cpp).
+    void CheckUiInspectorFrame();
     // Закрыть всплывающее окно, которое открыли, но никто не рисует: такое
     // окно обездвиживает редактор целиком (см. EditorLayer.cpp).
     void CloseGhostPopups();
@@ -405,6 +408,11 @@ private:
     int m_previewResStep = 0;
     int m_previewResWait = 0;
     int m_previewResGameW = 0, m_previewResGameH = 0;   // размер игры ДО проверки
+    bool m_uiInspectorChecked = false;
+    int m_uiInspectorStep = 0;
+    int m_uiInspectorWait = 0;
+    int m_uiInspectorErrors = 0;       // ошибок в консоли до проверки
+    int m_uiInspectorElement = 0;      // элемент, на котором открыто окно девятины
 
     // --- Мышь В ЖИВОМ КАДРЕ (SAGE_EDITOR_SELFTEST=1) -------------------------
     //

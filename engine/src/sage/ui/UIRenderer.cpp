@@ -463,7 +463,7 @@ void UIRenderer::GradientRect(float x, float y, float w, float h, glm::vec3 top,
 }
 
 void UIRenderer::RectShadow(float x, float y, float w, float h, float radius,
-                            float size, float alpha) {
+                            float size, float alpha, glm::vec3 color) {
     if (size <= 0.0f || alpha <= 0.0f) return;
     // Расширяющиеся контуры с падающей прозрачностью. Настоящее размытие
     // потребовало бы отдельного прохода и буфера — здесь оно не окупается:
@@ -476,7 +476,7 @@ void UIRenderer::RectShadow(float x, float y, float w, float h, float radius,
         float grow = size * t;
         float a = alpha * (1.0f - t) * (1.0f - t) * 0.9f;
         RoundedRect(x - grow, y - grow + size * 0.35f, w + grow * 2.0f, h + grow * 2.0f,
-                    glm::vec3(0.0f), a, radius + grow);
+                    color, a, radius + grow);
     }
 }
 

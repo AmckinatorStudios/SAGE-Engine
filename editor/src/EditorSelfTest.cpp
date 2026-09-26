@@ -481,6 +481,83 @@ void EditorLayer::CheckWorkspaceDockFrame() {
 }
 
 // ---------------------------------------------------------------------------
+// ИНСПЕКТОР КАЖДОГО ТИПА И ОКНО ДЕВЯТИНЫ — БЕЗ ПРЕТЕНЗИЙ ImGui.
+//
+// Окно девятины, суженное до ширины, где его колонки не помещались, писало в
+// консоль тысячи строк «Code uses SetCursorPos() to extend window/parent
+// boundaries» — по строке на кадр. Инспектор элемента разный у каждого типа
+// (виды состояний у кнопки, дорожка и ручка у ползунка, раскладка у
+// контейнера), и ошибка в одном из них видна только на нём. Поэтому каждый тип
+// создаётся и показывается живым кадром, а окно девятины открывается на
+// подложке и сужается до минимума. Консоль после этого обязана остаться без
+// новых ошибок.
+void EditorLayer::CheckUiInspectorFrame() {
+    if (m_uiInspectorChecked) return;
+    if (!std::getenv("SAGE_EDITOR_SELFTEST")) return;
+    if (!m_previewResChecked || m_probeStep >= 0) return;   // те проверки двигают окна
+    if (m_uiInspectorWait > 0) { --m_uiInspectorWait; return; }
+
+    const std::vector<sage::ui::Preset>& presets = sage::ui::Presets();
+    auto finish = [this]() {
+        m_uiInspectorChecked = true;
+        m_showNineSlice = false;
+        SetWorkspace(EditorWorkspace::Scene);
+        const int added = m_console.ErrorCount() - m_uiInspectorErrors;
+        if (added == 0)
+            LOG_INFO("Editor") << "UI_INSPECTOR: OK — инспектор каждого типа и узкое окно девятины "
+                               << "без ошибок ImGui";
+        else
+            LOG_ERROR("Editor") << "UI_INSPECTOR: FAIL — новых ошибок в консоли: " << added;
+    };
+
+    const int step = m_uiInspectorStep++;
+    if (step == 0) {
+        m_uiInspectorErrors = m_console.ErrorCount();
+        SetWorkspace(EditorWorkspace::Interface);
+        m_uiInspectorWait = 4;
+        return;
+    }
+    // Шаги 1..N — по типу на шаг: создать, выбрать, дать инспектору два кадра.
+    const int index = step - 1;
+    if (index < (int)presets.size()) {
+        GameObject e = CreateUIEntity(presets[(size_t)index].Name);
+        if (e.Valid()) {
+            m_selection.SetPrimary(e.Id());
+            // Состояния тоже: инспектор кнопки с включёнными видами состояний —
+            // самый длинный.
+            if (auto* act = m_scene->Registry().try_get<sage::ui::Interactable>(e.Entity())) {
+                act->UseHoverLook = act->UsePressedLook = true;
+            }
+            if (presets[(size_t)index].Name == "Panel") m_uiInspectorElement = e.Id();
+        }
+        m_uiInspectorWait = 2;
+        return;
+    }
+    const int after = index - (int)presets.size();
+    if (after == 0) {
+        // Окно девятины на подложке панели, и сразу узким.
+        EditorHost::NineSliceTarget t;
+        t.ElementId = m_uiInspectorElement;
+        t.PartId = "fill";
+        t.BorderKey = "sliceBorder";
+        OpenNineSliceEditor(t);
+        m_uiInspectorWait = 3;
+        return;
+    }
+    if (after == 1) {
+        ImGui::SetWindowSize("###NineSlice", ImVec2(420.0f, 300.0f));
+        m_uiInspectorWait = 4;
+        return;
+    }
+    if (after == 2) {
+        ImGui::SetWindowSize("###NineSlice", ImVec2(1100.0f, 700.0f));
+        m_uiInspectorWait = 3;
+        return;
+    }
+    finish();
+}
+
+// ---------------------------------------------------------------------------
 // РАЗРЕШЕНИЕ ПРЕДПРОСМОТРА ПРАВИТ КАДР, А НЕ ПРОЕКТ.
 //
 // Раскладка интерфейса считается в пикселях кадра, и весь смысл якорей и
@@ -7698,7 +7775,7 @@ end
     uiReg.emplace<sage::ui::Fill>(bar.Entity(), barFill);
     sage::ui::Bar barBar;
     barBar.Value = 0.0f;
-    barBar.FillColor = {0.95f, 0.80f, 0.20f, 1.0f};
+    barBar.SetFillColor({0.95f, 0.80f, 0.20f, 1.0f});
     uiReg.emplace<sage::ui::Bar>(bar.Entity(), barBar);
     m_scene->SetParent(bar.Entity(), hud.Entity());
 
