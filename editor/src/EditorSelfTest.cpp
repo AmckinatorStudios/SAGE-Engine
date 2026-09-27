@@ -599,14 +599,15 @@ void EditorLayer::CheckEnvironmentFrame() {
             e.Skybox.Kind = Src::Cubemap;
             return;
         case 8:
-            expect("папка кубической карты", {"sky.folder", "sky.rotation", "sky.exposure"},
+            expect("прежняя папка кубической карты", {"sky.folder", "sky.folder.convert", "sky.rotation",
+                                                     "sky.exposure"},
                    {"sky.image", "sky.face.px", "sky.zenith"});
             e.Skybox.Kind = Src::Faces;
             return;
         case 9:
             expect("шесть файлов",
-                   {"sky.face.px", "sky.face.nx", "sky.face.py", "sky.face.ny", "sky.face.pz", "sky.face.nz",
-                    "sky.rotation", "sky.exposure"},
+                   {"sky.faces.map", "sky.face.px", "sky.face.nx", "sky.face.py", "sky.face.ny",
+                    "sky.face.pz", "sky.face.nz", "sky.rotation", "sky.exposure"},
                    {"sky.image", "sky.folder", "sky.zenith"});
             e.Skybox.Enabled = false;
             return;
@@ -669,7 +670,7 @@ void EditorLayer::CheckEnvironmentFrame() {
     m_envChecked = true;
     const int added = m_console.ErrorCount() - m_envErrors;
     if (m_envFail.empty() && added == 0)
-        LOG_INFO("Editor") << "ENVIRONMENT: OK — пять типов неба, цикл суток, туман и сохранение; "
+        LOG_INFO("Editor") << "ENVIRONMENT: OK — четыре типа неба и прежняя папка, развёртка граней, цикл суток, туман и сохранение; "
                            << "показывается только нужное";
     else
         LOG_ERROR("Editor") << "ENVIRONMENT: FAIL — "

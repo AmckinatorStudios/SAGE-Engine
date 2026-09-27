@@ -363,21 +363,19 @@ MenuScope::MenuScope() {
     // элементам в плотной панели: ряд из пятнадцати строк без просветов
     // читается как сплошное полотно, в котором глазу не за что зацепиться.
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing,
-                        ImVec2(m.ItemSpacing.x, m.ItemSpacing.y));
+                        ImVec2(m.ItemSpacing.x, ImMax(m.ItemSpacing.y, 6.0f)));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemInnerSpacing, m.ItemInnerSpacing);
 }
 
 MenuScope::~MenuScope() { ImGui::PopStyleVar(4); }
 
 void MenuSection(const char* label, bool first) {
-    const Style& ui = Get();
-    if (!first) {
-        ImGui::Dummy(ImVec2(0.0f, ui.SpacingXS));
-        ImGui::Separator();
-    }
-    ImGui::Dummy(ImVec2(0.0f, ui.SpacingXS));
+    // Воздух даёт сам ItemSpacing меню. Пустышки сверху и снизу добавляли к
+    // нему ещё по отступу на КАЖДОЙ стороне линии и заголовка — между
+    // группами выходило по сорок точек пустоты, и меню из пятнадцати
+    // пунктов не влезало в окно.
+    if (!first) ImGui::Separator();
     TextSecondary("%s", label);
-    ImGui::Dummy(ImVec2(0.0f, ui.SpacingXS));
 }
 
 } // namespace Sage::UI

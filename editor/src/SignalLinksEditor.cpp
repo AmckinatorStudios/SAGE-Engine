@@ -1,6 +1,7 @@
 #include "SignalLinksEditor.h"
 
 #include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -104,7 +105,11 @@ bool DrawSignalLinks(EditorHost& host, GameObject obj) {
             const ImGuiTableFlags tf = ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoPadOuterX;
             if (ImGui::BeginTable("##link", 4, tf)) {
                 const float icon = ImGui::GetFrameHeight();
-                ImGui::TableSetupColumn("on", ImGuiTableColumnFlags_WidthFixed, icon);
+                // Колонка галочки — по самой галочке (она меньше поля, см.
+                // CheckboxScale): колонка в высоту поля оставляла справа от
+                // неё пустую полосу, и слот цели отъезжал от своей галки.
+                const float check = std::ceil(icon * ImGui::GetStyle().CheckboxScale);
+                ImGui::TableSetupColumn("on", ImGuiTableColumnFlags_WidthFixed, check);
                 ImGui::TableSetupColumn("target", ImGuiTableColumnFlags_WidthStretch, 1.0f);
                 ImGui::TableSetupColumn("method", ImGuiTableColumnFlags_WidthStretch, 1.0f);
                 ImGui::TableSetupColumn("trash", ImGuiTableColumnFlags_WidthFixed, icon);

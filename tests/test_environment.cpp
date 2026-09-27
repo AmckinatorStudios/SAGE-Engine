@@ -8,6 +8,8 @@
 #include "TestFramework.h"
 
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <nlohmann/json.hpp>
@@ -289,4 +291,69 @@ TEST(Environment_sky_type_keys_round_trip) {
     Src untouched = Src::Image;
     CHECK_FALSE(env::SkySourceFromKey("nonsense", untouched));
     CHECK_TRUE(untouched == Src::Image);
+}
+
+// «Папка с кубической картой» из выбора убрана: её место занимают шесть
+// отдельных файлов с подписью у каждой грани. Сцена со старым типом по-прежнему
+// открывается (тип находится), но предложить его заново нельзя.
+TEST(Environment_cubemap_folder_is_not_offered_but_old_scenes_open) {
+    const env::System* sky = env::FindSystem("sky");
+    CHECK_TRUE(sky != nullptr);
+    if (!sky) return;
+    int offered = 0;
+    for (const env::Variant& v : sky->Variants) {
+        if (v.Legacy) continue;
+        ++offered;
+        CHECK_TRUE(v.Key != "cubemap");
+    }
+    CHECK_EQ(offered, 4);
+    LightingEnvironment e;
+    e.Skybox.Enabled = true;
+    e.Skybox.Kind = Src::Cubemap;
+    const env::Variant* cur = env::CurrentVariant(*sky, e);
+    CHECK_TRUE(cur != nullptr && cur->Legacy);
+    CHECK_TRUE(Active("sky.folder.convert", e));
+}
+
+// У каждой из шести граней — своя подсказка «что видно в эту сторону», и
+// над слотами — развёртка куба, показывающая, где какая грань.
+TEST(Environment_six_faces_each_have_a_hint_and_a_map) {
+    for (const char* k : {"sky.face.px", "sky.face.nx", "sky.face.py", "sky.face.ny", "sky.face.pz", "sky.face.nz"}) {
+        const env::Prop* p = env::FindProp(k);
+        CHECK_TRUE(p != nullptr && !p->Hint.empty());
+    }
+    LightingEnvironment e;
+    e.Skybox.Enabled = true;
+    e.Skybox.Kind = Src::Faces;
+    CHECK_TRUE(Active("sky.faces.map", e));
+    e.Skybox.Kind = Src::Image;
+    CHECK_FALSE(Active("sky.faces.map", e));
+}
+
+// Перевод старого неба: грани px/nx/py/ny/pz/nz папки — в свои слоты по
+// порядку +X, -X, +Y, -Y, +Z, -Z; не хватает хоть одной — небо не трогается.
+TEST(Environment_cubemap_folder_converts_to_six_files) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path root = fs::temp_directory_path(ec) / "sage_env_cube_test";
+    fs::remove_all(root, ec);
+    fs::create_directories(root / "assets" / "sky", ec);
+    const char* names[6] = {"px.png", "nx.jpg", "py.png", "ny.png", "pz.png", "nz.png"};
+    for (int i = 0; i < 5; ++i) std::ofstream(root / "assets" / "sky" / names[i]) << "x";
+
+    SkyboxSettings sky;
+    sky.Kind = Src::Cubemap;
+    sky.CubemapDir = "assets/sky";
+    CHECK_FALSE(env::CubemapFolderToFaces(sky, root));   // нет nz
+    CHECK_TRUE(sky.Kind == Src::Cubemap);
+    CHECK_TRUE(sky.FacePaths[0].empty());
+
+    std::ofstream(root / "assets" / "sky" / names[5]) << "x";
+    CHECK_TRUE(env::CubemapFolderToFaces(sky, root));
+    CHECK_TRUE(sky.Kind == Src::Faces);
+    CHECK_EQ(sky.FacePaths[0], std::string("assets/sky/px.png"));
+    CHECK_EQ(sky.FacePaths[1], std::string("assets/sky/nx.jpg"));
+    CHECK_EQ(sky.FacePaths[5], std::string("assets/sky/nz.png"));
+    CHECK_TRUE(sky.HasFaces());
+    fs::remove_all(root, ec);
 }

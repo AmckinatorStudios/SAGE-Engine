@@ -1,4 +1,5 @@
 #pragma once
+#include <filesystem>
 #include <functional>
 #include <string>
 #include <vector>
@@ -74,6 +75,9 @@ struct Variant {
     std::string Label;
     std::string Hint;
     std::vector<Group> Groups;
+    // Прежний тип: в списке выбора его нет, но сцена, которая им уже пользуется,
+    // открывается как была — с его полями и способом перейти на новый тип.
+    bool Legacy = false;
 };
 
 struct System {
@@ -107,6 +111,12 @@ const Prop* FindProp(const std::string& key);
 // и видна, собственное условие выполнено. Этим же вопросом пользуются тесты:
 // «у одноцветного неба нет ползунка размера солнца».
 bool IsPropActive(const std::string& key, const Env& env);
+
+// Прежнее небо «папка с кубической картой» → шесть отдельных файлов: грани
+// px/nx/py/ny/pz/nz ищутся в папке (base — корень, от которого отсчитан путь
+// папки в сцене). true — нашлись все шесть; тогда тип неба становится Faces,
+// а пути граней — путями внутри той же папки. Иначе небо не трогается.
+bool CubemapFolderToFaces(SkyboxSettings& sky, const std::filesystem::path& base);
 
 // Тип неба словом и обратно — для скриптов и файлов.
 const char* SkySourceKey(SkyboxSettings::Source source);

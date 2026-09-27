@@ -109,7 +109,9 @@ ENGINE_TEXT = re.compile(r'SAGE_UI_TEXT\(\s*"((?:[^"\\]|\\.)*)"\s*\)')
 SCHEMA_FILES = [
     os.path.join(REPO, 'engine', 'src', 'sage', 'scene', 'EnvironmentSchema.cpp'),
 ]
-SCHEMA_SKIP = re.compile(r'^(?:[a-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*|[\w/]+\.h|x?%.*)$')
+# Расширения файлов («.png») — тоже не подписи: их ищет перевод старого неба
+# (CubemapFolderToFaces).
+SCHEMA_SKIP = re.compile(r'^(?:[a-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*|[\w/]+\.h|x?%.*|\.[a-z0-9]+)$')
 
 
 def schema_keys():

@@ -62,6 +62,7 @@ private:
                    LightingEnvironment& env, bool& changed);
     bool DrawProp(EditorHost& host, const sage::env::Prop& prop, LightingEnvironment& env);
     void DrawCustom(EditorHost& host, const std::string& key, LightingEnvironment& env);
+    void DrawFaceMap(EditorHost& host, LightingEnvironment& env);
     // Строка про объект-солнце: время суток задаётся его поворотом или циклом,
     // и добраться до него надо отсюда одним нажатием.
     void DrawSunLink(EditorHost& host, Scene& scene, LightingEnvironment& env);
@@ -70,5 +71,6 @@ private:
     // Ключ свойства, для которого открыт файловый диалог: ответ приходит через
     // кадр, и указатель на поле за это время мог бы повиснуть (откат, другая сцена).
     std::string m_pickKey;
+    bool m_convertFailed = false;   // перевод папки неба не нашёл всех граней
     std::vector<std::string> m_drawn;
 };
