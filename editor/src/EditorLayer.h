@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <algorithm>
 #include <optional>
 #include <memory>
@@ -223,6 +224,27 @@ public:
     void StepPlay() override { m_play.RequestStep(); }
     void ResumePlay() override { m_play.Resume(); }
     void StopPlay() override;
+
+    // --- ТЕСТЫ НА LUA ПРЯМО В РЕДАКТОРЕ (EditorLayer_LuaTests.cpp) ----------
+    //
+    // Файлы *.test.lua проекта (или переданные) запускаются в НАСТОЯЩЕМ
+    // Play-режиме: объект на файл, методы test_* — корутинами по кадрам
+    // (см. sage/scripting/ScriptTests.h). Итог — в консоль; Play, запущенный
+    // ради тестов, останавливается сам, и сцена возвращается как была.
+    bool RunLuaTests(const std::vector<std::string>& files = {});
+    bool LuaTestsRunning() const { return m_luaTests.Running; }
+    struct LuaTestRun {
+        bool Running = false;
+        bool StartedPlay = false;
+        bool Finished = false;
+        int Queued = 0;
+        int Passed = 0;
+        int Failed = 0;
+        std::vector<std::string> Failures;   // «файл:строка: имя — причина»
+    };
+    const LuaTestRun& LastLuaTests() const { return m_luaTests; }
+    void TickLuaTests();
+    std::vector<std::string> FindLuaTestFiles() const;
     // Ввод интерфейсу ИГРЫ в Play-режиме: курсор панели Game, переведённый в
     // координаты игрового кадра, плюс набранный текст (см. определение).
     void UpdatePlayUiInput(float dt);
@@ -408,6 +430,13 @@ private:
     // Окно Environment живым кадром: пять типов неба, цикл суток, туман,
     // сохранение — показывается только нужное (см. EnvironmentPanel.h).
     void CheckEnvironmentFrame();
+    // Набор Lua-тестов движка (assets/tests/lua) — в настоящем Play через
+    // «Run Lua Tests»: весь API скриптинга живым кадром.
+    void CheckLuaTestsFrame();
+    int m_luaSelfTestStep = 0;
+    // Выход по SAGE_SCREENSHOT_AT_FRAME ждёт конца Lua-тестов самопроверки.
+    bool m_shotWaitStarted = false;
+    std::chrono::steady_clock::time_point m_shotWaitStart;
     bool m_envChecked = false;
     int m_envStep = 0;
     int m_envErrors = 0;
@@ -576,6 +605,7 @@ private:
 
     // --- панели (архитектура v3: каждая — независимый класс) ---
     ConsolePanel m_console;
+    LuaTestRun m_luaTests;
     ProfilerPanel m_profiler;
     ConfirmDialog m_confirm;
     // Запросы мультивьюпорта: панель раскладывает, рендер исполняет в начале

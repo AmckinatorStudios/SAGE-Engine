@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2435.
+// Язык: Русский. Строк: 2440.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -2296,6 +2296,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Нижний процент"},
     {"Low — weak/old PCs: no shadows or post-processing, 75%% render scale\nMedium — 1024 shadows + tone mapping, no Bloom/SSAO\nHigh — everything on, 2048 shadows (default)\nUltra — 4096 shadows + MSAA 4x\nIn game: environment variable SAGE_QUALITY=low|medium|high|ultra",
      "Low — слабые/старые ПК: без теней и пост-процесса, рендер 75%%\nMedium — тени 1024 + тон-маппинг, без Bloom/SSAO\nHigh — всё включено, тени 2048 (по умолчанию)\nUltra — тени 4096 + MSAA 4x\nВ игре: переменная окружения SAGE_QUALITY=low|medium|high|ultra"},
+    {"Lua tests failed: ",
+     "Lua-тесты провалены: "},
+    {"Lua tests passed: ",
+     "Lua-тесты пройдены: "},
     {"Lua: OnStart and OnUpdate on this object",
      "Lua: OnStart и OnUpdate на этом объекте"},
     {"MB",
@@ -2568,6 +2572,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ночная палитра"},
     {"No Animation component - goals do nothing",
      "Нет компонента Animation — цели ни на что не влияют"},
+    {"No Lua tests: add files named *.test.lua to the project",
+     "Lua-тестов нет: добавьте в проект файлы *.test.lua"},
     {"No action selected",
      "Действие не выбрано"},
     {"No actions in this context yet",
@@ -3506,8 +3512,12 @@ constexpr TranslationPair kRussianStrings[] = {
      "Строками: имя и размер"},
     {"Run",
      "Запуск"},
+    {"Run Lua Tests",
+     "Запустить Lua-тесты"},
     {"Run the scene (it is restored on Stop)",
      "Запустить сцену (сцена будет восстановлена по Stop)"},
+    {"Running Lua tests…",
+     "Идут Lua-тесты…"},
     {"Runs in Play mode: OnStart(entity), OnUpdate(entity, dt)",
      "Выполняется в режиме игры: OnStart(entity), OnUpdate(entity, dt)"},
     {"Runs in Play mode: Start, Update, FixedUpdate, collisions",

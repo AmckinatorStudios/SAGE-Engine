@@ -1,4 +1,5 @@
 #pragma once
+#include <deque>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -92,6 +93,10 @@ public:
 
     InstanceId Create(const ScriptSource& source, GameObject owner, ScriptError& err) override;
     void Destroy(InstanceId id) override;
+    // Снять подписки экземпляров, чей объект уже уничтожен. Сам экземпляр
+    // убирает рантайм в следующем кадре, но подписки обязаны уйти СРАЗУ:
+    // иначе Events.count() в том же кадре считает мёртвые обработчики.
+    void DropDeadSubscriptions();
     bool Has(InstanceId id, Hook hook) const override;
     bool Call(InstanceId id, Hook hook, float dt, ScriptError& err) override;
     bool CallWith(InstanceId id, Hook hook, GameObject other, ScriptError& err) override;
@@ -103,6 +108,9 @@ public:
                      ScriptError& err) override;
     void ApplyFields(InstanceId id, const sage::vars::Table& fields) override;
     void Reset() override;
+    int QueueTests(InstanceId id, const std::string& path) override;
+    void TickTests(float dt, std::vector<TestResult>& finished) override;
+    int PendingTests() const override { return (int)m_tests.size(); }
 
     // --- Для файлов LuaApi_*.cpp ---------------------------------------------
     sol::state& Lua() { return *m_lua; }
@@ -171,12 +179,40 @@ private:
         // единообразия незачем.
         bool Legacy = false;
         sol::object LegacyEntity;
+        // Методы в порядке объявления в файле: тесты идут в том порядке, в
+        // каком их написали, а не в порядке хеш-таблицы.
+        std::vector<std::string> Methods;
     };
+
+    // Один тест в очереди: корутина метода test_* своего экземпляра.
+    struct PendingTest {
+        InstanceId Inst = kInvalidInstance;
+        std::string Script, Name;
+        sol::thread Thread;
+        sol::coroutine Co;
+        bool Started = false;
+        float Wait = 0.0f;     // секунд до продолжения
+        int WaitFrames = 0;    // кадров до продолжения
+        float Elapsed = 0.0f;
+        int Frames = 0;
+        float Timeout = 30.0f;
+    };
+    // true — тест закончился (результат в out).
+    bool StepTest(PendingTest& t, float dt, TestResult& out);
+    std::deque<PendingTest> m_tests;
 
     // Скомпилированный файл. Кэш по пути + времени правки: один и тот же
     // скрипт на сотне объектов компилируется ОДИН раз, а не сто.
+    // ХРАНИТСЯ БАЙТКОД, А НЕ ФУНКЦИЯ. Окружение (_ENV) — upvalue функции
+    // файла, ОБЩИЙ для всех замыканий, созданных ею. Пока кэш отдавал одну и
+    // ту же функцию, каждому новому экземпляру ей переставляли окружение — и
+    // у всех прежних экземпляров того же файла глобальные переменные молча
+    // начинали указывать в окружение последнего (нашёл тест на Lua в
+    // редакторе: второй объект со скриптом старого стиля сбрасывал счётчик
+    // первому). Из байткода каждый экземпляр получает свою функцию со своим
+    // _ENV, а разбор текста по-прежнему один на файл.
     struct Chunk {
-        sol::protected_function Fn;
+        std::string Bytecode;
         long long Stamp = 0;
     };
 
@@ -223,6 +259,7 @@ private:
     friend void RegisterComponents(Backend&);
     friend void RegisterGlobals(Backend&);
     friend void RegisterSignals(Backend&);
+    friend void RegisterTest(Backend&);
 };
 
 // Разделы API — по файлу на раздел (LuaApi_*.cpp).
@@ -236,6 +273,9 @@ void RegisterSignals(Backend& backend);
 // Сигналы и свойства интерфейса у прокси объекта — зовётся из RegisterObject,
 // у которого в руках сам тип.
 void RegisterObjectSignals(Backend& backend, sol::usertype<ObjectRef>& type);
+// Тесты на Lua: библиотека Test (проверки, ожидание кадров, щелчок по
+// интерфейсу, клавиши) и UI.create (см. LuaApi_Test.cpp).
+void RegisterTest(Backend& backend);
 // `field.number(...)` и прочие — они нужны и при ВЫПОЛНЕНИИ файла, а не только
 // при разборе объявления (см. LuaFields.cpp).
 void RegisterFields(Backend& backend);

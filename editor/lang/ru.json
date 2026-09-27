@@ -2435,6 +2435,11 @@
     "Tightness": "Узость",
     "Larger — a narrower glow around the sun": "Больше — уже свечение вокруг солнца",
     "Computed:": "Вычислено:",
-    "The cycle turns the object \"%s\"": "Цикл поворачивает объект «%s»"
+    "The cycle turns the object \"%s\"": "Цикл поворачивает объект «%s»",
+    "Lua tests failed: ": "Lua-тесты провалены: ",
+    "Lua tests passed: ": "Lua-тесты пройдены: ",
+    "No Lua tests: add files named *.test.lua to the project": "Lua-тестов нет: добавьте в проект файлы *.test.lua",
+    "Run Lua Tests": "Запустить Lua-тесты",
+    "Running Lua tests…": "Идут Lua-тесты…"
   }
 }

@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "sage/events/Events.h"
+#include "sage/scripting/ScriptTests.h"
 #include "sage/scripting/ScriptTypes.h"
 
 class Scene;
@@ -135,6 +136,16 @@ public:
     // инспекторе). Поля вида «ссылка на объект/компонент» бэкенд обязан отдать
     // скрипту УЖЕ объектом, а не номером.
     virtual void ApplyFields(InstanceId id, const sage::vars::Table& fields) = 0;
+
+    // --- Тесты на языке скриптов (ScriptTests.h) ------------------------------
+    //
+    // Поставить в очередь тесты экземпляра (его методы test_*). Возвращает,
+    // сколько поставлено; язык без тестов отвечает нулём. Тесты идут по одному,
+    // каждый — своей корутиной в настоящих кадрах (TickTests).
+    virtual int QueueTests(InstanceId id, const std::string& path) { (void)id; (void)path; return 0; }
+    // Шаг очереди тестов: закончившиеся дописываются в finished.
+    virtual void TickTests(float dt, std::vector<TestResult>& finished) { (void)dt; (void)finished; }
+    virtual int PendingTests() const { return 0; }
 
     // Тик самого рантайма языка: таймеры, корутины, сборка мусора. Хуки
     // экземпляров зовёт хозяин, а не это.
