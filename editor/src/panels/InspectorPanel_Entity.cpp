@@ -15,6 +15,7 @@
 #include "InspectorPanel.h"
 #include "../SignalLinksEditor.h"
 #include "../UIElementProperties.h"
+#include "TweenPanel.h"
 
 #include <cmath>
 #include <cstdio>
@@ -994,124 +995,49 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
-    // --- Твины: быстрые изменения свойств без клипа --------------------------
+    // --- Твины: только сводка -------------------------------------------------
     //
-    // ТОЛЬКО НУЖНОЕ, по строке на вопрос: кого, что, сколько, после чего, по
-    // какой кривой, повторять ли и как играть. Сами значения и шкала — в окне
-    // Tween (кнопка «Изменить»): таблица из десятка чисел в узком инспекторе
-    // читается хуже, чем в окне, где у каждого свойства своя полоса.
+    // ОДНО МЕСТО НА НАСТРОЙКУ. Значения, время и кривые правятся в окне Tween;
+    // здесь — что за твин, сколько в нём и две кнопки. Прежде инспектор
+    // повторял длительность, кривую и повтор из окна, и две копии одной
+    // настройки расходились в голове быстрее, чем в данных.
     if (reg.all_of<sage::anim::TweenComponent>(obj.Entity()) &&
         EditorTheme::SectionHeader("clock", T("Tween" "###Tween"), ImGuiTreeNodeFlags_DefaultOpen, &rmTween,
                                    T("Quick changes of properties over time — no clip needed"))) {
         auto& tc = reg.get<sage::anim::TweenComponent>(obj.Entity());
-        int removeAt = -1;
+        const float btn = ImGui::GetFrameHeight();
+        const float gap = ImGui::GetStyle().ItemSpacing.x;
         for (size_t i = 0; i < tc.Tweens.size(); ++i) {
-            sage::anim::TweenClip& c = tc.Tweens[i];
+            const sage::anim::TweenClip& c = tc.Tweens[i];
+            const bool empty = c.Tracks.empty();
             ImGui::PushID((int)i);
-            if (i) ImGui::Separator();
+            const float lineRight = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
             ImGui::AlignTextToFramePadding();
             ImGui::TextUnformatted(c.Name.c_str());
             ImGui::SameLine();
-            if (EditorIcons::Button("pencil", T("Edit"), T("Opens this tween in the Tween window")))
-                host.OpenTween(obj.Id(), (int)i);
-            ImGui::SameLine();
-            if (EditorIcons::IconOnlyButton("trash", T("Delete this tween"))) removeAt = (int)i;
-
-            Sage::UI::BeginProperties("tween");
-            Sage::UI::PropertyLabel(T("Target"));
-            objectslot::Options opt;
-            opt.EmptyLabel = "This object";
-            opt.SelfId = obj.Id();
-            const objectslot::Result r = objectslot::Draw(host, "target", c.Target, opt);
-            if (r.Changed) {
-                c.Target = r.Id == obj.Id() ? 0 : r.Id;
-                host.PushUndoSnapshot();
+            ImGui::TextDisabled("%s", tweenui::Summary(c).c_str());
+            const float buttons = empty ? btn : btn * 2.0f + gap;
+            ImGui::SameLine(std::max(ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x + gap, lineRight - buttons));
+            if (empty) {
+                if (EditorIcons::IconOnlyButton("plus", T("Add property")))
+                    host.OpenTween(obj.Id(), (int)i, EditorHost::TweenOpen::AddProperty);
+            } else {
+                ImGui::BeginDisabled(host.InPlayMode());
+                if (EditorIcons::IconOnlyButton("play", T("Play")))
+                    host.OpenTween(obj.Id(), (int)i, EditorHost::TweenOpen::Play);
+                ImGui::EndDisabled();
+                ImGui::SameLine();
+                if (EditorIcons::IconOnlyButton("pencil", T("Edit in the Tween window")))
+                    host.OpenTween(obj.Id(), (int)i, EditorHost::TweenOpen::Edit);
             }
-
-            Sage::UI::PropertyLabel(T("Properties"));
-            std::string props;
-            for (const sage::anim::TweenTrack& t : c.Tracks) {
-                if (t.Property.empty()) continue;
-                const sage::anim::PropertyType* p = sage::anim::FindProperty(t.Property);
-                if (!props.empty()) props += ", ";
-                props += p ? T(p->Title.c_str()) : t.Property.c_str();
-            }
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextWrapped("%s", props.empty() ? T("none yet — add them in the Tween window") : props.c_str());
-
-            Sage::UI::PropertyLabel(T("Duration"), T("Stretches or squeezes the whole tween in time"));
-            float length = c.Length();
-            ImGui::SetNextItemWidth(-FLT_MIN);
-            if (ImGui::DragFloat("##len", &length, 0.01f, 0.01f, 600.0f, "%.2f s") && length > 0.0f &&
-                !c.Tracks.empty())
-                c.Stretch(length);
-            host.TrackLastImGuiItem();
-
-            Sage::UI::PropertyLabel(T("Delay"));
-            ImGui::SetNextItemWidth(-FLT_MIN);
-            ImGui::DragFloat("##delay", &c.Delay, 0.01f, 0.0f, 600.0f, "%.2f s");
-            host.TrackLastImGuiItem();
-
-            // Кривая — одна на весь твин, пока у дорожек она общая; разные —
-            // «Разные», и выбор здесь ставит одну всем.
-            Sage::UI::PropertyLabel(T("Ease"), T("The curve of every property; each can have its own in the Tween window"));
-            std::string ease;
-            bool mixed = false;
-            for (const sage::anim::TweenTrack& t : c.Tracks) {
-                if (t.Property.empty()) continue;
-                const std::string e = sage::anim::ToString(t.Curve);
-                if (ease.empty()) ease = e;
-                else if (ease != e) mixed = true;
-            }
-            static const char* kEases[] = {"linear", "quad-out", "quad-in", "quad-inout", "cubic-out",
-                                           "sine-inout", "expo-out", "back-out", "elastic-out", "bounce-out"};
-            ImGui::SetNextItemWidth(-FLT_MIN);
-            if (ImGui::BeginCombo("##ease", mixed ? T("Mixed") : (ease.empty() ? "-" : ease.c_str()))) {
-                for (const char* e : kEases) {
-                    if (ImGui::Selectable(e, !mixed && ease == e)) {
-                        sage::anim::Ease curve;
-                        sage::anim::Parse(e, curve);
-                        for (sage::anim::TweenTrack& t : c.Tracks) t.Curve = curve;
-                        host.PushUndoSnapshot();
-                    }
-                }
-                ImGui::EndCombo();
-            }
-
-            Sage::UI::PropertyLabel(T("Loop"));
-            static const char* kLoops[] = {"Once", "Loop", "Ping-pong"};
-            ImGui::SetNextItemWidth(-FLT_MIN);
-            if (ImGui::BeginCombo("##loop", T(kLoops[(int)c.Loop]))) {
-                for (int k = 0; k < 3; ++k)
-                    if (ImGui::Selectable(T(kLoops[k]), k == (int)c.Loop)) {
-                        c.Loop = (sage::anim::TweenLoop)k;
-                        host.PushUndoSnapshot();
-                    }
-                ImGui::EndCombo();
-            }
-
-            Sage::UI::PropertyLabel(T("Playback"));
-            ImGui::SetNextItemWidth(80.0f);
-            ImGui::DragFloat("##speed", &c.Speed, 0.01f, 0.01f, 20.0f, "x%.2f");
-            host.TrackLastImGuiItem();
-            ImGui::SameLine();
-            if (ImGui::Checkbox(T("Reverse"), &c.Reverse)) host.PushUndoSnapshot();
-            ImGui::SameLine();
-            if (ImGui::Checkbox(T("On start"), &c.PlayOnStart)) host.PushUndoSnapshot();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Starts by itself when the game starts"));
-            Sage::UI::EndProperties();
             ImGui::PopID();
-        }
-        if (removeAt >= 0) {
-            tc.Tweens.erase(tc.Tweens.begin() + removeAt);
-            host.PushUndoSnapshot();
         }
         if (EditorIcons::Button("plus", T("Add tween"))) {
             sage::anim::TweenClip c;
             c.Name = "Tween " + std::to_string(tc.Tweens.size() + 1);
             tc.Tweens.push_back(c);
             host.PushUndoSnapshot();
-            host.OpenTween(obj.Id(), (int)tc.Tweens.size() - 1);
+            host.OpenTween(obj.Id(), (int)tc.Tweens.size() - 1, EditorHost::TweenOpen::AddProperty);
         }
     }
 
@@ -1865,6 +1791,8 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
             host.PushUndoSnapshot();
             c.Add(reg, e);
             ImGui::CloseCurrentPopup();
+            // Пустой твин ни на что не годен: сразу — выбрать свойство.
+            if (c.Add == AddTween) host.OpenTween(obj.Id(), 0, EditorHost::TweenOpen::AddProperty);
         }
         ImGui::PopID();
     }

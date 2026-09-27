@@ -307,6 +307,37 @@ TEST(Tween_component_plays_on_start_and_survives_save) {
     CHECK_NEAR(back->Registry().get<Transform>(b.Entity()).Position.y, 0.0f, 1e-6f);
 }
 
+// «После завершения» (Then): доигравший твин запускает следующий твин того же
+// объекта по имени — и эта связь переживает сохранение сцены.
+TEST(Tween_then_starts_next_tween_after_completion) {
+    Scene s("t");
+    GameObject cube = s.CreateObject("Cube");
+    TweenComponent& tc = s.Registry().emplace<TweenComponent>(cube.Entity());
+    TweenClip appear;
+    appear.Name = "Appear";
+    appear.PlayOnStart = true;
+    appear.Then = "Wobble";
+    appear.Tracks.push_back(MakeTrack("object.position", {0, 2, 0, 0}, 0.5f, Ease::Linear()));
+    TweenClip wobble;
+    wobble.Name = "Wobble";
+    wobble.Tracks.push_back(MakeTrack("object.scale", {3, 3, 3, 0}, 0.5f, Ease::Linear()));
+    tc.Tweens.push_back(appear);
+    tc.Tweens.push_back(wobble);
+
+    std::unique_ptr<Scene> back = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(s));
+    CHECK_TRUE(back != nullptr);
+    if (!back) return;
+    GameObject c = back->FindByName("Cube");
+    CHECK_EQ(back->Registry().get<TweenComponent>(c.Entity()).Tweens[0].Then, std::string("Wobble"));
+
+    UpdateTweens(*back, 0.5f);                       // «Появиться» доиграл…
+    CHECK_NEAR(back->Registry().get<Transform>(c.Entity()).Position.y, 2.0f, 1e-4f);
+    CHECK_EQ(back->Tweens.Count(), 1);               // …и запустил «Покачиваться»
+    UpdateTweens(*back, 0.5f);
+    CHECK_NEAR(back->Registry().get<Transform>(c.Entity()).Scale.x, 3.0f, 1e-4f);
+    CHECK_EQ(back->Tweens.Count(), 0);
+}
+
 // --- Lua ----------------------------------------------------------------------------
 
 namespace {

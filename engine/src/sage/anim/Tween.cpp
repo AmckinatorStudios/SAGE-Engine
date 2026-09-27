@@ -280,7 +280,7 @@ const TweenPlayer::Active* TweenPlayer::Find(TweenHandle h) const {
     return nullptr;
 }
 
-TweenHandle TweenPlayer::Play(entt::registry& reg, entt::entity target, const TweenClip& clip) {
+TweenHandle TweenPlayer::Play(entt::registry& reg, entt::entity target, const TweenClip& clip, entt::entity owner) {
     if (!reg.valid(target)) return kNoTween;
     // ПОСЛЕДНИЙ ЗАПУЩЕННЫЙ ГЛАВНЫЙ. Два твина одного свойства одного объекта
     // писали бы по очереди, и объект дёргался бы между ними. Новый отнимает
@@ -296,6 +296,7 @@ TweenHandle TweenPlayer::Play(entt::registry& reg, entt::entity target, const Tw
     if (m_next == kNoTween) m_next = 1;
     a.Reg = &reg;
     a.Target = target;
+    a.Owner = owner;
     a.Clip = clip;
     Sync(a);
     m_active.push_back(std::move(a));
@@ -375,6 +376,7 @@ void TweenPlayer::Update(float dt) {
         if (Apply(a, local)) {
             a.Done = true;
             if (a.OnComplete) m_callbacks.push_back(std::move(a.OnComplete));
+            if (!a.Clip.Then.empty() && a.Owner != entt::null) m_chains.push_back({a.Owner, a.Clip.Then});
         }
     }
     m_active.erase(std::remove_if(m_active.begin(), m_active.end(), [](const Active& a) { return a.Done; }),
@@ -500,7 +502,7 @@ TweenHandle PlayNamed(Scene& scene, entt::entity owner, const std::string& name)
     for (const TweenClip& clip : tc->Tweens) {
         if (clip.Name != name) continue;
         const entt::entity target = TargetOf(scene, owner, clip);
-        return target == entt::null ? kNoTween : scene.Tweens.Play(reg, target, clip);
+        return target == entt::null ? kNoTween : scene.Tweens.Play(reg, target, clip, owner);
     }
     return kNoTween;
 }
@@ -515,10 +517,14 @@ void UpdateTweens(Scene& scene, float dt) {
         for (const TweenClip& clip : tc.Tweens) {
             if (!clip.PlayOnStart) continue;
             const entt::entity target = TargetOf(scene, e, clip);
-            if (target != entt::null) scene.Tweens.Play(reg, target, clip);
+            if (target != entt::null) scene.Tweens.Play(reg, target, clip, e);
         }
     }
     scene.Tweens.Update(dt);
+    // «После завершения» — следующий твин того же объекта. Здесь, а не в
+    // проигрывателе: искать твин по имени можно только в сцене.
+    for (const TweenPlayer::Chain& c : scene.Tweens.TakeChains())
+        if (reg.valid(c.Owner)) PlayNamed(scene, c.Owner, c.Name);
 }
 
 } // namespace sage::anim
