@@ -41,6 +41,27 @@ struct TransformRef {
     TransformRef() = default;
     explicit TransformRef(GameObject o) : Obj(o) {}
 };
+// ВЕКТОР TRANSFORM, ПРИВЯЗАННЫЙ К ОБЪЕКТУ: `transform.position.z = 5` пишет в
+// объект. Обычный glm::vec3 из свойства был бы копией, и такая строка молча
+// ничего не делала бы — самая частая ловушка скриптовых движков.
+//
+// Наследник glm::vec3 (sol::base_classes): такой вектор принимает ЛЮБАЯ
+// функция, ждущая Vector3, и складывается с ними как обычный. Запись одной
+// оси меняет только эту ось объекта (прочие берутся живыми, а не из снимка).
+// Результат арифметики — обычный вектор, ни к чему не привязанный.
+struct TransformVector : glm::vec3 {
+    enum class Field { Position, Rotation, Scale };
+    GameObject Obj;
+    Field Which = Field::Position;
+    TransformVector() = default;
+    TransformVector(const glm::vec3& v, GameObject o, Field f) : glm::vec3(v), Obj(o), Which(f) {}
+};
+
+// `obj:get_component(...)` → `GetComponent`: нынешнее имя метода, которого
+// у прокси нет, ищется в прежнем написании. Пусто — такого метода нет.
+std::string SnakeToPascal(const std::string& name);
+sol::object SnakeMethod(sol::state_view lua, const char* type, const sol::stack_object& key);
+
 struct CharacterRef {
     GameObject Obj;
     CharacterRef() = default;
@@ -97,6 +118,7 @@ public:
     // убирает рантайм в следующем кадре, но подписки обязаны уйти СРАЗУ:
     // иначе Events.count() в том же кадре считает мёртвые обработчики.
     void DropDeadSubscriptions();
+    void Tick(float dt) override;
     bool Has(InstanceId id, Hook hook) const override;
     bool Call(InstanceId id, Hook hook, float dt, ScriptError& err) override;
     bool CallWith(InstanceId id, Hook hook, GameObject other, ScriptError& err) override;
@@ -179,6 +201,12 @@ private:
         // единообразия незачем.
         bool Legacy = false;
         sol::object LegacyEntity;
+        // ПРОСТОЙ скрипт: тоже глобальные функции, но нынешние — Start(),
+        // Update(dt), OnCollisionEnter(other). Хуки получают только свои
+        // аргументы, `self` — глобальная переменная файла (сам объект), поля —
+        // глобальные переменные. Отличается от Legacy по тексту: у старого
+        // стиля OnStart/OnUpdate или первый параметр `entity`.
+        bool Simple = false;
         // Методы в порядке объявления в файле: тесты идут в том порядке, в
         // каком их написали, а не в порядке хеш-таблицы.
         std::vector<std::string> Methods;
@@ -200,6 +228,29 @@ private:
     // true — тест закончился (результат в out).
     bool StepTest(PendingTest& t, float dt, TestResult& out);
     std::deque<PendingTest> m_tests;
+
+    // Events.emit("door_open") зовёт OnDoorOpen(data) у простых скриптов.
+    // Подписка «на всё» у шины текущей сцены; переставляется, когда сцена
+    // сменилась. Жетон — чтобы обработчик, переживший бэкенд (шина сцены
+    // живёт дольше), не позвал мёртвый объект.
+    void EnsureEventTap();
+    void CallEventFunctions(const sage::events::Event& event);
+    Scene* m_tapScene = nullptr;
+    int m_tapId = 0;
+    std::shared_ptr<Backend*> m_tapToken = std::make_shared<Backend*>(this);
+
+    // Позвать функцию экземпляра в его соглашении: простому — без self,
+    // остальным — с self (или сущностью у старого стиля) первым аргументом.
+    template <typename... Args>
+    sol::protected_function_result CallAs(const Instance& inst, const sol::protected_function& fn,
+                                          Args&&... args) {
+        if (inst.Simple) return fn(std::forward<Args>(args)...);
+        sol::object self = inst.Legacy ? inst.LegacyEntity : sol::object(inst.Self);
+        return fn(self, std::forward<Args>(args)...);
+    }
+    // Функция экземпляра по имени (метод скрипта-таблицы или глобальная
+    // функция простого скрипта). Не функция — пустая.
+    sol::protected_function MethodOf(const Instance& inst, const std::string& name) const;
 
     // Скомпилированный файл. Кэш по пути + времени правки: один и тот же
     // скрипт на сотне объектов компилируется ОДИН раз, а не сто.

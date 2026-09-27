@@ -1,5 +1,11 @@
 #include "sage/scripting/ScriptingSystem.h"
 
+#include <algorithm>
+#include <vector>
+
+#include "sage/input/InputSystem.h"
+#include "sage/input/Keys.h"
+
 #include "sage/core/Log.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/scene/Components.h"
@@ -20,12 +26,26 @@ void ScriptingSystem::Bind(ScriptServices services) {
 
 int ScriptingSystem::AttachScene(Scene& scene) {
     int attached = 0;
+    // Порядок — порядок объектов в сцене (номер объекта), а не хранилища entt:
+    // тот идёт задом наперёд и меняется от удалений, и «кто первым получил
+    // Start» зависел бы от истории правок сцены.
+    std::vector<GameObject> owners;
     auto view = scene.Registry().view<ScriptComponent>();
-    for (auto e : view) {
-        const ScriptComponent& sc = view.get<ScriptComponent>(e);
-        if (sc.Path.empty()) continue;
-        if (m_runtime.Attach(GameObject(&scene.Registry(), e), sc.Path, sc.Fields)) ++attached;
+    for (auto e : view)
+        if (!view.get<ScriptComponent>(e).Path.empty()) owners.emplace_back(&scene.Registry(), e);
+    auto order = [](const GameObject& o) -> long long {
+        const IdComponent* id = o.Registry()->try_get<IdComponent>(o.Entity());
+        return id ? (long long)id->Id : (1ll << 40) + (long long)entt::to_integral(o.Entity());
+    };
+    std::sort(owners.begin(), owners.end(),
+              [&order](const GameObject& a, const GameObject& b) { return order(a) < order(b); });
+    // Start всех — после подключения всех (см. ScriptRuntime::BeginBatch).
+    m_runtime.BeginBatch();
+    for (GameObject& o : owners) {
+        const ScriptComponent& sc = o.Registry()->get<ScriptComponent>(o.Entity());
+        if (m_runtime.Attach(o, sc.Path, sc.Fields)) ++attached;
     }
+    m_runtime.EndBatch();
     InstallLinks(scene);
     return attached;
 }
@@ -174,6 +194,7 @@ void ScriptingSystem::Update(float dt) {
     // Время берётся НЕмасштабированное — отладочная метка, живущая «две
     // секунды», не должна растягиваться замедлением игры.
     m_debug.Tick(dt);
+    DispatchKeys();
     m_runtime.Dispatch(Hook::Update, scaled);
     m_runtime.Tick(scaled);
     // Тесты — ПОСЛЕ Update всех скриптов: тест, ждавший кадр, видит мир уже
@@ -195,6 +216,21 @@ void ScriptingSystem::Update(float dt) {
             }
             m_testResults.push_back(std::move(r));
         }
+    }
+}
+
+void ScriptingSystem::DispatchKeys() {
+    // OnKeyDown / OnKeyUp — ДО Update: скрипт, отреагировавший на нажатие,
+    // видит его последствия в Update этого же кадра, как и при опросе
+    // Input.is_key_pressed. Клавиши перебираются, только если кто-то слушает:
+    // сотня клавиш на каждый кадр ради скриптов без OnKeyDown — лишняя работа.
+    const sage::input::InputSystem* input = m_runtime.Services().Input;
+    if (!input || !m_runtime.AnyHas(Hook::OnKeyDown, Hook::OnKeyUp)) return;
+    const sage::input::Keyboard& keys = input->State().Keys();
+    for (int k = 1; k < (int)sage::input::Key::Count; ++k) {
+        const auto key = (sage::input::Key)k;
+        if (keys.Pressed(key)) m_runtime.DispatchNamedAll(Hook::OnKeyDown, sage::input::KeyName(key));
+        if (keys.Released(key)) m_runtime.DispatchNamedAll(Hook::OnKeyUp, sage::input::KeyName(key));
     }
 }
 

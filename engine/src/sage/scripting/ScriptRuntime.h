@@ -83,6 +83,11 @@ public:
     // Привязывает скрипт к объекту. false — файла нет или он не собрался;
     // причина уже в консоли. Существующий скрипт этого объекта снимается.
     bool Attach(GameObject owner, const std::string& path, const sage::vars::Table& fields);
+    // Подключение пачкой (запуск сцены): Attach внутри Begin/EndBatch не зовёт
+    // Start сразу, а EndBatch зовёт Start всех в порядке подключения — когда
+    // каждый скрипт уже может найти любого соседа.
+    void BeginBatch();
+    void EndBatch();
 
     // Снимает скрипт объекта (зовёт OnDisable/OnDestroy).
     void Detach(entt::entity entity);
@@ -99,6 +104,11 @@ public:
     // Зовёт хук у скрипта одной сущности (столкновения, зоны).
     void DispatchTo(entt::entity entity, Hook hook, GameObject other);
     void DispatchNamed(entt::entity entity, Hook hook, const std::string& name);
+    // Всем скриптам, у которых хук есть: OnKeyDown("Space") и подобное —
+    // событие мира, а не одного объекта.
+    void DispatchNamedAll(Hook hook, const std::string& name);
+    // Есть ли хоть у одного живого скрипта один из двух хуков.
+    bool AnyHas(Hook a, Hook b) const;
 
     // Вызов метода чужого скрипта: `enemy:Call("TakeDamage", 20)` из Lua и то
     // же самое из C++ — одна дорога.
@@ -138,6 +148,7 @@ public:
     void SetErrorSink(ErrorSink sink) { m_sink = std::move(sink); }
 
 private:
+    void StartScript(LiveScript& live);
     // Один вызов хука с разбором ошибки и гашением повторов.
     void Guard(LiveScript& s, bool ok, ScriptError& err, Hook hook);
     void Report(const ScriptError& err);
@@ -163,6 +174,9 @@ private:
     void Reindex();
 
     ErrorSink m_sink;
+    // Запуск сцены целиком: Start всех — после того, как подключены все.
+    int m_batch = 0;
+    std::vector<entt::entity> m_pendingStart;
     // Сколько падений одного скрипта терпим, прежде чем замолчать.
     static constexpr int kMaxErrors = 3;
 };

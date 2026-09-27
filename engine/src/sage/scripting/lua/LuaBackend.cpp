@@ -25,22 +25,66 @@ const char* LegacyHookName(Hook hook) {
 }
 
 // Фабрика экземпляра: self ищет сначала в классе скрипта, затем в общей базе
-// (GetComponent, GetCharacterController, …). Метатаблица, а не копирование
-// методов в каждый экземпляр: копия базы на сотне объектов — это сотня
-// одинаковых таблиц в памяти и сотня мест, где можно разойтись.
+// (GetComponent, get_component, …), затем — компонент по имени типа
+// (`self.Audio`). Метатаблица, а не копирование методов в каждый экземпляр:
+// копия базы на сотне объектов — это сотня одинаковых таблиц в памяти и сотня
+// мест, где можно разойтись.
+//
+// Таблица self создаётся ДО выполнения файла (простой скрипт видит `self` уже
+// на верхнем уровне), а метатаблица ставится после, когда ясен вид скрипта.
+// У простого скрипта «класс» — его окружение: из него self отдаёт только
+// ЗНАЧЕНИЯ (`other:GetScript().speed`), а не функции — иначе `self:Destroy()`
+// позвал бы хук Destroy() вместо уничтожения объекта.
 constexpr const char* kInstanceFactory = R"LUA(
-return function(class, base)
-    local self = {}
+return function(self, class, base, simple)
     setmetatable(self, {
-        __index = function(_, key)
-            local v = class[key]
+        __index = function(t, key)
+            local v
+            if simple then
+                v = rawget(class, key)
+                if v ~= nil and type(v) ~= "function" then return v end
+            else
+                v = class[key]
+                if v ~= nil then return v end
+            end
+            v = base[key]
             if v ~= nil then return v end
-            return base[key]
+            local go = rawget(t, "gameObject")
+            if go == nil then return nil end
+            if key == "name" then return go.name end
+            -- self.Audio, self.Camera: компонент по имени типа; нет — nil.
+            if type(key) == "string" and key:match("^%u") then return go:GetComponent(key) end
+            return nil
         end
     })
     return self
 end
 )LUA";
+
+// Старый стиль глобальных функций: OnStart/OnUpdate или первый параметр
+// `entity` у On-функции. Простой (нынешний) — всё остальное без `return`.
+bool IsLegacySource(const std::string& text) {
+    static const char* kOnly[] = {"OnStart", "OnUpdate", "OnFixedUpdate", "OnLateUpdate"};
+    for (const char* name : kOnly) {
+        const std::string decl = std::string("function ") + name;
+        size_t at = text.find(decl);
+        while (at != std::string::npos) {
+            const size_t end = at + decl.size();
+            if (end < text.size() && !std::isalnum((unsigned char)text[end]) && text[end] != '_') return true;
+            at = text.find(decl, end);
+        }
+    }
+    size_t at = text.find("function On");
+    while (at != std::string::npos) {
+        const size_t paren = text.find('(', at);
+        if (paren == std::string::npos) break;
+        size_t j = paren + 1;
+        while (j < text.size() && (text[j] == ' ' || text[j] == '\t')) ++j;
+        if (text.compare(j, 6, "entity") == 0) return true;
+        at = text.find("function On", paren);
+    }
+    return false;
+}
 
 } // namespace
 
@@ -100,11 +144,20 @@ Backend::Backend(const LuaBackendConfig& config) : m_interop(config.Interop) {
             function base:once(name, fn) return self.gameObject:once(name, fn) end
             function base:emit(name, data) return self.gameObject:emit(name, data) end
             function base:signal(name) return self.gameObject:signal(name) end
+            -- Те же действия нынешними именами: self:get_component("Audio").
+            function base:get_component(name) return self.gameObject:GetComponent(name) end
+            function base:add_component(name, opts) return self.gameObject:AddComponent(name, opts) end
+            function base:has_component(name) return self.gameObject:HasComponent(name) end
+            function base:remove_component(name) return self.gameObject:RemoveComponent(name) end
+            function base:destroy() return self.gameObject:Destroy() end
+            function base:call(method, ...) return self.gameObject:Call(method, ...) end
         end
     )LUA").get<sol::protected_function>()(m_base);
 }
 
 Backend::~Backend() {
+    // Обработчик шины, переживший бэкенд, видит пустой жетон и молчит.
+    *m_tapToken = nullptr;
     // Мост снимается ПЕРВЫМ: прежний движок переживает бэкенд (он владеет
     // состоянием Lua), и оставленный указатель на мёртвый бэкенд сработал бы
     // на первом же сообщении — уже после того, как всё сделано.
@@ -209,7 +262,14 @@ bool Backend::Compile(const ScriptSource& source, sol::protected_function& out, 
 void Backend::FillHooks(Instance& inst) {
     for (size_t i = 0; i < (size_t)Hook::Count; ++i) {
         const Hook hook = (Hook)i;
-        sol::object fn = inst.Class[HookName(hook)];
+        // Простой скрипт — только СВОИ функции (raw): окружение смотрит в
+        // глобальные, и глобальная функция движка с именем хука стала бы его
+        // хуком молча.
+        sol::object fn = inst.Simple ? inst.Class.raw_get<sol::object>(HookName(hook))
+                                     : sol::object(inst.Class[HookName(hook)]);
+        // Destroy() — нынешнее имя OnDestroy у простого скрипта.
+        if (inst.Simple && hook == Hook::OnDestroy && fn.get_type() != sol::type::function)
+            fn = inst.Class.raw_get<sol::object>("Destroy");
         if (!fn.valid() && inst.Legacy) {
             if (const char* legacy = LegacyHookName(hook)) fn = inst.Class[legacy];
         }
@@ -240,6 +300,13 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
     // не имеет права быть видна другому, иначе два врага на уровне делят одно
     // состояние и ведут себя как один.
     sol::environment env(*m_lua, sol::create, m_lua->globals());
+    // self — ДО выполнения файла: простой скрипт вправе обратиться к своему
+    // объекту уже на верхнем уровне (`local body = self.transform`).
+    sol::table selfTable = m_lua->create_table();
+    selfTable["gameObject"] = Wrap(owner);
+    selfTable["game_object"] = selfTable["gameObject"];
+    selfTable["transform"] = owner.Valid() ? sol::make_object(*m_lua, TransformRef(owner)) : sol::object(sol::nil);
+    env["self"] = selfTable;
     sol::set_environment(env, chunk);
     sol::protected_function_result result = chunk();
     if (!result.valid()) {
@@ -255,20 +322,19 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
     if (returned.get_type() == sol::type::table) {
         inst.Class = returned.as<sol::table>();
     } else {
-        // Старый стиль: файл ничего не вернул, а объявил глобальные функции.
+        // Файл ничего не вернул, а объявил глобальные функции. Старый стиль
+        // (OnUpdate(entity, dt)) или нынешний простой (Update(dt)) — по тексту.
         inst.Class = env;
-        inst.Legacy = true;
+        if (IsLegacySource(source.Text)) inst.Legacy = true;
+        else inst.Simple = true;
     }
 
-    sol::protected_function_result made = m_makeInstance(inst.Class, m_base);
+    sol::protected_function_result made = m_makeInstance(selfTable, inst.Class, m_base, inst.Simple);
     if (!made.valid()) {
         Explain(made, source.Path, err);
         return abandon();
     }
-    inst.Self = made.get<sol::table>();
-    inst.Self["gameObject"] = Wrap(owner);
-    inst.Self["transform"] = TransformRef(owner);
-    inst.Self["name"] = owner.Valid() ? owner.Name() : std::string();
+    inst.Self = selfTable;
     if (m_interop)
         inst.LegacyEntity = sol::make_object(*m_lua, owner); // прежний usertype GameObject
     else
@@ -281,6 +347,7 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
     FillHooks(inst);
 
     m_instances[id] = std::move(inst);
+    EnsureEventTap();
     if (owner.Valid()) m_byEntity[(uint32_t)entt::to_integral(owner.Entity())] = id;
     return id;
 }
@@ -320,9 +387,14 @@ bool Backend::CallHook(InstanceId id, Hook hook, sol::object arg, ScriptError& e
     if (!inst) return true;
     sol::protected_function& fn = inst->Hooks[(size_t)hook];
     if (!fn.valid()) return true;
-    sol::object self = inst->Legacy ? inst->LegacyEntity : sol::object(inst->Self);
     CurrentScope scope(*this, id);
-    sol::protected_function_result result = fn(self, arg);
+    // Простой скрипт получает только то, что относится к событию: Update(dt),
+    // OnCollisionEnter(other). Start()/Destroy() — вовсе без аргументов.
+    const bool bare = hook == Hook::Start || hook == Hook::OnEnable || hook == Hook::OnDisable ||
+                      hook == Hook::OnDestroy;
+    sol::protected_function_result result = inst->Simple
+        ? (bare ? fn() : fn(arg))
+        : CallAs(*inst, fn, arg);
     if (result.valid()) return true;
     Explain(result, std::string(), err);
     return false;
@@ -344,16 +416,16 @@ bool Backend::Invoke(InstanceId id, const std::string& method,
                      const std::vector<sage::vars::Value>& args, ScriptError& err) {
     Instance* inst = Get(id);
     if (!inst) return false;
-    sol::object fn = inst->Self[method];
-    if (fn.get_type() != sol::type::function) return false;
+    sol::protected_function call = MethodOf(*inst, method);
+    if (!call.valid()) return false;
 
     std::vector<sol::object> converted;
     converted.reserve(args.size());
     for (const sage::vars::Value& v : args) converted.push_back(ToLua(v));
 
-    sol::protected_function call = fn.as<sol::protected_function>();
     CurrentScope scope(*this, id);
-    sol::protected_function_result result = call(inst->Self, sol::as_args(converted));
+    sol::protected_function_result result =
+        inst->Simple ? call(sol::as_args(converted)) : call(inst->Self, sol::as_args(converted));
     if (result.valid()) return true;
     Explain(result, std::string(), err);
     return false;
@@ -362,24 +434,28 @@ bool Backend::Invoke(InstanceId id, const std::string& method,
 bool Backend::HasMethod(InstanceId id, const std::string& method) const {
     const Instance* inst = Get(id);
     if (!inst || method.empty()) return false;
-    sol::object fn = inst->Self[method];
-    return fn.get_type() == sol::type::function;
+    return MethodOf(*inst, method).valid();
+}
+
+sol::protected_function Backend::MethodOf(const Instance& inst, const std::string& name) const {
+    // Простой скрипт: своя глобальная функция (raw — не функции движка из
+    // общих глобальных). Остальные: метод через self (класс, затем база).
+    sol::object fn = inst.Simple ? inst.Class.raw_get<sol::object>(name) : sol::object(inst.Self[name]);
+    if (fn.get_type() != sol::type::function) return sol::protected_function();
+    return fn.as<sol::protected_function>();
 }
 
 bool Backend::InvokeEvent(InstanceId id, const std::string& method,
                           const sage::events::Event& event, ScriptError& err) {
     Instance* inst = Get(id);
     if (!inst) return false;
-    sol::object fn = inst->Self[method];
-    if (fn.get_type() != sol::type::function) return false;
-    sol::protected_function call = fn.as<sol::protected_function>();
+    sol::protected_function call = MethodOf(*inst, method);
+    if (!call.valid()) return false;
     CurrentScope scope(*this, id);
     // Метод, позванный связью, получает ТО ЖЕ, что функция, подписанная
-    // кодом: (self, event, data).
-    // Скрипт старого стиля (глобальные функции файла) получает первым
-    // аргументом СВОЮ сущность — как и все его хуки.
-    sol::object self = inst->Legacy ? inst->LegacyEntity : sol::object(inst->Self);
-    sol::protected_function_result result = call(self, EventTable(event), EventData(event));
+    // кодом: (self, event, data). Скрипт старого стиля — СВОЮ сущность
+    // первым аргументом, простой — без self: Open(event, data).
+    sol::protected_function_result result = CallAs(*inst, call, EventTable(event), EventData(event));
     if (result.valid()) return true;
     Explain(result, std::string(), err);
     return false;
@@ -394,10 +470,14 @@ void Backend::ApplyFields(InstanceId id, const sage::vars::Table& fields) {
         // обязан быть аниматором, а не объектом, из которого его каждый раз
         // достают. Пустая ссылка и объект без такого компонента — честный nil,
         // и скрипт проверяет его обычным `if self.Animator then`.
+        // Поля простого скрипта — его глобальные переменные (`speed`), а не
+        // ключи self: значение из инспектора ложится ПОВЕРХ присваивания в
+        // файле (файл уже выполнен, Start ещё нет).
+        sol::table target = inst->Simple ? sol::table(inst->Class) : inst->Self;
         if (var.Data.Type() == sage::vars::Kind::Entity && !var.Hint.empty())
-            inst->Self[var.Name] = ComponentOf(var.Data.AsEntity(), var.Hint);
+            target[var.Name] = ComponentOf(var.Data.AsEntity(), var.Hint);
         else
-            inst->Self[var.Name] = ToLua(var.Data);
+            target[var.Name] = ToLua(var.Data);
     }
 }
 
@@ -429,14 +509,14 @@ sol::object Backend::InvokeOn(GameObject object, const std::string& method,
     if (it == m_byEntity.end()) return sol::nil;
     Instance* inst = Get(it->second);
     if (!inst) return sol::nil;
-    sol::object fn = inst->Self[method];
-    if (fn.get_type() != sol::type::function) return sol::nil;
-    sol::protected_function call = fn.as<sol::protected_function>();
+    sol::protected_function call = MethodOf(*inst, method);
+    if (!call.valid()) return sol::nil;
     CurrentScope scope(*this, it->second);
-    sol::protected_function_result result = call(inst->Self, args);
+    sol::protected_function_result result = inst->Simple ? call(args) : call(inst->Self, args);
     if (!result.valid()) {
-        sol::error e = result;
-        LOG_ERROR("Lua") << method << ": " << e.what();
+        ScriptError err;
+        Explain(result, std::string(), err);
+        LOG_ERROR("Lua") << err.Format() << " (" << object.Name() << ":call(\"" << method << "\"))";
         return sol::nil;
     }
     return result.get<sol::object>();
@@ -452,20 +532,24 @@ void Backend::DeliverMessage(int targetId, const std::string& name, sol::object 
         sol::object Self;
         GameObject Owner;
         InstanceId Id;
+        bool Simple = false;
     };
     std::vector<Target> targets;
     for (auto& [id, inst] : m_instances) {
         if (!inst.Owner.Valid()) continue;
         if (targetId >= 0 && inst.Owner.Id() != targetId) continue;
-        sol::object fn = inst.Class["OnMessage"];
-        if (fn.get_type() != sol::type::function) continue;
-        targets.push_back({fn.as<sol::protected_function>(),
-                           inst.Legacy ? inst.LegacyEntity : sol::object(inst.Self), inst.Owner, id});
+        sol::protected_function fn = inst.Simple ? MethodOf(inst, "OnMessage")
+                                                 : (inst.Class["OnMessage"].get_type() == sol::type::function
+                                                        ? inst.Class["OnMessage"].get<sol::protected_function>()
+                                                        : sol::protected_function());
+        if (!fn.valid()) continue;
+        targets.push_back({fn, inst.Legacy ? inst.LegacyEntity : sol::object(inst.Self), inst.Owner, id,
+                           inst.Simple});
     }
     for (Target& t : targets) {
         if (!t.Owner.Valid()) continue; // мог быть уничтожен предыдущим обработчиком
         CurrentScope scope(*this, t.Id);
-        sol::protected_function_result result = t.Fn(t.Self, name, data);
+        sol::protected_function_result result = t.Simple ? t.Fn(name, data) : t.Fn(t.Self, name, data);
         if (result.valid()) continue;
         sol::error err = result;
         LOG_ERROR("Lua") << "OnMessage (" << (t.Owner.Valid() ? t.Owner.Name() : std::string("?"))
@@ -475,17 +559,87 @@ void Backend::DeliverMessage(int targetId, const std::string& name, sol::object 
 
 void Backend::DeliverQuit() {
     for (auto& [id, inst] : m_instances) {
-        sol::object fn = inst.Class["OnQuit"];
-        if (fn.get_type() != sol::type::function) continue;
-        sol::protected_function call = fn.as<sol::protected_function>();
+        sol::protected_function call = inst.Simple ? MethodOf(inst, "OnQuit")
+                                                   : (inst.Class["OnQuit"].get_type() == sol::type::function
+                                                          ? inst.Class["OnQuit"].get<sol::protected_function>()
+                                                          : sol::protected_function());
+        if (!call.valid()) continue;
         CurrentScope scope(*this, id);
-        sol::protected_function_result result =
-            call(inst.Legacy ? inst.LegacyEntity : sol::object(inst.Self));
+        sol::protected_function_result result = CallAs(inst, call);
         if (result.valid()) continue;
         // Ошибка в OnQuit НЕ мешает выходу: игра уже закрывается, и падать на
         // прощание — худшее, что можно сделать.
         sol::error err = result;
         LOG_ERROR("Lua") << "OnQuit: " << err.what();
+    }
+}
+
+// --- On<Событие>: глобальные события без подписки ----------------------------
+//
+// Events.emit("door_open") — и у каждого простого скрипта, где есть функция
+// OnDoorOpen(data), она зовётся сама. То же правило, что у OnCollisionEnter:
+// «функция с именем события — и есть обработчик». Имя: On + слова события с
+// большой буквы («door_open», «door-open», «doorOpen» → OnDoorOpen).
+namespace {
+std::string EventFunctionName(const std::string& event) {
+    std::string out = "On";
+    bool upper = true;
+    for (char c : event) {
+        if (c == '_' || c == '-' || c == ' ' || c == '.' || c == ':') { upper = true; continue; }
+        if (!std::isalnum((unsigned char)c)) continue;
+        out += upper ? (char)std::toupper((unsigned char)c) : c;
+        upper = false;
+    }
+    return out.size() > 2 ? out : std::string();
+}
+} // namespace
+
+void Backend::Tick(float dt) {
+    (void)dt;
+    EnsureEventTap();
+}
+
+void Backend::EnsureEventTap() {
+    Scene* scene = ScenePtr();
+    if (scene == m_tapScene) return;
+    // Шина прежней сцены могла уже умереть вместе с ней — снимать с неё нечего
+    // и нельзя. Её обработчик всё равно безопасен: он смотрит в жетон.
+    m_tapScene = scene;
+    m_tapId = 0;
+    if (!scene) return;
+    std::weak_ptr<Backend*> token = m_tapToken;
+    // Подписка остаётся на шине до конца сцены (снять её с шины, которой уже
+    // может не быть, нельзя), поэтому обработчик сам проверяет, что бэкенд жив
+    // и что эта сцена — всё ещё его.
+    m_tapId = scene->Events.OnAny([token, scene](const sage::events::Event& e) {
+        std::shared_ptr<Backend*> alive = token.lock();
+        if (!alive || !*alive || (*alive)->m_tapScene != scene) return;
+        if (e.Object != sage::events::Bus::kGlobal) return;
+        (*alive)->CallEventFunctions(e);
+    });
+}
+
+void Backend::CallEventFunctions(const sage::events::Event& event) {
+    const std::string fnName = EventFunctionName(event.Name);
+    if (fnName.empty()) return;
+    // Цели — до вызовов: обработчик вправе создавать и удалять объекты.
+    std::vector<std::pair<InstanceId, sol::protected_function>> targets;
+    for (auto& [id, inst] : m_instances) {
+        if (!inst.Simple || !inst.Owner.Valid()) continue;
+        sol::protected_function fn = MethodOf(inst, fnName);
+        if (fn.valid()) targets.emplace_back(id, fn);
+    }
+    if (targets.empty()) return;
+    sol::object data = EventData(event);
+    for (auto& [id, fn] : targets) {
+        const Instance* inst = Get(id);
+        if (!inst || !inst->Owner.Valid()) continue;
+        CurrentScope scope(*this, id);
+        sol::protected_function_result r = fn(data, EventTable(event));
+        if (r.valid()) continue;
+        ScriptError err;
+        Explain(r, std::string(), err);
+        LOG_ERROR("Lua") << err.Format() << " (" << fnName << " у '" << inst->Owner.Name() << "')";
     }
 }
 

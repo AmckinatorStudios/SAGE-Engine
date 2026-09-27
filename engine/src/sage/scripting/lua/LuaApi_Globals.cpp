@@ -405,6 +405,109 @@ void RegisterGlobals(Backend& backend) {
     // Имя `audio` могло быть занято прежним разделом — не трогаем его: старые
     // игры зовут audio.PlaySound, и отобрать имя значит сломать их молча.
     lua["Audio"] = audio;
+
+    // =======================================================================
+    //  НЫНЕШНИЕ ИМЕНА: Input.is_key_down, Scene.find, Debug.log, Audio.play
+    // =======================================================================
+    //
+    // Одно правило на весь API вместо второго набора функций: у каждого
+    // раздела к `IsKeyDown` есть `is_key_down` — та же самая функция. Список
+    // не пишется руками, а выводится из имён: новая функция раздела сразу
+    // доступна обоими написаниями, и разойтись им негде.
+    sol::protected_function snake = lua.script(R"LUA(
+        return function(t)
+            local add = {}
+            for k, v in pairs(t) do
+                if type(k) == "string" and type(v) == "function" and k:match("^%u") then
+                    local s = k:gsub("(%l)(%u)", "%1_%2"):gsub("(%u)(%u%l)", "%1_%2"):gsub("(%d)(%u)", "%1_%2"):lower()
+                    if rawget(t, s) == nil then add[s] = v end
+                end
+            end
+            for k, v in pairs(add) do rawset(t, k, v) end
+        end
+    )LUA");
+
+    // --- Дополнения, которых не было под прежними именами ---------------------
+    // Кнопки мыши по-человечески: "left", "right", "middle" или 0/1/2.
+    auto mouseButton = [](const sol::variadic_args& va, size_t i, bool& ok) {
+        ok = false;
+        if (i >= va.size()) return sage::input::MouseButton::Left;
+        sol::object o = va[i];
+        if (o.is<int>()) {
+            const int n = o.as<int>();
+            ok = n >= 0 && n <= 2;
+            return (sage::input::MouseButton)(ok ? n : 0);
+        }
+        std::string name = o.is<std::string>() ? o.as<std::string>() : std::string();
+        for (char& c : name) c = (char)std::toupper((unsigned char)c);
+        if (name.rfind("MOUSE_", 0) != 0) name = "MOUSE_" + name;
+        return sage::input::ParseMouseButton(name, &ok);
+    };
+    input.set_function("IsKeyReleased", [self](sol::variadic_args va) {
+        const sage::input::Key key = sage::input::ParseKey(Str(va, Skip(va)));
+        if (key == sage::input::Key::Unknown) return false;
+        return NeedInput(*self, "is_key_released").State().Keys().Released(key);
+    });
+    input.set_function("is_mouse_down", [self, mouseButton](sol::variadic_args va) {
+        bool ok = false;
+        const auto b = mouseButton(va, Skip(va), ok);
+        return ok && NeedInput(*self, "is_mouse_down").State().MouseState().Down(b);
+    });
+    input.set_function("is_mouse_pressed", [self, mouseButton](sol::variadic_args va) {
+        bool ok = false;
+        const auto b = mouseButton(va, Skip(va), ok);
+        return ok && NeedInput(*self, "is_mouse_pressed").State().MouseState().Pressed(b);
+    });
+    input.set_function("is_mouse_released", [self, mouseButton](sol::variadic_args va) {
+        bool ok = false;
+        const auto b = mouseButton(va, Skip(va), ok);
+        return ok && NeedInput(*self, "is_mouse_released").State().MouseState().Released(b);
+    });
+    input.set_function("mouse_position", [self](sol::variadic_args) {
+        return NeedInput(*self, "mouse_position").MousePosition();
+    });
+    input.set_function("mouse_delta", [self](sol::variadic_args) {
+        return NeedInput(*self, "mouse_delta").MouseDelta();
+    });
+    input.set_function("mouse_wheel", [self](sol::variadic_args) {
+        return NeedInput(*self, "mouse_wheel").Wheel();
+    });
+
+    // Все объекты с таким именем ИЛИ меткой: «Enemy» — это и имя, и метка, и
+    // человек не обязан помнить, чем из двух он пометил врагов.
+    scene.set_function("find_all", [self](sol::variadic_args va) {
+        Scene* s = SceneOrThrow(*self, "Scene.find_all");
+        const std::string key = Str(va, Skip(va));
+        sol::table list = self->Lua().create_table();
+        int i = 1;
+        entt::registry& reg = s->Registry();
+        for (auto e : reg.view<NameComponent>()) {
+            const TagComponent* tag = reg.try_get<TagComponent>(e);
+            if (reg.get<NameComponent>(e).Name == key || (tag && tag->Tag == key))
+                list[i++] = self->Wrap(GameObject(&reg, e));
+        }
+        return list;
+    });
+
+    // Время — функциями: Time.delta() читается одинаково в любом месте файла.
+    // Прежние поля (Time.deltaTime) остаются полями.
+    auto clockOf = [self]() -> ScriptClock& {
+        ScriptClock* c = self->Clock();
+        if (!c) throw std::runtime_error("Time: часы не привязаны");
+        return *c;
+    };
+    time.set_function("delta", [clockOf](sol::variadic_args) { return clockOf().Delta; });
+    time.set_function("fixed_delta", [clockOf](sol::variadic_args) { return clockOf().FixedDelta; });
+    time.set_function("total", [clockOf](sol::variadic_args) { return clockOf().Time; });
+    time.set_function("scale", [clockOf](sol::variadic_args) { return clockOf().Scale; });
+    time.set_function("set_scale", [clockOf](sol::variadic_args va) {
+        const float k = Num(va, Skip(va), 1.0f);
+        clockOf().Scale = k < 0.0f ? 0.0f : k;
+    });
+
+    debug.set_function("warn", [](sol::variadic_args va) { LOG_WARN("Lua") << Str(va, Skip(va)); });
+
+    for (sol::table t : {input, scene, physics, audio, debug}) snake(t);
 }
 
 // --- Перевод значений движка в Lua и обратно ---------------------------------

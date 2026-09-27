@@ -2,6 +2,182 @@
 
 Lua-API, публичные переменные, события, ход игры, управление.
 
+## Первый скрипт: просто набор функций
+
+Главный вид скрипта в SAGE — обычный файл с функциями. Ни классов, ни
+регистрации, ни `return`:
+
+```lua
+speed = 5.0          -- поле инспектора: float
+jump_force = 8.0
+
+function Start()
+    Debug.log("Player started")
+end
+
+function Update(dt)
+    local direction = Vector3.zero()
+    if Input.is_key_down("W") then direction.z = direction.z + 1 end
+    if Input.is_key_down("S") then direction.z = direction.z - 1 end
+
+    self.transform.position = self.transform.position + direction * speed * dt
+
+    if Input.is_key_pressed("Space") then Debug.log("Jump") end
+end
+
+function OnCollisionEnter(other)
+    Debug.log("Hit " .. other.name)
+end
+```
+
+Файл ставится на объект компонентом **Script** в инспекторе (или кодом:
+`obj:add_component("Script", {path = "assets/scripts/Door.lua"})`). Учебные
+скрипты — `editor/assets/scripts/examples/` (в проекте —
+`assets/scripts/examples/`): `Player.lua`, `RotatingCube.lua`, `Door.lua`,
+`Trigger.lua`, `Events.lua`, по одной возможности API в каждом.
+
+**Кто что делает.** C++ даёт возможности движка (объекты, transform, ввод,
+физика, звук, события) и сам зовёт функции скрипта. Что объект ЗНАЧИТ —
+игрок, дверь, враг — решает только Lua; игровых механик в движке нет.
+
+### Функции, которые движок зовёт сам
+
+| функция | когда |
+|---|---|
+| `Start()` | один раз, когда объект ожил — после того, как подключены ВСЕ скрипты сцены |
+| `Update(dt)` | каждый кадр, `dt` — секунд с прошлого |
+| `FixedUpdate(dt)` | постоянным шагом (физика) |
+| `LateUpdate(dt)` | после всех `Update` кадра |
+| `Destroy()` | перед удалением объекта или скрипта (`OnDestroy` — то же) |
+| `OnCollisionEnter(other)` / `OnCollisionExit(other)` | удар / конец касания |
+| `OnTriggerEnter(other)` / `OnTriggerExit(other)` | вход / выход из зоны-сенсора |
+| `OnKeyDown(key)` / `OnKeyUp(key)` | клавиша нажата / отпущена в этом кадре |
+| `On<Событие>(data)` | кто-то сделал `Events.emit("<событие>", data)` |
+
+Нет функции — нет вызова и нет ошибки. Каждая функция получает только своё:
+`Update(dt)`, а не `(self, dt)`.
+
+**Start — после подключения всех.** При запуске сцены движок сначала
+подключает скрипты всех объектов (в порядке объектов сцены), и только потом
+зовёт `Start` каждого. Раньше `Start` звался сразу при подключении, а сцена
+подключалась в порядке хранилища — задом наперёд, и `Start`, обратившийся к
+соседу (`Scene.find("Player"):call(...)`), не находил у него скрипта. Объект,
+созданный посреди игры, получает `Start` сразу.
+
+### Свой объект: `self`
+
+`self` — объект, на котором стоит скрипт, виден во всём файле, даже на верхнем
+уровне:
+
+```lua
+self.name                        -- имя объекта
+self.transform.position          -- Vector3, rotation (градусы), scale
+self.game_object                 -- сам объект (то, что отдаёт Scene.find)
+self:get_component("Audio")      -- компонент по имени, nil — нет такого
+self.Audio                       -- то же короче: имя типа с большой буквы
+self:add_component("RigidBody", {type = "dynamic"})
+self:destroy()
+```
+
+**`transform.position.z = 5` пишет в объект.** Вектор из `transform` —
+окно в объект: запись одной оси меняет только эту ось объекта. При этом он
+остаётся обычным `Vector3` — его принимает любая функция и с ним работает
+арифметика (`TransformVector` — наследник `glm::vec3` в sol2). Результат
+арифметики — обычный вектор, ни к чему не привязанный; своя копия —
+`p:copy()`.
+
+### Публичные переменные: присваивание наверху файла
+
+```lua
+speed = 5.0                         -- float (есть точка)
+count = 10                          -- integer
+enabled = true                      -- bool
+target_name = "Player"              -- string
+offset = Vector3.new(0, 1, 0)       -- Vector3
+health = field.number(100, 0, 200)  -- с границами для ползунка
+target = field.entity()             -- ссылка на объект сцены
+```
+
+Каждое присваивание ЛИТЕРАЛА на верхнем уровне файла (не `local`, не внутри
+функции) — поле секции Script в инспекторе, тип — по значению. Не поля:
+`local x`, `_timer = 0` (подчёркивание — служебное), `sum = a + b`
+(выражение — показать нечем). Разбор — текстом, а не запуском файла:
+инспектор показывает поля, пока игра не запущена, и чужой файл ради этого не
+выполняется. Значение из инспектора ложится ПОВЕРХ присваивания в файле ещё
+до `Start`.
+
+### События
+
+```lua
+Events.emit("door_open", data)            -- послать
+Events.on("door_open", function(event, data) … end)   -- подписаться
+function OnDoorOpen(data) … end           -- или просто объявить функцию
+```
+
+`Events.emit("door_open")` зовёт `OnDoorOpen(data)` у всех простых скриптов —
+то же правило, что у `OnCollisionEnter`: функция с именем события и есть
+обработчик. Имя: `On` + слова события с большой буквы (`door_open`,
+`door-open`, `doorOpen` → `OnDoorOpen`). Подписка `Events.on` нужна, когда
+обработчик — не функция файла (замыкание, временная реакция).
+
+Функцию другого скрипта зовут напрямую: `Scene.find("Door"):call("Open")`,
+`player:call("TakeDamage", 10)` — возвращает то, что вернула функция.
+
+### API: разделы
+
+| раздел | примеры |
+|---|---|
+| `Input` | `is_key_down("W")`, `is_key_pressed("Space")`, `is_key_released("E")`, `is_mouse_down("left")`, `mouse_position()`, `mouse_delta()`, `is_action_down("Jump")` |
+| `Scene` | `find("Player")`, `find_all("Enemy")` (по имени или метке), `create("Box")`, `instantiate(prefab, pos)`, `load("level2")` |
+| `Events` | `emit`, `on`, `once`, `off`, `count` |
+| `Time` | `delta()`, `fixed_delta()`, `total()`, `set_scale(0.5)` |
+| `Debug` | `log`, `warn`, `error`, `draw_line`, `draw_sphere` |
+| `Audio` | `play("explosion")`, `play_at(clip, pos)` |
+| `Physics` | `raycast(origin, dir, dist)`, `overlap_sphere(center, r)` |
+| `Vector3` | `new(x, y, z)`, `zero()`, `one()`, `up()`, `forward()`, `distance`, `dot`, `cross`, `lerp`; у вектора `length()`, `normalized()`, `copy()` |
+
+**Одно правило имён.** У каждой функции раздела есть имя через подчёркивание:
+`Input.IsKeyDown` — это `Input.is_key_down`, `obj:GetComponent` —
+`obj:get_component`. Список не пишется руками: он выводится из имён при
+регистрации раздела, и новая функция сразу доступна обоими написаниями.
+`Vector3.zero()` — функция, возвращающая НОВЫЙ вектор: общий «ноль»,
+поправленный одним скриптом на месте, стал бы (0, 0, 1) у всех.
+
+### Ошибки
+
+Ошибка в скрипте не останавливает ни движок, ни соседей: она ловится, уходит
+в консоль с файлом и строкой (`Player.lua:12: attempt to call a nil value
+(global 'this_does_not_exist')`), и консоль открывает файл на этой строке.
+Хук, падающий каждый кадр, замолкает после третьего сообщения.
+
+### Правка на ходу и подсказки IDE
+
+Сохранённый `.lua` перечитывается во время Play (см. ниже); значения из
+инспектора при этом сохраняются. Для автодополнения проект содержит
+`.sage/api/sage.lua` (описание API в аннотациях LuaLS) и `.luarc.json`,
+указывающий на него: `self.transform.` в VS Code / любом редакторе с Lua
+Language Server показывает `position`, `rotation`, `scale` и методы.
+
+### Прежние виды скрипта
+
+Работают как раньше и определяются по тексту:
+
+- **скрипт-таблица** (`local Player = {} … return Player`, методы
+  `Player:Update(dt)`, поля в `Player.public`) — ниже, «Скрипт объекта»;
+- **старые глобальные функции** (`OnStart(entity)`, `OnUpdate(entity, dt)` —
+  первым аргументом сущность) — «Скриптинг (Lua)».
+
+Файл без `return`, где нет `OnStart/OnUpdate` и первого параметра `entity`, —
+простой.
+
+### Проверка
+
+`tests/test_lua_simple.cpp` — модульные проверки в той же связке, что у
+редактора; `editor/assets/tests/lua/simple.test.lua` — учебные скрипты на
+объектах в настоящем Play редактора (Play → Run Lua Tests, самопроверка
+`LUA_TESTS`): игрок идёт по W, куб крутится, дверь открывается событием, вызовом
+и триггером с настоящей физикой.
+
 ## Правка на ходу: скрипт перечитывается без перезапуска
 
 Скрипты правят во ВНЕШНЕМ редакторе (своего в SAGE нет — см.
@@ -31,6 +207,7 @@ Lua-API, публичные переменные, события, ход игр�
 
 ## Содержание
 
+- [Первый скрипт: просто набор функций](#первый-скрипт-просто-набор-функций)
 - [Правка на ходу: скрипт перечитывается без перезапуска](#правка-на-ходу-скрипт-перечитывается-без-перезапуска)
 - [Архитектура: язык — сменная деталь, а не часть ядра](#архитектура-язык--сменная-деталь-а-не-часть-ядра)
 - [Скрипт объекта: таблица, которую файл возвращает](#скрипт-объекта-таблица-которую-файл-возвращает)

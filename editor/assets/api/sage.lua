@@ -27,11 +27,33 @@ Vec2 = {}
 ---@return Vec2
 function Vec2.new(x, y) end
 
+---Вектор. Складывается, вычитается, умножается на число с любой стороны.
 ---@class Vec3
 ---@field x number
 ---@field y number
 ---@field z number
+---@operator add(Vec3): Vec3
+---@operator sub(Vec3): Vec3
+---@operator mul(number): Vec3
+---@operator div(number): Vec3
+---@operator unm: Vec3
 Vec3 = {}
+---@return number
+function Vec3:length() end
+---@return Vec3
+function Vec3:normalized() end
+---@param other Vec3
+---@return number
+function Vec3:distance(other) end
+---@param other Vec3
+---@return number
+function Vec3:dot(other) end
+---@param other Vec3
+---@return Vec3
+function Vec3:cross(other) end
+---Свой вектор-копия: менять его, не задевая исходный.
+---@return Vec3
+function Vec3:copy() end
 ---@param x number
 ---@param y number
 ---@param z number
@@ -192,6 +214,7 @@ function field.vector3() end
 ---@return any
 function field.asset(kind) end
 
+---Место объекта в мире. `position.z = 5` пишет прямо в объект.
 ---@class SageTransform
 ---@field position Vec3
 ---@field rotation Vec3 углы Эйлера, ГРАДУСЫ
@@ -218,6 +241,23 @@ function SageTransform:LookAt(target) end
 ---Позиция с учётом цепочки родителей.
 ---@return Vec3
 function SageTransform:WorldPosition() end
+-- Нынешние имена тех же методов.
+function SageTransform:set_position(x, y, z) end
+function SageTransform:set_rotation(x, y, z) end
+function SageTransform:set_scale(x, y, z) end
+---@param delta Vec3
+function SageTransform:translate(delta) end
+function SageTransform:rotate(x, y, z) end
+---@return Vec3
+function SageTransform:forward() end
+---@return Vec3
+function SageTransform:right() end
+---@return Vec3
+function SageTransform:up() end
+---@param target Vec3
+function SageTransform:look_at(target) end
+---@return Vec3
+function SageTransform:world_position() end
 
 ---Объект сцены. Встроенные сигналы — свойства (`button.clicked`,
 ---`crate.collision`): их объявляют компоненты объекта. Интерфейс — часть
@@ -306,6 +346,28 @@ function SageObject:emit(name, data) end
 ---@param name string
 ---@return integer
 function SageObject:off(name) end
+-- Нынешние имена тех же методов.
+---Позвать функцию скрипта объекта: `player:call("TakeDamage", 10)`.
+---@param method string
+---@return any
+function SageObject:call(method, ...) end
+---@param name string
+---@return any|nil
+function SageObject:get_component(name) end
+---@param name string
+---@param options? table
+---@return any
+function SageObject:add_component(name, options) end
+---@param name string
+---@return boolean
+function SageObject:has_component(name) end
+function SageObject:destroy() end
+---@return table|nil
+function SageObject:get_script() end
+---@param parent SageObject|nil
+function SageObject:set_parent(parent) end
+---@return boolean
+function SageObject:is_valid() end
 ---@param text string
 function SageObject:set_text(text) end
 function SageObject:show() end
@@ -518,6 +580,19 @@ function Input:IsCursorCaptured() end
 ---@field unscaledTime number
 ---@field timeScale number
 Time = {}
+---Секунд с прошлого кадра (с учётом масштаба времени).
+---@return number
+function Time.delta() end
+---Шаг FixedUpdate.
+---@return number
+function Time.fixed_delta() end
+---Секунд с начала игры.
+---@return number
+function Time.total() end
+---@return number
+function Time.scale() end
+---@param scale number 0 — пауза, 0.5 — замедление
+function Time.set_scale(scale) end
 
 ---Отладочный вывод и отладочная графика.
 Debug = {}
@@ -724,9 +799,142 @@ function Audio.PlayAt(clip, position, volume) end
 ---@param volume number
 function Audio.SetMasterVolume(volume) end
 
+-- --- Нынешние имена разделов ---------------------------------------------
+-- У каждой функции раздела есть имя через подчёркивание: Input.IsKeyDown —
+-- это Input.is_key_down. Ниже — те, которыми пишут простые скрипты.
+
+---@param key string "W", "Space", "E", "Left", "F1"…
+---@return boolean держится прямо сейчас
+function Input.is_key_down(key) end
+---@param key string
+---@return boolean нажата ИМЕННО в этом кадре
+function Input.is_key_pressed(key) end
+---@param key string
+---@return boolean отпущена ИМЕННО в этом кадре
+function Input.is_key_released(key) end
+---@param button string|integer "left", "right", "middle" или 0/1/2
+---@return boolean
+function Input.is_mouse_down(button) end
+---@param button string|integer
+---@return boolean
+function Input.is_mouse_pressed(button) end
+---@param button string|integer
+---@return boolean
+function Input.is_mouse_released(button) end
+---@return Vec2
+function Input.mouse_position() end
+---@return Vec2
+function Input.mouse_delta() end
+---@return number
+function Input.mouse_wheel() end
+---@param action string
+---@return boolean
+function Input.is_action_down(action) end
+---@param action string
+---@return boolean
+function Input.is_action_pressed(action) end
+---@param action string
+---@return number
+function Input.get_axis(action) end
+
+---@param message any
+function Debug.log(message) end
+---@param message any
+function Debug.warn(message) end
+---@param message any
+function Debug.error(message) end
+
+---Объект по имени; нет — nil.
+---@param name string
+---@return SageObject|nil
+function Scene.find(name) end
+---Все объекты с таким именем ИЛИ меткой.
+---@param name_or_tag string
+---@return SageObject[]
+function Scene.find_all(name_or_tag) end
+---@param name string
+---@return SageObject
+function Scene.create(name) end
+---@param prefab string
+---@param position? Vec3
+---@return SageObject|nil
+function Scene.instantiate(prefab, position) end
+---@param target SageObject|integer
+function Scene.destroy(target) end
+---@param name string
+function Scene.load(name) end
+
+---@param origin Vec3
+---@param direction Vec3
+---@param max_distance? number
+---@return table|nil {object, point, normal, distance}
+function Physics.raycast(origin, direction, max_distance) end
+---@param center Vec3
+---@param radius number
+---@return SageObject[]
+function Physics.overlap_sphere(center, radius) end
+
+---@param clip string
+---@param volume? number
+function Audio.play(clip, volume) end
+---@param clip string
+---@param position Vec3
+---@param volume? number
+function Audio.play_at(clip, position, volume) end
+
 ---Vector3 — не второй тип, а конструктор и статические функции поверх Vec3.
 ---@overload fun(x: number, y: number, z: number): Vec3
 Vector3 = {}
+---@param x number
+---@param y number
+---@param z number
+---@return Vec3
+function Vector3.new(x, y, z) end
+---Новый вектор (0, 0, 0) — свой, его можно менять.
+---@return Vec3
+function Vector3.zero() end
+---@return Vec3
+function Vector3.one() end
+---@return Vec3
+function Vector3.up() end
+---@return Vec3
+function Vector3.down() end
+---@return Vec3
+function Vector3.right() end
+---@return Vec3
+function Vector3.left() end
+---@return Vec3
+function Vector3.forward() end
+---@return Vec3
+function Vector3.back() end
+---@param a Vec3
+---@param b Vec3
+---@return number
+function Vector3.distance(a, b) end
+---@param a Vec3
+---@param b Vec3
+---@return number
+function Vector3.dot(a, b) end
+---@param a Vec3
+---@param b Vec3
+---@return Vec3
+function Vector3.cross(a, b) end
+---@param v Vec3
+---@return Vec3
+function Vector3.normalize(v) end
+---@param v Vec3
+---@return number
+function Vector3.length(v) end
+---@param a Vec3
+---@param b Vec3
+---@param t number
+---@return Vec3
+function Vector3.lerp(a, b, t) end
+---@param from Vec3
+---@param to Vec3
+---@param max_delta number
+---@return Vec3
+function Vector3.move_towards(from, to, max_delta) end
 ---@param a Vec3
 ---@param b Vec3
 ---@return number
@@ -763,13 +971,70 @@ Color = {}
 ---@overload fun(): Vec4
 Quaternion = {}
 
--- --- Хуки скрипта нового стиля --------------------------------------------
--- Объявляются в таблице, которую файл ВОЗВРАЩАЕТ. Ни один не обязателен:
--- зовётся только то, что скрипт объявил.
+-- --- ПРОСТОЙ СКРИПТ: набор функций ---------------------------------------
+--
+--     speed = 5.0                      -- поле инспектора (тип — по значению)
+--     function Start() Debug.log(self.name) end
+--     function Update(dt) self.transform.position.z = self.transform.position.z + speed * dt end
+--     function OnCollisionEnter(other) Debug.log("Hit " .. other.name) end
+--
+-- Ни одна функция не обязательна: движок зовёт только объявленные. Своё
+-- событие: Events.emit("door_open") зовёт OnDoorOpen(data) у всех скриптов.
+
+---Свой объект скрипта.
 ---@class Script
----@field gameObject SageObject
+---@field name string имя объекта
 ---@field transform SageTransform
+---@field game_object SageObject
+---@field gameObject SageObject
 local Script = {}
+---@param name string "Transform", "Audio", "Camera", "Animation", "CharacterController", "Script"
+---@return any|nil
+function Script:get_component(name) end
+---@param name string
+---@param options? table
+---@return any
+function Script:add_component(name, options) end
+---@param name string
+---@return boolean
+function Script:has_component(name) end
+---Удалить свой объект.
+function Script:destroy() end
+
+---Сам объект, на котором стоит скрипт.
+---@type Script
+self = nil
+
+---Один раз, когда объект ожил (после того как подключены все скрипты сцены).
+function Start() end
+---Каждый кадр.
+---@param dt number секунд с прошлого кадра
+function Update(dt) end
+---С постоянным шагом — для физики.
+---@param dt number
+function FixedUpdate(dt) end
+---После всех Update кадра — камера за игроком.
+---@param dt number
+function LateUpdate(dt) end
+---Перед удалением объекта или скрипта.
+function Destroy() end
+---@param other SageObject
+function OnCollisionEnter(other) end
+---@param other SageObject
+function OnCollisionExit(other) end
+---@param other SageObject
+function OnTriggerEnter(other) end
+---@param other SageObject|nil
+function OnTriggerExit(other) end
+---Клавиша нажата в этом кадре.
+---@param key string "W", "Space", …
+function OnKeyDown(key) end
+---Клавиша отпущена в этом кадре.
+---@param key string
+function OnKeyUp(key) end
+
+-- --- Хуки скрипта-таблицы -------------------------------------------------
+-- Объявляются в таблице, которую файл ВОЗВРАЩАЕТ (`return Player`).
 function Script:Start() end
 ---@param dt number
 function Script:Update(dt) end

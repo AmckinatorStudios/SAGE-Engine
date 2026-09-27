@@ -52,11 +52,29 @@ void ScriptEngine::RegisterMathTypes() {
         sol::meta_function::addition, [](const glm::vec3& a, const glm::vec3& b) { return a + b; },
         sol::meta_function::subtraction, [](const glm::vec3& a, const glm::vec3& b) { return a - b; },
         sol::meta_function::unary_minus, [](const glm::vec3& a) { return -a; },
-        sol::meta_function::multiplication, [](const glm::vec3& a, float s) { return a * s; },
+        // Число с любой стороны: `direction * speed` и `speed * direction` —
+        // одно и то же в голове у пишущего, и падать на втором незачем.
+        sol::meta_function::multiplication,
+        sol::overload([](const glm::vec3& a, float s) { return a * s; },
+                      [](float s, const glm::vec3& a) { return a * s; },
+                      [](const glm::vec3& a, const glm::vec3& b) { return a * b; }),
         sol::meta_function::division, [](const glm::vec3& a, float s) { return a / s; },
         sol::meta_function::to_string, [](const glm::vec3& a) {
             return "(" + std::to_string(a.x) + ", " + std::to_string(a.y) + ", " + std::to_string(a.z) + ")";
         },
+        // Копия: `Vector3.zero()` и `v:copy()` — свой вектор, который можно
+        // менять, не задевая чужой.
+        sol::meta_function::call, [](const glm::vec3& a) { return a; },
+        "copy", [](const glm::vec3& a) { return a; },
+        // Нынешние имена (snake_case) — те же функции, что ниже.
+        "length", [](const glm::vec3& a) { return glm::length(a); },
+        "normalized", [](const glm::vec3& a) {
+            float len = glm::length(a);
+            return len > 0.0001f ? a / len : a;
+        },
+        "distance", [](const glm::vec3& a, const glm::vec3& b) { return glm::length(b - a); },
+        "dot", [](const glm::vec3& a, const glm::vec3& b) { return glm::dot(a, b); },
+        "cross", [](const glm::vec3& a, const glm::vec3& b) { return glm::cross(a, b); },
         "Length", [](const glm::vec3& a) { return glm::length(a); },
         "Normalized", [](const glm::vec3& a) {
             float len = glm::length(a);
