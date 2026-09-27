@@ -830,6 +830,7 @@ static void SaveTweens(json& j, const sage::anim::TweenComponent& tc) {
         if (c.Speed != 1.0f) cj["speed"] = c.Speed;
         if (c.Reverse) cj["reverse"] = true;
         if (c.PlayOnStart) cj["playOnStart"] = true;
+        if (!c.Then.empty()) cj["then"] = c.Then;
         json tracks = json::array();
         for (const sage::anim::TweenTrack& t : c.Tracks) {
             json tj;
@@ -862,6 +863,7 @@ static sage::anim::TweenComponent ParseTweens(const json& list) {
         c.Speed = cj.value("speed", 1.0f);
         c.Reverse = cj.value("reverse", false);
         c.PlayOnStart = cj.value("playOnStart", false);
+        c.Then = cj.value("then", std::string());
         if (cj.contains("tracks") && cj["tracks"].is_array()) {
             for (const json& tj : cj["tracks"]) {
                 sage::anim::TweenTrack t;

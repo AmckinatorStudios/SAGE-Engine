@@ -164,9 +164,12 @@ public:
         m_animation.RequestFocus();
         m_animation.OpenClip(*this, clipPath);
     }
-    void OpenTween(int objectId, int tweenIndex) override {
+    void OpenTween(int objectId, int tweenIndex, TweenOpen what) override {
         m_panels[EditorPanel::Tween] = true;
-        m_tween.Open(objectId, tweenIndex);
+        m_tween.Open(objectId, tweenIndex,
+                     what == TweenOpen::Play          ? TweenPanel::Action::Play
+                     : what == TweenOpen::AddProperty ? TweenPanel::Action::AddProperty
+                                                      : TweenPanel::Action::None);
     }
     void OpenNineSliceEditor(const NineSliceTarget& target) override {
         m_showNineSlice = true;

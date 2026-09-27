@@ -74,6 +74,7 @@
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPart.h"
 #include "sage/ui/UIPresets.h"
+#include "panels/TweenPanel.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/events/Events.h"
 #include "sage/scene/Signals.h"
@@ -502,7 +503,8 @@ void EditorLayer::CheckTweenFrame() {
         LOG_ERROR("Editor") << "TWEEN: FAIL — " << why;
         m_tween.Reset(*this);
         m_panels[EditorPanel::Tween] = false;
-        if (GameObject o = m_scene->FindByName("TweenProbe"); o.Valid()) m_scene->RemoveObject(o.Id());
+        for (const char* n : {"TweenProbe", "TweenQuick"})
+            if (GameObject o = m_scene->FindByName(n); o.Valid()) m_scene->RemoveObject(o.Id());
         m_tweenChecked = true;
     };
     switch (m_tweenSelfTestStep) {
@@ -527,7 +529,7 @@ void EditorLayer::CheckTweenFrame() {
             clip.AppendAfter(grow);
             reg.emplace<sage::anim::TweenComponent>(o.Entity()).Tweens.push_back(clip);
             m_selection.SetPrimary(o.Id());
-            OpenTween(o.Id(), 0);
+            OpenTween(o.Id(), 0, TweenOpen::Edit);
             m_tweenSelfTestErrors = m_console.ErrorCount();
             m_tweenSelfTestStep = 1;
             return;
@@ -554,6 +556,61 @@ void EditorLayer::CheckTweenFrame() {
                 return fail("Reset не вернул объект на место");
             if (m_console.ErrorCount() != m_tweenSelfTestErrors) return fail("окно Tween дало ошибки в консоли");
             m_scene->RemoveObject(o.Id());
+
+            // ТРИ ДЕЙСТВИЯ: объект → «+ Tween» → свойство — и твин уже рабочий
+            // (начало — как есть, конец — то же, 0.5 с, плавное замедление);
+            // человеку остаётся конечное значение.
+            namespace anim = sage::anim;
+            auto offers = [&](GameObject g, const char* id, const char* section) {
+                for (const tweenui::Choice& c : tweenui::Choices(reg, g.Entity()))
+                    if (c.Property->Id == id) return std::string(c.Section) == section;
+                return false;
+            };
+            auto quick = [&](GameObject g, const char* id) -> anim::TweenTrack* {
+                m_selection.SetPrimary(g.Id());
+                OpenTween(g.Id(), 0, TweenOpen::Edit);   // меню свойств здесь — AddProperty напрямую
+                if (!m_tween.AddProperty(*this, id)) return nullptr;
+                auto* qc = reg.try_get<anim::TweenComponent>(g.Entity());
+                if (!qc || qc->Tweens.size() != 1 || qc->Tweens[0].Tracks.size() != 1) return nullptr;
+                anim::TweenTrack& t = qc->Tweens[0].Tracks[0];
+                const bool defaults = t.Property == id && t.FromCurrent && std::fabs(t.Duration - 0.5f) < 1e-6f &&
+                                      t.Curve == anim::Ease::Make(anim::EaseShape::Quad, anim::EaseMode::Out);
+                return defaults ? &t : nullptr;
+            };
+            // Кнопка интерфейса: «Непрозрачность» в разделе интерфейса, → 0.
+            GameObject button = CreateUIEntity("Button");
+            if (!button.Valid() || !offers(button, "element.opacity", "Interface"))
+                return fail("у кнопки в меню нет «Непрозрачности» в разделе интерфейса");
+            for (const tweenui::Choice& c : tweenui::Choices(reg, button.Entity()))
+                if (c.Property->Id.find("sprite") != std::string::npos)
+                    return fail("в меню свойств техническое поле " + c.Property->Id);
+            anim::TweenTrack* fade = quick(button, "element.opacity");
+            if (!fade || std::fabs(fade->To.x - 1.0f) > 1e-6f) return fail("быстрый твин кнопки создан не с умолчаниями");
+            fade->To.x = 0.0f;
+            m_scene->RemoveObject(button.Id());
+            // Позиция объекта — в разделе Transform.
+            GameObject cube = m_scene->CreateObject("TweenQuick");
+            if (!offers(cube, "object.position", "Transform")) return fail("у объекта в меню нет «Позиции» в Transform");
+            // Куб: масштаб 1 → 1.2 за 0.3 с.
+            anim::TweenTrack* pop = quick(cube, "object.scale");
+            if (!pop || std::fabs(pop->To.x - 1.0f) > 1e-6f) return fail("быстрый твин куба создан не с умолчаниями");
+            pop->To = glm::vec4(1.2f, 1.2f, 1.2f, 0.0f);
+            pop->Duration = 0.3f;
+            m_tween.Play(*this);
+            if (!m_tween.Previewing()) return fail("быстрый твин не играет");
+            m_tweenSelfTestAt = glfwGetTime();
+            m_tweenSelfTestStep = 7;
+            return;
+        }
+        case 7: {
+            if (glfwGetTime() - m_tweenSelfTestAt < 0.8) return;
+            GameObject cube = m_scene->FindByName("TweenQuick");
+            const Transform& t = reg.get<Transform>(cube.Entity());
+            if (std::fabs(t.Scale.x - 1.2f) > 1e-3f) return fail("быстрый твин не довёл масштаб: " + std::to_string(t.Scale.x));
+            m_tween.Reset(*this);
+            if (std::fabs(t.Scale.x - 1.0f) > 1e-5f) return fail("Reset не вернул масштаб куба");
+            if (m_console.ErrorCount() != m_tweenSelfTestErrors) return fail("окно Tween дало ошибки в консоли");
+            m_scene->RemoveObject(cube.Id());
             m_panels[EditorPanel::Tween] = false;
 
             // Твин из редактора для прогона Lua-тестов: сам стартует в Play
@@ -571,7 +628,8 @@ void EditorLayer::CheckTweenFrame() {
             reg.emplace<sage::anim::TweenComponent>(e.Entity()).Tweens.push_back(pulse);
 
             LOG_INFO("Editor") << "TWEEN: OK — окно Tween: Play общим проигрывателем сцены довёл объект "
-                                  "(сдвиг, затем масштаб по своей кривой), Reset вернул его; ошибок нет";
+                                  "(сдвиг, затем масштаб по своей кривой), Reset вернул его; в три действия "
+                                  "созданы твины масштаба куба и непрозрачности кнопки; ошибок нет";
             m_tweenChecked = true;
             return;
         }

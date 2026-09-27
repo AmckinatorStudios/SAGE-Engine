@@ -115,6 +115,11 @@ struct TweenClip {
     float Speed = 1.0f;           // 2 — вдвое быстрее
     bool Reverse = false;         // играть с конца к началу
     bool PlayOnStart = false;     // сам при запуске игры
+    // После завершения — запустить твин ТОГО ЖЕ объекта с этим именем
+    // («Появиться» → «Покачиваться»). Пусто — ничего. Цепочку ведёт
+    // UpdateTweens: проигрыватель не знает, чей это твин, а только кого он
+    // двигает (Target может быть и чужим объектом).
+    std::string Then;
 
     // Длина одного прохода — конец последней дорожки.
     float Length() const;
@@ -145,7 +150,9 @@ public:
     // Запустить твин на сущности. Свойства разбираются здесь один раз;
     // дорожка со свойством, которого у сущности нет, пропускается молча
     // (твин пришёл из другой сборки игры — не повод ломать остальные).
-    TweenHandle Play(entt::registry& reg, entt::entity target, const TweenClip& clip);
+    // owner — чей это твин (у кого искать Then); null — цепочки нет.
+    TweenHandle Play(entt::registry& reg, entt::entity target, const TweenClip& clip,
+                     entt::entity owner = entt::null);
 
     // Шаг времени всех твинов. Завершившиеся (Once) снимаются, их
     // OnComplete зовутся ПОСЛЕ прохода: колбэк вправе запустить новый твин.
@@ -175,6 +182,18 @@ public:
     TweenClip* Clip(TweenHandle h);
     void SetOnComplete(TweenHandle h, std::function<void()> fn);
 
+    // Твины, доигравшие в последнем Update и просящие продолжения (Then):
+    // владелец и имя следующего. Забирает — и очищает — UpdateTweens.
+    struct Chain {
+        entt::entity Owner = entt::null;
+        std::string Name;
+    };
+    std::vector<Chain> TakeChains() {
+        std::vector<Chain> out;
+        out.swap(m_chains);
+        return out;
+    }
+
 private:
     struct Channel {
         PropertyAccess Access;
@@ -186,6 +205,7 @@ private:
         TweenHandle Id = kNoTween;
         entt::registry* Reg = nullptr;
         entt::entity Target = entt::null;
+        entt::entity Owner = entt::null;
         TweenClip Clip;
         std::vector<Channel> Channels;
         float Time = 0.0f;       // включая задержку
@@ -202,6 +222,7 @@ private:
 
     std::vector<Active> m_active;
     std::vector<std::function<void()>> m_callbacks;   // переиспользуется между кадрами
+    std::vector<Chain> m_chains;
     TweenHandle m_next = 1;
 };
 
