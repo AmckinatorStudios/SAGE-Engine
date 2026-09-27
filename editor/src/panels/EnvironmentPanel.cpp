@@ -2,6 +2,7 @@
 #include "EnvironmentPanel.h"
 #include "EditorTheme.h"
 
+#include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
@@ -98,8 +99,27 @@ void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvir
 
 // --- Особые виджеты, отмеченные в схеме как Custom ------------------------------
 void EnvironmentPanel::DrawCustom(EditorHost& host, const std::string& key, LightingEnvironment& e) {
+    m_drawn.push_back(key);
     ImGui::PushID(key.c_str());
-    if (key == "sky.preset") {
+    if (key == "sky.faces.map") {
+        DrawFaceMap(host, e);
+    } else if (key == "sky.folder.convert") {
+        // Прежний тип неба: перевести одним щелчком, а не собирать шесть
+        // граней заново руками. Не вышло — небо остаётся как было.
+        if (ImGui::Button(T("Convert to six files"), ImVec2(-FLT_MIN, 0.0f))) {
+            if (env::CubemapFolderToFaces(e.Skybox, host.CurrentProject().Dir())) {
+                host.PushUndoSnapshot();
+                m_convertFailed = false;
+            } else {
+                m_convertFailed = true;
+            }
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Each face px/nx/py/ny/pz/nz of the folder goes into its own slot"));
+        if (m_convertFailed)
+            ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Danger), "%s",
+                               T("Not all six faces px/nx/py/ny/pz/nz are in the folder"));
+    } else if (key == "sky.preset") {
         // Готовый вид — отправная точка: собрать узнаваемое небо из трёх
         // десятков полей с нуля — полчаса подбора цветов.
         ImGui::SetNextItemWidth(-FLT_MIN);
@@ -147,6 +167,76 @@ void EnvironmentPanel::DrawCustom(EditorHost& host, const std::string& key, Ligh
         }
     }
     ImGui::PopID();
+}
+
+// --- Развёртка куба: где какая грань ------------------------------------------
+//
+// Подписи «+X», «-Z» ничего не говорят тому, кто держит шесть картинок с
+// названиями «лес», «горы», «закат». Крест развёртки показывает, как грани
+// сложатся в небо: перед в середине, по бокам лево и право, за правым — зад,
+// сверху и снизу — верх и низ. Каждая клетка — отдельная кнопка: подсказка
+// «что видно в эту сторону» и выбор файла щелчком.
+void EnvironmentPanel::DrawFaceMap(EditorHost& host, LightingEnvironment& e) {
+    struct Cell { int Face, Col, Row; const char* Name; const char* Key; };
+    // Грани по порядку FacePaths: +X, -X, +Y, -Y, +Z, -Z.
+    static const Cell kCells[6] = {
+        {0, 2, 1, "Right face", "sky.face.px"}, {1, 0, 1, "Left face", "sky.face.nx"},
+        {2, 1, 0, "Top face", "sky.face.py"},   {3, 1, 2, "Bottom face", "sky.face.ny"},
+        {4, 1, 1, "Front face", "sky.face.pz"}, {5, 3, 1, "Back face", "sky.face.nz"},
+    };
+    // Клетка — прямоугольник по ширине панели, а не квадрат: в квадрате на
+    // узкой панели не помещалось даже слово «Перед».
+    const float gap = 2.0f;
+    const float cellW = std::floor(std::min((ImGui::GetContentRegionAvail().x - gap * 3.0f) / 4.0f,
+                                            ImGui::GetFrameHeight() * 4.0f));
+    const float cellH = std::floor(ImGui::GetFrameHeight() * 1.4f);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImU32 filled = ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::AccentMuted));
+    const ImU32 empty = ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::Input));
+    const ImU32 line = ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::LineStrong));
+    const ImU32 textOn = ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::Text));
+    const ImU32 textOff = ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::TextDim));
+    for (const Cell& c : kCells) {
+        const ImVec2 a(origin.x + c.Col * (cellW + gap), origin.y + c.Row * (cellH + gap));
+        const ImVec2 b(a.x + cellW, a.y + cellH);
+        ImGui::SetCursorScreenPos(a);
+        ImGui::PushID(c.Face);
+        const bool clicked = ImGui::InvisibleButton("##face", ImVec2(cellW, cellH));
+        const bool hovered = ImGui::IsItemHovered();
+        ImGui::PopID();
+        const std::string& path = e.Skybox.FacePaths[c.Face];
+        dl->AddRectFilled(a, b, path.empty() ? empty : filled, 3.0f);
+        dl->AddRect(a, b, hovered ? ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::Accent)) : line,
+                    3.0f);
+        const char* name = T(c.Name);   // ключи «… face» — в ru.json
+        const ImVec2 ts = ImGui::CalcTextSize(name);
+        dl->PushClipRect(a, b, true);
+        dl->AddText(ImVec2(a.x + std::floor(std::max(cellW - ts.x, 0.0f) * 0.5f),
+                           a.y + std::floor((cellH - ts.y) * 0.5f)),
+                    path.empty() ? textOff : textOn, name);
+        dl->PopClipRect();
+        if (const env::Prop* p = env::FindProp(c.Key)) {
+            if (hovered) {
+                const std::string tip = std::string(T(p->Label)) + "\n" + T(p->Hint) + "\n\n" +
+                                        (path.empty() ? std::string(T("Not set — click to pick a picture"))
+                                                      : path);
+                ImGui::SetTooltip("%s", tip.c_str());
+            }
+            if (clicked) {
+                FileBrowser::Config cfg;
+                cfg.Title = T(p->Label);
+                cfg.Filters = {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".hdr"};
+                cfg.FilterLabel = T("Images");
+                cfg.StartDir = cfg.Root = assetslot::ProjectRoot(host);
+                m_browser.Open(cfg);
+                m_pickKey = p->Key;
+            }
+        }
+    }
+    // Курсор — под крестом: следующие строки не должны лечь поверх клеток.
+    ImGui::SetCursorScreenPos(ImVec2(origin.x, origin.y + 3.0f * cellH + 2.0f * gap));
+    ImGui::Dummy(ImVec2(4.0f * cellW + 3.0f * gap, 0.0f));
 }
 
 // --- Одно свойство — одна строка таблицы ----------------------------------------
@@ -346,6 +436,9 @@ void EnvironmentPanel::DrawSystem(EditorHost& host, const env::System& s, Lighti
                 ImGui::SetNextItemWidth(-FLT_MIN);
                 if (ImGui::BeginCombo("##type", cur ? T(cur->Label) : "?")) {
                     for (const env::Variant& v : s.Variants) {
+                        // Прежний тип не предлагается: на нём остаются только
+                        // сцены, которые им уже пользуются (см. Variant::Legacy).
+                        if (v.Legacy) continue;
                         // Пути и цвета других типов НЕ стираются при переключении:
                         // вернуться к своему набору неба надо уметь без повторного выбора.
                         if (ImGui::Selectable(T(v.Label), &v == cur) && &v != cur) {
@@ -394,14 +487,9 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
         m_pickKey.clear();
     }
 
-    // ГДЕ ЧТО НАСТРАИВАЕТСЯ — одной строкой: здесь мир сцены, источники света —
-    // объекты в иерархии, качество и цена кадра — Game Settings.
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::TextWrapped("%s", T("The look of the scene's world: sky, air, ambient light. Saved with "
-                               "the scene. Light SOURCES are objects — see the hierarchy. Quality "
-                               "and cost are in Game Settings."));
-    ImGui::PopStyleColor();
-
+    // Без вводной строки сверху: три строки текста над каждым открытием окна
+    // отнимали место у самих настроек, а читают их один раз. Что делает
+    // система — в подсказке её заголовка.
     for (const env::System& s : env::Systems()) DrawSystem(host, s, e);
 
     // ВЫПЕЧКА GI ПОКА УБРАНА ИЗ РЕДАКТОРА (см. EnvironmentPanel.h).

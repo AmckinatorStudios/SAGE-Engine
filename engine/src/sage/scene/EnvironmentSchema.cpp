@@ -1,6 +1,9 @@
 #include "sage/scene/EnvironmentSchema.h"
 
 #include <algorithm>
+#include <array>
+
+#include "sage/core/Paths.h"
 
 namespace sage::env {
 
@@ -233,14 +236,20 @@ System MakeSky() {
         image.Groups = {G("main", "", props)};
     }
 
-    // --- Папка с кубической картой ----------------------------------------
+    // --- Папка с кубической картой — прежний тип -------------------------
+    // Из выбора убран: он требовал угадать имена px/nx/py/ny/pz/nz, а «шесть
+    // файлов» делает то же самое без правил об именах и с подписью у каждой
+    // грани. Сцена, где он уже стоит, открывается с тем же небом и кнопкой
+    // перевода на шесть файлов (sky.folder.convert).
     Variant cube;
     cube.Value = (int)Src::Cubemap;
     cube.Key = "cubemap";
-    cube.Label = "Cubemap folder";
-    cube.Hint = "A folder with six faces px/nx/py/ny/pz/nz";
+    cube.Label = "Cubemap folder (old)";
+    cube.Hint = "An older sky type: a folder with faces px/nx/py/ny/pz/nz. Convert it to six files";
+    cube.Legacy = true;
     {
-        std::vector<Prop> props = {P(PropKind::Folder, "sky.folder", "Folder", FIELD(Skybox.CubemapDir))};
+        std::vector<Prop> props = {P(PropKind::Folder, "sky.folder", "Folder", FIELD(Skybox.CubemapDir)),
+                                   Custom("sky.folder.convert")};
         for (Prop& p : TexturedCommon()) props.push_back(p);
         cube.Groups = {G("main", "", props)};
     }
@@ -252,14 +261,24 @@ System MakeSky() {
     faces.Label = "Six separate files";
     faces.Hint = "Six pictures picked one by one, any file names";
     faces.Groups = {
+        // Развёртка куба сверху (sky.faces.map) показывает, какая картинка
+        // где окажется, — подписи «+X» сами этого не объясняют. У каждой
+        // грани — своя подсказка: что видно, если смотреть в её сторону.
         G("faces", "Faces",
           {
-              P(PropKind::Texture, "sky.face.px", "Right (+X)", FIELD(Skybox.FacePaths[0])),
-              P(PropKind::Texture, "sky.face.nx", "Left (-X)", FIELD(Skybox.FacePaths[1])),
-              P(PropKind::Texture, "sky.face.py", "Up (+Y)", FIELD(Skybox.FacePaths[2])),
-              P(PropKind::Texture, "sky.face.ny", "Down (-Y)", FIELD(Skybox.FacePaths[3])),
-              P(PropKind::Texture, "sky.face.pz", "Front (+Z)", FIELD(Skybox.FacePaths[4])),
-              P(PropKind::Texture, "sky.face.nz", "Back (-Z)", FIELD(Skybox.FacePaths[5])),
+              Custom("sky.faces.map"),
+              P(PropKind::Texture, "sky.face.px", "Right (+X)", FIELD(Skybox.FacePaths[0]),
+                "Right side: what is seen looking along +X"),
+              P(PropKind::Texture, "sky.face.nx", "Left (-X)", FIELD(Skybox.FacePaths[1]),
+                "Left side: what is seen looking along -X"),
+              P(PropKind::Texture, "sky.face.py", "Up (+Y)", FIELD(Skybox.FacePaths[2]),
+                "Top: the sky straight overhead"),
+              P(PropKind::Texture, "sky.face.ny", "Down (-Y)", FIELD(Skybox.FacePaths[3]),
+                "Bottom: what is under the feet, below the horizon"),
+              P(PropKind::Texture, "sky.face.pz", "Front (+Z)", FIELD(Skybox.FacePaths[4]),
+                "Front: what is seen looking along +Z"),
+              P(PropKind::Texture, "sky.face.nz", "Back (-Z)", FIELD(Skybox.FacePaths[5]),
+                "Back: what is seen looking along -Z, behind the front"),
           }),
         G("main", "", TexturedCommon()),
     };
@@ -447,6 +466,34 @@ bool IsPropActive(const std::string& key, const Env& env) {
         if (scan(s.Common)) return true;
     }
     return false;
+}
+
+bool CubemapFolderToFaces(SkyboxSettings& sky, const std::filesystem::path& base) {
+    namespace fs = std::filesystem;
+    if (sky.CubemapDir.empty()) return false;
+    // Имена и порядок — те же, что читает Skybox::LoadFromDirectory: +X, -X,
+    // +Y, -Y, +Z, -Z. Грань найдена не вся — небо не трогаем: половина граней
+    // из папки и половина пустых слотов хуже, чем прежнее рабочее небо.
+    static const char* kNames[6] = {"px", "nx", "py", "ny", "pz", "nz"};
+    static const char* kExt[] = {".png", ".jpg", ".jpeg", ".tga", ".bmp"};
+    const fs::path dir = sage::PathFromUtf8(sky.CubemapDir);
+    const fs::path full = dir.is_absolute() ? dir : base / dir;
+    std::array<std::string, 6> found;
+    for (int i = 0; i < 6; ++i) {
+        for (const char* ext : kExt) {
+            std::error_code ec;
+            const std::string file = std::string(kNames[i]) + ext;
+            if (fs::is_regular_file(full / sage::PathFromUtf8(file), ec)) {
+                found[i] = sage::PathToUtf8(dir / sage::PathFromUtf8(file));
+                std::replace(found[i].begin(), found[i].end(), '\\', '/');
+                break;
+            }
+        }
+        if (found[i].empty()) return false;
+    }
+    for (int i = 0; i < 6; ++i) sky.FacePaths[i] = found[i];
+    sky.Kind = Src::Faces;
+    return true;
 }
 
 const char* SkySourceKey(SkyboxSettings::Source source) {

@@ -85,14 +85,18 @@ struct Metrics {
     float Radius = 8.0f;            // окна, всплывающие
     float RadiusFrame = 6.0f;       // поля, кнопки, вкладки
     float RadiusSmall = 4.0f;       // грабы, полосы прокрутки
-    ImVec2 WindowPadding{12, 10};
-    ImVec2 FramePadding{10, 6};
-    ImVec2 ItemSpacing{8, 7};
-    ImVec2 ItemInnerSpacing{7, 5};
-    ImVec2 CellPadding{8, 5};
+    // Плотнее, чем было (12×10, 10×6, 8×7): на рабочем экране редактора
+    // воздух между КАЖДЫМ полем складывается в полэкрана пустоты — инспектор
+    // уходил в прокрутку на трёх компонентах, меню вырастало выше окна.
+    // Поле высотой 24 (кегль 16 + 2×4) — та же ControlHeight, что в сетке.
+    ImVec2 WindowPadding{8, 8};
+    ImVec2 FramePadding{8, 4};
+    ImVec2 ItemSpacing{6, 4};
+    ImVec2 ItemInnerSpacing{4, 4};
+    ImVec2 CellPadding{4, 2};
     float ScrollbarSize = 12.0f;
     float GrabMinSize = 12.0f;
-    float IndentSpacing = 18.0f;
+    float IndentSpacing = 16.0f;
     float BorderWindow = 0.0f;      // 0 — слои разделяет фон, а не линия
     float BorderFrame = 0.0f;
     float BorderPopup = 1.0f;

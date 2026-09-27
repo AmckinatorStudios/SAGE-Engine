@@ -2440,6 +2440,24 @@
     "Lua tests passed: ": "Lua-тесты пройдены: ",
     "No Lua tests: add files named *.test.lua to the project": "Lua-тестов нет: добавьте в проект файлы *.test.lua",
     "Run Lua Tests": "Запустить Lua-тесты",
-    "Running Lua tests…": "Идут Lua-тесты…"
+    "Running Lua tests…": "Идут Lua-тесты…",
+    "An older sky type: a folder with faces px/nx/py/ny/pz/nz. Convert it to six files": "Прежний тип неба: папка с гранями px/nx/py/ny/pz/nz. Переведите его в шесть файлов",
+    "Back: what is seen looking along -Z, behind the front": "Зад: что видно, если смотреть вдоль -Z — за спиной у переда",
+    "Bottom: what is under the feet, below the horizon": "Низ: что под ногами, ниже горизонта",
+    "Convert to six files": "Перевести в шесть файлов",
+    "Cubemap folder (old)": "Папка с кубической картой (прежний тип)",
+    "Each face px/nx/py/ny/pz/nz of the folder goes into its own slot": "Каждая грань папки px/nx/py/ny/pz/nz встанет в свой слот",
+    "Front: what is seen looking along +Z": "Перед: что видно, если смотреть вдоль +Z",
+    "Left side: what is seen looking along -X": "Лево: что видно, если смотреть вдоль -X",
+    "Not all six faces px/nx/py/ny/pz/nz are in the folder": "В папке есть не все шесть граней px/nx/py/ny/pz/nz",
+    "Not set — click to pick a picture": "Не задано — щёлкните, чтобы выбрать картинку",
+    "Right side: what is seen looking along +X": "Право: что видно, если смотреть вдоль +X",
+    "Top: the sky straight overhead": "Верх: небо прямо над головой",
+    "Right face": "Право",
+    "Left face": "Лево",
+    "Top face": "Верх",
+    "Bottom face": "Низ",
+    "Front face": "Перед",
+    "Back face": "Зад"
   }
 }
