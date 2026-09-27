@@ -52,6 +52,43 @@ bool ColorFieldAlpha(const char* label, float rgb[3], float* alpha, ColorFieldFl
 // ширина по умолчанию.
 bool ColorPickerInline(const char* id, float rgb[3], float* alpha = nullptr, float width = 0.0f);
 
+// --- ПИПЕТКА ------------------------------------------------------------------
+//
+// Взять цвет С ЭКРАНА — в том числе за пределами окна редактора: с референса
+// в браузере, со скриншота, из чужой программы. Запускается из меню по ПКМ на
+// поле цвета («Пипетка») или кнопкой в палитре; дальше щелчок где угодно
+// берёт цвет под курсором, Esc или ПКМ — отмена. Пока идёт выбор, у курсора
+// видна лупа: цвет и его hex.
+//
+// Как читать экран, решает редактор (бэкенд): свой кадр — пикселем из
+// отрисованного кадра, чужие окна — системой (ScreenColor.h). Логика «ждать
+// отпускания — взять по щелчку — отменить» живёт здесь и проверяется тестом
+// с поддельным бэкендом.
+namespace eyedropper {
+struct Backend {
+    // Цвет под курсором вне своего окна (система). nullptr — не умеет.
+    bool (*SampleScreen)(float rgb[3]) = nullptr;
+    // Кнопка мыши / Esc зажаты где угодно, а не только над окном.
+    bool (*GlobalMouseDown)(int button) = nullptr;
+    bool (*GlobalEscapeDown)() = nullptr;
+    // Курсор над своим окном (тогда цвет берётся из кадра, см. FramebufferPoint).
+    bool (*OverOwnWindow)() = nullptr;
+};
+void SetBackend(const Backend& backend);
+
+// Начать выбор для поля owner (ключ поля — см. ColorFieldAlpha).
+void Start(ImGuiID owner);
+bool Active();
+void Cancel();
+// Раз в кадр ImGui, ПОСЛЕ всех панелей: ловит щелчок поверх окна, рисует лупу.
+void Frame();
+// Где в своём кадре читать пиксель (пиксели кадрового буфера, от левого
+// верхнего угла). false — сейчас не нужно.
+bool FramebufferPoint(int* x, int* y);
+// Цвет, прочитанный из отрисованного кадра (зовёт редактор после отрисовки).
+void SetFramebufferColor(const float rgb[3]);
+} // namespace eyedropper
+
 // --- чистая математика: проверяется без кадра ImGui ---------------------------
 namespace color {
 
@@ -61,6 +98,16 @@ std::string ToHex(const float rgb[3], const float* alpha = nullptr);
 // Альфа из текста пишется в *alpha, только если она там есть и alpha != nullptr.
 // false — строка не цвет; rgb при этом не трогается.
 bool ParseHex(const char* text, float rgb[3], float* alpha = nullptr);
+// ЛЮБАЯ ЗАПИСЬ ЦВЕТА, КОТОРУЮ ВСТАВЛЯЮТ: hex, «rgb(255, 128, 0)»,
+// «rgba(255, 128, 0, 0.5)», «255 128 0», «1.0, 0.5, 0.0[, 0.5]». Цвет копируют
+// откуда угодно — из графического редактора, CSS, чужого движка, — и формат
+// у всех свой. Числа больше 1 — байты 0..255, иначе доли. Прочие правила — как
+// у ParseHex.
+bool ParseAny(const char* text, float rgb[3], float* alpha = nullptr);
+// Цвет строкой для «Копировать как…»: «rgb(255, 128, 0)» / «rgba(…, 0.50)» и
+// «1.000, 0.502, 0.000[, 0.500]».
+std::string ToRgbText(const float rgb[3], const float* alpha = nullptr);
+std::string ToFloatText(const float rgb[3], const float* alpha = nullptr);
 
 // Тон, насыщенность, яркость — все в 0..1.
 void RgbToHsv(const float rgb[3], float hsv[3]);
@@ -92,6 +139,11 @@ struct PickerLayout {
     Box SV, Hue, Alpha, Original;
 };
 const PickerLayout& LastPickerLayout();
+// Пункты меню ПКМ поля в последнем кадре, где оно было открыто.
+struct MenuLayout {
+    Box CopyHex, Paste, Pick;
+};
+const MenuLayout& LastMenuLayout();
 
 } // namespace color
 } // namespace Sage::UI

@@ -2338,6 +2338,14 @@
     "The game will be:": "Игра будет здесь:",
     "Up one folder": "На папку выше",
     "What goes in": "Что войдёт в игру",
-    "main.sage, else the first by name": "main.sage, иначе первая по алфавиту"
+    "main.sage, else the first by name": "main.sage, иначе первая по алфавиту",
+    "Click to pick a colour. Drag it onto another colour to copy it.\nRight-click: copy, paste, pick from the screen.": "Щелчок — выбрать цвет. Перетащите на другое поле, чтобы скопировать.\nПКМ — копировать, вставить, пипетка.",
+    "Click — take, Esc — cancel": "Щелчок — взять, Esc — отмена",
+    "Copy as RGB": "Копировать как RGB",
+    "Copy as numbers 0..1": "Копировать числами 0..1",
+    "Copy colour": "Копировать цвет",
+    "Paste colour": "Вставить цвет",
+    "Pick a colour from the screen — anywhere, even outside the editor. Click to take it, Esc to cancel.": "Взять цвет с экрана — где угодно, даже за пределами редактора. Щелчок — взять, Esc — отмена.",
+    "Pick from screen": "Пипетка (взять с экрана)"
   }
 }

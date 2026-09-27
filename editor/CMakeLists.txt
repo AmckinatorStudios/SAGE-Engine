@@ -37,6 +37,7 @@ add_executable(SageEditor WIN32
     src/AssetSlot.cpp
     src/ObjectSlot.cpp
     src/GameBuilder.cpp
+    src/ScreenColor.cpp
     src/ModelMaterialImport.cpp
     src/ProjectTemplates.cpp
     src/TemplateStore.cpp
@@ -100,6 +101,13 @@ add_executable(SageEditor WIN32
 
 # imguizmo — 3D-гизмо во вьюпорте; nlohmann_json — файлы проектов (.sageproj).
 target_link_libraries(SageEditor PRIVATE sage::engine imgui imguizmo nlohmann_json::nlohmann_json)
+# Пипетка за пределами окна (src/ScreenColor.cpp): на Windows — GDI, на Linux
+# libX11 подгружается во время работы (dlopen), поэтому нужна только libdl.
+if (WIN32)
+    target_link_libraries(SageEditor PRIVATE gdi32 user32)
+else()
+    target_link_libraries(SageEditor PRIVATE ${CMAKE_DL_LIBS})
+endif()
 target_include_directories(SageEditor PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
 # Скелетная модель для САМОПРОВЕРКИ: извлечение клипов анимации проверяется на
 # настоящем .glb со скелетом и клипами, а не на синтетике. Путь абсолютный —

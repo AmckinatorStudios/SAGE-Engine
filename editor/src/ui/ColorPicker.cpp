@@ -4,11 +4,13 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <cstdlib>
 
 #include "imgui_internal.h"
 
 #include "Localization.h"
 #include "ui/UI.h"
+#include "EditorIcons.h"
 
 namespace Sage::UI {
 
@@ -74,6 +76,68 @@ bool ParseHex(const char* text, float rgb[3], float* alpha) {
     return true;
 }
 
+bool ParseAny(const char* text, float rgb[3], float* alpha) {
+    if (!text) return false;
+    if (ParseHex(text, rgb, alpha)) return true;
+    // Числа подряд — через запятые, пробелы, точки с запятой, внутри «rgb(…)».
+    // Что угодно другое (буквы, кроме имени функции) — не цвет.
+    const char* p = text;
+    while (*p == ' ' || *p == '\t') ++p;
+    bool func = false;
+    for (const char* name : {"rgba(", "rgb(", "RGBA(", "RGB("}) {
+        if (std::strncmp(p, name, std::strlen(name)) == 0) { p += std::strlen(name); func = true; break; }
+    }
+    float v[4];
+    bool dot[4] = {false, false, false, false};
+    int n = 0;
+    while (*p) {
+        if (*p == ' ' || *p == '\t' || *p == ',' || *p == ';' || (func && *p == ')')) { ++p; continue; }
+        char* end = nullptr;
+        const float f = std::strtof(p, &end);
+        if (end == p || n >= 4 || !(f >= 0.0f)) return false;
+        for (const char* q = p; q < end; ++q) if (*q == '.') dot[n] = true;
+        v[n++] = f;
+        p = end;
+    }
+    if (n != 3 && n != 4) return false;
+    // Шкала — одна на три канала: «1, 0.5, 0» — доли, «255, 128, 0» — байты.
+    // Решает НАЛИЧИЕ числа больше 1; «1, 1, 1» без точек — байты почти чёрного
+    // не бывают на практике, а белый в долях бывает, поэтому единицы — доли.
+    bool bytes = false;
+    for (int i = 0; i < 3; ++i) if (v[i] > 1.0f) bytes = true;
+    float out[3];
+    for (int i = 0; i < 3; ++i) {
+        out[i] = bytes ? v[i] / 255.0f : v[i];
+        if (out[i] > 1.0f) return false;
+    }
+    std::memcpy(rgb, out, sizeof out);
+    // Альфа в CSS — доля даже при байтовых каналах («rgba(255,0,0,0.5)»), а в
+    // списке байт — байт.
+    if (alpha && n == 4) *alpha = Clamp01(v[3] > 1.0f || (bytes && !dot[3] && !func) ? v[3] / 255.0f : v[3]);
+    return true;
+}
+
+std::string ToRgbText(const float rgb[3], const float* alpha) {
+    char buf[48];
+    if (alpha)
+        std::snprintf(buf, sizeof buf, "rgba(%d, %d, %d, %.2f)", Byte(rgb[0]), Byte(rgb[1]),
+                      Byte(rgb[2]), Clamp01(*alpha));
+    else
+        std::snprintf(buf, sizeof buf, "rgb(%d, %d, %d)", Byte(rgb[0]), Byte(rgb[1]), Byte(rgb[2]));
+    return buf;
+}
+
+std::string ToFloatText(const float rgb[3], const float* alpha) {
+    char buf[64];
+    if (alpha)
+        std::snprintf(buf, sizeof buf, "%.3f, %.3f, %.3f, %.3f", Clamp01(rgb[0]), Clamp01(rgb[1]),
+                      Clamp01(rgb[2]), Clamp01(*alpha));
+    else
+        std::snprintf(buf, sizeof buf, "%.3f, %.3f, %.3f", Clamp01(rgb[0]), Clamp01(rgb[1]),
+                      Clamp01(rgb[2]));
+    return buf;
+}
+
 void RgbToHsv(const float rgb[3], float hsv[3]) {
     ImGui::ColorConvertRGBtoHSV(rgb[0], rgb[1], rgb[2], hsv[0], hsv[1], hsv[2]);
 }
@@ -120,6 +184,8 @@ void Remember(const ImVec4& c) {
 void ClearRecent() { g_recent.clear(); }
 
 const PickerLayout& LastPickerLayout() { return g_layout; }
+MenuLayout g_menuLayout;
+const MenuLayout& LastMenuLayout() { return g_menuLayout; }
 
 } // namespace color
 
@@ -138,6 +204,115 @@ struct Session {
     bool Edited = false;
 };
 Session g_session;
+
+// ПРАВКА ОДНИМ ДЕЙСТВИЕМ — вставка из буфера и пипетка. У них нет жеста
+// «нажал — потянул — отпустил», а отмена правок (TrackLastImGuiItem) видит
+// только жесты: начало (IsItemActivated) снимает «до», конец
+// (IsItemDeactivatedAfterEdit) пишет запись. Поэтому правка разыгрывается как
+// жест из двух кадров на скрытом элементе поля: в первом кадре он становится
+// активным (снимок «до» — ещё старого цвета), во втором цвет меняется и
+// элемент отпускается. Одна правка — одна запись в истории, как у ползунка.
+struct OneShot {
+    ImGuiID Id = 0;
+    int Stage = 0;   // 1 — начать жест, 2 — применить и отпустить
+    float Rgb[3] = {0, 0, 0};
+    float Alpha = 1.0f;
+    bool HasAlpha = false;
+};
+OneShot g_oneShot;
+
+void RequestSet(ImGuiID owner, const float rgb[3], const float* alpha) {
+    g_oneShot = OneShot{};
+    g_oneShot.Id = owner;
+    g_oneShot.Stage = 1;
+    std::memcpy(g_oneShot.Rgb, rgb, sizeof(float) * 3);
+    if (alpha) {
+        g_oneShot.Alpha = *alpha;
+        g_oneShot.HasAlpha = true;
+    }
+}
+
+// Разыграть правку для поля owner. true — цвет поменялся в этом кадре.
+bool ApplyOneShot(ImGuiID owner, float rgb[3], float* alpha) {
+    if (g_oneShot.Id != owner || owner == 0) return false;
+    ImGuiContext& g = *GImGui;
+    bool changed = false;
+    if (g_oneShot.Stage == 1) {
+        ImGui::SetActiveID(owner, ImGui::GetCurrentWindow());
+        ImGui::KeepAliveID(owner);
+        g_oneShot.Stage = 2;
+    } else {
+        std::memcpy(rgb, g_oneShot.Rgb, sizeof(float) * 3);
+        if (alpha && g_oneShot.HasAlpha) *alpha = g_oneShot.Alpha;
+        color::Remember(ImVec4(rgb[0], rgb[1], rgb[2], alpha ? *alpha : 1.0f));
+        changed = true;
+        // Жест мог перехватить кто-то другой (щелчок между кадрами) — тогда
+        // цвет всё равно применяется, просто без собственной записи отмены.
+        if (g.ActiveId == owner) {
+            ImGui::MarkItemEdited(owner);
+            ImGui::ClearActiveID();
+        }
+        g_oneShot = OneShot{};
+    }
+    // «Последний элемент» — скрытый элемент жеста: по нему вызывающий видит
+    // начало и конец правки.
+    g.LastItemData.ID = owner;
+    // Флаги «отпущен / не отпущен» остались от настоящего последнего элемента
+    // и перекрыли бы проверку конца жеста по DeactivatedItemData.
+    g.LastItemData.StatusFlags &=
+        ~(ImGuiItemStatusFlags_HasDeactivated | ImGuiItemStatusFlags_Deactivated);
+    return changed;
+}
+
+// --- Пипетка -----------------------------------------------------------------
+struct Dropper {
+    bool Active = false;
+    ImGuiID Owner = 0;
+    bool Released = false;     // кнопку, запустившую пипетку, уже отпустили
+    float Preview[3] = {0, 0, 0};
+    bool HasPreview = false;
+    bool WantFb = false;       // в этом кадре цвет берётся из своего кадра
+    int FbX = 0, FbY = 0;
+    float Fb[3] = {0, 0, 0};
+    bool FbValid = false;
+};
+Dropper g_drop;
+eyedropper::Backend g_backend;
+
+// Меню поля по ПКМ: копировать в трёх записях, вставить, пипетка.
+void ColorContextMenu(ImGuiID owner, const float rgb[3], const float* alpha, bool readOnly) {
+    if (Sage::UI::MenuScope menu; ImGui::BeginPopup("###sage_color_ctx")) {
+        color::MenuLayout& lay = color::g_menuLayout;
+        lay = {};
+        auto rect = [] { return Box{ImGui::GetItemRectMin(), ImGui::GetItemRectMax()}; };
+        if (EditorIcons::MenuItem("copy", T("Copy colour"), color::ToHex(rgb, alpha).c_str()))
+            ImGui::SetClipboardText(color::ToHex(rgb, alpha).c_str());
+        lay.CopyHex = rect();
+        if (EditorIcons::MenuItem("copy", T("Copy as RGB"), color::ToRgbText(rgb, alpha).c_str()))
+            ImGui::SetClipboardText(color::ToRgbText(rgb, alpha).c_str());
+        if (EditorIcons::MenuItem("copy", T("Copy as numbers 0..1")))
+            ImGui::SetClipboardText(color::ToFloatText(rgb, alpha).c_str());
+        if (!readOnly) {
+            ImGui::Separator();
+            // Вставка доступна, только если в буфере правда цвет: пункт,
+            // который молча ничего не делает, хуже серого.
+            const char* clip = ImGui::GetClipboardText();
+            float pasted[3] = {rgb[0], rgb[1], rgb[2]};
+            float pastedA = alpha ? *alpha : 1.0f;
+            const bool canPaste = clip && color::ParseAny(clip, pasted, alpha ? &pastedA : nullptr);
+            if (EditorIcons::MenuItem("paste", T("Paste colour"),
+                                      canPaste ? color::ToHex(pasted, alpha ? &pastedA : nullptr).c_str()
+                                               : nullptr,
+                                      canPaste))
+                RequestSet(owner, pasted, alpha ? &pastedA : nullptr);
+            lay.Paste = rect();
+            if (EditorIcons::MenuItem("eyedropper", T("Pick from screen")))
+                eyedropper::Start(owner);
+            lay.Pick = rect();
+        }
+        ImGui::EndPopup();
+    }
+}
 
 // Тон и насыщенность, которые помнит палитра (см. RgbToHsvKeep): пока цвет на
 // входе тот, что палитра записала сама, берём её HSV как есть — пересчёт из
@@ -269,7 +444,7 @@ void DrawFieldSwatch(ImDrawList* dl, const ImVec2& a, const ImVec2& b, const flo
 
 // Сама палитра — общая для всплывающего окна поля и для встроенной.
 // original — цвет до открытия (RGBA) для «было/стало»; nullptr — без него.
-bool PickerBody(float rgb[3], float* alpha, const float* original, float width) {
+bool PickerBody(float rgb[3], float* alpha, const float* original, float width, ImGuiID owner) {
     const ImGuiStyle& style = ImGui::GetStyle();
     const float fs = ImGui::GetFontSize();
     const float frameH = ImGui::GetFrameHeight();
@@ -394,7 +569,10 @@ bool PickerBody(float rgb[3], float* alpha, const float* original, float width) 
         const ImGuiID hexId = ImGui::GetID("##hex");
         if (ImGui::GetActiveID() != hexId)
             std::snprintf(buf, sizeof buf, "%s", color::ToHex(rgb, alpha).c_str());
-        ImGui::SetNextItemWidth(W - cmpW - inner);
+        // Пипетка — рядом с hex: оба отвечают на вопрос «какой именно цвет»,
+        // один числом, другой — «вот этот, с экрана».
+        const float dropW = ImGui::GetFrameHeight();
+        ImGui::SetNextItemWidth(W - cmpW - inner * 2.0f - dropW);
         if (ImGui::InputText("##hex", buf, sizeof buf,
                              ImGuiInputTextFlags_CharsUppercase | ImGuiInputTextFlags_AutoSelectAll)) {
             float next[3] = {rgb[0], rgb[1], rgb[2]};
@@ -407,6 +585,12 @@ bool PickerBody(float rgb[3], float* alpha, const float* original, float width) 
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("Hex colour: #RRGGBB or #RRGGBBAA. Ctrl+C and Ctrl+V copy and paste it."));
+        ImGui::SameLine(0.0f, inner);
+        if (EditorIcons::IconOnlyButton("eyedropper",
+                                        T("Pick a colour from the screen — anywhere, even outside the "
+                                          "editor. Click to take it, Esc to cancel."),
+                                        eyedropper::Active()))
+            eyedropper::Start(owner);
     }
 
     // --- каналы полосами ----------------------------------------------------
@@ -517,6 +701,8 @@ bool ColorFieldAlpha(const char* label, float rgb[3], float* alpha, ColorFieldFl
     bool changed = false;
 
     ImGui::PushID(label);
+    // Ключ поля для правок одним действием (вставка, пипетка) — см. OneShot.
+    const ImGuiID owner = ImGui::GetID("##oneshot");
     ImGui::BeginGroup();
     const float h = ImGui::GetFrameHeight();
     const float w = compact ? h : std::max(ImGui::CalcItemWidth(), h);
@@ -527,6 +713,9 @@ bool ColorFieldAlpha(const char* label, float rgb[3], float* alpha, ColorFieldFl
     const ImVec2 b(a.x + w, a.y + h);
     const bool clicked = ImGui::InvisibleButton("##swatch", ImVec2(w, h));
     const bool hovered = ImGui::IsItemHovered();
+    // ПКМ — меню: копировать, вставить, пипетка. Открывается и у поля
+    // «только смотреть»: скопировать вычисленный цвет — законная просьба.
+    if (hovered && ImGui::IsMouseReleased(ImGuiMouseButton_Right)) ImGui::OpenPopup("###sage_color_ctx");
     DrawFieldSwatch(ImGui::GetWindowDrawList(), a, b, rgb, alpha, compact, hovered, readOnly);
 
     ImGuiWindow* picker = nullptr;
@@ -568,12 +757,13 @@ bool ColorFieldAlpha(const char* label, float rgb[3], float* alpha, ColorFieldFl
             ImGui::SetNextWindowPos(ImVec2(a.x, b.y + style.ItemSpacing.y));
         }
         if (hovered && !g.DragDropActive && !ImGui::IsPopupOpen("###sage_color"))
-            ImGui::SetTooltip("%s", T("Click to pick a colour. Drag it onto another colour to copy it."));
+            ImGui::SetTooltip("%s", T("Click to pick a colour. Drag it onto another colour to copy it.\n"
+                                      "Right-click: copy, paste, pick from the screen."));
 
         if (Sage::UI::MenuScope menu; ImGui::BeginPopup("###sage_color")) {
             picker = g.CurrentWindow;
             const float* original = g_session.Owner == popupId ? g_session.Original : nullptr;
-            if (PickerBody(rgb, alpha, original, 0.0f)) {
+            if (PickerBody(rgb, alpha, original, 0.0f, owner)) {
                 changed = true;
                 g_session.Edited = true;
             }
@@ -590,6 +780,9 @@ bool ColorFieldAlpha(const char* label, float rgb[3], float* alpha, ColorFieldFl
         ImGui::TextEx(label, labelEnd);
     }
     ImGui::EndGroup();
+    // Меню — ЗА ГРУППОЙ поля: внутри неё щелчок по пункту группа сочла бы
+    // своим жестом, и отмена правок получила бы лишнее «начало».
+    ColorContextMenu(owner, rgb, alpha, readOnly);
     ImGui::PopID();
 
     // ПРАВКА В ПАЛИТРЕ — ПРАВКА ЭТОГО ПОЛЯ. Палитра — отдельное окно, и без этой
@@ -598,6 +791,9 @@ bool ColorFieldAlpha(const char* label, float rgb[3], float* alpha, ColorFieldFl
     // жеста. Тот же приём, что у ImGui::ColorEdit4.
     if (picker && g.ActiveId != 0 && g.ActiveIdWindow == picker) g.LastItemData.ID = g.ActiveId;
     if (changed && g.LastItemData.ID != 0) ImGui::MarkItemEdited(g.LastItemData.ID);
+    // Вставка и пипетка — последними: их «последний элемент» — скрытый элемент
+    // жеста (см. OneShot), и он не должен быть перебит правкой в палитре.
+    if (!readOnly && ApplyOneShot(owner, rgb, alpha)) changed = true;
     return changed;
 }
 
@@ -611,13 +807,126 @@ bool ColorField4(const char* label, float rgba[4], ColorFieldFlags flags) {
 
 bool ColorPickerInline(const char* id, float rgb[3], float* alpha, float width) {
     ImGui::PushID(id);
+    const ImGuiID owner = ImGui::GetID("##oneshot");
     ImGui::BeginGroup();
-    const bool changed = PickerBody(rgb, alpha, nullptr, width);
+    bool changed = PickerBody(rgb, alpha, nullptr, width, owner);
     ImGui::EndGroup();
     ImGui::PopID();
+    if (ApplyOneShot(owner, rgb, alpha)) changed = true;
     if (ImGui::IsItemDeactivatedAfterEdit())
         color::Remember(ImVec4(rgb[0], rgb[1], rgb[2], alpha ? *alpha : 1.0f));
     return changed;
 }
+
+// ============================================================================
+//  Пипетка
+// ============================================================================
+namespace eyedropper {
+
+void SetBackend(const Backend& backend) { g_backend = backend; }
+
+void Start(ImGuiID owner) {
+    g_drop = Dropper{};
+    g_drop.Active = owner != 0;
+    g_drop.Owner = owner;
+}
+
+bool Active() { return g_drop.Active; }
+void Cancel() { g_drop = Dropper{}; }
+
+bool FramebufferPoint(int* x, int* y) {
+    if (!g_drop.Active || !g_drop.WantFb) return false;
+    *x = g_drop.FbX;
+    *y = g_drop.FbY;
+    return true;
+}
+
+void SetFramebufferColor(const float rgb[3]) {
+    std::memcpy(g_drop.Fb, rgb, sizeof(float) * 3);
+    g_drop.FbValid = true;
+}
+
+void Frame() {
+    if (!g_drop.Active) return;
+    ImGuiIO& io = ImGui::GetIO();
+    ImGuiViewport* main = ImGui::GetMainViewport();
+
+    // ГДЕ КУРСОР. Над своим окном — цвет из СВОЕГО КАДРА (точно тот, что на
+    // экране, включая 3D-вьюпорт и прозрачность панелей); за окном — у системы.
+    const bool mouseOk = ImGui::IsMousePosValid();
+    const bool overOwn = mouseOk && (g_backend.OverOwnWindow ? g_backend.OverOwnWindow() : true) &&
+                         io.MousePos.x >= main->Pos.x && io.MousePos.y >= main->Pos.y &&
+                         io.MousePos.x < main->Pos.x + main->Size.x &&
+                         io.MousePos.y < main->Pos.y + main->Size.y;
+    g_drop.WantFb = overOwn;
+    if (overOwn) {
+        g_drop.FbX = (int)((io.MousePos.x - main->Pos.x) * io.DisplayFramebufferScale.x);
+        g_drop.FbY = (int)((io.MousePos.y - main->Pos.y) * io.DisplayFramebufferScale.y);
+        if (g_drop.FbValid) {
+            std::memcpy(g_drop.Preview, g_drop.Fb, sizeof g_drop.Preview);
+            g_drop.HasPreview = true;
+        }
+    } else if (g_backend.SampleScreen) {
+        float c[3];
+        if (g_backend.SampleScreen(c)) {
+            std::memcpy(g_drop.Preview, c, sizeof c);
+            g_drop.HasPreview = true;
+        }
+    }
+
+    // ЛОВУШКА ЩЕЛЧКА поверх всего окна: щелчок пипетки берёт цвет, а не
+    // нажимает кнопку, которая оказалась под курсором.
+    ImGui::SetNextWindowPos(main->Pos);
+    ImGui::SetNextWindowSize(main->Size);
+    ImGui::SetNextWindowViewport(main->ID);
+    ImGui::SetNextWindowFocus();
+    ImGui::Begin("##sage_eyedropper", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground |
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoNav |
+                     ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoMove);
+    ImGui::InvisibleButton("##catch", main->Size);
+    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+    ImGui::End();
+
+    // КНОПКИ — и свои, и системные: за окном ImGui щелчков не видит.
+    const bool down = io.MouseDown[0] || (g_backend.GlobalMouseDown && g_backend.GlobalMouseDown(0));
+    const bool cancel = ImGui::IsKeyPressed(ImGuiKey_Escape) || io.MouseDown[1] ||
+                        (g_backend.GlobalEscapeDown && g_backend.GlobalEscapeDown()) ||
+                        (g_backend.GlobalMouseDown && g_backend.GlobalMouseDown(1));
+    if (cancel) {
+        Cancel();
+        return;
+    }
+    // Кнопка, которой запустили пипетку (пункт меню, кнопка в палитре), ещё
+    // может быть зажата — её отпускание не выбор.
+    if (!g_drop.Released) {
+        if (!down) g_drop.Released = true;
+    } else if (down) {
+        if (g_drop.HasPreview) RequestSet(g_drop.Owner, g_drop.Preview, nullptr);
+        Cancel();
+        return;
+    }
+
+    // ЛУПА у курсора: цвет и hex. Сбоку от курсора, а не под ним: иначе
+    // пипетка прочла бы из кадра свою же лупу.
+    if (mouseOk && overOwn) {
+        ImDrawList* dl = ImGui::GetForegroundDrawList(main);
+        const float fs = ImGui::GetFontSize();
+        const ImVec2 p0(io.MousePos.x + fs * 1.2f, io.MousePos.y + fs * 1.2f);
+        const std::string hex = g_drop.HasPreview ? color::ToHex(g_drop.Preview) : std::string("…");
+        const char* hint = T("Click — take, Esc — cancel");
+        const float tw = std::max(ImGui::CalcTextSize(hex.c_str()).x, ImGui::CalcTextSize(hint).x);
+        const ImVec2 p1(p0.x + fs * 2.6f + tw + fs * 0.8f, p0.y + fs * 2.9f);
+        dl->AddRectFilled(p0, p1, ImGui::GetColorU32(ImGuiCol_PopupBg), fs * 0.3f);
+        dl->AddRect(p0, p1, ImGui::GetColorU32(ImGuiCol_Border), fs * 0.3f);
+        const ImVec2 s0(p0.x + fs * 0.4f, p0.y + fs * 0.4f), s1(s0.x + fs * 2.0f, s0.y + fs * 2.1f);
+        dl->AddRectFilled(s0, s1, g_drop.HasPreview ? ToU32(g_drop.Preview) : IM_COL32(0, 0, 0, 0), fs * 0.2f);
+        dl->AddRect(s0, s1, ImGui::GetColorU32(ImGuiCol_Border), fs * 0.2f);
+        dl->AddText(ImVec2(s1.x + fs * 0.5f, p0.y + fs * 0.35f), ImGui::GetColorU32(ImGuiCol_Text), hex.c_str());
+        dl->AddText(ImVec2(s1.x + fs * 0.5f, p0.y + fs * 1.45f), ImGui::GetColorU32(ImGuiCol_TextDisabled), hint);
+    }
+}
+
+} // namespace eyedropper
 
 } // namespace Sage::UI

@@ -49,6 +49,7 @@
 #include "EditorTheme.h"
 #include "TemplateStore.h"
 #include "sage/assets/Pack.h"
+#include "ScreenColor.h"
 #include "sage/core/Version.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/anim/ClipFile.h"
@@ -2404,6 +2405,21 @@ bool EditorLayer::SelfTestSceneAndPlay() {
                                        "хотя сборка по умолчанию его не кладёт";
                 ok = false;
             }
+        }
+    }
+
+    // --- Пипетка за пределами окна: системное чтение экрана живое ---------
+    //
+    // Путь X11/GDI исполняется только у человека с мышью в руке — без этой
+    // проверки он мог бы сломаться (не найти libX11, упасть в XGetImage) и
+    // остаться незамеченным. Где системы нет (Wayland), проверять нечего.
+    if (ok && sage::editor::screencolor::GlobalAvailable()) {
+        float rgb[3] = {-1.0f, -1.0f, -1.0f};
+        int sx = -1, sy = -1;
+        if (!sage::editor::screencolor::SampleAtCursor(rgb, &sx, &sy) || rgb[0] < 0.0f ||
+            rgb[0] > 1.0f || sx < 0 || sy < 0) {
+            LOG_ERROR("Editor") << "SELFTEST: пипетка не прочла цвет с экрана";
+            ok = false;
         }
     }
 
