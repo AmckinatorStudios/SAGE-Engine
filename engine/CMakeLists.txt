@@ -27,6 +27,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/gi/LightBaker.cpp
     src/sage/gi/LightmapUV.cpp
     src/sage/ecs/CameraView.cpp
+    src/sage/ecs/DayNightCycle.cpp
     src/sage/ecs/DecalSystem.cpp
     src/sage/vars/Value.cpp
     src/sage/vars/Table.cpp
@@ -149,6 +150,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/SceneMigrations.cpp
     src/sage/scene/SceneValueJson.cpp
     src/sage/scene/Signals.cpp
+    src/sage/scene/EnvironmentSchema.cpp
     src/sage/scripting/ScriptEngine.cpp
     src/sage/render/DebugLines.cpp
     src/sage/scripting/ScriptRuntime.cpp

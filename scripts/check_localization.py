@@ -103,6 +103,30 @@ ENGINE_TEXT_FILES = [
 ENGINE_TEXT = re.compile(r'SAGE_UI_TEXT\(\s*"((?:[^"\\]|\\.)*)"\s*\)')
 
 
+# Схема окружения (небо, цикл суток, свет, туман): подписи и подсказки в ней —
+# обычные литералы, которые панель Environment переводит через T(). Ключи полей
+# («sky.sun.size»), форматы («%.2f») и пути в подписи не входят.
+SCHEMA_FILES = [
+    os.path.join(REPO, 'engine', 'src', 'sage', 'scene', 'EnvironmentSchema.cpp'),
+]
+SCHEMA_SKIP = re.compile(r'^(?:[a-z][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*|[\w/]+\.h|x?%.*)$')
+
+
+def schema_keys():
+    keys = set()
+    for path in SCHEMA_FILES:
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding='utf-8') as f:
+            src = f.read()
+        src = re.sub(r'"\s*\n\s*"', '', src)   # соседние литералы склеиваются, как в C++
+        for m in TEXT_IN_LITERAL.finditer(src):
+            text = m.group(1)
+            if text and not SCHEMA_SKIP.match(text):
+                keys.add(text)
+    return keys
+
+
 def engine_keys():
     keys = set()
     for path in ENGINE_TEXT_FILES:
@@ -111,7 +135,7 @@ def engine_keys():
         with open(path, encoding='utf-8') as f:
             for m in ENGINE_TEXT.finditer(f.read()):
                 keys.add(m.group(1))
-    return keys
+    return keys | schema_keys()
 
 
 def collect():

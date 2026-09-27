@@ -76,6 +76,7 @@
 #include "sage/ui/UISceneSystem.h"
 #include "sage/events/Events.h"
 #include "sage/scene/Signals.h"
+#include "sage/ecs/DayNightCycle.h"
 #include "sage/vars/VarsComponent.h"
 #include "UILayoutOps.h"
 #include "EditorPrefs.h"
@@ -483,6 +484,147 @@ void EditorLayer::CheckWorkspaceDockFrame() {
             return;
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// ОКНО ENVIRONMENT ПОКАЗЫВАЕТ ТОЛЬКО НУЖНОЕ.
+//
+// Проверяется по тому, что панель НАРИСОВАЛА в кадре (LastDrawnKeys), а не по
+// схеме: схема может быть верной, а панель — рисовать мимо неё. На каждом шаге
+// выставляется состояние (тип неба, цикл, туман), кадр рисуется, и на
+// следующем шаге сверяется: нужные строки есть, чужих — нет. В конце —
+// сохранение и загрузка сцены с новыми полями и возврат прежнего окружения.
+void EditorLayer::CheckEnvironmentFrame() {
+    if (m_envChecked) return;
+    if (!std::getenv("SAGE_EDITOR_SELFTEST")) return;
+    if (!m_uiInspectorChecked) return;
+    LightingEnvironment& e = m_scene->Lighting;
+    using Src = SkyboxSettings::Source;
+
+    auto has = [this](const char* key) {
+        const std::vector<std::string>& d = m_environment.LastDrawnKeys();
+        return std::find(d.begin(), d.end(), key) != d.end();
+    };
+    auto expect = [&](const char* what, std::initializer_list<const char*> yes,
+                      std::initializer_list<const char*> no) {
+        for (const char* k : yes)
+            if (!has(k) && m_envFail.empty()) m_envFail = std::string(what) + ": нет строки " + k;
+        for (const char* k : no)
+            if (has(k) && m_envFail.empty()) m_envFail = std::string(what) + ": лишняя строка " + k;
+    };
+
+    // Панель стоит в доке вкладкой, и за соседней вкладкой её дерево не
+    // раскрывается вовсе — рисовать было бы нечего. Выводим вперёд КАЖДЫЙ шаг:
+    // игровое окно и другие проверки вправе перетянуть фокус на себя. По
+    // идентификатору, а не по имени: имя переводится.
+    if (!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+        if (ImGuiWindow* w = ImGui::FindWindowByID(ImHashStr("Lighting"))) ImGui::FocusWindow(w);
+
+    const int step = m_envStep++;
+    switch (step) {
+        case 0:
+            m_envErrors = m_console.ErrorCount();
+            m_envSaved = SceneSerializer::SaveToString(*m_scene);
+            m_panels[EditorPanel::Environment] = true;
+            e.Skybox.Enabled = true;
+            e.Skybox.Kind = Src::Procedural;
+            e.Cycle.Enabled = false;
+            e.Fog.Enabled = false;
+            return;
+        case 1: case 2: case 3: case 4:   // окно открывается и выходит вперёд
+            return;
+        case 5:
+            expect("процедурное небо", {"sky.enabled", "sky.type", "sky.zenith", "sky.horizon"},
+                   {"sky.image", "sky.folder", "sky.rotation", "sky.color", "cycle.time", "fog.color"});
+            e.Skybox.Kind = Src::Solid;
+            return;
+        case 6:
+            expect("небо одним цветом", {"sky.color"},
+                   {"sky.zenith", "sky.sun.size", "sky.rotation", "sky.exposure", "sky.clouds.height"});
+            e.Skybox.Kind = Src::Image;
+            return;
+        case 7:
+            expect("одна картинка", {"sky.image", "sky.imageLayout", "sky.rotation", "sky.exposure"},
+                   {"sky.zenith", "sky.folder", "sky.face.px", "sky.color"});
+            e.Skybox.Kind = Src::Cubemap;
+            return;
+        case 8:
+            expect("папка кубической карты", {"sky.folder", "sky.rotation", "sky.exposure"},
+                   {"sky.image", "sky.face.px", "sky.zenith"});
+            e.Skybox.Kind = Src::Faces;
+            return;
+        case 9:
+            expect("шесть файлов",
+                   {"sky.face.px", "sky.face.nx", "sky.face.py", "sky.face.ny", "sky.face.pz", "sky.face.nz",
+                    "sky.rotation", "sky.exposure"},
+                   {"sky.image", "sky.folder", "sky.zenith"});
+            e.Skybox.Enabled = false;
+            return;
+        case 10:
+            expect("небо выключено", {"sky.enabled"}, {"sky.type", "sky.face.px", "sky.zenith"});
+            e.Skybox.Enabled = true;
+            e.Skybox.Kind = Src::Procedural;
+            // Цикл выключен — видна только галка.
+            expect("цикл выключен", {"cycle.enabled"}, {"cycle.time", "cycle.speed"});
+            e.Cycle.Enabled = true;
+            e.Cycle.Time = 18.0f;   // закат
+            return;
+        case 11: {
+            expect("цикл включён", {"cycle.enabled", "cycle.time", "cycle.speed", "cycle.dayLength"}, {});
+            // Панель ставит солнце по циклу сразу: в 18 часов оно на горизонте.
+            const glm::vec3 d = sage::ecs::SunDirectionAt(e.Cycle);
+            if (std::abs(d.y) > 0.02f && m_envFail.empty()) m_envFail = "цикл: в 18 часов солнце не на горизонте";
+            e.Cycle.Enabled = false;
+            e.Fog.Enabled = false;
+            return;
+        }
+        case 12:
+            expect("туман выключен", {"fog.enabled"}, {"fog.type", "fog.color", "fog.density", "fog.start"});
+            e.Fog.Enabled = true;
+            e.Fog.Kind = FogSettings::Mode::Linear;
+            return;
+        case 13:
+            expect("линейный туман", {"fog.type", "fog.color", "fog.start", "fog.end"},
+                   {"fog.density", "fog.falloff"});
+            e.Fog.Kind = FogSettings::Mode::ExponentialHeight;
+            return;
+        case 14: {
+            expect("высотный туман", {"fog.color.height", "fog.density", "fog.falloff", "fog.maxOpacity"},
+                   {"fog.end", "fog.start"});
+            // СОХРАНЕНИЕ И ЗАГРУЗКА: новые поля (цикл) и прежние (тип неба,
+            // туман) переживают запись сцены.
+            e.Skybox.Kind = Src::Solid;
+            e.Skybox.TopColor = {0.25f, 0.5f, 0.75f};
+            e.Cycle.Enabled = true;
+            e.Cycle.Time = 7.5f;
+            e.Cycle.Speed = 3.0f;
+            e.Fog.Density = 0.05f;
+            std::unique_ptr<Scene> back = SceneSerializer::LoadFromString(
+                SceneSerializer::SaveToString(*m_scene));
+            const bool same = back && back->Lighting.Skybox.Kind == Src::Solid &&
+                              back->Lighting.Skybox.TopColor == e.Skybox.TopColor &&
+                              back->Lighting.Cycle.Enabled && back->Lighting.Cycle.Time == 7.5f &&
+                              back->Lighting.Cycle.Speed == 3.0f &&
+                              back->Lighting.Fog.Kind == FogSettings::Mode::ExponentialHeight &&
+                              back->Lighting.Fog.Density == 0.05f;
+            if (!same && m_envFail.empty()) m_envFail = "окружение не пережило сохранение и загрузку";
+            return;
+        }
+        default: break;
+    }
+    // Вернуть сцене прежнее окружение: проверка не должна менять то, что
+    // проверяют следующие.
+    if (std::unique_ptr<Scene> orig = SceneSerializer::LoadFromString(m_envSaved))
+        m_scene->Lighting = orig->Lighting;
+    m_envChecked = true;
+    const int added = m_console.ErrorCount() - m_envErrors;
+    if (m_envFail.empty() && added == 0)
+        LOG_INFO("Editor") << "ENVIRONMENT: OK — пять типов неба, цикл суток, туман и сохранение; "
+                           << "показывается только нужное";
+    else
+        LOG_ERROR("Editor") << "ENVIRONMENT: FAIL — "
+                            << (m_envFail.empty() ? "новых ошибок в консоли: " + std::to_string(added)
+                                                  : m_envFail);
 }
 
 // ---------------------------------------------------------------------------

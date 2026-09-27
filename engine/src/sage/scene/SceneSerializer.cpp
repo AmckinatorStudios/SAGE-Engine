@@ -219,6 +219,20 @@ static json LightingToJson(const LightingEnvironment& lighting) {
     // Дальность теней сцены. Ноль (по умолчанию) — «взять из настроек движка»,
     // и такие сцены ведут себя ровно как до появления поля.
     j["shadows"]["distance"] = lighting.Shadows.Distance;
+
+    // Цикл дня и ночи — своим объектом: это отдельная система, а не свойство
+    // неба (работает при любом его типе).
+    {
+        const DayNightCycle& c = lighting.Cycle;
+        json& cj = j["dayNightCycle"];
+        cj["enabled"] = c.Enabled;
+        cj["time"] = c.Time;
+        cj["dayLengthMinutes"] = c.DayLengthMinutes;
+        cj["speed"] = c.Speed;
+        cj["runInPlay"] = c.RunInPlay;
+        cj["sunAzimuth"] = c.SunAzimuth;
+        cj["noonElevation"] = c.NoonElevation;
+    }
     return j;
 }
 
@@ -263,6 +277,18 @@ static LightingEnvironment LightingFromJson(const json& root) {
 
     if (j.contains("shadows")) {
         lighting.Shadows.Distance = j["shadows"].value("distance", lighting.Shadows.Distance);
+    }
+    // Нет ключа — сцена старше цикла: он выключен, время задаёт поворот солнца.
+    if (j.contains("dayNightCycle") && j["dayNightCycle"].is_object()) {
+        const json& cj = j["dayNightCycle"];
+        DayNightCycle& c = lighting.Cycle;
+        c.Enabled = cj.value("enabled", c.Enabled);
+        c.Time = cj.value("time", c.Time);
+        c.DayLengthMinutes = cj.value("dayLengthMinutes", c.DayLengthMinutes);
+        c.Speed = cj.value("speed", c.Speed);
+        c.RunInPlay = cj.value("runInPlay", c.RunInPlay);
+        c.SunAzimuth = cj.value("sunAzimuth", c.SunAzimuth);
+        c.NoonElevation = cj.value("noonElevation", c.NoonElevation);
     }
 
     for (const auto& sj : j.value("spotLights", json::array())) {

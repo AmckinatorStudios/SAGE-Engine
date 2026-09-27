@@ -405,6 +405,14 @@ private:
     // Инспектор каждого типа интерфейса и окно девятины (в том числе узкое)
     // рисуются без единой претензии ImGui (см. .cpp).
     void CheckUiInspectorFrame();
+    // Окно Environment живым кадром: пять типов неба, цикл суток, туман,
+    // сохранение — показывается только нужное (см. EnvironmentPanel.h).
+    void CheckEnvironmentFrame();
+    bool m_envChecked = false;
+    int m_envStep = 0;
+    int m_envErrors = 0;
+    std::string m_envSaved;   // окружение сцены до проверки (JSON сцены)
+    std::string m_envFail;
     // Закрыть всплывающее окно, которое открыли, но никто не рисует: такое
     // окно обездвиживает редактор целиком (см. EditorLayer.cpp).
     void CloseGhostPopups();

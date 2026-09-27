@@ -138,6 +138,7 @@ int EditorPlaySession::BuildRuntime(const PlayContext& ctx, Scene& scene) {
         core.Physics = m_physics.get();
         core.Particles = ctx.Particles;
         core.Audio = m_audio.get();
+        core.DayNight = true;
         // Анимация уже зарегистрирована набором режима правки (превью) и
         // повторной регистрацией только заменилась бы сама на себя.
         core.Animation = false;
@@ -166,6 +167,7 @@ void EditorPlaySession::TeardownRuntime(const PlayContext& ctx, Scene* scene) {
         ctx.Systems->Remove("scripting");
         ctx.Systems->Remove("scripting.late");
         ctx.Systems->Remove("physics");
+        ctx.Systems->Remove("daynight");
     }
     if (m_audio && scene) sage::audio::StopScene(*scene, *m_audio);
     if (m_scripting) m_scripting->Shutdown();

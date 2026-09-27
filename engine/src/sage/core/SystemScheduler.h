@@ -128,6 +128,10 @@ struct CoreSystems {
     ParticleSystem* Particles = nullptr;
     AudioEngine* Audio = nullptr;
     bool Animation = true;    // анимация не требует объекта — только сцену
+    // Ход времени суток (DayNightCycle сцены). Только в ИГРЕ: в режиме правки
+    // время стоит там, куда его поставили, иначе сцена менялась бы сама, пока
+    // её настраивают.
+    bool DayNight = false;
 };
 
 // Регистрирует стандартную последовательность движка. ЕДИНСТВЕННОЕ место, где

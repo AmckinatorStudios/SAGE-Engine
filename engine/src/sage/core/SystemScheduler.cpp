@@ -1,6 +1,7 @@
 #include "sage/core/SystemScheduler.h"
 
 #include "sage/scripting/ScriptingSystem.h"
+#include "sage/ecs/DayNightCycle.h"
 
 #include "sage/audio/AudioSystem.h"
 
@@ -172,6 +173,15 @@ void RegisterCoreSystems(SystemScheduler& scheduler, const CoreSystems& systems)
         scheduler.Add(Stage::PostPhysics, "scripting.late", [scripting](Scene&, float dt) {
             scripting->LateUpdate(dt);
         }, 20);
+    }
+
+    // Время суток — после скриптов и физики: скрипт вправе поставить час
+    // (`Cycle.Time = 18`) в Update, и солнце этого же кадра обязано встать уже
+    // по нему, а не по прошлому.
+    if (systems.DayNight) {
+        scheduler.Add(Stage::PostPhysics, "daynight", [](Scene& scene, float dt) {
+            sage::ecs::UpdateDayNight(scene, dt);
+        }, 15);
     }
 
     // Анимация — ПОСЛЕ физики. Её второй проход (IK) ставит ноги на землю, а

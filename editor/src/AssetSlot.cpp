@@ -402,7 +402,13 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
     }
     ImGui::EndDisabled();
 
-    ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y + style.ItemSpacing.y));
+    // Курсор — под карточку, и ОБЯЗАТЕЛЬНО пустым элементом после него: голый
+    // SetCursorScreenPos в конце виджета раздвигает границы родителя, не подав
+    // ни одного элемента, и в ячейке таблицы или дочернем окне ImGui на это
+    // ругается каждый кадр. Dummy нулевой высоты даёт тот же отступ снизу
+    // (ItemSpacing) и честно отмечает, где виджет кончился.
+    ImGui::SetCursorScreenPos(ImVec2(p0.x, p1.y));
+    ImGui::Dummy(ImVec2(0.0f, 0.0f));
     ImGui::PopID();
     return result;
 }
