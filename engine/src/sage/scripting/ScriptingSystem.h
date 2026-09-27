@@ -146,6 +146,9 @@ private:
     void CallLink(Scene& scene, const sage::signals::Link& link, const std::string& ownerName,
                   const std::string& targetName, const sage::events::Event& event);
 
+    // OnKeyDown/OnKeyUp всем скриптам по клавишам этого кадра.
+    void DispatchKeys();
+
     ScriptRuntime m_runtime;
     std::vector<TestResult> m_testResults;
     // Группа шины для связей инспектора: Shutdown снимает их разом.

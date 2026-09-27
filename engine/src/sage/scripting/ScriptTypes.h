@@ -39,6 +39,10 @@ enum class Hook {
     // Каждый шаг, пока гость в зоне (кроме шага входа — тот уже OnTriggerEnter).
     // В конце списка: номера хуков старше него не сдвигаются.
     OnTriggerStay,
+    // Клавиша нажата / отпущена в этом кадре: OnKeyDown("Space"). Имя — то же,
+    // что понимает Input.is_key_down.
+    OnKeyDown,
+    OnKeyUp,
     Count
 };
 

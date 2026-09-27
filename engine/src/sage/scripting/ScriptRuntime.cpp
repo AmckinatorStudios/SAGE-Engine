@@ -26,6 +26,8 @@ const char* HookName(Hook hook) {
         case Hook::OnTriggerExit: return "OnTriggerExit";
         case Hook::OnTriggerStay: return "OnTriggerStay";
         case Hook::OnAnimationEvent: return "OnAnimationEvent";
+        case Hook::OnKeyDown: return "OnKeyDown";
+        case Hook::OnKeyUp: return "OnKeyUp";
         case Hook::Count: break;
     }
     return "?";
@@ -207,18 +209,43 @@ bool ScriptRuntime::Attach(GameObject owner, const std::string& path,
     m_dirtyIndex = true;
 
     // Start зовётся СРАЗУ: скрипт, созданный посреди кадра (Instantiate), не
-    // должен ждать следующего кадра, чтобы себя настроить.
-    LiveScript& live = m_scripts.back();
+    // должен ждать следующего кадра, чтобы себя настроить. Кроме запуска
+    // сцены целиком (BeginBatch): там Start ждёт, пока подключатся ВСЕ, —
+    // иначе Start первого скрипта, обратившегося к соседу
+    // (`Scene.find("Player"):call(...)`), не находил бы у соседа скрипта.
+    if (m_batch > 0) {
+        m_pendingStart.push_back(owner.Entity());
+        return true;
+    }
+    StartScript(m_scripts.back());
+    return true;
+}
+
+void ScriptRuntime::StartScript(LiveScript& live) {
+    if (live.Started || live.Dead || live.Instance == kInvalidInstance) return;
+    live.Started = true;
+    LanguageBackend* backend = live.Backend;
+    const InstanceId id = live.Instance;
     if (backend->Has(id, Hook::Start)) {
         ScriptError err;
         Guard(live, backend->Call(id, Hook::Start, 0.0f, err), err, Hook::Start);
     }
-    live.Started = true;
     if (live.Enabled && backend->Has(id, Hook::OnEnable)) {
         ScriptError err;
         Guard(live, backend->Call(id, Hook::OnEnable, 0.0f, err), err, Hook::OnEnable);
     }
-    return true;
+}
+
+void ScriptRuntime::BeginBatch() { ++m_batch; }
+
+void ScriptRuntime::EndBatch() {
+    if (m_batch == 0 || --m_batch > 0) return;
+    // По ОДНОМУ и заново ищем: Start вправе создать объект со скриптом, и
+    // вектор скриптов перевыделится.
+    std::vector<entt::entity> pending;
+    pending.swap(m_pendingStart);
+    for (entt::entity e : pending)
+        if (LiveScript* s = Find(e)) StartScript(*s);
 }
 
 void ScriptRuntime::Detach(entt::entity entity) {
@@ -314,6 +341,27 @@ void ScriptRuntime::DispatchNamed(entt::entity entity, Hook hook, const std::str
     if (!s->Backend->Has(s->Instance, hook)) return;
     ScriptError err;
     Guard(*s, s->Backend->CallNamed(s->Instance, hook, name, err), err, hook);
+}
+
+bool ScriptRuntime::AnyHas(Hook a, Hook b) const {
+    for (const LiveScript& s : m_scripts) {
+        if (s.Dead || s.Muted || !s.Enabled || s.Instance == kInvalidInstance) continue;
+        if (s.Backend->Has(s.Instance, a) || s.Backend->Has(s.Instance, b)) return true;
+    }
+    return false;
+}
+
+void ScriptRuntime::DispatchNamedAll(Hook hook, const std::string& name) {
+    // Тот же обход, что у Dispatch: по индексу — обработчик вправе породить
+    // объект со скриптом.
+    const size_t count = m_scripts.size();
+    for (size_t i = 0; i < count && i < m_scripts.size(); ++i) {
+        LiveScript& s = m_scripts[i];
+        if (s.Dead || s.Muted || !s.Enabled || !s.Owner.Valid()) continue;
+        if (!s.Backend->Has(s.Instance, hook)) continue;
+        ScriptError err;
+        Guard(s, s.Backend->CallNamed(s.Instance, hook, name, err), err, hook);
+    }
 }
 
 bool ScriptRuntime::Invoke(entt::entity entity, const std::string& method,

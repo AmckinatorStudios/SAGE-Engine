@@ -67,10 +67,20 @@ void RegisterMath(Backend& backend) {
             sol::meta_function::addition, [](const glm::vec3& a, const glm::vec3& b) { return a + b; },
             sol::meta_function::subtraction, [](const glm::vec3& a, const glm::vec3& b) { return a - b; },
             sol::meta_function::unary_minus, [](const glm::vec3& a) { return -a; },
-            sol::meta_function::multiplication, [](const glm::vec3& a, float s) { return a * s; },
+            sol::meta_function::multiplication,
+            sol::overload([](const glm::vec3& a, float s) { return a * s; },
+                          [](float s, const glm::vec3& a) { return a * s; },
+                          [](const glm::vec3& a, const glm::vec3& b) { return a * b; }),
             sol::meta_function::division, [](const glm::vec3& a, float s) { return a / s; },
+            sol::meta_function::call, [](const glm::vec3& a) { return a; },
+            "copy", [](const glm::vec3& a) { return a; },
             "Length", [](const glm::vec3& a) { return glm::length(a); },
-            "Normalized", [](const glm::vec3& a) { return Normalize(a); });
+            "Normalized", [](const glm::vec3& a) { return Normalize(a); },
+            "length", [](const glm::vec3& a) { return glm::length(a); },
+            "normalized", [](const glm::vec3& a) { return Normalize(a); },
+            "distance", [](const glm::vec3& a, const glm::vec3& b) { return glm::length(b - a); },
+            "dot", [](const glm::vec3& a, const glm::vec3& b) { return glm::dot(a, b); },
+            "cross", [](const glm::vec3& a, const glm::vec3& b) { return glm::cross(a, b); });
     }
     if (!lua["Vec2"].valid()) {
         lua.new_usertype<glm::vec2>("Vec2",
@@ -132,11 +142,29 @@ void RegisterMath(Backend& backend) {
         if (la < 1e-6f || lb < 1e-6f) return 0.0f;
         return glm::degrees(std::acos(std::clamp(glm::dot(a, b) / (la * lb), -1.0f, 1.0f)));
     };
-    v3["zero"] = glm::vec3(0.0f);
-    v3["one"] = glm::vec3(1.0f);
-    v3["up"] = glm::vec3(0.0f, 1.0f, 0.0f);
-    v3["right"] = glm::vec3(1.0f, 0.0f, 0.0f);
-    v3["forward"] = glm::vec3(0.0f, 0.0f, 1.0f);
+    // ПОСТОЯННЫЕ — функции, возвращающие НОВЫЙ вектор. Общий объект
+    // `Vector3.zero` правился бы на месте: `local d = Vector3.zero; d.z = 1`
+    // тихо превращал «ноль» в (0, 0, 1) у всех скриптов сразу.
+    v3["zero"] = []() { return glm::vec3(0.0f); };
+    v3["one"] = []() { return glm::vec3(1.0f); };
+    v3["up"] = []() { return glm::vec3(0.0f, 1.0f, 0.0f); };
+    v3["down"] = []() { return glm::vec3(0.0f, -1.0f, 0.0f); };
+    v3["right"] = []() { return glm::vec3(1.0f, 0.0f, 0.0f); };
+    v3["left"] = []() { return glm::vec3(-1.0f, 0.0f, 0.0f); };
+    v3["forward"] = []() { return glm::vec3(0.0f, 0.0f, 1.0f); };
+    v3["back"] = []() { return glm::vec3(0.0f, 0.0f, -1.0f); };
+    // Vector3.new(x, y, z) — то же, что Vector3(x, y, z).
+    v3["new"] = [](sol::variadic_args args) {
+        sol::variadic_args a = args;
+        return glm::vec3(Arg(a, 0), Arg(a, 1), Arg(a, 2));
+    };
+    // Нынешние имена статических функций — те же функции.
+    const std::pair<const char*, const char*> kSnake[] = {
+        {"dot", "Dot"},       {"cross", "Cross"},   {"normalize", "Normalize"},
+        {"length", "Length"}, {"distance", "Distance"}, {"lerp", "Lerp"},
+        {"move_towards", "MoveTowards"}, {"reflect", "Reflect"}, {"angle", "Angle"},
+    };
+    for (const auto& [snake, pascal] : kSnake) v3[snake] = v3[pascal];
     lua["Vector3"] = v3;
 
     // --- Vector2 -------------------------------------------------------------

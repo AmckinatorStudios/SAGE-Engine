@@ -505,6 +505,14 @@ void EditorLayer::CheckLuaTestsFrame() {
         const fs::path to = m_project.AssetsDir() / "tests" / "lua";
         fs::create_directories(to, ec);
         fs::copy(from, to, fs::copy_options::overwrite_existing | fs::copy_options::recursive, ec);
+        // Учебные скрипты (simple.test.lua ставит их на объекты) — туда же,
+        // где их найдёт человек: assets/scripts/examples проекта.
+        if (!ec) {
+            const fs::path examples = m_project.AssetsDir() / "scripts" / "examples";
+            fs::create_directories(examples, ec);
+            fs::copy(fs::path("assets") / "scripts" / "examples", examples,
+                     fs::copy_options::overwrite_existing | fs::copy_options::recursive, ec);
+        }
         if (ec || !m_project.Loaded()) {
             LOG_ERROR("Editor") << "LUA_TESTS: FAIL — набор тестов не скопирован в проект: " << ec.message();
             m_luaSelfTestStep = -1;
@@ -523,11 +531,27 @@ void EditorLayer::CheckLuaTestsFrame() {
     const LuaTestRun& r = m_luaTests;
     // Тестов меньше, чем в наборе, — тоже провал: файл, в котором разбор не
     // увидел ни одного test_*, иначе «проходил» бы молча.
-    const bool enough = r.Passed + r.Failed >= 50;
-    if (r.Failed == 0 && enough && !m_play.Active()) {
+    const bool enough = r.Passed + r.Failed >= 57;
+    // Инспектор видит глобальные переменные простого скрипта: speed и
+    // jump_force у Player.lua — поля секции Script, с типом по значению.
+    bool inspectorOk = false;
+    {
+        GameObject probe = m_scene->CreateObject("LuaVarsProbe");
+        m_scene->Registry().emplace<ScriptComponent>(probe.Entity()).Path =
+            "assets/scripts/examples/Player.lua";
+        MergeScriptVars(probe);
+        const ScriptComponent& sc = m_scene->Registry().get<ScriptComponent>(probe.Entity());
+        const sage::vars::Var* speed = sc.Fields.Find("speed");
+        const sage::vars::Var* jump = sc.Fields.Find("jump_force");
+        inspectorOk = speed && jump && speed->Data.Type() == sage::vars::Kind::Float &&
+                      std::fabs(speed->Data.AsFloat() - 5.0f) < 1e-5f && sc.Fields.Find("direction") == nullptr;
+        m_scene->RemoveObject(probe.Id());
+        if (!inspectorOk) LOG_ERROR("Editor") << "LUA_TESTS:   инспектор не показал speed/jump_force у Player.lua";
+    }
+    if (r.Failed == 0 && enough && inspectorOk && !m_play.Active()) {
         LOG_INFO("Editor") << "LUA_TESTS: OK — тестов на Lua прошло " << r.Passed
                            << " в настоящем Play (объект, жизненный цикл, сигналы, UI, ввод, физика, "
-                           << "скрипты, окружение, прежний API)";
+                           << "скрипты, окружение, прежний API, простой вид скрипта на учебных примерах)";
         return;
     }
     for (const std::string& f : r.Failures) LOG_ERROR("Editor") << "LUA_TESTS:   " << f;

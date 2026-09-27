@@ -321,12 +321,176 @@ size_t FindDeclaration(const std::string& source) {
     return std::string::npos;
 }
 
+// Vector3.new(x, y, z) / Vector3(x, y, z) / Vec3(x, y, z) — вектор-литерал.
+bool VectorCall(Reader& r, Value& out) {
+    const size_t mark = r.I;
+    bool named = false;
+    if (r.Keyword("Vector3")) {
+        named = true;
+        const size_t dot = r.I;
+        if (r.Eat('.') && r.Name() != "new") { r.I = mark; return false; }
+        if (r.S[dot] != '.') r.I = dot;
+    } else if (r.Keyword("Vec3")) {
+        named = true;
+    }
+    if (!named || !r.Eat('(')) { r.I = mark; return false; }
+    float c[3] = {0.0f, 0.0f, 0.0f};
+    for (int i = 0; i < 3; ++i) {
+        double n = 0.0;
+        bool integral = false;
+        if (!r.Number(n, integral)) break;
+        c[i] = (float)n;
+        if (!r.Eat(',')) break;
+    }
+    if (!r.Eat(')')) { r.I = mark; return false; }
+    out = Value(glm::vec3(c[0], c[1], c[2]));
+    return true;
+}
+
+// ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ ПРОСТОГО СКРИПТА — тоже публичные поля.
+//
+//     speed = 5.0              -- число с точкой  → float
+//     count = 10               -- без точки        → integer
+//     enabled = true           -- bool
+//     target_name = "Player"   -- string
+//     offset = Vector3.new(0, 1, 0)
+//     health = field.number(100, 0, 200)   -- с границами, если нужны
+//
+// Никакой регистрации: присваивание ЛИТЕРАЛА на верхнем уровне файла (не
+// внутри функции, не `local`) — и есть объявление. Имя с подчёркиванием в
+// начале (`_timer = 0`) — служебное и в инспектор не выходит, как и
+// `x = a + b`: значение-выражение инспектору показать нечем.
+//
+// Разбор лексический, со счётом вложенности (function/do/then/repeat … end/
+// until и скобки): `x = 1` внутри функции полем не становится. Начало
+// оператора в Lua ничем не отмечено, поэтому признак — «имя, за которым `=`,
+// и перед которым не точка, не двоеточие и не запятая».
+void ParseTopLevelGlobals(const std::string& source, sage::vars::Table& out) {
+    Reader r(source);
+    int depth = 0;        // блоки Lua
+    int brackets = 0;     // ( { [
+    bool afterLocal = false;
+    bool inForHeader = false;   // for i = 1, n do — «i = 1» не поле
+    char prev = '\n';           // последний значимый символ перед словом
+    auto isIdent = [](char c) { return std::isalnum((unsigned char)c) || c == '_'; };
+    while (true) {
+        r.Skip();
+        if (r.Done()) break;
+        const char c = r.Peek();
+        if (c == '"' || c == '\'') {
+            std::string t;
+            r.String(t);
+            prev = c;
+            continue;
+        }
+        if (c == '[' && r.I + 1 < r.S.size() && (r.S[r.I + 1] == '[' || r.S[r.I + 1] == '=')) {
+            // Длинная строка [[ ... ]] или [==[ ... ]==].
+            size_t j = r.I + 1;
+            int eq = 0;
+            while (j < r.S.size() && r.S[j] == '=') { ++eq; ++j; }
+            if (j < r.S.size() && r.S[j] == '[') {
+                const std::string close = "]" + std::string((size_t)eq, '=') + "]";
+                const size_t end = r.S.find(close, j + 1);
+                r.I = end == std::string::npos ? r.S.size() : end + close.size();
+                prev = ']';
+                continue;
+            }
+        }
+        if (!isIdent(c) || std::isdigit((unsigned char)c)) {
+            if (c == '(' || c == '{' || c == '[') ++brackets;
+            else if ((c == ')' || c == '}' || c == ']') && brackets > 0) --brackets;
+            if (std::isdigit((unsigned char)c)) {
+                double n = 0.0;
+                bool integral = false;
+                if (!r.Number(n, integral)) ++r.I;
+            } else {
+                ++r.I;
+            }
+            prev = c;
+            continue;
+        }
+
+        const std::string word = r.Name();
+        const char before = prev;
+        prev = 'a';
+        const bool wasLocal = afterLocal;
+        afterLocal = (word == "local");
+        if (word == "for") inForHeader = true;
+        if (word == "function" || word == "then" || word == "repeat") ++depth;
+        else if (word == "do") { if (inForHeader) inForHeader = false; ++depth; }
+        else if (word == "elseif") --depth;   // у elseif своё then — не новый блок
+        else if (word == "end" || word == "until") { if (depth > 0) --depth; }
+
+        if (depth != 0 || brackets != 0 || wasLocal || inForHeader) continue;
+        if (before == '.' || before == ':' || before == ',') continue;
+        const size_t mark = r.I;
+        r.Skip();
+        if (r.Peek() != '=' || r.S.compare(r.I, 2, "==") == 0) { r.I = mark; continue; }
+        ++r.I;
+        prev = '=';
+        if (word[0] == '_') continue;
+
+        Var var;
+        var.Name = word;
+        var.Declared = true;
+        r.Skip();
+        const size_t valueAt = r.I;
+        bool known = FieldCall(r, var) || VectorCall(r, var.Data);
+        if (!known && Scalar(r, var.Data)) {
+            // «x = 1 + y», «x = 1 or 2» — выражение, а не литерал: не поле.
+            const size_t after = r.I;
+            r.Skip();
+            known = true;
+            if (!r.Done()) {
+                const char next = r.Peek();
+                if (isIdent(next) && !std::isdigit((unsigned char)next)) {
+                    const size_t w = r.I;
+                    const std::string nextWord = r.Name();
+                    known = nextWord != "and" && nextWord != "or";
+                    r.I = w;
+                } else {
+                    // После литерала — только начало следующего оператора
+                    // (имя) или «;»; знак операции значит «это выражение».
+                    known = next == ';';
+                }
+            }
+            r.I = after;
+        }
+        if (known) out.Put(var);
+        else r.I = valueAt;
+    }
+}
+
+// Файл-таблица (`return Player` в конце) — скрипт нового вида с public.
+// Смотрится последний значимый оператор верхнего уровня: `return <имя>`.
+bool ReturnsTable(const std::string& source) {
+    size_t at = source.rfind("return");
+    while (at != std::string::npos) {
+        const bool lineStart = at == 0 || source[at - 1] == '\n';
+        if (lineStart) {
+            size_t j = at + 6;
+            while (j < source.size() && (source[j] == ' ' || source[j] == '\t')) ++j;
+            return j < source.size() && (std::isalpha((unsigned char)source[j]) || source[j] == '_' ||
+                                         source[j] == '{');
+        }
+        if (at == 0) break;
+        at = source.rfind("return", at - 1);
+    }
+    return false;
+}
+
 } // namespace
 
 sage::vars::Table ParsePublicFields(const std::string& source) {
     sage::vars::Table out;
     const size_t at = FindDeclaration(source);
-    if (at == std::string::npos) return out;
+    if (at == std::string::npos) {
+        // Нет таблицы объявления: простой скрипт (глобальные функции) заводит
+        // поля обычными присваиваниями верхнего уровня. У скрипта-таблицы
+        // (`return Player`) глобальных полей не бывает — там всё в public.
+        if (!ReturnsTable(source)) ParseTopLevelGlobals(source, out);
+        return out;
+    }
 
     Reader r(source);
     r.I = at;

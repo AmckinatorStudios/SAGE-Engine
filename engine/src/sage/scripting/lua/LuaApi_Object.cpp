@@ -1,5 +1,6 @@
 #include "sage/scripting/lua/LuaInternal.h"
 
+#include <cctype>
 #include <cmath>
 
 #include "sage/physics/PhysicsComponents.h"
@@ -49,22 +50,91 @@ glm::vec3 AxisOf(const Transform& t, int axis) {
     return len > 1e-6f ? v / len : glm::vec3(0.0f);
 }
 
+glm::vec3& FieldOf(Transform& t, TransformVector::Field f) {
+    switch (f) {
+        case TransformVector::Field::Rotation: return t.Rotation;
+        case TransformVector::Field::Scale: return t.Scale;
+        default: return t.Position;
+    }
+}
+
+// Ось вектора: читается из снимка, пишется И в снимок, И в объект — только
+// эта ось, чтобы `p.y = 1` не вернул объекту старые x и z из снимка.
+auto Axis(int i) {
+    return sol::property(
+        [i](TransformVector& v) { return v[i]; },
+        [i](TransformVector& v, float value) {
+            v[i] = value;
+            if (!v.Obj.Valid()) return;   // объект уничтожен — остаётся просто числом
+            if (Transform* t = v.Obj.Registry()->try_get<Transform>(v.Obj.Entity()))
+                FieldOf(*t, v.Which)[i] = value;
+        });
+}
+
 } // namespace
+
+std::string SnakeToPascal(const std::string& name) {
+    if (name.empty() || !std::islower((unsigned char)name[0])) return {};
+    std::string out;
+    bool upper = true;
+    for (char c : name) {
+        if (c == '_') { upper = true; continue; }
+        out += upper ? (char)std::toupper((unsigned char)c) : c;
+        upper = false;
+    }
+    return out == name ? std::string() : out;
+}
+
+sol::object SnakeMethod(sol::state_view lua, const char* type, const sol::stack_object& key) {
+    if (!key.is<std::string>()) return sol::lua_nil;
+    const std::string pascal = SnakeToPascal(key.as<std::string>());
+    if (pascal.empty()) return sol::lua_nil;
+    sol::object cls = lua[type];
+    if (cls.get_type() != sol::type::table) return sol::lua_nil;
+    sol::object fn = cls.as<sol::table>()[pascal];
+    return fn.get_type() == sol::type::function ? fn : sol::object(sol::lua_nil);
+}
 
 void RegisterObject(Backend& backend) {
     sol::state& lua = backend.Lua();
     Backend* self = &backend;
 
     // --- Transform -----------------------------------------------------------
+    using TV = TransformVector;
+    lua.new_usertype<TV>("SageTransformVector", sol::no_constructor,
+        sol::base_classes, sol::bases<glm::vec3>(),
+        "x", Axis(0), "y", Axis(1), "z", Axis(2),
+        sol::meta_function::addition, [](const glm::vec3& a, const glm::vec3& b) { return a + b; },
+        sol::meta_function::subtraction, [](const glm::vec3& a, const glm::vec3& b) { return a - b; },
+        sol::meta_function::unary_minus, [](const glm::vec3& a) { return -a; },
+        sol::meta_function::multiplication,
+        sol::overload([](const glm::vec3& a, float k) { return a * k; },
+                      [](float k, const glm::vec3& a) { return a * k; },
+                      [](const glm::vec3& a, const glm::vec3& b) { return a * b; }),
+        sol::meta_function::division, [](const glm::vec3& a, float k) { return a / k; },
+        sol::meta_function::equal_to, [](const glm::vec3& a, const glm::vec3& b) { return a == b; },
+        sol::meta_function::to_string, [](const glm::vec3& a) {
+            return "(" + std::to_string(a.x) + ", " + std::to_string(a.y) + ", " + std::to_string(a.z) + ")";
+        },
+        "copy", [](const glm::vec3& a) { return a; },
+        "length", [](const glm::vec3& a) { return glm::length(a); },
+        "normalized", [](const glm::vec3& a) {
+            const float len = glm::length(a);
+            return len > 1e-6f ? a / len : glm::vec3(0.0f);
+        },
+        "distance", [](const glm::vec3& a, const glm::vec3& b) { return glm::length(b - a); },
+        "dot", [](const glm::vec3& a, const glm::vec3& b) { return glm::dot(a, b); },
+        "cross", [](const glm::vec3& a, const glm::vec3& b) { return glm::cross(a, b); });
+
     sol::usertype<TransformRef> tr = lua.new_usertype<TransformRef>("SageTransform");
     tr["position"] = sol::property(
-        [](TransformRef& r) { return Tr(r.Obj, "transform.position").Position; },
+        [](TransformRef& r) { return TV(Tr(r.Obj, "transform.position").Position, r.Obj, TV::Field::Position); },
         [](TransformRef& r, const glm::vec3& v) { Tr(r.Obj, "transform.position").Position = v; });
     tr["rotation"] = sol::property(
-        [](TransformRef& r) { return Tr(r.Obj, "transform.rotation").Rotation; },
+        [](TransformRef& r) { return TV(Tr(r.Obj, "transform.rotation").Rotation, r.Obj, TV::Field::Rotation); },
         [](TransformRef& r, const glm::vec3& v) { Tr(r.Obj, "transform.rotation").Rotation = v; });
     tr["scale"] = sol::property(
-        [](TransformRef& r) { return Tr(r.Obj, "transform.scale").Scale; },
+        [](TransformRef& r) { return TV(Tr(r.Obj, "transform.scale").Scale, r.Obj, TV::Field::Scale); },
         [](TransformRef& r, const glm::vec3& v) { Tr(r.Obj, "transform.scale").Scale = v; });
     // Локальные имена — синонимы того же самого: Transform в SAGE и есть
     // локальный, а мировую позицию считает сцена по цепочке родителей
@@ -113,6 +183,10 @@ void RegisterObject(Backend& backend) {
         const glm::vec3 n = d / len;
         t.Rotation.y = glm::degrees(std::atan2(n.x, n.z));
         t.Rotation.x = glm::degrees(std::asin(-n.y));
+    };
+    // translate, look_at, forward… — нынешние имена тех же методов.
+    tr[sol::meta_function::index] = [](TransformRef&, sol::stack_object key) {
+        return SnakeMethod(key.lua_state(), "SageTransform", key);
     };
     tr["WorldPosition"] = [self](TransformRef& r) {
         Alive(r.Obj, "WorldPosition");

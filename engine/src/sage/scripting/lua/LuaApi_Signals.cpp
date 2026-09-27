@@ -1,5 +1,7 @@
 #include "sage/scripting/lua/LuaInternal.h"
 
+#include <cctype>
+
 #include "sage/core/Log.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
@@ -261,11 +263,20 @@ void RegisterObjectSignals(Backend& backend, sol::usertype<ObjectRef>& ot) {
     // объекта (sage/scene/Signals.h): иначе любая опечатка в любом поле
     // (`obj.helth`) превращалась бы в «сигнал helth», и `if obj.x then`
     // перестал бы работать. Своё событие — через obj:on/obj:emit/obj:signal.
-    ot[sol::meta_function::index] = [signalOf](ObjectRef& r, sol::stack_object key) -> sol::object {
-        if (!key.is<std::string>() || !r.Obj.Valid()) return sol::lua_nil;
+    //
+    // Затем — нынешние имена методов (`obj:get_component`, `obj:call`) и
+    // компонент по имени типа (`obj.Audio`): одно правило для self и для
+    // любого найденного объекта.
+    ot[sol::meta_function::index] = [signalOf, self](ObjectRef& r, sol::stack_object key) -> sol::object {
+        if (!key.is<std::string>()) return sol::lua_nil;
+        sol::object method = SnakeMethod(key.lua_state(), "SageObject", key);
+        if (method.valid() && method.get_type() != sol::type::lua_nil) return method;
+        if (!r.Obj.Valid()) return sol::lua_nil;
         const std::string name = key.as<std::string>();
-        if (!sage::signals::IsDeclared(*r.Obj.Registry(), r.Obj.Entity(), name)) return sol::lua_nil;
-        return sol::make_object(key.lua_state(), signalOf(r.Obj, name));
+        if (sage::signals::IsDeclared(*r.Obj.Registry(), r.Obj.Entity(), name))
+            return sol::make_object(key.lua_state(), signalOf(r.Obj, name));
+        if (std::isupper((unsigned char)name[0])) return self->ComponentOf(r.Obj, name);
+        return sol::lua_nil;
     };
 
     // --- Интерфейс как часть объекта ----------------------------------------
