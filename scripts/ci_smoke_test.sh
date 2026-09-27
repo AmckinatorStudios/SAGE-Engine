@@ -85,7 +85,18 @@ if ! grep -q "VIEWPORT_INPUT: OK" "${EDITOR_LOG}"; then
     grep "VIEWPORT_INPUT" "${EDITOR_LOG}" || true
     cat "${EDITOR_LOG}"; exit 1
 fi
-echo "OK: SageEditor self-test прошёл (включая отдельное окно редактора интерфейса и мышь во вьюпорте)"
+# Поздние проверки кадром: инспектор каждого типа UI, окно Environment и
+# набор Lua-тестов API скриптинга в настоящем Play (editor/assets/tests/lua).
+# Выход редактора ждёт их конца (EditorLayer::TakeAutoScreenshot), так что
+# отсутствие вердикта — тоже провал: проверка зависла или не запустилась.
+for CHECK in UI_INSPECTOR ENVIRONMENT LUA_TESTS; do
+    if ! grep -q "${CHECK}: OK" "${EDITOR_LOG}"; then
+        echo "ОШИБКА: проверка ${CHECK} самопроверки редактора не прошла"
+        grep -E "${CHECK}|\[Test\]" "${EDITOR_LOG}" || true
+        cat "${EDITOR_LOG}"; exit 1
+    fi
+done
+echo "OK: SageEditor self-test прошёл (включая отдельное окно редактора интерфейса, мышь во вьюпорте и Lua-тесты в Play)"
 
 echo "=== Smoke-тест 3/11: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
 if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then

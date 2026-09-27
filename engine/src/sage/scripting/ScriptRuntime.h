@@ -112,6 +112,12 @@ public:
     // КРАЮ, а не каждый кадр, пока объект включён.
     void SetEnabled(entt::entity entity, bool enabled);
 
+    // Тесты на языке скриптов (ScriptTests.h): поставить в очередь тесты
+    // скрипта объекта, шагнуть очередь, сколько осталось.
+    int QueueTests(entt::entity entity);
+    void TickTests(float dt, std::vector<TestResult>& finished);
+    int PendingTests() const;
+
     // Тик рантаймов языков (таймеры, корутины).
     void Tick(float dt);
 

@@ -15,6 +15,7 @@ add_executable(SageEditor WIN32
     src/EditorLayer.cpp
     src/EditorLayer_Project.cpp
     src/EditorLayer_Play.cpp
+    src/EditorLayer_LuaTests.cpp
     src/EditorPlaySession.cpp
     src/EditorRecovery.cpp
     src/EditorLayer_Edit.cpp

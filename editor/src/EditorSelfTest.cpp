@@ -487,6 +487,56 @@ void EditorLayer::CheckWorkspaceDockFrame() {
 }
 
 // ---------------------------------------------------------------------------
+// ТЕСТЫ СКРИПТИНГА НА LUA — В НАСТОЯЩЕМ PLAY.
+//
+// Набор движка (editor/assets/tests/lua, рядом с редактором — assets/tests/lua)
+// копируется в проект и запускается ТОЙ ЖЕ командой, что пункт меню «Run Lua
+// Tests»: Play, объект на файл, тесты корутинами по кадрам, щелчки по
+// интерфейсу и клавиши — настоящим путём. Проверяется весь API скриптинга
+// живым кадром редактора, а не вызовами функций в пустой сцене.
+void EditorLayer::CheckLuaTestsFrame() {
+    if (m_luaSelfTestStep < 0) return;
+    if (!std::getenv("SAGE_EDITOR_SELFTEST")) return;
+    if (!m_envChecked) return;
+    namespace fs = std::filesystem;
+    if (m_luaSelfTestStep == 0) {
+        std::error_code ec;
+        const fs::path from = fs::path("assets") / "tests" / "lua";
+        const fs::path to = m_project.AssetsDir() / "tests" / "lua";
+        fs::create_directories(to, ec);
+        fs::copy(from, to, fs::copy_options::overwrite_existing | fs::copy_options::recursive, ec);
+        if (ec || !m_project.Loaded()) {
+            LOG_ERROR("Editor") << "LUA_TESTS: FAIL — набор тестов не скопирован в проект: " << ec.message();
+            m_luaSelfTestStep = -1;
+            return;
+        }
+        if (!RunLuaTests()) {
+            LOG_ERROR("Editor") << "LUA_TESTS: FAIL — прогон не запустился";
+            m_luaSelfTestStep = -1;
+            return;
+        }
+        m_luaSelfTestStep = 1;
+        return;
+    }
+    if (m_luaTests.Running) return;
+    m_luaSelfTestStep = -1;
+    const LuaTestRun& r = m_luaTests;
+    // Тестов меньше, чем в наборе, — тоже провал: файл, в котором разбор не
+    // увидел ни одного test_*, иначе «проходил» бы молча.
+    const bool enough = r.Passed + r.Failed >= 50;
+    if (r.Failed == 0 && enough && !m_play.Active()) {
+        LOG_INFO("Editor") << "LUA_TESTS: OK — тестов на Lua прошло " << r.Passed
+                           << " в настоящем Play (объект, жизненный цикл, сигналы, UI, ввод, физика, "
+                           << "скрипты, окружение, прежний API)";
+        return;
+    }
+    for (const std::string& f : r.Failures) LOG_ERROR("Editor") << "LUA_TESTS:   " << f;
+    LOG_ERROR("Editor") << "LUA_TESTS: FAIL — прошло " << r.Passed << ", провалено " << r.Failed
+                        << (enough ? "" : " (тестов меньше, чем в наборе)")
+                        << (m_play.Active() ? ", Play не остановился" : "");
+}
+
+// ---------------------------------------------------------------------------
 // ОКНО ENVIRONMENT ПОКАЗЫВАЕТ ТОЛЬКО НУЖНОЕ.
 //
 // Проверяется по тому, что панель НАРИСОВАЛА в кадре (LastDrawnKeys), а не по

@@ -162,6 +162,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/lua/LuaApi_Math.cpp
     src/sage/scripting/lua/LuaApi_Object.cpp
     src/sage/scripting/lua/LuaApi_Signals.cpp
+    src/sage/scripting/lua/LuaApi_Test.cpp
     src/sage/scripting/lua/LuaApi_Components.cpp
     src/sage/scripting/lua/LuaApi_Globals.cpp
     src/sage/scripting/ScriptApi_Math.cpp

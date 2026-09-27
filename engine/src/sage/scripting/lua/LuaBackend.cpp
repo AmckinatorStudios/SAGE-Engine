@@ -5,6 +5,7 @@
 #include "sage/core/Log.h"
 #include "sage/scene/Components.h"
 #include "sage/scripting/ScriptEngine.h"
+#include "sage/scripting/ScriptFields.h"
 
 namespace sage::scripting::lua {
 
@@ -66,6 +67,7 @@ Backend::Backend(const LuaBackendConfig& config) : m_interop(config.Interop) {
     RegisterComponents(*this);
     RegisterGlobals(*this);
     RegisterSignals(*this);
+    RegisterTest(*this);
     RegisterFields(*this);
 
     // Мост из прежнего движка: сообщения и выход обязаны доходить и до
@@ -162,9 +164,13 @@ void Backend::Explain(const sol::protected_function_result& result, const std::s
 
 bool Backend::Compile(const ScriptSource& source, sol::protected_function& out, ScriptError& err) {
     auto it = m_chunks.find(source.Path);
-    if (it != m_chunks.end() && it->second.Stamp == source.Stamp && it->second.Fn.valid()) {
-        out = it->second.Fn;
-        return true;
+    if (it != m_chunks.end() && it->second.Stamp == source.Stamp && !it->second.Bytecode.empty()) {
+        sol::load_result fresh = m_lua->load(it->second.Bytecode, "@" + source.Path, sol::load_mode::binary);
+        if (fresh.valid()) {
+            out = fresh.get<sol::protected_function>();
+            return true;
+        }
+        m_chunks.erase(it);   // байткод не принялся — собираем из текста заново
     }
     // Имя куска с '@' — чтобы ошибки внутри ссылались на файл и строку, а не на
     // «[string "..."]»: номер строки в чужом безымянном куске бесполезен.
@@ -189,11 +195,14 @@ bool Backend::Compile(const ScriptSource& source, sol::protected_function& out, 
         }
         return false;
     }
+    out = chunk.get<sol::protected_function>();
     Chunk cached;
-    cached.Fn = chunk.get<sol::protected_function>();
     cached.Stamp = source.Stamp;
-    m_chunks[source.Path] = cached;
-    out = cached.Fn;
+    // Без отладочной информации байткод терял бы имена файлов и номера строк в
+    // ошибках — а ради них ошибки и разбираются (strip = false).
+    sol::bytecode bc = out.dump();
+    cached.Bytecode.assign(bc.as_string_view().begin(), bc.as_string_view().end());
+    m_chunks[source.Path] = std::move(cached);
     return true;
 }
 
@@ -241,6 +250,7 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
     Instance inst;
     inst.Owner = owner;
     inst.Env = env;
+    inst.Methods = sage::scripting::ParseMethods(source.Path, source.Text);
     sol::object returned = result.get<sol::object>();
     if (returned.get_type() == sol::type::table) {
         inst.Class = returned.as<sol::table>();
@@ -290,6 +300,14 @@ void Backend::Destroy(InstanceId id) {
         if (e != m_byEntity.end() && e->second == id) m_byEntity.erase(e);
     }
     m_instances.erase(it);
+}
+
+void Backend::DropDeadSubscriptions() {
+    Scene* scene = ScenePtr();
+    if (!scene) return;
+    for (const auto& [id, inst] : m_instances)
+        if (inst.Owner.Registry() && !inst.Owner.Valid())
+            scene->Events.DisconnectOwner(m_signals->Group(), (int)id);
 }
 
 bool Backend::Has(InstanceId id, Hook hook) const {
@@ -388,6 +406,8 @@ void Backend::Reset() {
     // Reset в шине не должно остаться ни одного обработчика, зовущего код,
     // которого больше нет.
     if (m_signals) m_signals->Clear(ScenePtr() ? &ScenePtr()->Events : nullptr);
+    // Корутины тестов держат ссылки в состояние Lua — уходят до экземпляров.
+    m_tests.clear();
     m_instances.clear();
     m_byEntity.clear();
     m_chunks.clear();

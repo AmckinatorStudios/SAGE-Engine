@@ -329,6 +329,22 @@ bool ScriptRuntime::Invoke(entt::entity entity, const std::string& method,
     return ok;
 }
 
+int ScriptRuntime::QueueTests(entt::entity entity) {
+    LiveScript* s = Find(entity);
+    if (!s || s->Instance == kInvalidInstance) return 0;
+    return s->Backend->QueueTests(s->Instance, s->Path);
+}
+
+void ScriptRuntime::TickTests(float dt, std::vector<TestResult>& finished) {
+    for (const auto& b : m_backends) b->TickTests(dt, finished);
+}
+
+int ScriptRuntime::PendingTests() const {
+    int n = 0;
+    for (const auto& b : m_backends) n += b->PendingTests();
+    return n;
+}
+
 bool ScriptRuntime::InvokeEvent(entt::entity entity, const std::string& method,
                                 const sage::events::Event& event) {
     LiveScript* s = Find(entity);

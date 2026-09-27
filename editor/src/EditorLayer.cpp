@@ -132,6 +132,9 @@ void EditorLayer::RegisterCommands() {
                     [this] { StartPlay(); }});
     m_commands.Add({"play.stop", T("Stop"), scene, "", "stop",
                     [this] { return InPlayMode(); }, [this] { StopPlay(); }});
+    m_commands.Add({"play.luaTests", T("Run Lua Tests"), scene, "", "script",
+                    [this] { return m_project.Loaded() && !m_luaTests.Running; },
+                    [this] { RunLuaTests(); }});
 
     m_commands.Add({"object.duplicate", T("Duplicate"), object, "Ctrl+D", "cube",
                     hasSelection, [this] { DuplicateSelected(); }});
@@ -995,9 +998,13 @@ void EditorLayer::OnUpdate(float dt) {
         // В остальное время всё отпускается: клавиши уходят редактору, а игра
         // не остаётся идти вперёд сама. Простое «не считать действия» тут не
         // годится — они застыли бы нажатыми.
-        m_play.Cursor().SetGameFocused(m_game.Focused());
+        // Идут Lua-тесты — игра «в фокусе», куда бы ни смотрел человек: тест
+        // нажимает клавиши (Test.key), и без фокуса ввод отпускался бы каждый
+        // кадр, то есть тест проверял бы не игру, а окно редактора.
+        const bool gameFocused = m_game.Focused() || m_luaTests.Running;
+        m_play.Cursor().SetGameFocused(gameFocused);
         m_play.Cursor().SyncCapture();
-        if (m_game.Focused()) {
+        if (gameFocused) {
             // Тот же порядок, что в собранной игре: устройства -> интерфейс
             // сцены -> действия (см. InputSystem::BeginFrame).
             UpdatePlayUiInput(dt);
@@ -1076,6 +1083,7 @@ void EditorLayer::OnUpdate(float dt) {
         m_systems.Run(*m_scene, step);
     }
     m_plugins.UpdateAll(dt);
+    TickLuaTests();
 
     // Чего игра попросила за кадр. Здесь — после того, как все скрипты
     // отработали и ни один не находится на стеке.
@@ -1430,6 +1438,7 @@ void EditorLayer::OnRender() {
     CheckPreviewResolutionFrame();
     CheckUiInspectorFrame();
     CheckEnvironmentFrame();
+    CheckLuaTestsFrame();
 
     TakeAutoScreenshot(app);
 }
@@ -1532,6 +1541,17 @@ void EditorLayer::TakeAutoScreenshot(sage::Application& app) {
     // то есть выход случался раньше первого щелчка, и проверка не давала
     // вердикта вообще. Поэтому снимок и выход ждут её конца, а не номера кадра.
     if (m_probeStep >= 0) return;
+    // То же с проверками, что идут после мыши (инспектор UI, окружение,
+    // Lua-тесты в Play): выход на кадре мыши обрывал их, и CI не видел их
+    // вердикта вовсе — провал Lua-теста проходил сборку молча. Ждём конца
+    // последней в цепочке, но не вечно: зависшая проверка не должна вешать CI,
+    // её отсутствие в логе поймает сам smoke-тест.
+    if (std::getenv("SAGE_EDITOR_SELFTEST") && m_luaSelfTestStep >= 0) {
+        using Clock = std::chrono::steady_clock;
+        if (!m_shotWaitStarted) { m_shotWaitStart = Clock::now(); m_shotWaitStarted = true; }
+        if (Clock::now() - m_shotWaitStart < std::chrono::minutes(5)) return;
+        LOG_ERROR("Editor") << "SELFTEST: поздние проверки не закончились за 5 минут — выходим без них";
+    }
     Window& win = app.GetWindow();
     SaveScreenshot(m_screenshotPath, win.Width(), win.Height());
     app.Close();

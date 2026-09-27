@@ -347,6 +347,7 @@ function SageTransform:WorldPosition() end
 ---@class SageObject
 ---@field name string
 ---@field id integer
+---@field tag string метка объекта (TagComponent)
 ---@field active boolean включён (виден и участвует в кадре)
 ---@field transform SageTransform
 ---@field parent SageObject|nil
@@ -368,6 +369,20 @@ function SageTransform:WorldPosition() end
 ---@field enabled boolean ловит ли мышь (Interactable)
 ---@field value number|boolean|nil значение ползунка или галки
 local SageObject = {}
+---Добавить компонент кодом. Для "Script" вернёт таблицу скрипта (Start уже позван).
+---"RigidBody": {type="static|dynamic|kinematic", mass, friction, restitution, sensor};
+---"Collider": {shape="box|sphere|capsule", size=Vec3, radius, halfHeight};
+---"Script": {path="assets/..."}; "CharacterController".
+---@param name string
+---@param opts? table
+---@return any
+function SageObject:AddComponent(name, opts) end
+---@param name string
+---@return boolean
+function SageObject:HasComponent(name) end
+---@param name string
+---@return boolean снят ли
+function SageObject:RemoveComponent(name) end
 ---@param name string
 ---@return any компонент или nil
 function SageObject:GetComponent(name) end
@@ -748,6 +763,76 @@ function UI.get(name) end
 ---@param name string
 ---@return SageObject|nil
 function UI.find(name) end
+---Создать элемент по пресету ("Button", "Label", "Slider", "Checkbox", ...).
+---@param preset string
+---@param name? string
+---@param parent? SageObject
+---@return SageObject
+function UI.create(preset, name, parent) end
+
+---Lua-тесты: файл *.test.lua возвращает таблицу с методами test_*; они идут
+---в настоящем Play по одному (Play → «Запустить Lua-тесты»). before_each и
+---after_each оборачивают каждый тест. Ожидания — в кадрах игры.
+Test = {}
+---@param cond any
+---@param msg? string
+function Test.expect(cond, msg) end
+---@param actual any
+---@param expected any
+---@param msg? string
+function Test.eq(actual, expected, msg) end
+---@param actual any
+---@param other any
+---@param msg? string
+function Test.ne(actual, other, msg) end
+---@param actual number
+---@param expected number
+---@param eps? number
+---@param msg? string
+function Test.near(actual, expected, eps, msg) end
+---@param msg? string
+function Test.fail(msg) end
+---Функция обязана упасть; needle — кусок текста ошибки.
+---@param fn function
+---@param needle? string
+---@param msg? string
+function Test.errors(fn, needle, msg) end
+---Ждать секунды игрового времени (без учёта timeScale).
+---@param seconds number
+function Test.wait(seconds) end
+---@param n? integer
+function Test.frames(n) end
+---Ждать, пока условие не станет истинным (по умолчанию до 5 с).
+---@param pred fun(): boolean
+---@param timeout? number
+---@param msg? string
+function Test.waitUntil(pred, timeout, msg) end
+---Предел времени этого теста (по умолчанию 30 с).
+---@param seconds number
+function Test.timeout(seconds) end
+---@return number секунды с начала теста
+function Test.elapsed() end
+---@param ... any
+function Test.log(...) end
+---Щелчок мышью по элементу интерфейса (настоящий путь ввода UI).
+---false — элемента на экране нет (спрятан, выключен, за краем).
+---@param element SageObject|string
+---@return boolean
+function Test.click(element) end
+---@param element SageObject|string
+---@param text string
+function Test.type(element, text) end
+---Ползунок: t — доля 0..1 по ширине.
+---@param element SageObject|string
+---@param t number
+function Test.slide(element, t) end
+---Навести курсор; nil — увести (unhovered).
+---@param element SageObject|string|nil
+function Test.hover(element) end
+---Клавиша: down=false — отпустить. Видна со следующего кадра.
+---@param name string
+---@param down? boolean
+function Test.key(name, down) end
 
 ---Звук без объекта: щелчок интерфейса, взрыв в точке мира.
 Audio = {}

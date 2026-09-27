@@ -20,6 +20,7 @@ add_executable(sage_tests
     test_vars_events.cpp
     test_signals.cpp
     test_environment.cpp
+    test_lua_runner.cpp
     test_input.cpp
     test_eventbus.cpp
     test_framegraph.cpp

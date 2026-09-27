@@ -2,7 +2,10 @@
 
 #include <cmath>
 
+#include "sage/physics/PhysicsComponents.h"
 #include "sage/scene/Components.h"
+#include "sage/scripting/ScriptComponent.h"
+#include "sage/scripting/ScriptingSystem.h"
 #include "sage/scene/Scene.h"
 
 // ---------------------------------------------------------------------------
@@ -175,6 +178,7 @@ void RegisterObject(Backend& backend) {
         if (!r.Obj.Valid()) return;
         Scene* scene = SceneOrThrow(*self, "Destroy");
         scene->RemoveObject(r.Obj.Id());
+        self->DropDeadSubscriptions();
     };
 
     // Компоненты: универсальный GetComponent и типизированные короткие пути.
@@ -185,6 +189,108 @@ void RegisterObject(Backend& backend) {
         return self->ComponentOf(r.Obj, "CharacterController");
     };
     ot["GetAnimation"] = [self](ObjectRef& r) { return self->ComponentOf(r.Obj, "Animation"); };
+
+    // --- СБОРКА ОБЪЕКТА ИЗ СКРИПТА -------------------------------------------
+    //
+    // Раньше скрипт нового API мог только ЧИТАТЬ компоненты: ящик, созданный
+    // Scene.Create, так и оставался без тела и коллайдера — падающий предмет,
+    // зону или персонажа собрать кодом было нечем (прежний API это умел, но
+    // его объект с новым не совместим). Теперь — теми же словами, что
+    // GetComponent, с таблицей настроек:
+    //
+    //     crate:AddComponent("RigidBody", {type = "dynamic", mass = 2})
+    //     crate:AddComponent("Collider",  {shape = "box", size = Vector3(1, 1, 1)})
+    //     zone:AddComponent("RigidBody",  {type = "static", sensor = true})
+    ot["AddComponent"] = [self](ObjectRef& r, const std::string& name, sol::optional<sol::table> opts)
+        -> sol::object {
+        Alive(r.Obj, "AddComponent");
+        entt::registry& reg = *r.Obj.Registry();
+        const entt::entity e = r.Obj.Entity();
+        auto str = [&](const char* key, const std::string& def) {
+            return opts ? opts->get_or<std::string>(key, def) : def;
+        };
+        auto num = [&](const char* key, float def) { return opts ? opts->get_or(key, def) : def; };
+        if (name == "RigidBody" || name == "Body") {
+            RigidBodyComponent& rb = reg.get_or_emplace<RigidBodyComponent>(e);
+            const std::string type = str("type", "dynamic");
+            if (type == "static") rb.Type = sage::physics::BodyType::Static;
+            else if (type == "kinematic") rb.Type = sage::physics::BodyType::Kinematic;
+            else if (type == "dynamic") rb.Type = sage::physics::BodyType::Dynamic;
+            else throw std::runtime_error("AddComponent(RigidBody): тип '" + type +
+                                          "' — нужен static, dynamic или kinematic");
+            rb.Mass = num("mass", rb.Mass);
+            rb.Friction = num("friction", rb.Friction);
+            rb.Restitution = num("restitution", rb.Restitution);
+            if (opts) rb.Sensor = opts->get_or("sensor", rb.Sensor);
+            return sol::make_object(self->Lua(), true);
+        }
+        if (name == "Collider") {
+            ColliderComponent& c = reg.get_or_emplace<ColliderComponent>(e);
+            const std::string shape = str("shape", "box");
+            if (shape == "box") c.Shape = sage::physics::ShapeType::Box;
+            else if (shape == "sphere") c.Shape = sage::physics::ShapeType::Sphere;
+            else if (shape == "capsule") c.Shape = sage::physics::ShapeType::Capsule;
+            else throw std::runtime_error("AddComponent(Collider): форма '" + shape +
+                                          "' — нужна box, sphere или capsule");
+            if (opts) {
+                if (sol::optional<glm::vec3> size = (*opts)["size"]) c.HalfExtents = *size * 0.5f;
+                c.Radius = opts->get_or("radius", c.Radius);
+                c.HalfHeight = opts->get_or("halfHeight", c.HalfHeight);
+            }
+            return sol::make_object(self->Lua(), true);
+        }
+        if (name == "CharacterController") {
+            reg.get_or_emplace<CharacterControllerComponent>(e);
+            return self->ComponentOf(r.Obj, "CharacterController");
+        }
+        // Скрипт на объект — и сразу в работу (Start зовётся здесь же):
+        // объект, собранный кодом, не должен ждать перезапуска сцены, чтобы
+        // ожить. Возвращает таблицу нового скрипта (как GetScript).
+        if (name == "Script") {
+            const std::string path = str("path", "");
+            if (path.empty()) throw std::runtime_error("AddComponent(Script): нужен путь — {path = \"assets/scripts/x.lua\"}");
+            ScriptingSystem* system = self->Services().System;
+            if (!system) throw std::runtime_error("AddComponent(Script): система скриптинга не привязана");
+            reg.emplace_or_replace<ScriptComponent>(e).Path = path;
+            if (!system->Attach(r.Obj))
+                throw std::runtime_error("AddComponent(Script): скрипт '" + path + "' не загрузился (причина — в консоли)");
+            return self->ScriptOf(r.Obj);
+        }
+        throw std::runtime_error("AddComponent: компонент '" + name +
+                                 "' из скрипта не добавляется (есть RigidBody, Collider, CharacterController, Script)");
+    };
+    ot["HasComponent"] = [](ObjectRef& r, const std::string& name) {
+        Alive(r.Obj, "HasComponent");
+        entt::registry& reg = *r.Obj.Registry();
+        const entt::entity e = r.Obj.Entity();
+        if (name == "RigidBody" || name == "Body") return reg.all_of<RigidBodyComponent>(e);
+        if (name == "Collider") return reg.all_of<ColliderComponent>(e);
+        if (name == "CharacterController") return reg.all_of<CharacterControllerComponent>(e);
+        if (name == "Script") return reg.all_of<ScriptComponent>(e);
+        if (name == "Light") return reg.all_of<LightComponent>(e);
+        if (name == "Camera") return reg.all_of<CameraComponent>(e);
+        return false;
+    };
+    ot["RemoveComponent"] = [](ObjectRef& r, const std::string& name) {
+        Alive(r.Obj, "RemoveComponent");
+        entt::registry& reg = *r.Obj.Registry();
+        const entt::entity e = r.Obj.Entity();
+        if (name == "RigidBody" || name == "Body") return reg.remove<RigidBodyComponent>(e) > 0;
+        if (name == "Collider") return reg.remove<ColliderComponent>(e) > 0;
+        if (name == "CharacterController") return reg.remove<CharacterControllerComponent>(e) > 0;
+        throw std::runtime_error("RemoveComponent: компонент '" + name + "' из скрипта не снимается");
+    };
+    // Тег — метка для поиска (Scene.FindByTag): «enemy», «pickup».
+    ot["tag"] = sol::property(
+        [](ObjectRef& r) {
+            Alive(r.Obj, "tag");
+            const TagComponent* t = r.Obj.Registry()->try_get<TagComponent>(r.Obj.Entity());
+            return t ? t->Tag : std::string();
+        },
+        [](ObjectRef& r, const std::string& tag) {
+            Alive(r.Obj, "tag");
+            r.Obj.Registry()->get_or_emplace<TagComponent>(r.Obj.Entity()).Tag = tag;
+        });
     ot["GetAudio"] = [self](ObjectRef& r) { return self->ComponentOf(r.Obj, "Audio"); };
     ot["GetCamera"] = [self](ObjectRef& r) { return self->ComponentOf(r.Obj, "Camera"); };
 

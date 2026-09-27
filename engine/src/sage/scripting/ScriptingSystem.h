@@ -124,6 +124,17 @@ public:
     // out — «перезагрузить текущую».
     bool TakeSceneRequest(std::string& name);
 
+    // --- Тесты на языке скриптов (ScriptTests.h) ------------------------------
+    //
+    // Поставить в очередь тесты скрипта объекта (методы test_*). Скрипт уже
+    // должен быть привязан (Attach). Тесты идут в Update, по одному, каждый —
+    // корутиной в настоящих кадрах; результаты копятся в TestResults() и
+    // пишутся в лог категории "Test".
+    int RunTests(GameObject object);
+    int PendingTests() const { return m_runtime.PendingTests(); }
+    const std::vector<TestResult>& TestResults() const { return m_testResults; }
+    void ClearTestResults() { m_testResults.clear(); }
+
     // Горячая перезагрузка изменённых файлов (редактор зовёт каждый кадр).
     int ReloadChanged() { return m_runtime.ReloadChanged(); }
 
@@ -136,6 +147,7 @@ private:
                   const std::string& targetName, const sage::events::Event& event);
 
     ScriptRuntime m_runtime;
+    std::vector<TestResult> m_testResults;
     // Группа шины для связей инспектора: Shutdown снимает их разом.
     int m_linkGroup = sage::events::Bus::NewGroup();
     Scene* m_linkScene = nullptr;

@@ -645,6 +645,11 @@ void EditorLayer::DrawDockspaceAndMenu() {
             if (EditorIcons::MenuItem("pause", T("Pause"), nullptr, m_play.Playing())) PausePlay();
             if (EditorIcons::MenuItem("play", T("Resume"), nullptr, m_play.Paused())) ResumePlay();
             if (EditorIcons::MenuItem("stop", T("Stop"), nullptr, InPlayMode())) StopPlay();
+            ImGui::Separator();
+            // Тесты проекта (*.test.lua) — в настоящем Play, итог в консоли.
+            if (EditorIcons::MenuItem("script", T("Run Lua Tests"), nullptr,
+                                      m_project.Loaded() && !m_luaTests.Running))
+                RunLuaTests();
             ImGui::EndMenu();
         }
         // ОБЪЕКТ — ОДИН КАТАЛОГ НА ВЕСЬ РЕДАКТОР.

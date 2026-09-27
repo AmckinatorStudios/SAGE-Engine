@@ -176,6 +176,31 @@ void ScriptingSystem::Update(float dt) {
     m_debug.Tick(dt);
     m_runtime.Dispatch(Hook::Update, scaled);
     m_runtime.Tick(scaled);
+    // Тесты — ПОСЛЕ Update всех скриптов: тест, ждавший кадр, видит мир уже
+    // обновлённым этим кадром. Время — НЕмасштабированное: тест, проверяющий
+    // Time.timeScale = 0, иначе ждал бы вечно и не дошёл бы до тайм-аута.
+    if (m_runtime.PendingTests() > 0) {
+        std::vector<TestResult> finished;
+        m_runtime.TickTests(dt, finished);
+        for (TestResult& r : finished) {
+            if (r.Passed) {
+                LOG_INFO("Test") << "ok   " << r.Script << " › " << r.Name << " ("
+                                 << r.Frames << " кадр., " << r.Seconds << " с)";
+            } else {
+                // Файл и строка — в начале: консоль редактора открывает по ним
+                // файл на месте ошибки.
+                LOG_ERROR("Test") << (r.File.empty() ? r.Script : r.File)
+                                  << (r.Line > 0 ? ":" + std::to_string(r.Line) : std::string())
+                                  << ": FAIL " << r.Name << " — " << r.Message;
+            }
+            m_testResults.push_back(std::move(r));
+        }
+    }
+}
+
+int ScriptingSystem::RunTests(GameObject object) {
+    if (!object.Valid()) return 0;
+    return m_runtime.QueueTests(object.Entity());
 }
 
 void ScriptingSystem::FixedUpdate(float dt) {
