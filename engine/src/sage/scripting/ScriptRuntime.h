@@ -105,6 +105,9 @@ public:
     bool Invoke(entt::entity entity, const std::string& method,
                 const std::vector<sage::vars::Value>& args);
 
+    // Метод скрипта объекта как обработчик сигнала (связи инспектора).
+    bool InvokeEvent(entt::entity entity, const std::string& method, const sage::events::Event& event);
+
     // Включение/выключение объекта: хуки OnEnable/OnDisable зовутся ровно на
     // КРАЮ, а не каждый кадр, пока объект включён.
     void SetEnabled(entt::entity entity, bool enabled);

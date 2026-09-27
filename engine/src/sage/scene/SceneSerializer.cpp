@@ -28,8 +28,8 @@
 using json = nlohmann::json;
 
 // Переменные и связи в JSON — общий словарь (см. SceneValueJson.h).
-using sage::scene::BindingsFromJson;
-using sage::scene::BindingsToJson;
+using sage::scene::LinksFromJson;
+using sage::scene::LinksToJson;
 using sage::scene::ValueFromJson;
 using sage::scene::ValueToJson;
 using sage::scene::VarsFromJson;
@@ -1248,6 +1248,9 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const AudioSourceComponent* au = reg.try_get<AudioSourceComponent>(e)) SaveAudio(j, *au);
         if (const VarsComponent* vc = reg.try_get<VarsComponent>(e))
             if (!vc->Values.Empty()) j["vars"] = VarsToJson(vc->Values);
+        if (const sage::signals::SignalLinksComponent* sl =
+                reg.try_get<sage::signals::SignalLinksComponent>(e))
+            if (!sl->Links.empty()) j["signalLinks"] = LinksToJson(sl->Links);
         // Элемент и его компоненты — общей записью (см. sage/ui/UISerialize.h):
         // тот же формат, каким интерфейс ложится в отдельный ресурс .sageui.
         if (json ui; sage::ui::SaveElement(ui, reg, e)) j["ui"] = std::move(ui);
@@ -1399,6 +1402,16 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             VarsFromJson(j["vars"], vc.Values);
             if (!vc.Values.Empty())
                 obj.Registry()->emplace_or_replace<VarsComponent>(obj.Entity(), std::move(vc));
+        }
+        if (j.contains("signalLinks")) {
+            // ДОБАВЛЕНИЕМ, а не заменой: связи, переведённые из старого формата
+            // при чтении "ui" выше, не должны пропасть.
+            std::vector<sage::signals::Link> links;
+            LinksFromJson(j["signalLinks"], links);
+            if (!links.empty()) {
+                auto& sl = obj.Registry()->get_or_emplace<sage::signals::SignalLinksComponent>(obj.Entity());
+                sl.Links.insert(sl.Links.end(), links.begin(), links.end());
+            }
         }
         if (j.contains("interface")) {
             const json& ij = j["interface"];

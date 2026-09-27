@@ -286,6 +286,46 @@ TEST(ColorPicker_context_menu_paste_is_one_undo_step) {
     cp::ClearRecent();
 }
 
+// Открытое меню НЕ читает буфер обмена каждый кадр. На Windows буфер с
+// картинкой (не текстом) GLFW на каждое чтение отвечает ошибкой, и открытое
+// меню засыпало ею лог — «Failed to convert clipboard to string (x1369)».
+namespace {
+int g_clipReads = 0;
+const char* CountingClipboard(ImGuiContext*) {
+    ++g_clipReads;
+    return "#ff8000";
+}
+} // namespace
+
+TEST(ColorPicker_context_menu_reads_the_clipboard_once_per_opening) {
+    Harness h;
+    float col[3] = {0.1f, 0.1f, 0.1f};
+    ImVec2 fieldMin, fieldMax;
+    auto draw = [&]() {
+        ImGui::SetNextItemWidth(240.0f);
+        Sage::UI::ColorField3("Tint", col);
+        fieldMin = ImGui::GetItemRectMin();
+        fieldMax = ImGui::GetItemRectMax();
+    };
+    auto frames = [&](int n) { for (int i = 0; i < n; ++i) h.Frame(draw); };
+    frames(3);
+    ImGuiPlatformIO& pio = ImGui::GetPlatformIO();
+    auto saved = pio.Platform_GetClipboardTextFn;
+    pio.Platform_GetClipboardTextFn = &CountingClipboard;
+    g_clipReads = 0;
+    h.Move(ImVec2(fieldMin.x + 20.0f, (fieldMin.y + fieldMax.y) * 0.5f));
+    frames(1);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, true);
+    frames(1);
+    ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Right, false);
+    frames(30);                                   // меню висит открытым полсекунды
+    const cp::MenuLayout menu = cp::LastMenuLayout();
+    CHECK_TRUE(menu.Paste.Max.y > menu.Paste.Min.y);
+    std::printf("       чтений буфера за 30 кадров открытого меню: %d\n", g_clipReads);
+    CHECK_TRUE(g_clipReads >= 1 && g_clipReads <= 2);
+    pio.Platform_GetClipboardTextFn = saved;
+}
+
 // ПИПЕТКА: цвет под курсором ЗА ОКНОМ берётся у системы (здесь — поддельный
 // бэкенд), щелчок кладёт его в поле одной правкой. Кнопку, запустившую
 // пипетку, надо сначала отпустить; Esc отменяет, ничего не меняя.

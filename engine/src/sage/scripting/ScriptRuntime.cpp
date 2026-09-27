@@ -283,7 +283,16 @@ void ScriptRuntime::Dispatch(Hook hook, float dt) {
     for (size_t i = 0; i < count && i < m_scripts.size(); ++i) {
         LiveScript& s = m_scripts[i];
         if (s.Dead || s.Muted || !s.Enabled) continue;
-        if (!s.Owner.Valid()) { s.Dead = true; m_dirtyIndex = true; continue; }
+        if (!s.Owner.Valid()) {
+            // Объект уничтожен: экземпляр уходит СРАЗУ, а с ним — его подписки
+            // на сигналы. Раньше он только помечался и оставался жить в языке:
+            // его обработчики звались бы на чужие щелчки с мёртвым self.
+            if (s.Instance != kInvalidInstance) s.Backend->Destroy(s.Instance);
+            s.Instance = kInvalidInstance;
+            s.Dead = true;
+            m_dirtyIndex = true;
+            continue;
+        }
         if (!s.Backend->Has(s.Instance, hook)) continue;
         ScriptError err;
         Guard(s, s.Backend->Call(s.Instance, hook, dt, err), err, hook);
@@ -313,6 +322,19 @@ bool ScriptRuntime::Invoke(entt::entity entity, const std::string& method,
     if (!s) return false;
     ScriptError err;
     const bool ok = s->Backend->Invoke(s->Instance, method, args, err);
+    if (!ok && !err.Empty()) {
+        if (err.File.empty()) err.File = s->Path;
+        Report(err);
+    }
+    return ok;
+}
+
+bool ScriptRuntime::InvokeEvent(entt::entity entity, const std::string& method,
+                                const sage::events::Event& event) {
+    LiveScript* s = Find(entity);
+    if (!s) return false;
+    ScriptError err;
+    const bool ok = s->Backend->InvokeEvent(s->Instance, method, event, err);
     if (!ok && !err.Empty()) {
         if (err.File.empty()) err.File = s->Path;
         Report(err);

@@ -194,6 +194,10 @@ void RegisterObject(Backend& backend) {
     ot["Call"] = [self](ObjectRef& r, const std::string& method, sol::variadic_args args) {
         return self->InvokeOn(r.Obj, method, args);
     };
+
+    // Сигналы (`obj.clicked`, obj:on/emit) и интерфейс как часть объекта
+    // (text, visible, enabled) — см. LuaApi_Signals.cpp.
+    RegisterObjectSignals(backend, ot);
 }
 
 Scene* SceneOrThrow(Backend& backend, const char* who) {

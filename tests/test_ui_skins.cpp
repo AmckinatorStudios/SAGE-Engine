@@ -423,7 +423,6 @@ TEST(UISkin_each_part_shows_few_settings_up_front) {
         int upFront = 0;
         for (const auto& f : fields) {
             if (f.Hidden || f.Advanced || f.Tab || f.LookKey) continue;   // поля вида — внутри его группы
-            if (f.Type == sage::ui::PartField::Kind::Bindings) continue;   // события — своим разделом
             if (!sage::ui::FieldVisible(fields, f, data)) continue;
             ++upFront;
         }

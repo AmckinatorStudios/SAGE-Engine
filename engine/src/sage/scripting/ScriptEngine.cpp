@@ -29,6 +29,31 @@ ScriptEngine::ScriptEngine() {
     m_lua["package"]["path"] = "";
     m_lua["package"]["cpath"] = "";
     RegisterModuleLoader();
+    // Подписчики sage.events получают НАГРУЗКУ: ту таблицу, что послал
+    // скрипт, или — для события из C++ (кнопка, движок) — таблицу {value,
+    // sender, object}, чтобы обработчик знал, КТО прислал.
+    m_events = std::make_unique<sage::scripting::LuaHandlerStore>(
+        [this](const sol::protected_function& fn, const sage::events::Event& e, int) {
+            sol::object payload;
+            if (const sol::object* raw = std::any_cast<sol::object>(&e.Payload)) {
+                payload = *raw;
+            } else {
+                sol::table t = m_lua.create_table();
+                t["value"] = ValueToLua(e.Arg);
+                t["sender"] = e.Sender;
+                if (m_scene && e.Sender > 0) {
+                    GameObject from = m_scene->Get(e.Sender);
+                    if (from.Valid()) t["object"] = from;
+                }
+                payload = t;
+            }
+            sol::protected_function_result r = payload.valid() ? fn(payload) : fn();
+            if (!r.valid()) {
+                const sol::error err = r;
+                LOG_ERROR("ScriptEngine") << "Ошибка в обработчике события '" << e.Name
+                                          << "': " << err.what();
+            }
+        });
     RegisterEngineApi();
 }
 

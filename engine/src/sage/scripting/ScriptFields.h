@@ -1,5 +1,6 @@
 #pragma once
 #include <string>
+#include <vector>
 
 #include "sage/vars/Table.h"
 
@@ -17,5 +18,11 @@
 namespace sage::scripting {
 
 sage::vars::Table ParseFields(const std::string& path, const std::string& source);
+
+// Методы, которые скрипт объявляет, — для выбора «Target.Method» в связи
+// инспектора. Тоже ТЕКСТОМ: связь настраивают, пока игра не запущена. Хуки
+// жизненного цикла (Start, Update, OnCollisionEnter…) в список не входят —
+// звать их связью значит ломать порядок кадра, который им обещан.
+std::vector<std::string> ParseMethods(const std::string& path, const std::string& source);
 
 } // namespace sage::scripting

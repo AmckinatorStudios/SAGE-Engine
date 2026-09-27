@@ -14,7 +14,8 @@
 #include "sage/scene/Scene.h"
 
 // ---------------------------------------------------------------------------
-// РАЗДЕЛЫ API: Input, Time, Debug, Scene, Physics, Events, Audio.
+// РАЗДЕЛЫ API: Input, Time, Debug, Scene, Physics, Audio (Events и UI — в
+// LuaApi_Signals.cpp).
 //
 // Не сотня глобальных функций, а несколько именованных разделов — иначе
 // подсказка редактора превращается в список несвязанных имён, а игра,
@@ -376,55 +377,8 @@ void RegisterGlobals(Backend& backend) {
     });
     lua["Physics"] = physics;
 
-    // =======================================================================
-    //  Events — одна шина на всех: кнопка интерфейса, скрипт и код на C++
-    // =======================================================================
-    sol::table events = lua.create_table();
-    events.set_function("Emit", [self](sol::variadic_args va) {
-        Scene* s = SceneOrThrow(*self, "Events:Emit");
-        const size_t b = Skip(va);
-        const std::string name = Str(va, b);
-        if (name.empty()) return;
-        sage::vars::Value arg;
-        if (b + 1 < va.size()) arg = self->FromLua(va[b + 1]);
-        s->Events.Emit(name, arg);
-    });
-    events.set_function("On", [self](sol::variadic_args va) {
-        Scene* s = SceneOrThrow(*self, "Events:On");
-        const size_t b = Skip(va);
-        const std::string name = Str(va, b);
-        if (name.empty() || b + 1 >= va.size()) return 0;
-        sol::protected_function fn = va[b + 1].as<sol::protected_function>();
-        Backend* backend = self;
-        return s->Events.On(name, [backend, fn](const sage::events::Event& e) {
-            sol::protected_function_result r = fn(backend->ToLua(e.Arg));
-            if (!r.valid()) {
-                sol::error err = r;
-                LOG_ERROR("Lua") << "обработчик события " << e.Name << ": " << err.what();
-            }
-        });
-    });
-    events.set_function("Once", [self](sol::variadic_args va) {
-        Scene* s = SceneOrThrow(*self, "Events:Once");
-        const size_t b = Skip(va);
-        const std::string name = Str(va, b);
-        if (name.empty() || b + 1 >= va.size()) return 0;
-        sol::protected_function fn = va[b + 1].as<sol::protected_function>();
-        Backend* backend = self;
-        return s->Events.Once(name, [backend, fn](const sage::events::Event& e) {
-            sol::protected_function_result r = fn(backend->ToLua(e.Arg));
-            if (!r.valid()) {
-                sol::error err = r;
-                LOG_ERROR("Lua") << "обработчик события " << e.Name << ": " << err.what();
-            }
-        });
-    });
-    events.set_function("Off", [self](sol::variadic_args va) {
-        Scene* s = SceneOrThrow(*self, "Events:Off");
-        const size_t b = Skip(va);
-        s->Events.Off((int)Num(va, b));
-    });
-    lua["Events"] = events;
+    // Events — в LuaApi_Signals.cpp: глобальные события — те же сигналы, что у
+    // объектов, и описаны вместе с ними.
 
     // =======================================================================
     //  Audio — звук БЕЗ объекта: щелчок интерфейса, взрыв в точке мира

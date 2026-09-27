@@ -3,6 +3,7 @@
 #include <memory>
 
 #include "sage/render/DebugLines.h"
+#include "sage/scene/Signals.h"
 #include "sage/scripting/ScriptRuntime.h"
 
 class Scene;
@@ -71,6 +72,18 @@ public:
         if (object.Valid()) m_runtime.Detach(object.Entity());
     }
 
+    // --- Связи сигналов из инспектора ----------------------------------------
+    //
+    // «On Click → Menu.start_game()» — данные сцены (SignalLinksComponent).
+    // При запуске каждая связь становится ОБЫЧНЫМ соединением шины сцены — тем
+    // же, что заводит `button.clicked:connect(...)` из скрипта. Отдельного
+    // исполнителя связей нет: инспектор — только оболочка над тем же бэкендом.
+    //
+    // AttachScene ставит связи сама (после скриптов: связь сразу проверяет,
+    // есть ли у цели метод). Возвращает, сколько поставлено.
+    int InstallLinks(Scene& scene);
+    int InstallLinks(Scene& scene, entt::entity only);
+
     // --- Кадр ----------------------------------------------------------------
 
     // Update всех скриптов + тик рантаймов языков. dt — НЕмасштабированный:
@@ -118,7 +131,17 @@ public:
     void Shutdown();
 
 private:
+    int InstallLinksOf(Scene& scene, entt::entity e);
+    void CallLink(Scene& scene, const sage::signals::Link& link, const std::string& ownerName,
+                  const std::string& targetName, const sage::events::Event& event);
+
     ScriptRuntime m_runtime;
+    // Группа шины для связей инспектора: Shutdown снимает их разом.
+    int m_linkGroup = sage::events::Bus::NewGroup();
+    Scene* m_linkScene = nullptr;
+    // Замыкания связей в шине держат слабую ссылку на это: система ушла — они
+    // молча ничего не делают (шина сцены живёт дольше системы).
+    std::shared_ptr<int> m_alive = std::make_shared<int>(0);
     ScriptClock m_clock;
     sage::render::DebugLines m_debug;
     float m_fixedAccum = 0.0f;

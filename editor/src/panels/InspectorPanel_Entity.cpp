@@ -13,6 +13,7 @@
 #include "EditorTheme.h"
 #include "ui/UI.h"
 #include "InspectorPanel.h"
+#include "../SignalLinksEditor.h"
 #include "../UIElementProperties.h"
 
 #include <cmath>
@@ -33,6 +34,7 @@
 #include "sage/core/Paths.h"
 #include "VarsEditor.h"
 #include "sage/core/Log.h"
+#include "sage/scene/Signals.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/physics/PhysicsScene.h"
 #include <algorithm>
@@ -1304,6 +1306,23 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     if (reg.all_of<sage::ui::Element>(obj.Entity()) &&
         EditorTheme::SectionHeader("layout", T("UI Element" "###UI Element"), ImGuiTreeNodeFlags_DefaultOpen)) {
         DrawUIElement(host, obj);
+    }
+
+    // --- СОБЫТИЯ: «On Click → Menu.start_game()» -----------------------------
+    //
+    // У ЛЮБОГО объекта, а не только у кнопки: сигналы объявляют компоненты
+    // (кнопка — clicked, тело — collision), а своё событие (`obj:emit(...)`)
+    // бывает у чего угодно. Раскрыта сразу, только если есть что показать:
+    // пустая раскрытая секция у каждого камня — шум.
+    {
+        const bool any = reg.all_of<sage::signals::SignalLinksComponent>(obj.Entity()) ||
+                         !sage::signals::Of(reg, obj.Entity()).empty();
+        if (EditorTheme::SectionHeader("anim", T("Events" "###Events"),
+                                       any ? ImGuiTreeNodeFlags_DefaultOpen : 0, nullptr,
+                                       T("What happens when this object's events fire: call a method "
+                                         "of a script"))) {
+            sage::editor::DrawSignalLinks(host, obj);
+        }
     }
 
     // --- Снятие компонентов: ОДНО место, в конце ----------------------------

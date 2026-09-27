@@ -75,6 +75,7 @@
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/events/Events.h"
+#include "sage/scene/Signals.h"
 #include "sage/vars/VarsComponent.h"
 #include "UILayoutOps.h"
 #include "EditorPrefs.h"
@@ -7297,7 +7298,7 @@ bool EditorLayer::SelfTestTools() {
             doorScript->Fields.Set("target", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
         }
 
-        // Кнопка со связью: щёлкнули — послала событие и позвала метод двери.
+        // Кнопка со связью из инспектора: «On Click → SelfTestDoor.Open()».
         GameObject button = m_scene->CreateObject("SelfTestButton");
         {
             sage::ui::Element t;
@@ -7306,15 +7307,13 @@ bool EditorLayer::SelfTestTools() {
             t.Size = {200.0f, 100.0f};
             m_scene->Registry().emplace_or_replace<sage::ui::Element>(button.Entity(), t);
             m_scene->Registry().emplace_or_replace<sage::ui::Fill>(button.Entity());
-            sage::ui::Interactable& act =
-                m_scene->Registry().emplace_or_replace<sage::ui::Interactable>(button.Entity());
-            sage::events::Binding b;
-            b.Trigger = "click";
-            b.Event = "selftest.open";
-            b.Target = sage::vars::EntityRef{door.Id()};
-            b.Method = "Open";
-            b.Arg = sage::vars::Value(std::string("тихо"));
-            act.Events.push_back(b);
+            m_scene->Registry().emplace_or_replace<sage::ui::Interactable>(button.Entity());
+            sage::signals::Link link;
+            link.Signal = sage::signals::kClicked;
+            link.Target = sage::vars::EntityRef{door.Id()};
+            link.Method = "Open";
+            m_scene->Registry().emplace_or_replace<sage::signals::SignalLinksComponent>(button.Entity())
+                .Links.push_back(link);
         }
 
         // Сохранение и загрузка: связи и переменные — данные, и терять их при
@@ -7347,15 +7346,25 @@ bool EditorLayer::SelfTestTools() {
                 ok = false;
             }
 
-            // ЩЕЛЧОК: кнопка обязана послать событие САМА.
+            // Связь пережила запись — со своей целью и методом.
+            const sage::signals::SignalLinksComponent* links =
+                loadedBtn.Valid()
+                    ? m_scene->Registry().try_get<sage::signals::SignalLinksComponent>(loadedBtn.Entity())
+                    : nullptr;
+            if (!links || links->Links.size() != 1 || links->Links[0].Signal != "clicked" ||
+                links->Links[0].Target.Id != loadedDoor.Id() || links->Links[0].Method != "Open") {
+                LOG_ERROR("Editor") << "SELFTEST: связь «On Click» не пережила сохранение";
+                ok = false;
+            }
+
+            // ЩЕЛЧОК: кнопка обязана послать СВОЙ сигнал clicked сама.
             int heard = 0;
-            std::string arg;
             int sender = 0;
-            m_scene->Events.On("selftest.open", [&](const sage::events::Event& e) {
-                ++heard;
-                arg = e.Arg.AsString();
-                sender = e.Sender;
-            });
+            const int conn = m_scene->Events.Connect(loadedBtn.Id(), sage::signals::kClicked,
+                                                     [&](const sage::events::Event& e) {
+                                                         ++heard;
+                                                         sender = e.Sender;
+                                                     });
             sage::ui::UIInputState down;
             down.Mouse = {50.0f, 50.0f};
             down.MouseDown = true;
@@ -7366,8 +7375,9 @@ bool EditorLayer::SelfTestTools() {
             up.MouseReleased = true;
             sage::ui::UpdateSceneUI(*m_scene, up, 1280, 720);
 
-            if (heard != 1 || arg != "тихо") {
-                LOG_ERROR("Editor") << "SELFTEST: кнопка не послала своё событие (получено "
+            m_scene->Events.Disconnect(conn);
+            if (heard != 1) {
+                LOG_ERROR("Editor") << "SELFTEST: кнопка не послала сигнал clicked (получено "
                                     << heard << ")";
                 ok = false;
             } else if (loadedBtn.Valid() && sender != loadedBtn.Id()) {
@@ -7395,18 +7405,15 @@ bool EditorLayer::SelfTestTools() {
             m_scene->Registry().emplace_or_replace<VarsComponent>(knob.Entity()).Values;
         vars.Set("opens", sage::vars::Value(sage::vars::EntityRef{door.Id()}));
         vars.Set("watch", sage::vars::Value(sage::vars::EntityRef{outsider.Id()}));
-        sage::events::Binding b;
-        b.Trigger = "click";
-        b.Event = "prefab.open";
+        sage::signals::Link b;
+        b.Signal = sage::signals::kClicked;
         b.Target = sage::vars::EntityRef{door.Id()};
         b.Method = "Open";
-        // Прямоугольник обязателен: без него сущность не элемент интерфейса, и
-        // сериализатор её части не пишет (см. SaveUIComponents). Кнопка без
-        // прямоугольника — не кнопка, и проверять на такой нечего.
         m_scene->Registry().emplace_or_replace<sage::ui::Element>(knob.Entity());
+        m_scene->Registry().emplace_or_replace<sage::ui::Interactable>(knob.Entity());
         m_scene->Registry()
-            .emplace_or_replace<sage::ui::Interactable>(knob.Entity())
-            .Events.push_back(b);
+            .emplace_or_replace<sage::signals::SignalLinksComponent>(knob.Entity())
+            .Links.push_back(b);
 
         const fs::path pf = m_project.AssetsDir() / "selftest_door.sageprefab";
         std::string perr;
@@ -7432,13 +7439,13 @@ bool EditorLayer::SelfTestTools() {
                     const entt::entity copyKnob = h->Children[0];
                     const VarsComponent* cv =
                         m_scene->Registry().try_get<VarsComponent>(copyKnob);
-                    const sage::ui::Interactable* ca =
-                        m_scene->Registry().try_get<sage::ui::Interactable>(copyKnob);
+                    const sage::signals::SignalLinksComponent* ca =
+                        m_scene->Registry().try_get<sage::signals::SignalLinksComponent>(copyKnob);
                     if (!cv || cv->Values.Get("opens").AsEntity().Id != copy.Id()) {
                         LOG_ERROR("Editor") << "SELFTEST: ссылка внутри копии ведёт не в копию";
                         ok = false;
                     }
-                    if (!ca || ca->Events.empty() || ca->Events[0].Target.Id != copy.Id()) {
+                    if (!ca || ca->Links.empty() || ca->Links[0].Target.Id != copy.Id()) {
                         LOG_ERROR("Editor") << "SELFTEST: адресат связи в копии не переписан";
                         ok = false;
                     }

@@ -10,6 +10,7 @@
 #include "UIIcons.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
+#include "sage/scene/Signals.h"
 #include <algorithm>
 #include <cmath>
 #include <vector>
@@ -760,30 +761,36 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         }
     }
 
-    // СВЯЗИ СОБЫТИЙ. Кнопка делает то, что у неё настроено, САМА — не дожидаясь
-    // скрипта, который каждый кадр спрашивал бы «не нажали ли». Отправка идёт в
-    // шину сцены (Scene::Events), которую слушают и Lua, и код на C++.
+    // СИГНАЛЫ ЭЛЕМЕНТОВ (sage/scene/Signals.h). Кнопка не знает, что за ней
+    // последует: она сообщает «меня нажали» (clicked), а что делать — решают
+    // подписчики: скрипт или связь из инспектора, одним механизмом шины.
     //
-    // Отправитель — Id элемента: без него обработчик «нажали кнопку» не узнает,
-    // КАКУЮ нажали, и каждой кнопке пришлось бы придумывать своё имя события.
-    auto fire = [&](entt::entity e, const char* trigger) {
-        const Interactable* act = reg.try_get<Interactable>(e);
-        if (!act || act->Events.empty()) return;
-        const int sender = reg.all_of<IdComponent>(e) ? reg.get<IdComponent>(e).Id : 0;
-        for (const sage::events::Binding* b : sage::events::ForTrigger(act->Events, trigger)) {
-            sage::events::Event ev;
-            // Имя события не задано — берём имя триггера: связь, у которой
-            // забыли вписать событие, должна быть заметна, а не молчать.
-            ev.Name = b->Event.empty() ? std::string(trigger) : b->Event;
-            ev.Arg = b->Arg;
-            ev.Sender = sender;
-            // Адресная часть едет В ТОМ ЖЕ событии: настроить связь дважды —
-            // отдельно «кому» и отдельно «что» — значит однажды поправить одно
-            // и забыть другое.
-            ev.Target = b->Target;
-            ev.Method = b->Method;
-            scene.Events.Emit(ev);
+    // Рассылаются ПОСЛЕ прохода, а не посреди него: обработчик волен удалить
+    // элемент, спрятать панель или собрать новую, а проход держит список
+    // элементов кадра — удалённый посреди цикла стал бы висячей сущностью.
+    // Задержки на кадр это не добавляет: всё уходит до возврата из функции.
+    struct Pending {
+        int Id;
+        const char* Signal;
+        sage::vars::Value Arg;
+    };
+    struct Flush {
+        Scene& S;
+        std::vector<Pending> Queue;
+        ~Flush() {
+            for (const Pending& p : Queue) S.Events.EmitSignal(p.Id, p.Signal, p.Arg);
         }
+    } signals{scene, {}};
+    auto fire = [&](entt::entity e, const char* signal, sage::vars::Value arg = {}) {
+        if (!reg.valid(e) || !reg.all_of<IdComponent>(e)) return;
+        signals.Queue.push_back({reg.get<IdComponent>(e).Id, signal, std::move(arg)});
+    };
+    // Значение для value_changed: галка — да/нет, ползунок — число.
+    auto rangeValue = [&](entt::entity e) {
+        const Range* r = reg.try_get<Range>(e);
+        if (!r) return sage::vars::Value();
+        if (r->Toggle) return sage::vars::Value(r->Value >= (r->Min + r->Max) * 0.5f);
+        return sage::vars::Value(r->Value);
     };
 
     // Флаги «за этот кадр» гасим у всех: их читает игра сразу после нас, и
@@ -797,8 +804,8 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
             // Вход и выход курсора — отдельные события: подсветка соседа,
             // подсказка и звук наведения нужны именно на переходе, а не каждый
             // кадр, пока курсор стоит на месте.
-            if (st->Hovered && !wasHovered) fire(it.Entity, "hoverIn");
-            if (!st->Hovered && wasHovered) fire(it.Entity, "hoverOut");
+            if (st->Hovered && !wasHovered) fire(it.Entity, sage::signals::kHovered);
+            if (!st->Hovered && wasHovered) fire(it.Entity, sage::signals::kUnhovered);
             // Pressed здесь НЕ сбрасываем: в кадре отпускания кнопка уже не
             // удерживается, и сброс до разбора отпускания съел бы сам щелчок.
         }
@@ -808,7 +815,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     if (input.MousePressed) {
         if (hovered != entt::null) {
             result.PressedAction = reg.get<Interactable>(hovered).Action;
-            fire(hovered, "press");
+            fire(hovered, sage::signals::kPressed);
         }
         for (const Solved& it : items) {
             State* st = stateOf(it.Entity);
@@ -833,7 +840,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         // Отпустили НАД этим элементом — независимо от того, где нажали.
         // Именно этим щелчок отличается от переноса, и знать надо оба.
         result.ReleasedAction = reg.get<Interactable>(hovered).Action;
-        fire(hovered, "release");
+        fire(hovered, sage::signals::kReleased);
         if (State* st = stateOf(hovered)) {
             if (st->Pressed) {
                 st->Clicked = true;
@@ -846,10 +853,10 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
                     range->Value = range->Value >= mid ? range->Min : range->Max;
                     st->Changed = true;
                 }
-                fire(hovered, "click");
+                fire(hovered, sage::signals::kClicked);
                 // Значение изменилось щелчком по галке — это то же «change»,
                 // что и у ползунка: слушателю всё равно, чем его подвинули.
-                if (st->Changed) fire(hovered, "change");
+                if (st->Changed) fire(hovered, sage::signals::kValueChanged, rangeValue(hovered));
             }
         }
     }
@@ -871,7 +878,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         if (v != range->Value) {
             range->Value = v;
             st->Changed = true;
-            fire(it.Entity, "change");
+            fire(it.Entity, sage::signals::kValueChanged, rangeValue(it.Entity));
         }
         result.WantsMouse = true;
     }
@@ -886,6 +893,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         st->CaretBlink += input.DeltaTime;
         st->Caret = glm::clamp(st->Caret, 0, (int)lbl->Text.size());
         if (field->ReadOnly) continue;   // показывать можно, править нельзя
+        const std::string textBefore = lbl->Text;
 
         if (!input.TypedText.empty()) {
             const bool room = field->MaxLength <= 0 ||
@@ -915,6 +923,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         if (input.Home) { st->Caret = 0; st->CaretBlink = 0.0f; }
         if (input.End) { st->Caret = (int)lbl->Text.size(); st->CaretBlink = 0.0f; }
         if (input.Enter || input.Escape) st->Focused = false;
+        if (lbl->Text != textBefore) fire(it.Entity, sage::signals::kTextChanged, sage::vars::Value(lbl->Text));
     }
 
     // Сглаживание полос: значение едет к цели, а не прыгает.

@@ -352,7 +352,13 @@ private:
         std::vector<entt::entity> kids;
         if (auto* h = m_registry.try_get<HierarchyComponent>(e)) kids = h->Children;
         for (auto k : kids) DestroySubtree(k);
-        if (auto* idc = m_registry.try_get<IdComponent>(e)) m_idToEntity.erase(idc->Id);
+        if (auto* idc = m_registry.try_get<IdComponent>(e)) {
+            m_idToEntity.erase(idc->Id);
+            // Сигналы уничтоженного объекта больше некому слать, а их
+            // обработчики держат замыкания (функции скриптов, ссылки на
+            // другие объекты) — снимаем сразу, а не «когда-нибудь».
+            Events.DisconnectObject(idc->Id);
+        }
         if (m_registry.valid(e)) m_registry.destroy(e);
     }
 

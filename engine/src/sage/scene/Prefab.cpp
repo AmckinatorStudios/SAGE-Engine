@@ -6,6 +6,7 @@
 
 #include "sage/core/Log.h"
 #include "sage/scene/Components.h"
+#include "sage/scene/Signals.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPart.h"
 #include "sage/vars/Refs.h"
@@ -85,6 +86,8 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     // Публичные переменные едут с объектом: префаб без своих настроек — это
     // объект, который после постановки в сцену надо настраивать заново.
     CopyIfPresent<VarsComponent>(src, dst);
+    // Связи сигналов — тоже: кнопка из префаба без своих «On Click» — мёртвая.
+    CopyIfPresent<sage::signals::SignalLinksComponent>(src, dst);
     CopyIfPresent<CameraComponent>(src, dst);
     CopyIfPresent<LightComponent>(src, dst);
     CopyIfPresent<RigidBodyComponent>(src, dst);

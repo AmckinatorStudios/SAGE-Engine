@@ -1,5 +1,5 @@
-// Шина событий: типизированные события, сроки жизни и правила «когда — если —
-// то» (sage/events).
+// Шина событий: типизированные события и сроки жизни (sage/events).
+// Сигналы объектов и связи — tests/test_signals.cpp.
 //
 // Проверяется то, ради чего шина существует: подсистемы разговаривают, не зная
 // друг о друге; удаление объекта из обработчика не роняет игру; цепочка
@@ -11,18 +11,12 @@
 
 #include "sage/events/EventTypes.h"
 #include "sage/events/Events.h"
-#include "sage/events/Rules.h"
 #include "sage/events/TypedBus.h"
 
-using sage::events::Binding;
 using sage::events::Bus;
-using sage::events::Compare;
-using sage::events::Condition;
 using sage::events::DamageEvent;
 using sage::events::DeathEvent;
 using sage::events::Event;
-using sage::events::Rule;
-using sage::events::RuleSet;
 using sage::events::TypedBus;
 using sage::vars::Value;
 
@@ -168,155 +162,4 @@ TEST(Events_clearing_the_bus_drops_pending_events) {
     bus.Clear();
     bus.DispatchQueued();
     CHECK_EQ(seen, 0);
-}
-
-// ===========================================================================
-//  ПРАВИЛА: КОГДА — ЕСЛИ — ТО
-// ===========================================================================
-
-namespace {
-
-// Мир, из которого правила берут значения. В игре это сцена, в тесте —
-// таблица: правило не знает разницы, и в этом весь смысл резолвера.
-struct FakeWorld {
-    bool DoorLocked = true;
-    bool HasKey = false;
-
-    sage::events::Resolver Lookup() {
-        return [this](const std::string& var) -> Value {
-            if (var == "Door.IsLocked") return Value(DoorLocked);
-            if (var == "Player.HasKey") return Value(HasKey);
-            return Value();
-        };
-    }
-};
-
-Rule MakeOpenDoorRule() {
-    Rule rule;
-    rule.Name = "Открыть дверь";
-    rule.When = "Interact";
-    rule.If.push_back(Condition{"Door.IsLocked", Compare::IsFalse, Value()});
-    Binding open;
-    open.Event = "DoorOpened";
-    rule.Then.push_back(open);
-    return rule;
-}
-
-} // namespace
-
-// «КОГДА взаимодействие, ЕСЛИ дверь не заперта, ТО открыть» — та самая
-// цепочка из ТЗ, собранная данными, а не кодом.
-TEST(Events_a_rule_fires_only_when_its_condition_holds) {
-    Bus bus;
-    FakeWorld world;
-    RuleSet rules;
-    rules.SetResolver(world.Lookup());
-    rules.Add(MakeOpenDoorRule());
-    rules.Install(bus);
-
-    int opened = 0;
-    bus.On("DoorOpened", [&](const Event&) { ++opened; });
-
-    bus.Emit("Interact");
-    CHECK_EQ(opened, 0);   // заперта — правило молчит
-
-    world.DoorLocked = false;
-    bus.Emit("Interact");
-    CHECK_EQ(opened, 1);
-    CHECK_EQ(rules.FiredCount(), 1);
-}
-
-// Правило, которому нечем проверить условие, обязано молчать, а не открывать
-// дверь наугад.
-TEST(Events_a_rule_without_a_resolver_stays_silent) {
-    Bus bus;
-    RuleSet rules;
-    rules.Add(MakeOpenDoorRule());
-    rules.Install(bus);
-
-    int opened = 0;
-    bus.On("DoorOpened", [&](const Event&) { ++opened; });
-    bus.Emit("Interact");
-    CHECK_EQ(opened, 0);
-}
-
-// «ТО» одного правила — «КОГДА» другого: цепочка получается сама собой, и ни
-// одно правило не знает о существовании соседа (§17 ТЗ).
-TEST(Events_rules_chain_through_the_bus) {
-    Bus bus;
-    FakeWorld world;
-    world.DoorLocked = false;
-    RuleSet rules;
-    rules.SetResolver(world.Lookup());
-    rules.Add(MakeOpenDoorRule());
-
-    Rule sound;
-    sound.Name = "Звук двери";
-    sound.When = "DoorOpened";
-    Binding play;
-    play.Event = "PlaySound";
-    play.Arg = Value(std::string("door_open"));
-    sound.Then.push_back(play);
-    rules.Add(sound);
-    rules.Install(bus);
-
-    std::string played;
-    bus.On("PlaySound", [&](const Event& e) { played = e.Arg.AsString(); });
-
-    bus.Emit("Interact");
-    CHECK_EQ(played, std::string("door_open"));
-}
-
-TEST(Events_rule_conditions_compare_numbers_and_strings) {
-    FakeWorld world;
-    auto resolver = [](const std::string& var) -> Value {
-        if (var == "Player.Health") return Value(30);
-        if (var == "Door.State") return Value(std::string("closed"));
-        return Value();
-    };
-    CHECK_TRUE(sage::events::TestCondition({"Player.Health", Compare::Less, Value(50)}, resolver));
-    CHECK_FALSE(sage::events::TestCondition({"Player.Health", Compare::Greater, Value(50)}, resolver));
-    CHECK_TRUE(sage::events::TestCondition(
-        {"Door.State", Compare::Equal, Value(std::string("closed"))}, resolver));
-    CHECK_TRUE(sage::events::TestCondition(
-        {"Door.State", Compare::NotEqual, Value(std::string("open"))}, resolver));
-    (void)world;
-}
-
-// Правила принадлежат сцене и обязаны исчезнуть вместе с ней — иначе
-// выгруженный уровень продолжает открывать свои двери.
-TEST(Events_uninstalling_a_ruleset_stops_it) {
-    Bus bus;
-    FakeWorld world;
-    world.DoorLocked = false;
-    RuleSet rules;
-    rules.SetResolver(world.Lookup());
-    rules.Add(MakeOpenDoorRule());
-    rules.Install(bus);
-
-    int opened = 0;
-    bus.On("DoorOpened", [&](const Event&) { ++opened; });
-    bus.Emit("Interact");
-    CHECK_EQ(opened, 1);
-
-    rules.Uninstall();
-    bus.Emit("Interact");
-    CHECK_EQ(opened, 1);
-}
-
-// Правило, добавленное ПОСЛЕ подписки набора на шину, обязано работать: иначе
-// разбираться с его молчанием будут долго.
-TEST(Events_a_rule_added_after_install_still_works) {
-    Bus bus;
-    FakeWorld world;
-    world.DoorLocked = false;
-    RuleSet rules;
-    rules.SetResolver(world.Lookup());
-    rules.Install(bus);
-    rules.Add(MakeOpenDoorRule());
-
-    int opened = 0;
-    bus.On("DoorOpened", [&](const Event&) { ++opened; });
-    bus.Emit("Interact");
-    CHECK_EQ(opened, 1);
 }

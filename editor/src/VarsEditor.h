@@ -1,7 +1,6 @@
 #pragma once
 #include <string>
 
-#include "sage/events/Events.h"
 #include "sage/vars/Table.h"
 
 class EditorHost;
@@ -9,7 +8,8 @@ class GameObject;
 class AssetPreview;
 
 // ---------------------------------------------------------------------------
-// РЕДАКТОР ЗНАЧЕНИЙ: публичные переменные, ссылки и связи событий.
+// РЕДАКТОР ЗНАЧЕНИЙ: публичные переменные и ссылки. (Связи сигналов — своя
+// секция, SignalLinksEditor.h.)
 //
 // Один набор рисовалок на все места, где встречается sage::vars::Value:
 // секция «Переменные» у любого объекта, аргумент связи у кнопки, поле части
@@ -33,10 +33,5 @@ bool DrawEntityRef(EditorHost& host, const char* id, sage::vars::EntityRef& ref)
 // Возвращает true, если что-то изменилось.
 bool DrawTable(EditorHost& host, GameObject obj, sage::vars::Table& table,
                AssetPreview* preview);
-
-// Список связей «когда здесь случилось X — сделать Y».
-// triggers — имена триггеров, которые умеет слать владелец списка.
-bool DrawBindings(EditorHost& host, const char* id, sage::events::Bindings& bindings,
-                  const std::vector<std::string>& triggers, AssetPreview* preview);
 
 } // namespace varsui

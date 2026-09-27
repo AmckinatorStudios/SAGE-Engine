@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "sage/events/Events.h"
 #include "sage/scripting/ScriptTypes.h"
 
 class Scene;
@@ -118,6 +119,17 @@ public:
     // поэтому так сможет позвать и C++, и скрипт на другом языке.
     virtual bool Invoke(InstanceId id, const std::string& method,
                         const std::vector<sage::vars::Value>& args, ScriptError& err) = 0;
+
+    // Есть ли у экземпляра такой метод. Связь из инспектора («On Click →
+    // Menu.start_game()») обязана сказать «в скрипте нет метода start_game»,
+    // а не молча ничего не сделать.
+    virtual bool HasMethod(InstanceId id, const std::string& method) const = 0;
+
+    // Метод как обработчик сигнала: получает событие в том же виде, что и
+    // функция, подписанная из скрипта (`button.clicked:connect(fn)`), — связь
+    // инспектора и подписка кодом обязаны быть неотличимы для того, кого зовут.
+    virtual bool InvokeEvent(InstanceId id, const std::string& method,
+                             const sage::events::Event& event, ScriptError& err) = 0;
 
     // Кладёт значения публичных полей в экземпляр (до Start и после правки в
     // инспекторе). Поля вида «ссылка на объект/компонент» бэкенд обязан отдать

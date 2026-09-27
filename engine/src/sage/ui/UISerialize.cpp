@@ -2,7 +2,7 @@
 
 #include <string>
 
-#include "sage/events/Events.h"
+#include "sage/scene/Signals.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Texture.h"
 #include "sage/scene/SceneJson.h"
@@ -14,8 +14,6 @@
 using json = nlohmann::json;
 
 // Переменные и связи в JSON — общий словарь (см. SceneValueJson.h).
-using sage::scene::BindingsFromJson;
-using sage::scene::BindingsToJson;
 using sage::scene::ValueFromJson;
 using sage::scene::ValueToJson;
 using sage::scene::VarsFromJson;
@@ -42,9 +40,6 @@ void SaveField(json& out, const void* data, const sage::ui::PartField& f) {
         // Перечисление пишется ЧИСЛОМ: имена значений живут в таблице полей и
         // нужны человеку, а файл должен пережить их переименование.
         case K::Enum: out[f.Key] = sage::ui::FieldAs<int>(data, f); break;
-        case K::Bindings:
-            out[f.Key] = BindingsToJson(sage::ui::FieldAs<sage::events::Bindings>(data, f));
-            break;
         // Вид — вложенным объектом по своей таблице: дорожка, ручка, вид при
         // наведении пишутся одними и теми же ключами.
         case K::Look: {
@@ -92,9 +87,6 @@ void LoadField(const json& in, void* data, const sage::ui::PartField& f) {
                 if (f.EnumCount <= 0 || (n >= 0 && n < f.EnumCount))
                     sage::ui::FieldAs<int>(data, f) = n;
             }
-            break;
-        case K::Bindings:
-            BindingsFromJson(v, sage::ui::FieldAs<sage::events::Bindings>(data, f));
             break;
         case K::Look:
             if (v.is_object()) {
@@ -251,6 +243,19 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
         const json& pj = uj[p.Id];
         for (const sage::ui::PartField& f : *p.Fields) LoadField(pj, data, f);
         UpgradeLegacyKeys(p.Id, pj, data);
+    }
+
+    // Связи старого формата жили списком "events" в части interactable. Теперь
+    // это связи сигналов объекта (sage/scene/Signals.h) — у любого объекта, а
+    // не только у кнопки; переводятся здесь, при чтении, один раз.
+    if (uj.contains("interactable") && uj["interactable"].is_object() &&
+        uj["interactable"].contains("events")) {
+        std::vector<sage::signals::Link> links;
+        sage::scene::LinksFromLegacyBindings(uj["interactable"]["events"], links);
+        if (!links.empty()) {
+            auto& sl = reg.get_or_emplace<sage::signals::SignalLinksComponent>(e);
+            sl.Links.insert(sl.Links.end(), links.begin(), links.end());
+        }
     }
 
     // Картинке нужен рантайм-указатель на текстуру: путь в файле есть, а

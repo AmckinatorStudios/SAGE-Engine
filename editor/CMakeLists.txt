@@ -70,6 +70,7 @@ add_executable(SageEditor WIN32
     src/TextureSet.cpp
     src/UIElementProperties.cpp
     src/VarsEditor.cpp
+    src/SignalLinksEditor.cpp
     src/panels/TopBarPanel.cpp
     src/panels/ViewportTools.cpp
     src/panels/SettingsPanel.cpp
