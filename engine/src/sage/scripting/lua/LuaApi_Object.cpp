@@ -297,7 +297,16 @@ void RegisterObject(Backend& backend) {
             rb.Mass = num("mass", rb.Mass);
             rb.Friction = num("friction", rb.Friction);
             rb.Restitution = num("restitution", rb.Restitution);
-            if (opts) rb.Sensor = opts->get_or("sensor", rb.Sensor);
+            rb.LinearDamping = num("linearDamping", rb.LinearDamping);
+            rb.AngularDamping = num("angularDamping", rb.AngularDamping);
+            rb.GravityScale = num("gravityScale", rb.GravityScale);
+            if (opts) {
+                rb.Sensor = opts->get_or("sensor", rb.Sensor);
+                rb.Continuous = opts->get_or("continuous", rb.Continuous);
+                // «Не опрокидывается» — самое частое, поэтому отдельным флагом.
+                if (opts->get_or("freezeRotation", false)) rb.Locks |= sage::physics::kLockRotAll;
+                rb.Locks = (uint8_t)(opts->get_or("locks", (int)rb.Locks) & 0x3F);
+            }
             return sol::make_object(self->Lua(), true);
         }
         if (name == "Collider") {
@@ -306,9 +315,12 @@ void RegisterObject(Backend& backend) {
             if (shape == "box") c.Shape = sage::physics::ShapeType::Box;
             else if (shape == "sphere") c.Shape = sage::physics::ShapeType::Sphere;
             else if (shape == "capsule") c.Shape = sage::physics::ShapeType::Capsule;
+            else if (shape == "convex") c.Shape = sage::physics::ShapeType::ConvexHull;
+            else if (shape == "mesh") c.Shape = sage::physics::ShapeType::Mesh;
             else throw std::runtime_error("AddComponent(Collider): форма '" + shape +
-                                          "' — нужна box, sphere или capsule");
+                                          "' — нужна box, sphere, capsule, convex или mesh");
             if (opts) {
+                c.MeshPath = opts->get_or<std::string>("mesh", c.MeshPath);
                 if (sol::optional<glm::vec3> size = (*opts)["size"]) c.HalfExtents = *size * 0.5f;
                 c.Radius = opts->get_or("radius", c.Radius);
                 c.HalfHeight = opts->get_or("halfHeight", c.HalfHeight);

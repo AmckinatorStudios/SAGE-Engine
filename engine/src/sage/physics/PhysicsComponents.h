@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <string>
 #include <vector>
 #include <glm/glm.hpp>
 #include "sage/physics/CharacterMotor.h"
@@ -33,6 +34,13 @@ struct RigidBodyComponent {
     float Mass = 1.0f;
     float Friction = 0.5f;
     float Restitution = 0.1f;
+
+    // Движение (только Dynamic; смысл — см. sage::physics::BodyDesc).
+    float LinearDamping = 0.05f;   // сопротивление воздуха/воды, доля скорости в секунду
+    float AngularDamping = 0.05f;  // то же для вращения; без него шар катится вечно
+    float GravityScale = 1.0f;     // 0 — парит, 0.3 — перо, 2 — «тяжёлый» предмет
+    bool Continuous = true;        // CCD: быстрое тело не проходит сквозь стенку и не тонет в полу
+    uint8_t Locks = sage::physics::kLockNone;  // замороженные оси (sage::physics::AxisLock)
 
     // Слой столкновений — по нему тело находят (или не находят) лучи и запросы.
     // Без слоёв луч из камеры первым делом упирается в самого игрока, и
@@ -153,6 +161,13 @@ struct ColliderComponent {
     glm::vec3 HalfExtents{0.5f, 0.5f, 0.5f}; // Box
     float Radius = 0.5f;                     // Sphere / Capsule
     float HalfHeight = 0.5f;                 // Capsule
+
+    // ConvexHull / Mesh: из какой модели брать геометрию. Пусто — из меша
+    // самого объекта (MeshRendererComponent), то есть «коллайдер по форме того,
+    // что нарисовано» без единой настройки. Путь к другой модели нужен, когда
+    // для столкновений есть упрощённая версия: у статуи в сто тысяч
+    // треугольников коллайдер из пятисот считается в сотни раз быстрее.
+    std::string MeshPath;
 
     // СОСТАВНАЯ форма: если Parts непусто, тело строится из этих дочерних форм
     // (каждая со своим локальным смещением/поворотом), а поля выше игнорируются.

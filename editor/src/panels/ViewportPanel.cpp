@@ -502,6 +502,11 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         const glm::mat4 model = scene.WorldMatrix(selected.Entity());
         ColliderComponent* col =
             scene.Registry().try_get<ColliderComponent>(selected.Entity());
+        // Форму по мешу тянуть нечем: её размер — это размер модели, и
+        // меняется он масштабом объекта, а не ручками коллайдера.
+        if (col && (col->Shape == sage::physics::ShapeType::ConvexHull ||
+                    col->Shape == sage::physics::ShapeType::Mesh))
+            col = nullptr;
         if (col) {
             const glm::vec3 wpos = glm::vec3(model[3]);
             const glm::vec3 sc(glm::length(glm::vec3(model[0])),
@@ -529,6 +534,8 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                     size = glm::vec3(col->Radius * uniform * 2.0f,
                                      (col->HalfHeight * sc.y + col->Radius * uniform) * 2.0f,
                                      col->Radius * uniform * 2.0f);
+                    break;
+                default:
                     break;
             }
             size = glm::max(size, glm::vec3(1e-3f));
@@ -564,6 +571,8 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                         col->HalfHeight = glm::max(half / safe.y, 0.0f);
                         break;
                     }
+                    default:
+                        break;
                 }
             }
             if (m_gizmoWasUsing && !ImGuizmo::IsUsing()) host.History().CommitPending();

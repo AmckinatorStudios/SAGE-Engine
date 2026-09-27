@@ -571,11 +571,77 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot();
                 rb->Type = (sage::physics::BodyType)kind;
             }
-            ImGui::DragFloat(T("Mass"), &rb->Mass, 0.05f, 0.0f, 1000.0f); host.TrackLastImGuiItem();
-            // Трение, упругость и слой — нужны реже, чем тип и масса.
+            const bool dynamic = rb->Type == sage::physics::BodyType::Dynamic;
+            // Масса — только у падающего тела: статике и кинематике она ни к
+            // чему, и поле, которое ни на что не влияет, только путает.
+            if (dynamic) {
+                // Логарифмическая шкала: и граммы, и тонны в одном поле без
+                // ввода с клавиатуры.
+                ImGui::DragFloat(T("Mass"), &rb->Mass, 0.05f, 0.001f, 100000.0f, "%.3f",
+                                 ImGuiSliderFlags_Logarithmic);
+                host.TrackLastImGuiItem();
+            }
+
+            // Как тело движется прямо сейчас — в игре видно, крутится ли оно и
+            // с какой скоростью летит, без отладочного вывода из скрипта.
+            if (PhysicsScene* physics = host.PlayPhysics(); physics && dynamic &&
+                                                            rb->RuntimeBody != sage::physics::kInvalidBody) {
+                const glm::vec3 v = physics->GetLinearVelocity(rb->RuntimeBody);
+                const glm::vec3 w = physics->GetAngularVelocity(rb->RuntimeBody);
+                ImGui::TextDisabled(T("Speed %.2f m/s, spin %.2f rad/s%s"), glm::length(v), glm::length(w),
+                                    physics->IsSleeping(rb->RuntimeBody) ? T(", asleep") : "");
+            }
+
+            // Трение, упругость, слой и тонкая настройка движения — нужны
+            // реже, чем тип и масса.
             if (EditorTheme::BeginMore("rbMore")) {
             ImGui::DragFloat(T("Friction"), &rb->Friction, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Restitution"), &rb->Restitution, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", T("Bounciness: 0 lands dead, 1 bounces back to the same height"));
+
+            if (dynamic) {
+                ImGui::DragFloat(T("Linear Damping"), &rb->LinearDamping, 0.005f, 0.0f, 1.0f);
+                host.TrackLastImGuiItem();
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", T("Air or water drag: share of speed lost per second"));
+                ImGui::DragFloat(T("Angular Damping"), &rb->AngularDamping, 0.005f, 0.0f, 1.0f);
+                host.TrackLastImGuiItem();
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", T("Slows spinning and rolling: raise it so balls stop sooner"));
+                ImGui::DragFloat(T("Gravity Scale"), &rb->GravityScale, 0.01f, -10.0f, 10.0f);
+                host.TrackLastImGuiItem();
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", T("0 floats, 1 is normal weight, 2 falls twice as hard"));
+                bool ccd = rb->Continuous;
+                if (ImGui::Checkbox(T("Continuous Collision"), &ccd)) {
+                    host.PushUndoSnapshot();
+                    rb->Continuous = ccd;
+                }
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", T("Checks the whole path each step: fast objects neither pass through walls nor sink into the floor"));
+
+                // Заморозка осей — одной строкой из трёх галочек на группу:
+                // «не опрокидывается» и «игра в плоскости» так делаются за
+                // клик, без скрипта, который гасил бы скорость каждый кадр.
+                auto lockRow = [&](const char* label, uint8_t firstBit) {
+                    ImGui::PushID(label);
+                    ImGui::TextUnformatted(label);
+                    const char* axes[] = {"X", "Y", "Z"};
+                    for (int i = 0; i < 3; ++i) {
+                        ImGui::SameLine();
+                        const uint8_t bit = (uint8_t)(firstBit << i);
+                        bool on = (rb->Locks & bit) != 0;
+                        if (ImGui::Checkbox(axes[i], &on)) {
+                            host.PushUndoSnapshot();
+                            rb->Locks = on ? (uint8_t)(rb->Locks | bit) : (uint8_t)(rb->Locks & ~bit);
+                        }
+                    }
+                    ImGui::PopID();
+                };
+                lockRow(T("Freeze Position"), sage::physics::kLockPosX);
+                lockRow(T("Freeze Rotation"), sage::physics::kLockRotX);
+            }
 
             // Слой — номер (1..32), а хранится битом: так его понимает маска
             // лучей и зон, а человек думает «слой 3», а не «бит 4».
@@ -648,13 +714,47 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                                        T("Parts override the single shape above")).c_str())) {
         if (ColliderComponent* col = reg.try_get<ColliderComponent>(obj.Entity())) {
             // Порядок строго совпадает с sage::physics::ShapeType.
-            const char* shapes[] = {T("Box"), T("Sphere"), T("Capsule")};
+            const char* shapes[] = {T("Box"), T("Sphere"), T("Capsule"), T("Convex Hull"), T("Mesh")};
             int shape = (int)col->Shape;
             if (ImGui::Combo(T("Shape"), &shape, shapes, IM_ARRAYSIZE(shapes))) {
                 host.PushUndoSnapshot();
                 col->Shape = (sage::physics::ShapeType)shape;
             }
-            if (col->Shape == sage::physics::ShapeType::Box) {
+            if (col->Shape == sage::physics::ShapeType::ConvexHull ||
+                col->Shape == sage::physics::ShapeType::Mesh) {
+                // Форма — из модели. Пустой слот означает меш самого объекта:
+                // коллайдер «по тому, что нарисовано» без единой настройки.
+                const assetslot::Result slot =
+                    assetslot::Draw(host, "colmesh", assetslot::Kind::Model, col->MeshPath, &m_preview,
+                                    T("Uses this object's own mesh"));
+                if (slot.Changed) {
+                    host.PushUndoSnapshot();
+                    col->MeshPath = slot.Path;
+                }
+                if (slot.BrowseRequested) {
+                    FileBrowser::Config c;
+                    c.Title = T("Choose a collision mesh");
+                    c.Filters = assetslot::Extensions(assetslot::Kind::Model);
+                    c.FilterLabel = T("Models");
+                    // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+                    c.StartDir = c.Root = assetslot::ProjectRoot(host);
+                    m_browser.Open(c);
+                    m_browseTarget = &col->MeshPath;
+                    m_browseIsShader = false;
+                    m_browseIsMesh = false;
+                    m_browseIsMaterial = false;
+                }
+                // Сетка треугольников у падающего тела невозможна (нет объёма и
+                // массы) — говорим, что будет вместо неё, а не молчим.
+                const RigidBodyComponent* body = reg.try_get<RigidBodyComponent>(obj.Entity());
+                if (col->Shape == sage::physics::ShapeType::Mesh && body &&
+                    body->Type == sage::physics::BodyType::Dynamic)
+                    ImGui::TextDisabled("%s", T("A falling body uses the convex hull of the mesh"));
+                else if (col->Shape == sage::physics::ShapeType::Mesh)
+                    ImGui::TextDisabled("%s", T("Exact triangles: for floors, walls and terrain"));
+                else
+                    ImGui::TextDisabled("%s", T("Convex wrap of the mesh: works for falling bodies"));
+            } else if (col->Shape == sage::physics::ShapeType::Box) {
                 ImGui::DragFloat3(T("Half Extents"), &col->HalfExtents.x, 0.02f, 0.001f, 100.0f);
                 host.TrackLastImGuiItem();
             } else if (col->Shape == sage::physics::ShapeType::Sphere) {

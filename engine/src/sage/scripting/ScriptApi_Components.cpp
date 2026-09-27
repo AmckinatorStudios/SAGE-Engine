@@ -34,6 +34,8 @@ void ScriptEngine::RegisterComponentTypes() {
         {"Box",     sage::physics::ShapeType::Box},
         {"Sphere",  sage::physics::ShapeType::Sphere},
         {"Capsule", sage::physics::ShapeType::Capsule},
+        {"ConvexHull", sage::physics::ShapeType::ConvexHull},
+        {"Mesh",    sage::physics::ShapeType::Mesh},
     });
     m_lua.new_enum<sage::physics::JointType>("JointType", {
         {"Fixed",    sage::physics::JointType::Fixed},
@@ -66,13 +68,22 @@ void ScriptEngine::RegisterComponentTypes() {
         "Type", &RigidBodyComponent::Type,
         "Mass", &RigidBodyComponent::Mass,
         "Friction", &RigidBodyComponent::Friction,
-        "Restitution", &RigidBodyComponent::Restitution
+        "Restitution", &RigidBodyComponent::Restitution,
+        "LinearDamping", &RigidBodyComponent::LinearDamping,
+        "AngularDamping", &RigidBodyComponent::AngularDamping,
+        "GravityScale", &RigidBodyComponent::GravityScale,
+        "Continuous", &RigidBodyComponent::Continuous,
+        // Замороженные оси — битовая маска AxisLock: 1/2/4 — позиция X/Y/Z,
+        // 8/16/32 — поворот X/Y/Z. Правка на ходу пересобирает тело.
+        "Locks", sol::property([](const RigidBodyComponent& rb) { return (int)rb.Locks; },
+                               [](RigidBodyComponent& rb, int v) { rb.Locks = (uint8_t)(v & 0x3F); })
     );
     m_lua.new_usertype<ColliderComponent>("ColliderComponent",
         "Shape", &ColliderComponent::Shape,
         "HalfExtents", &ColliderComponent::HalfExtents,
         "Radius", &ColliderComponent::Radius,
-        "HalfHeight", &ColliderComponent::HalfHeight
+        "HalfHeight", &ColliderComponent::HalfHeight,
+        "MeshPath", &ColliderComponent::MeshPath
     );
     m_lua.new_usertype<JointComponent>("JointComponent",
         "Type", &JointComponent::Type,

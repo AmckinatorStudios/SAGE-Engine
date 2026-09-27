@@ -526,6 +526,11 @@ static void SaveRigidBody(json& j, const RigidBodyComponent& rb) {
     j["rigidBody"]["layer"] = (unsigned)rb.Layer;
     j["rigidBody"]["sensor"] = rb.Sensor;
     j["rigidBody"]["triggerMask"] = (unsigned)rb.TriggerMask;
+    j["rigidBody"]["linearDamping"] = rb.LinearDamping;
+    j["rigidBody"]["angularDamping"] = rb.AngularDamping;
+    j["rigidBody"]["gravityScale"] = rb.GravityScale;
+    j["rigidBody"]["continuous"] = rb.Continuous;
+    j["rigidBody"]["locks"] = (unsigned)rb.Locks;
 }
 
 static RigidBodyComponent ParseRigidBody(const json& rj) {
@@ -540,13 +545,22 @@ static RigidBodyComponent ParseRigidBody(const json& rj) {
     rb.Layer = rj.value("layer", (unsigned)rb.Layer);
     rb.Sensor = rj.value("sensor", rb.Sensor);
     rb.TriggerMask = rj.value("triggerMask", (unsigned)rb.TriggerMask);
+    // Сцены, сохранённые до этих полей, получают значения по умолчанию —
+    // те же, с которыми тела и так строились.
+    rb.LinearDamping = rj.value("linearDamping", rb.LinearDamping);
+    rb.AngularDamping = rj.value("angularDamping", rb.AngularDamping);
+    rb.GravityScale = rj.value("gravityScale", rb.GravityScale);
+    rb.Continuous = rj.value("continuous", rb.Continuous);
+    rb.Locks = (uint8_t)(rj.value("locks", 0u) & 0x3Fu);
     return rb;
 }
 
-static const char* kShapeNames[] = {"box", "sphere", "capsule"};
+static const char* kShapeNames[] = {"box", "sphere", "capsule", "convex", "mesh"};
 static sage::physics::ShapeType ShapeFromStr(const std::string& s) {
     return s == "sphere" ? sage::physics::ShapeType::Sphere
          : s == "capsule" ? sage::physics::ShapeType::Capsule
+         : s == "convex" ? sage::physics::ShapeType::ConvexHull
+         : s == "mesh" ? sage::physics::ShapeType::Mesh
          : sage::physics::ShapeType::Box;
 }
 
@@ -555,6 +569,9 @@ static void SaveCollider(json& j, const ColliderComponent& col) {
     j["collider"]["halfExtents"] = Vec3ToJson(col.HalfExtents);
     j["collider"]["radius"] = col.Radius;
     j["collider"]["halfHeight"] = col.HalfHeight;
+    // Ссылкой на ассет (GUID + путь), как меш и материал: переименованная
+    // модель коллайдера не должна молча превращать его в коробку.
+    if (!col.MeshPath.empty()) SaveAssetRef(j["collider"], "mesh", col.MeshPath);
     if (!col.Parts.empty()) {
         json parts = json::array();
         for (const ColliderComponent::Part& p : col.Parts) {
@@ -577,6 +594,7 @@ static ColliderComponent ParseCollider(const json& cj) {
     if (cj.contains("halfExtents")) col.HalfExtents = Vec3FromJson(cj["halfExtents"]);
     col.Radius = cj.value("radius", col.Radius);
     col.HalfHeight = cj.value("halfHeight", col.HalfHeight);
+    if (cj.contains("mesh")) col.MeshPath = LoadAssetRef(cj, "mesh");
     if (cj.contains("parts") && cj["parts"].is_array()) {
         for (const json& pj : cj["parts"]) {
             ColliderComponent::Part p;

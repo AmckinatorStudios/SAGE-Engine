@@ -9,7 +9,13 @@
 #include <glm/gtx/euler_angles.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <cstring>
+#include <sstream>
+
+#include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"
+#include "sage/render/MeshData.h"
+#include "sage/render/ModelLoader.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 
@@ -74,8 +80,10 @@ glm::mat4 ParentWorldMatrix(const Scene& scene, entt::entity e) {
     return scene.WorldMatrix(h->Parent);
 }
 
+bool IsMeshShape(ShapeType s) { return s == ShapeType::ConvexHull || s == ShapeType::Mesh; }
+
 BodyDesc DescFromEntity(const RigidBodyComponent& rb, const ColliderComponent* col,
-                        const WorldTransform& tr) {
+                        const WorldTransform& tr, MeshGeometryPtr geometry = nullptr) {
     BodyDesc d;
     d.Type = rb.Type;
     d.Mass = rb.Mass;
@@ -83,6 +91,11 @@ BodyDesc DescFromEntity(const RigidBodyComponent& rb, const ColliderComponent* c
     d.Restitution = rb.Restitution;
     d.Layer = rb.Layer;
     d.Sensor = rb.Sensor;
+    d.LinearDamping = rb.LinearDamping;
+    d.AngularDamping = rb.AngularDamping;
+    d.GravityScale = rb.GravityScale;
+    d.Continuous = rb.Continuous;
+    d.Locks = rb.Locks;
     d.Position = tr.Position;
     d.Rotation = tr.Rotation;
 
@@ -100,6 +113,12 @@ BodyDesc DescFromEntity(const RigidBodyComponent& rb, const ColliderComponent* c
             cs.Rotation = EulerToQuat(p.EulerDeg);
             d.Children.push_back(cs);
         }
+    } else if (col && IsMeshShape(col->Shape)) {
+        // Геометрия уже с масштабом (см. ColliderGeometry). Размеры коробки —
+        // запасная форма бэкенда, если из геометрии ничего не построится.
+        d.Shape = col->Shape;
+        d.Geometry = std::move(geometry);
+        d.HalfExtents = col->HalfExtents * scale;
     } else if (col) {
         d.Shape = col->Shape;
         d.HalfExtents = col->HalfExtents * scale;              // Box масштабируется по осям
@@ -154,6 +173,15 @@ float SegmentToShape(const glm::vec3& a, const glm::vec3& b, ShapeType shape, co
 bool CapsuleTouchesBody(const glm::vec3& a, const glm::vec3& b, float r, const BodyDesc& desc) {
     const glm::quat inv = glm::inverse(desc.Rotation);
     const glm::vec3 la = inv * (a - desc.Position), lb = inv * (b - desc.Position);
+    // Зона по форме модели — по её габариту: точного расстояния до сетки
+    // здесь не посчитать, а зона-триггер с точностью до габарита и так
+    // рисуется в редакторе коробкой.
+    if (desc.Children.empty() && IsMeshShape(desc.Shape) && desc.Geometry && !desc.Geometry->Empty()) {
+        glm::vec3 lo = desc.Geometry->Points.front(), hi = lo;
+        for (const glm::vec3& p : desc.Geometry->Points) { lo = glm::min(lo, p); hi = glm::max(hi, p); }
+        const glm::vec3 c = (lo + hi) * 0.5f;
+        return SegmentToShape(la - c, lb - c, ShapeType::Box, (hi - lo) * 0.5f, 0.0f, 0.0f) <= r;
+    }
     if (desc.Children.empty())
         return SegmentToShape(la, lb, desc.Shape, desc.HalfExtents, desc.Radius, desc.HalfHeight) <= r;
     for (const ChildShape& c : desc.Children) {
@@ -165,6 +193,151 @@ bool CapsuleTouchesBody(const glm::vec3& a, const glm::vec3& b, float r, const B
     return false;
 }
 
+// Снимок всего, из чего строится тело: настройки тела, форма и масштаб. Строкой
+// байтов, а не структурой с operator==: поле, добавленное в компонент и
+// забытое в сравнении, молча перестало бы пересобирать тело, а здесь его
+// забыть можно только вместе с записью в дескриптор.
+template <class T> void PutRaw(std::string& out, const T& v) {
+    out.append(reinterpret_cast<const char*>(&v), sizeof(T));
+}
+std::string SettingsKey(const RigidBodyComponent& rb, const ColliderComponent* col, const glm::vec3& scale,
+                        const MeshRendererComponent* mr) {
+    std::string k;
+    k.reserve(128);
+    PutRaw(k, rb.Type); PutRaw(k, rb.Mass); PutRaw(k, rb.Friction); PutRaw(k, rb.Restitution);
+    PutRaw(k, rb.Layer); PutRaw(k, rb.Sensor);
+    PutRaw(k, rb.LinearDamping); PutRaw(k, rb.AngularDamping); PutRaw(k, rb.GravityScale);
+    PutRaw(k, rb.Continuous); PutRaw(k, rb.Locks);
+    PutRaw(k, scale);
+    if (!col) return k;
+    PutRaw(k, col->Shape); PutRaw(k, col->HalfExtents); PutRaw(k, col->Radius); PutRaw(k, col->HalfHeight);
+    for (const ColliderComponent::Part& p : col->Parts) {
+        PutRaw(k, p.Shape); PutRaw(k, p.HalfExtents); PutRaw(k, p.Radius); PutRaw(k, p.HalfHeight);
+        PutRaw(k, p.Offset); PutRaw(k, p.EulerDeg);
+    }
+    if (IsMeshShape(col->Shape)) {
+        k += col->MeshPath;
+        k += '|';
+        // Меш самого объекта сменили (другая модель) — форма тоже другая.
+        if (col->MeshPath.empty() && mr) {
+            PutRaw(k, mr->Ref.type);
+            k += mr->Ref.path;
+        }
+    }
+    return k;
+}
+
+// Сварка вершин по положению. Меш для рендера режет вершины по швам нормалей
+// и развёртки: у куба их 24 вместо 8. Для сетки столкновений это не мелочь —
+// Jolt узнаёт внутреннее ребро (между двумя треугольниками одной поверхности)
+// по ОБЩИМ индексам вершин, и несваренная сетка вся состоит из «краёв»: ящик,
+// едущий по полу из такой модели, подпрыгивает на каждом стыке треугольников.
+std::shared_ptr<MeshGeometry> Weld(const std::vector<Vertex>& verts, const std::vector<unsigned int>& indices) {
+    auto g = std::make_shared<MeshGeometry>();
+    std::unordered_map<std::string, uint32_t> seen;
+    std::vector<uint32_t> remap(verts.size());
+    for (size_t i = 0; i < verts.size(); ++i) {
+        // Ключ — позиция, округлённая до десятой миллиметра: вершины шва
+        // совпадают бит в бит не всегда (экспорт пишет их с разной ошибкой).
+        const glm::ivec3 q = glm::ivec3(glm::round(verts[i].Position * 10000.0f));
+        std::string key(reinterpret_cast<const char*>(&q), sizeof(q));
+        auto [it, fresh] = seen.emplace(std::move(key), (uint32_t)g->Points.size());
+        if (fresh) g->Points.push_back(verts[i].Position);
+        remap[i] = it->second;
+    }
+    g->Indices.reserve(indices.size());
+    for (size_t i = 0; i + 2 < indices.size(); i += 3) {
+        const unsigned a = indices[i], b = indices[i + 1], c = indices[i + 2];
+        if (a >= verts.size() || b >= verts.size() || c >= verts.size()) continue;
+        // Треугольник, схлопнувшийся при сварке в линию, — не поверхность.
+        if (remap[a] == remap[b] || remap[b] == remap[c] || remap[a] == remap[c]) continue;
+        // Лицевая сторона — туда, куда смотрят нормали вершин. Jolt сталкивает
+        // сетку только с лицевой стороны, а обход треугольников в моделях (и
+        // даже в примитиве «плоскость») бывает любым — рендеру он безразличен,
+        // освещение идёт по нормалям. Пол с обходом «вниз» пропускал сквозь
+        // себя всё, что на него падало.
+        const glm::vec3 face = glm::cross(verts[b].Position - verts[a].Position,
+                                          verts[c].Position - verts[a].Position);
+        const bool flip = glm::dot(face, verts[a].Normal + verts[b].Normal + verts[c].Normal) < 0.0f;
+        g->Indices.push_back(remap[a]);
+        g->Indices.push_back(remap[flip ? c : b]);
+        g->Indices.push_back(remap[flip ? b : c]);
+    }
+    return g;
+}
+
+} // namespace
+
+sage::physics::MeshGeometryPtr PhysicsScene::ColliderGeometry(Scene& scene, entt::entity e, const glm::vec3& scale) {
+    const ColliderComponent* col = scene.Registry().try_get<ColliderComponent>(e);
+    if (!col) return nullptr;
+    const MeshRendererComponent* mr = scene.Registry().try_get<MeshRendererComponent>(e);
+
+    // Откуда геометрия: своя модель коллайдера или меш объекта.
+    MeshRef::Type type = MeshRef::Type::Model;
+    std::string path = col->MeshPath;
+    const Mesh* gpu = nullptr;
+    if (path.empty()) {
+        if (!mr || mr->Ref.type == MeshRef::Type::None) return nullptr;
+        type = mr->Ref.type;
+        path = mr->Ref.path;
+        gpu = mr->MeshPtr.get();
+    }
+    const std::string sourceKey = std::to_string((int)type) + "|" + path;
+
+    std::shared_ptr<const MeshGeometry>& source = m_meshSources[sourceKey];
+    if (!source) {
+        std::shared_ptr<MeshGeometry> built;
+        switch (type) {
+            case MeshRef::Type::Cube: { auto d = sage::render::BuildCube(); built = Weld(d.Vertices, d.Indices); break; }
+            case MeshRef::Type::Sphere: { auto d = sage::render::BuildSphere(); built = Weld(d.Vertices, d.Indices); break; }
+            case MeshRef::Type::Plane: { auto d = sage::render::BuildPlane(); built = Weld(d.Vertices, d.Indices); break; }
+            case MeshRef::Type::Cylinder: { auto d = sage::render::BuildCylinder(); built = Weld(d.Vertices, d.Indices); break; }
+            case MeshRef::Type::Cone: { auto d = sage::render::BuildCone(); built = Weld(d.Vertices, d.Indices); break; }
+            case MeshRef::Type::Capsule: { auto d = sage::render::BuildCapsule(); built = Weld(d.Vertices, d.Indices); break; }
+            case MeshRef::Type::Model:
+            default: {
+                // Копия в памяти у меша уже есть (редактор держит её для выбора
+                // мышью) — берём её, а не читаем файл второй раз.
+                if (gpu && gpu->CpuVertices() && gpu->CpuIndices()) {
+                    built = Weld(*gpu->CpuVertices(), *gpu->CpuIndices());
+                } else if (!path.empty()) {
+                    const sage::render::MeshData d =
+                        ModelLoader::LoadMeshData(sage::AssetDatabase::Instance().LocatePath(path));
+                    built = Weld(d.Vertices, d.Indices);
+                }
+                break;
+            }
+        }
+        if (!built || built->Empty()) {
+            LOG_WARN("Physics") << "Коллайдер по мешу: геометрия «" << (path.empty() ? "примитив" : path)
+                                << "» пуста — тело получит коробку по размерам коллайдера";
+            m_meshSources.erase(sourceKey);
+            return nullptr;
+        }
+        source = std::move(built);
+    }
+
+    // Масштаб вшивается в точки: растянутый камень должен сталкиваться
+    // растянутым. Одинаковый масштаб у разных сущностей — одна геометрия, и
+    // бэкенд узнаёт общую форму по общему указателю.
+    std::string scaledKey = sourceKey;
+    PutRaw(scaledKey, scale);
+    MeshGeometryPtr& scaled = m_meshScaled[scaledKey];
+    if (!scaled) {
+        auto g = std::make_shared<MeshGeometry>(*source);
+        for (glm::vec3& p : g->Points) p *= scale;
+        // Отрицательный масштаб по нечётному числу осей выворачивает
+        // треугольники наизнанку — возвращаем им обход, иначе сетка
+        // сталкивается «изнутри».
+        if (scale.x * scale.y * scale.z < 0.0f)
+            for (size_t i = 0; i + 2 < g->Indices.size(); i += 3) std::swap(g->Indices[i + 1], g->Indices[i + 2]);
+        scaled = std::move(g);
+    }
+    return scaled;
+}
+
+namespace {
 } // namespace
 
 bool sage::physics::CapsuleTouchesBodyForTest(const glm::vec3& a, const glm::vec3& b, float r,
@@ -186,27 +359,145 @@ PhysicsScene::PhysicsScene(Backend backend, Scene& scene) {
     SyncBodies(scene);
 
     // Второй проход — соединения (все тела уже созданы, партнёров можно
-    // резолвить по id). Требует RigidBodyComponent у самой сущности (BodyA).
-    auto joints = scene.Registry().view<JointComponent, RigidBodyComponent, Transform>();
+    // резолвить по id). Хэндлы прошлого прогона сбрасываются так же, как у тел.
+    for (auto e : scene.Registry().view<JointComponent>())
+        scene.Registry().get<JointComponent>(e).RuntimeJoint = kInvalidJoint;
+    SyncJoints(scene);
+
+    LOG_INFO("Physics") << "PhysicsScene: бэкенд " << m_world->BackendName()
+                        << ", тел " << m_bodyCount << ", соединений " << m_jointCount
+                        << (m_world->IsAvailable() ? "" : " (симуляция отключена)");
+}
+
+void PhysicsScene::SyncBodies(Scene& scene) {
+    if (!m_world) return;
+    auto& reg = scene.Registry();
+
+    // Тело по сущности: мировая поза и масштаб, форма, геометрия модели.
+    auto build = [&](entt::entity e, const RigidBodyComponent& rb, const glm::vec3& linear,
+                     const glm::vec3& angular) {
+        const WorldTransform tr = DecomposeWorld(scene.WorldMatrix(e));
+        const ColliderComponent* col = reg.try_get<ColliderComponent>(e);
+        MeshGeometryPtr geometry;
+        if (col && col->Parts.empty() && IsMeshShape(col->Shape))
+            geometry = ColliderGeometry(scene, e, glm::abs(tr.Scale));
+        BodyDesc desc = DescFromEntity(rb, col, tr, std::move(geometry));
+        desc.LinearVelocity = linear;
+        desc.AngularVelocity = angular;
+        return m_world->CreateBody(desc);
+    };
+    auto settingsOf = [&](entt::entity e, const RigidBodyComponent& rb) {
+        const Transform* t = reg.try_get<Transform>(e);
+        return SettingsKey(rb, reg.try_get<ColliderComponent>(e), t ? t->Scale : glm::vec3(1.0f),
+                           reg.try_get<MeshRendererComponent>(e));
+    };
+
+    // 1. Осиротевшие тела (сущность уничтожена или с неё сняли компонент) и
+    // тела, чьи настройки поменяли на ходу.
+    // Без первого мир копил бы невидимые тела уничтоженных объектов — игра,
+    // которая порождает и убирает предметы каждую секунду, за минуту набивала
+    // бы физический мир мусором, с которым продолжали бы сталкиваться живые.
+    size_t alive = 0;
+    for (size_t i = 0; i < m_tracked.size(); ++i) {
+        Tracked& t = m_tracked[i];
+        RigidBodyComponent* rb = reg.valid(t.Entity) ? reg.try_get<RigidBodyComponent>(t.Entity) : nullptr;
+        if (!rb || rb->RuntimeBody != t.Body) {
+            m_world->RemoveBody(t.Body);
+            m_bodyToEntity.erase(t.Body);
+            --m_bodyCount;
+            continue;
+        }
+        std::string now = settingsOf(t.Entity, *rb);
+        if (now != t.Settings) {
+            // Пересборка с сохранением движения: ящик, которому в инспекторе
+            // поменяли массу в полёте, продолжает лететь, а не замирает.
+            const glm::vec3 v = m_world->GetLinearVelocity(t.Body);
+            const glm::vec3 w = m_world->GetAngularVelocity(t.Body);
+            m_world->RemoveBody(t.Body);
+            m_bodyToEntity.erase(t.Body);
+            const BodyHandle fresh = build(t.Entity, *rb, v, w);
+            rb->RuntimeBody = fresh;
+            if (fresh == kInvalidBody) {
+                --m_bodyCount;
+                continue;
+            }
+            t.Body = fresh;
+            t.Settings = std::move(now);
+            m_bodyToEntity[fresh] = t.Entity;
+        }
+        if (alive != i) m_tracked[alive] = std::move(t);
+        ++alive;
+    }
+    m_tracked.resize(alive);
+
+    // 2. Новые сущности с RigidBodyComponent, но без тела. Признак «нет тела» —
+    // сам RuntimeBody: сущность, пришедшая из сериализатора или порождённая
+    // скриптом, несёт kInvalidBody, и другого маркера не требуется.
+    auto view = reg.view<RigidBodyComponent, Transform>();
+    for (auto e : view) {
+        RigidBodyComponent& rb = view.get<RigidBodyComponent>(e);
+        if (rb.RuntimeBody != kInvalidBody) continue;
+        rb.RuntimeBody = build(e, rb, glm::vec3(0.0f), glm::vec3(0.0f));
+        if (rb.RuntimeBody == kInvalidBody) continue; // Null-бэкенд: тел не бывает
+        m_tracked.push_back(Tracked{e, rb.RuntimeBody, settingsOf(e, rb)});
+        m_bodyToEntity[rb.RuntimeBody] = e;
+        ++m_bodyCount;
+    }
+}
+
+void PhysicsScene::SyncJoints(Scene& scene) {
+    if (!m_world || !m_world->SupportsJoints()) return;
+    auto& reg = scene.Registry();
+
+    // Соединение держится за ТЕЛА, а тела пересобираются на ходу (правка в
+    // инспекторе, смена слоя из скрипта). Соединение со старым телом бэкенд
+    // уже снял вместе с ним — строим заново по новым. И соединения сущностей,
+    // порождённых во время игры (sage.scene.SpawnRagdoll), раньше не строились
+    // вовсе: кукла рассыпалась на отдельные кости.
+    // Партнёр указан, но тела у него нет (объект удалён, компонент снят, тело
+    // ещё не построено) — соединения нет. Крепить в этом случае к миру, как
+    // было, значило бы, что кость, у которой отстрелили плечо, повисает в
+    // воздухе на невидимом шарнире.
+    auto partnerMissing = [&](int id) {
+        if (id < 0) return false;
+        GameObject target = scene.Get(id);
+        const RigidBodyComponent* rb = target.Valid() ? reg.try_get<RigidBodyComponent>(target.Entity()) : nullptr;
+        return !rb || rb->RuntimeBody == kInvalidBody;
+    };
+    auto bodyOf = [&](int id) -> BodyHandle {
+        if (id < 0) return kInvalidBody;
+        GameObject target = scene.Get(id);
+        if (!target.Valid()) return kInvalidBody;
+        const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(target.Entity());
+        return rb ? rb->RuntimeBody : kInvalidBody;
+    };
+
+    for (auto it = m_jointBodies.begin(); it != m_jointBodies.end();) {
+        const entt::entity owner = it->second.Owner;
+        const JointComponent* jc = reg.valid(owner) ? reg.try_get<JointComponent>(owner) : nullptr;
+        const RigidBodyComponent* rb = reg.valid(owner) ? reg.try_get<RigidBodyComponent>(owner) : nullptr;
+        const bool stale = !jc || !rb || jc->RuntimeJoint != it->first || rb->RuntimeBody != it->second.A ||
+                           bodyOf(jc->TargetId) != it->second.B;
+        if (!stale) { ++it; continue; }
+        m_world->RemoveJoint(it->first);
+        if (jc && jc->RuntimeJoint == it->first) reg.get<JointComponent>(owner).RuntimeJoint = kInvalidJoint;
+        --m_jointCount;
+        it = m_jointBodies.erase(it);
+    }
+
+    auto joints = reg.view<JointComponent, RigidBodyComponent, Transform>();
     for (auto e : joints) {
         JointComponent& jc = joints.get<JointComponent>(e);
         const RigidBodyComponent& rb = joints.get<RigidBodyComponent>(e);
-        const Transform& tr = joints.get<Transform>(e);
-        if (rb.RuntimeBody == kInvalidBody) continue;
+        if (jc.RuntimeJoint != kInvalidJoint || rb.RuntimeBody == kInvalidBody) continue;
+        if (partnerMissing(jc.TargetId)) continue;
+        const BodyHandle partner = bodyOf(jc.TargetId);
 
         JointDesc jd;
         jd.Type = jc.Type;
         jd.BodyA = rb.RuntimeBody;
-        jd.BodyB = kInvalidBody;
-        if (jc.TargetId >= 0) {
-            GameObject target = scene.Get(jc.TargetId);
-            if (target.Valid()) {
-                const RigidBodyComponent* trb =
-                    scene.Registry().try_get<RigidBodyComponent>(target.Entity());
-                if (trb) jd.BodyB = trb->RuntimeBody;
-            }
-        }
-        jd.Anchor = tr.Position + jc.Anchor; // мировая точка крепления
+        jd.BodyB = partner;
+        jd.Anchor = glm::vec3(scene.WorldMatrix(e)[3]) + jc.Anchor; // мировая точка крепления
         jd.Axis = jc.Axis;
         jd.UseLimits = jc.UseLimits;
         jd.MinLimit = jc.MinLimit;
@@ -216,51 +507,10 @@ PhysicsScene::PhysicsScene(Backend backend, Scene& scene) {
         jd.ConeHalfAngle = jc.ConeHalfAngle;
 
         jc.RuntimeJoint = m_world->CreateJoint(jd);
-        if (jc.RuntimeJoint != kInvalidJoint) ++m_jointCount;
+        if (jc.RuntimeJoint == kInvalidJoint) continue;
+        m_jointBodies[jc.RuntimeJoint] = JointLink{e, jd.BodyA, jd.BodyB};
+        ++m_jointCount;
     }
-
-    LOG_INFO("Physics") << "PhysicsScene: бэкенд " << m_world->BackendName()
-                        << ", тел " << m_bodyCount << ", соединений " << m_jointCount
-                        << (m_world->IsAvailable() ? "" : " (симуляция отключена)");
-}
-
-void PhysicsScene::SyncBodies(Scene& scene) {
-    if (!m_world) return;
-
-    // 1. Новые сущности с RigidBodyComponent, но без тела. Признак «нет тела» —
-    // сам RuntimeBody: сущность, пришедшая из сериализатора или порождённая
-    // скриптом, несёт kInvalidBody, и другого маркера не требуется.
-    auto view = scene.Registry().view<RigidBodyComponent, Transform>();
-    for (auto e : view) {
-        RigidBodyComponent& rb = view.get<RigidBodyComponent>(e);
-        if (rb.RuntimeBody != kInvalidBody) continue;
-        const WorldTransform tr = DecomposeWorld(scene.WorldMatrix(e));
-        const ColliderComponent* col = scene.Registry().try_get<ColliderComponent>(e);
-        rb.RuntimeBody = m_world->CreateBody(DescFromEntity(rb, col, tr));
-        if (rb.RuntimeBody == kInvalidBody) continue; // Null-бэкенд: тел не бывает
-        m_tracked.emplace_back(e, rb.RuntimeBody);
-        m_bodyToEntity[rb.RuntimeBody] = e;
-        ++m_bodyCount;
-    }
-
-    // 2. Осиротевшие тела: сущность уничтожена или с неё сняли компонент.
-    // Без этого мир копил бы невидимые тела уничтоженных объектов — игра,
-    // которая порождает и убирает предметы каждую секунду, за минуту набивала
-    // бы физический мир мусором, с которым продолжали бы сталкиваться живые.
-    size_t alive = 0;
-    for (size_t i = 0; i < m_tracked.size(); ++i) {
-        const auto& [entity, body] = m_tracked[i];
-        const RigidBodyComponent* rb = scene.Registry().valid(entity)
-            ? scene.Registry().try_get<RigidBodyComponent>(entity) : nullptr;
-        if (rb && rb->RuntimeBody == body) {
-            m_tracked[alive++] = m_tracked[i];
-        } else {
-            m_world->RemoveBody(body);
-            m_bodyToEntity.erase(body);
-            --m_bodyCount;
-        }
-    }
-    m_tracked.resize(alive);
 }
 
 void PhysicsScene::TeleportEntity(Scene& scene, entt::entity e) {
@@ -284,6 +534,7 @@ void PhysicsScene::Step(Scene& scene, float dt) {
 
     // Состав мира мог измениться с прошлого кадра (скрипт спавнит и удаляет).
     SyncBodies(scene);
+    SyncJoints(scene);
     SyncCharacters(scene);
 
     // Контроллеры персонажей — ДО шага мира: тяготение, прыжок, склон и
@@ -613,11 +864,16 @@ void PhysicsScene::UpdateTriggers(Scene& scene) {
     // 2. Персонажи — геометрией (бэкенд о них не сообщает).
     auto characters = reg.view<CharacterControllerComponent, Transform>();
     if (characters.begin() != characters.end()) {
-        for (const auto& [zone, body] : m_tracked) {
+        for (const Tracked& tracked : m_tracked) {
+            const entt::entity zone = tracked.Entity;
             const RigidBodyComponent* rb = zoneOf(zone);
             if (!rb) continue;
             const ColliderComponent* col = reg.try_get<ColliderComponent>(zone);
-            const BodyDesc desc = DescFromEntity(*rb, col, DecomposeWorld(scene.WorldMatrix(zone)));
+            const WorldTransform ztr = DecomposeWorld(scene.WorldMatrix(zone));
+            MeshGeometryPtr geometry;
+            if (col && col->Parts.empty() && IsMeshShape(col->Shape))
+                geometry = ColliderGeometry(scene, zone, glm::abs(ztr.Scale));
+            const BodyDesc desc = DescFromEntity(*rb, col, ztr, std::move(geometry));
             for (auto e : characters) {
                 const CharacterControllerComponent& cc = characters.get<CharacterControllerComponent>(e);
                 // Подошвы — там, где их ставит контроллер: точка объекта + Center.
