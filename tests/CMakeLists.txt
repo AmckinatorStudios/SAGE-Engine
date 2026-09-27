@@ -32,6 +32,7 @@ add_executable(sage_tests
     test_builtinphysics.cpp
     test_character.cpp
     test_physics.cpp
+    test_physics_contact.cpp
     test_tween.cpp
     test_decals.cpp
     test_gi.cpp

@@ -47,6 +47,37 @@ public:
     // Мгновенный импульс (кг·м/с) в центр масс — толчок/выстрел/пинок ragdoll.
     virtual void AddImpulse(BodyHandle body, const glm::vec3& impulse) = 0;
 
+    // --- Вращение и силы ----------------------------------------------------
+    //
+    // Угловая скорость — рад/с вокруг МИРОВЫХ осей. Бэкенд без вращения
+    // (Null) отвечает нулём и молча игнорирует запись.
+    virtual void SetAngularVelocity(BodyHandle body, const glm::vec3& w) { (void)body; (void)w; }
+    virtual glm::vec3 GetAngularVelocity(BodyHandle body) const { (void)body; return glm::vec3(0.0f); }
+
+    // Импульс в ТОЧКЕ (мир): толкает и закручивает. Пуля в край ящика
+    // разворачивает его, пуля в центр — нет; AddImpulse — второй случай.
+    virtual void AddImpulseAtPoint(BodyHandle body, const glm::vec3& impulse, const glm::vec3& point) {
+        (void)point;
+        AddImpulse(body, impulse);
+    }
+    // Угловой импульс (Н·м·с): мгновенная закрутка без сдвига.
+    virtual void AddAngularImpulse(BodyHandle body, const glm::vec3& impulse) { (void)body; (void)impulse; }
+
+    // Сила (Н) и момент (Н·м) действуют ВЕСЬ следующий Step(dt): итоговый
+    // импульс равен сила·dt при любом числе внутренних подшагов. Так двигатель,
+    // который скрипт включает каждый кадр, разгоняет одинаково при 30 и 144
+    // кадрах в секунду. Звать каждый кадр, пока сила должна действовать.
+    virtual void AddForce(BodyHandle body, const glm::vec3& force) { (void)body; (void)force; }
+    virtual void AddForceAtPoint(BodyHandle body, const glm::vec3& force, const glm::vec3& point) {
+        (void)point;
+        AddForce(body, force);
+    }
+    virtual void AddTorque(BodyHandle body, const glm::vec3& torque) { (void)body; (void)torque; }
+
+    // Спит ли тело (улеглось и не считается). Для отладки и тестов: «всё
+    // успокоилось» — это ровно «все тела спят».
+    virtual bool IsSleeping(BodyHandle body) const { (void)body; return false; }
+
     // --- Соединения (constraints/joints) ------------------------------------
     // Создаёт соединение между телами по описанию; kInvalidJoint при ошибке или
     // если бэкенд их не поддерживает (Null логирует и возвращает invalid).

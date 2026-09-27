@@ -346,6 +346,65 @@ void ScriptEngine::RegisterPhysicsApi() {
         if (!rb || rb->RuntimeBody == sage::physics::kInvalidBody) return;
         m_physics->AddImpulse(rb->RuntimeBody, impulse);
     });
+    // --- Вращение и силы ---------------------------------------------------
+    //
+    // Раньше скрипту была доступна только ЛИНЕЙНАЯ скорость и импульс в центр:
+    // закрутить колесо, толкнуть ящик за край, чтобы он развернулся, или
+    // держать двигатель включённым было нечем. Сила и момент действуют весь
+    // следующий шаг физики — звать их каждый кадр, пока они должны тянуть, и
+    // разгон не зависит от частоты кадров.
+    auto bodyOf = [](GameObject& obj) {
+        if (!obj.Valid()) return sage::physics::kInvalidBody;
+        auto* rb = obj.Registry()->try_get<RigidBodyComponent>(obj.Entity());
+        return rb ? rb->RuntimeBody : sage::physics::kInvalidBody;
+    };
+    Bind("physics", "SetAngularVelocity", "SetAngularVelocity", [this, bodyOf](GameObject& obj, const glm::vec3& w) {
+        if (!m_physics) throw std::runtime_error("SetAngularVelocity: физика не привязана (BindPhysics не вызван)");
+        const sage::physics::BodyHandle b = bodyOf(obj);
+        if (b != sage::physics::kInvalidBody) m_physics->SetAngularVelocity(b, w);
+    });
+    Bind("physics", "GetAngularVelocity", "GetAngularVelocity", [this, bodyOf](GameObject& obj) -> glm::vec3 {
+        if (!m_physics) throw std::runtime_error("GetAngularVelocity: физика не привязана (BindPhysics не вызван)");
+        const sage::physics::BodyHandle b = bodyOf(obj);
+        return b != sage::physics::kInvalidBody ? m_physics->GetAngularVelocity(b) : glm::vec3(0.0f);
+    });
+    // Сила (Н). С точкой (мир) — ещё и закручивает: тянуть ящик за угол.
+    Bind("physics", "AddForce", "AddForce", [this, bodyOf](GameObject& obj, const glm::vec3& force,
+                                                            sol::optional<glm::vec3> point) {
+        if (!m_physics) throw std::runtime_error("AddForce: физика не привязана (BindPhysics не вызван)");
+        const sage::physics::BodyHandle b = bodyOf(obj);
+        if (b == sage::physics::kInvalidBody) return;
+        if (point) m_physics->AddForceAtPoint(b, force, *point);
+        else m_physics->AddForce(b, force);
+    });
+    // Момент силы (Н·м) вокруг мировых осей — двигатель колеса, винт.
+    Bind("physics", "AddTorque", "AddTorque", [this, bodyOf](GameObject& obj, const glm::vec3& torque) {
+        if (!m_physics) throw std::runtime_error("AddTorque: физика не привязана (BindPhysics не вызван)");
+        const sage::physics::BodyHandle b = bodyOf(obj);
+        if (b != sage::physics::kInvalidBody) m_physics->AddTorque(b, torque);
+    });
+    // Импульс в точке (мир): пуля в край ящика разворачивает его.
+    Bind("physics", "AddImpulseAtPoint", "AddImpulseAtPoint", [this, bodyOf](GameObject& obj,
+                                                                              const glm::vec3& impulse,
+                                                                              const glm::vec3& point) {
+        if (!m_physics) throw std::runtime_error("AddImpulseAtPoint: физика не привязана (BindPhysics не вызван)");
+        const sage::physics::BodyHandle b = bodyOf(obj);
+        if (b != sage::physics::kInvalidBody) m_physics->AddImpulseAtPoint(b, impulse, point);
+    });
+    // Мгновенная закрутка (Н·м·с) без сдвига.
+    Bind("physics", "AddAngularImpulse", "AddAngularImpulse", [this, bodyOf](GameObject& obj,
+                                                                              const glm::vec3& impulse) {
+        if (!m_physics) throw std::runtime_error("AddAngularImpulse: физика не привязана (BindPhysics не вызван)");
+        const sage::physics::BodyHandle b = bodyOf(obj);
+        if (b != sage::physics::kInvalidBody) m_physics->AddAngularImpulse(b, impulse);
+    });
+    // Улеглось ли тело (сон физики): «всё успокоилось — можно считать очки».
+    Bind("physics", "IsSleeping", "IsSleeping", [this, bodyOf](GameObject& obj) -> bool {
+        if (!m_physics) return false;
+        const sage::physics::BodyHandle b = bodyOf(obj);
+        return b != sage::physics::kInvalidBody && m_physics->IsSleeping(b);
+    });
+
     // Собирает тряпичную куклу (кости-капсулы + суставы) в сцене на месте pos.
     // Возвращает id корневой сущности (таз). Полноценно симулируется на Jolt;
     // встроенный бэкенд держит суставы так же — оба умеют соединения.

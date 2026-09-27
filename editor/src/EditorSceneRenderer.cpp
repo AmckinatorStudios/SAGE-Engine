@@ -480,6 +480,8 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
                 if (cg.DrawFill()) m_debugDraw->SolidCapsule(frame, radius, halfHeight, fill);
                 if (cg.DrawLines()) m_debugDraw->WireCapsule(frame, radius, halfHeight, color);
                 break;
+            default:
+                break;   // формы по мешу рисуются рёбрами модели (см. ниже)
         }
     };
     for (auto e : colView) {
@@ -507,9 +509,43 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
         }
         rot[3] = glm::vec4(wpos, 1.0f);
 
+        // Форма по мешу — рёбрами треугольников той модели, из которой физика
+        // её строит (своей или указанной в коллайдере). Для оболочки это
+        // исходная модель, которую оболочка обтягивает.
+        const bool meshShape = col.Shape == sage::physics::ShapeType::ConvexHull ||
+                               col.Shape == sage::physics::ShapeType::Mesh;
+        if (col.Parts.empty() && meshShape) {
+            std::shared_ptr<Mesh> src;
+            if (!col.MeshPath.empty()) src = ResourceManager::Instance().GetModel(col.MeshPath);
+            else if (const MeshRendererComponent* mr = reg.try_get<MeshRendererComponent>(e)) src = mr->MeshPtr;
+            const std::vector<Vertex>* verts = src ? src->CpuVertices() : nullptr;
+            const std::vector<unsigned int>* idx = src ? src->CpuIndices() : nullptr;
+            const glm::vec3 wire = color * (col.Shape == sage::physics::ShapeType::Mesh ? 1.0f : 0.75f);
+            // Густую модель — габаритом: десятки тысяч линий каждый кадр
+            // превращают вьюпорт в слайд-шоу, а форму всё равно не разглядеть.
+            constexpr size_t kMaxWireTriangles = 4000;
+            if (verts && idx && idx->size() / 3 <= kMaxWireTriangles) {
+                for (size_t t = 0; t + 2 < idx->size(); t += 3) {
+                    const unsigned a = (*idx)[t], b = (*idx)[t + 1], c = (*idx)[t + 2];
+                    if (a >= verts->size() || b >= verts->size() || c >= verts->size()) continue;
+                    const glm::vec3 pa(world * glm::vec4((*verts)[a].Position, 1.0f));
+                    const glm::vec3 pb(world * glm::vec4((*verts)[b].Position, 1.0f));
+                    const glm::vec3 pc(world * glm::vec4((*verts)[c].Position, 1.0f));
+                    m_debugDraw->Line(pa, pb, wire);
+                    m_debugDraw->Line(pb, pc, wire);
+                    m_debugDraw->Line(pc, pa, wire);
+                }
+            } else if (src) {
+                const glm::vec3 lo = src->BoundsMin(), hi = src->BoundsMax();
+                m_debugDraw->WireBox(world * glm::translate(glm::mat4(1.0f), (lo + hi) * 0.5f) *
+                                         glm::scale(glm::mat4(1.0f), glm::max(hi - lo, glm::vec3(1e-3f))),
+                                     wire);
+            }
+        }
+
         // Одиночная форма — только без частей: с частями физика её поля не
         // читает, и рисовать её значит показывать форму, которой нет.
-        if (col.Parts.empty())
+        if (col.Parts.empty() && !meshShape)
             shape(col.Shape, rot, col.HalfExtents * scale, col.Radius * uniform,
                   col.HalfHeight * scale.y, color, selected ? 1.0f : 0.7f);
 

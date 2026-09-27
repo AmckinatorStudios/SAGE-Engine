@@ -94,8 +94,31 @@ BodyHandle BuiltinWorld::CreateBody(const BodyDesc& desc) {
     b.Restitution = glm::clamp(desc.Restitution, 0.0f, 1.0f);
     b.Layer = desc.Layer;
     b.Sensor = desc.Sensor;
+    b.LinearDamping = glm::clamp(desc.LinearDamping, 0.0f, 1.0f);
+    b.AngularDamping = glm::clamp(desc.AngularDamping, 0.0f, 1.0f);
+    b.GravityScale = desc.GravityScale;
+    b.Locks = desc.Locks;
+    b.LinearVelocity = desc.LinearVelocity;
+    b.AngularVelocity = desc.AngularVelocity;
 
-    if (desc.Children.empty()) {
+    if (desc.Children.empty() && (desc.Shape == ShapeType::ConvexHull || desc.Shape == ShapeType::Mesh)) {
+        // Оболочек и сеток у встроенного движка нет по замыслу (см. шапку
+        // BuiltinWorld.h) — коробка по габариту модели. Грубо, но тело стоит
+        // там, где объект нарисован, а не пропадает вовсе.
+        glm::vec3 lo(0.0f), hi(0.0f);
+        if (desc.Geometry && !desc.Geometry->Empty()) {
+            lo = hi = desc.Geometry->Points.front();
+            for (const glm::vec3& q : desc.Geometry->Points) { lo = glm::min(lo, q); hi = glm::max(hi, q); }
+        } else {
+            lo = -desc.HalfExtents;
+            hi = desc.HalfExtents;
+        }
+        Part p;
+        p.Shape = ShapeType::Box;
+        p.Half = glm::max((hi - lo) * 0.5f, glm::vec3(0.01f));
+        p.Position = (hi + lo) * 0.5f;
+        b.Parts.push_back(p);
+    } else if (desc.Children.empty()) {
         Part p;
         p.Shape = desc.Shape;
         p.Half = desc.HalfExtents;
@@ -196,6 +219,73 @@ void BuiltinWorld::AddImpulse(BodyHandle body, const glm::vec3& impulse) {
     Wake(*b);
 }
 
+void BuiltinWorld::SetAngularVelocity(BodyHandle body, const glm::vec3& w) {
+    Body* b = Find(body);
+    if (!b || b->Type == BodyType::Static) return;
+    b->AngularVelocity = w;
+    ApplyLocks(*b);
+    Wake(*b);
+}
+
+glm::vec3 BuiltinWorld::GetAngularVelocity(BodyHandle body) const {
+    const Body* b = Find(body);
+    return b ? b->AngularVelocity : glm::vec3(0.0f);
+}
+
+void BuiltinWorld::AddImpulseAtPoint(BodyHandle body, const glm::vec3& impulse, const glm::vec3& point) {
+    Body* b = Find(body);
+    if (!b || !b->Movable()) return;
+    const glm::mat3 r = glm::mat3_cast(b->Rotation);
+    b->InvInertiaWorld = r * b->InvInertiaLocal * glm::transpose(r);
+    ApplyImpulse(*b, impulse, point);
+    ApplyLocks(*b);
+    Wake(*b);
+}
+
+void BuiltinWorld::AddAngularImpulse(BodyHandle body, const glm::vec3& impulse) {
+    Body* b = Find(body);
+    if (!b || !b->Movable()) return;
+    const glm::mat3 r = glm::mat3_cast(b->Rotation);
+    b->AngularVelocity += r * b->InvInertiaLocal * glm::transpose(r) * impulse;
+    ApplyLocks(*b);
+    Wake(*b);
+}
+
+void BuiltinWorld::AddForce(BodyHandle body, const glm::vec3& force) {
+    Body* b = Find(body);
+    if (!b || !b->Movable()) return;
+    b->Force += force;
+    Wake(*b);
+}
+
+void BuiltinWorld::AddForceAtPoint(BodyHandle body, const glm::vec3& force, const glm::vec3& point) {
+    Body* b = Find(body);
+    if (!b || !b->Movable()) return;
+    b->Force += force;
+    b->Torque += glm::cross(point - b->Center(), force);
+    Wake(*b);
+}
+
+void BuiltinWorld::AddTorque(BodyHandle body, const glm::vec3& torque) {
+    Body* b = Find(body);
+    if (!b || !b->Movable()) return;
+    b->Torque += torque;
+    Wake(*b);
+}
+
+bool BuiltinWorld::IsSleeping(BodyHandle body) const {
+    const Body* b = Find(body);
+    return b && b->Movable() && b->Sleeping;
+}
+
+void BuiltinWorld::ApplyLocks(Body& b) {
+    if (b.Locks == kLockNone) return;
+    for (int i = 0; i < 3; ++i) {
+        if (b.Locks & (kLockPosX << i)) b.LinearVelocity[i] = 0.0f;
+        if (b.Locks & (kLockRotX << i)) b.AngularVelocity[i] = 0.0f;
+    }
+}
+
 void BuiltinWorld::ApplyImpulse(Body& b, const glm::vec3& impulse, const glm::vec3& at) {
     if (!b.Movable()) return;
     b.LinearVelocity += impulse * b.InvMass;
@@ -246,17 +336,35 @@ void BuiltinWorld::RemoveJoint(JointHandle joint) { m_joints.erase(joint); }
 
 void BuiltinWorld::Step(float dt) {
     if (dt <= 0.0f) return;
+    // Сила действует всё время кадра: её импульс копится и раздаётся
+    // подшагам. Иначе число подшагов (0, 1 или 2 на кадр) решало бы, сколько
+    // тело разгонится, и двигатель тянул бы по-разному на 30 и 144 кадрах.
+    const float frame = std::min(dt, kFixedStep * kMaxSubSteps);
+    for (auto& [h, b] : m_bodies) {
+        if (!b.Alive) continue;
+        b.PendingLinear += b.Force * frame;
+        b.PendingAngular += b.Torque * frame;
+        b.Force = b.Torque = glm::vec3(0.0f);
+    }
     m_accum += dt;
     // Потолок накопителя: после долгой паузы (окно свернули, загрузка сцены)
     // накопилось бы несколько секунд, и физика попыталась бы отсчитать их
     // разом — кадр встал бы намертво, а мир взорвался.
     m_accum = std::min(m_accum, kFixedStep * kMaxSubSteps);
-    int steps = 0;
-    while (m_accum >= kFixedStep && steps < kMaxSubSteps) {
-        SubStep(kFixedStep);
-        m_accum -= kFixedStep;
-        ++steps;
+    // Сколько подшагов будет — известно заранее: импульс сил делится поровну.
+    // Допуск в тысячную шага — чтобы кадр ровно в два шага не превращался в
+    // один из-за округления.
+    const int steps = std::min((int)((m_accum + kFixedStep * 1e-3f) / kFixedStep), kMaxSubSteps);
+    if (steps == 0) return;
+    for (auto& [h, b] : m_bodies) {
+        if (!b.Alive || !b.Movable()) continue;
+        b.Force = b.PendingLinear / (kFixedStep * steps);
+        b.Torque = b.PendingAngular / (kFixedStep * steps);
+        b.PendingLinear = b.PendingAngular = glm::vec3(0.0f);
     }
+    for (int i = 0; i < steps; ++i) SubStep(kFixedStep);
+    m_accum = std::max(m_accum - kFixedStep * steps, 0.0f);
+    for (auto& [h, b] : m_bodies) b.Force = b.Torque = glm::vec3(0.0f);
 }
 
 void BuiltinWorld::SubStep(float dt) {
@@ -266,7 +374,25 @@ void BuiltinWorld::SubStep(float dt) {
         if (b.Movable()) {
             const glm::mat3 r = glm::mat3_cast(b.Rotation);
             b.InvInertiaWorld = r * b.InvInertiaLocal * glm::transpose(r);
-            if (!b.Sleeping) b.LinearVelocity += m_gravity * dt;
+            // Замороженный поворот — нулевая обратная инерция по мировой оси:
+            // решатель контактов тогда сам не пытается крутить тело вокруг
+            // неё, а не только «поправляется» после.
+            if (b.Locks & kLockRotAll) {
+                glm::mat3 keep(1.0f);
+                for (int i = 0; i < 3; ++i)
+                    if (b.Locks & (kLockRotX << i)) keep[i][i] = 0.0f;
+                b.InvInertiaWorld = keep * b.InvInertiaWorld * keep;
+            }
+            if (glm::dot(b.Force, b.Force) > 0.0f || glm::dot(b.Torque, b.Torque) > 0.0f) {
+                b.LinearVelocity += b.Force * b.InvMass * dt;
+                b.AngularVelocity += b.InvInertiaWorld * b.Torque * dt;
+                Wake(b);
+            }
+            if (!b.Sleeping) b.LinearVelocity += m_gravity * b.GravityScale * dt;
+            // Затухание как у Jolt: dv/dt = −c·v.
+            b.LinearVelocity *= std::max(0.0f, 1.0f - b.LinearDamping * dt);
+            b.AngularVelocity *= std::max(0.0f, 1.0f - b.AngularDamping * dt);
+            ApplyLocks(b);
         } else {
             b.InvInertiaWorld = glm::mat3(0.0f);
         }
@@ -807,6 +933,7 @@ void BuiltinWorld::Integrate(float dt) {
         if (!b.Alive || b.Sleeping) continue;
         if (b.Type == BodyType::Static) continue;
 
+        if (b.Movable()) ApplyLocks(b);
         b.Position += b.LinearVelocity * dt;
         if (b.Type == BodyType::Kinematic) continue;
 

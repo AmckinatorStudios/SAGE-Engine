@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <string>
 #include <utility>
 #include <unordered_map>
 #include <vector>
@@ -56,6 +57,37 @@ public:
     void AddImpulse(sage::physics::BodyHandle body, const glm::vec3& impulse) {
         if (m_world) m_world->AddImpulse(body, impulse);
     }
+    // Вращение и силы — см. PhysicsWorld (сила действует весь следующий Step).
+    void SetAngularVelocity(sage::physics::BodyHandle body, const glm::vec3& w) {
+        if (m_world) m_world->SetAngularVelocity(body, w);
+    }
+    glm::vec3 GetAngularVelocity(sage::physics::BodyHandle body) const {
+        return m_world ? m_world->GetAngularVelocity(body) : glm::vec3(0.0f);
+    }
+    void AddImpulseAtPoint(sage::physics::BodyHandle body, const glm::vec3& impulse, const glm::vec3& point) {
+        if (m_world) m_world->AddImpulseAtPoint(body, impulse, point);
+    }
+    void AddAngularImpulse(sage::physics::BodyHandle body, const glm::vec3& impulse) {
+        if (m_world) m_world->AddAngularImpulse(body, impulse);
+    }
+    void AddForce(sage::physics::BodyHandle body, const glm::vec3& force) {
+        if (m_world) m_world->AddForce(body, force);
+    }
+    void AddForceAtPoint(sage::physics::BodyHandle body, const glm::vec3& force, const glm::vec3& point) {
+        if (m_world) m_world->AddForceAtPoint(body, force, point);
+    }
+    void AddTorque(sage::physics::BodyHandle body, const glm::vec3& torque) {
+        if (m_world) m_world->AddTorque(body, torque);
+    }
+    bool IsSleeping(sage::physics::BodyHandle body) const { return m_world && m_world->IsSleeping(body); }
+    // Мир целиком — для тестов и инструментов, которым нужен бэкенд напрямую.
+    sage::physics::PhysicsWorld* World() { return m_world.get(); }
+
+    // Геометрия коллайдера ConvexHull/Mesh сущности: точки уже с масштабом,
+    // вершины сварены. nullptr — брать не из чего (нет меша, файл не открылся).
+    // Кэшируется на время жизни сцены физики: сто одинаковых камней читают
+    // модель один раз.
+    sage::physics::MeshGeometryPtr ColliderGeometry(Scene& scene, entt::entity e, const glm::vec3& scale);
     void SetGravity(const glm::vec3& g) {
         if (m_world) m_world->SetGravity(g);
     }
@@ -156,6 +188,8 @@ private:
     // Step() каждый кадр — состав мира меняется скриптами на ходу.
     void SyncBodies(Scene& scene);
     void SyncCharacters(Scene& scene);
+    // Соединения: строит недостающие и пересобирает те, чьи тела сменились.
+    void SyncJoints(Scene& scene);
     // Тяготение, прыжок, опора, склон и ступенька контроллеров персонажа.
     // Между «состав мира» и шагом мира: скрипт уже сказал, куда идти, а
     // столкновения ещё не посчитаны.
@@ -171,9 +205,32 @@ private:
     // Что кому принадлежит: по этой паре Step() понимает, чьё тело осиротело.
     // Хранится вектором, а не картой: список короткий, обход идёт целиком
     // каждый кадр, и порядок в памяти важнее скорости точечного поиска.
-    std::vector<std::pair<entt::entity, sage::physics::BodyHandle>> m_tracked;
+    //
+    // Рядом — снимок настроек, из которых тело построено. Правка в инспекторе
+    // во время игры (масса, форма, замороженные оси, размер) раньше не делала
+    // НИЧЕГО до следующего запуска: тело строилось один раз. Теперь SyncBodies
+    // сверяет снимок и пересобирает тело на ходу, сохраняя его скорость.
+    struct Tracked {
+        entt::entity Entity = entt::null;
+        sage::physics::BodyHandle Body = sage::physics::kInvalidBody;
+        std::string Settings;   // см. SettingsKey в PhysicsScene.cpp
+    };
+    std::vector<Tracked> m_tracked;
+
+    // Геометрия коллайдеров: исходная (по модели, без масштаба) и готовая (с
+    // масштабом). Две ступени — чтобы растянутая копия камня не перечитывала
+    // файл модели, а только пересчитывала точки.
+    std::unordered_map<std::string, std::shared_ptr<const sage::physics::MeshGeometry>> m_meshSources;
+    std::unordered_map<std::string, sage::physics::MeshGeometryPtr> m_meshScaled;
     int m_bodyCount = 0;
     int m_jointCount = 0;
+    // Живые соединения: чьё оно и между какими телами построено. По телам
+    // SyncJoints узнаёт, что соединение держится за пересобранное тело.
+    struct JointLink {
+        entt::entity Owner = entt::null;
+        sage::physics::BodyHandle A = sage::physics::kInvalidBody, B = sage::physics::kInvalidBody;
+    };
+    std::unordered_map<sage::physics::JointHandle, JointLink> m_jointBodies;
 
     // Обратная карта «тело -> сущность» для перевода результатов запросов.
     // Строится в SyncBodies рядом с m_tracked: два источника правды о том, чьё

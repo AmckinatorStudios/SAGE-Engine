@@ -61,6 +61,15 @@ public:
     glm::vec3 GetLinearVelocity(BodyHandle body) const override;
     void AddImpulse(BodyHandle body, const glm::vec3& impulse) override;
 
+    void SetAngularVelocity(BodyHandle body, const glm::vec3& w) override;
+    glm::vec3 GetAngularVelocity(BodyHandle body) const override;
+    void AddImpulseAtPoint(BodyHandle body, const glm::vec3& impulse, const glm::vec3& point) override;
+    void AddAngularImpulse(BodyHandle body, const glm::vec3& impulse) override;
+    void AddForce(BodyHandle body, const glm::vec3& force) override;
+    void AddForceAtPoint(BodyHandle body, const glm::vec3& force, const glm::vec3& point) override;
+    void AddTorque(BodyHandle body, const glm::vec3& torque) override;
+    bool IsSleeping(BodyHandle body) const override;
+
     JointHandle CreateJoint(const JointDesc& desc) override;
     void RemoveJoint(JointHandle joint) override;
     bool SupportsJoints() const override { return true; }
@@ -103,6 +112,14 @@ private:
 
         float Friction = 0.5f;
         float Restitution = 0.1f;
+        float LinearDamping = 0.0f;
+        float AngularDamping = 0.0f;
+        float GravityScale = 1.0f;
+        uint8_t Locks = kLockNone;
+        // Сила и момент, заказанные на следующий Step, и их импульс, ещё не
+        // отданный подшагам (кадр короче шага — импульс ждёт следующего).
+        glm::vec3 Force{0.0f}, Torque{0.0f};
+        glm::vec3 PendingLinear{0.0f}, PendingAngular{0.0f};
         LayerMask Layer = kLayerDefault;
         bool Sensor = false;
         bool Alive = true;
@@ -188,6 +205,8 @@ private:
     void EmitContactEvents();
 
     void ApplyImpulse(Body& b, const glm::vec3& impulse, const glm::vec3& at);
+    // Гасит скорость по замороженным осям (AxisLock) — после каждого решения.
+    static void ApplyLocks(Body& b);
     void Wake(Body& b) { b.Sleeping = false; b.IdleTime = 0.0f; }
 
     void SolveJoint(Joint& j, float dt, bool useBias);

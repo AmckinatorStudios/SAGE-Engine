@@ -1792,12 +1792,26 @@ sage.physics = {}
 physics = nil
 
 ---@param entity Entity
+---@param impulse Vec3
+function sage.physics.AddAngularImpulse(entity, impulse) end
+---@param entity Entity
 ---@param radius number
 ---@param height number
 function sage.physics.AddCharacter(entity, radius, height) end
 ---@param entity Entity
+---@param force Vec3
+---@param point Vec3
+function sage.physics.AddForce(entity, force, point) end
+---@param entity Entity
 ---@param impulse Vec3
 function sage.physics.AddImpulse(entity, impulse) end
+---@param entity Entity
+---@param impulse Vec3
+---@param point Vec3
+function sage.physics.AddImpulseAtPoint(entity, impulse, point) end
+---@param entity Entity
+---@param torque Vec3
+function sage.physics.AddTorque(entity, torque) end
 ---@param entity Entity
 ---@param feet Vec3
 ---@return boolean
@@ -1807,6 +1821,9 @@ function sage.physics.CharacterFits(entity, feet) end
 function sage.physics.CharacterState(entity) end
 ---@return table
 function sage.physics.Collisions() end
+---@param entity Entity
+---@return Vec3
+function sage.physics.GetAngularVelocity(entity) end
 ---@param entity Entity
 ---@return Vec3
 function sage.physics.GetVelocity(entity) end
@@ -1820,6 +1837,9 @@ function sage.physics.IsGrounded(entity) end
 ---@param entity Entity
 ---@return boolean
 function sage.physics.IsInTrigger(zone, entity) end
+---@param entity Entity
+---@return boolean
+function sage.physics.IsSleeping(entity) end
 ---@param entity Entity
 ---@param velocity Vec3
 ---@param dt number
@@ -1838,6 +1858,9 @@ function sage.physics.OverlapSphere(center, radius, mask) end
 ---@param mask number
 ---@return any
 function sage.physics.Raycast(origin, dir, maxDistance, mask) end
+---@param entity Entity
+---@param w Vec3
+function sage.physics.SetAngularVelocity(entity, w) end
 ---@param entity Entity
 ---@param pos Vec3
 function sage.physics.SetCharacterPosition(entity, pos) end
@@ -2238,17 +2261,25 @@ function sage.volumetric.Set(t) end
 ---@type fun(...): any
 ActiveTweens = sage.tween.Active
 ---@type fun(...): any
+AddAngularImpulse = sage.physics.AddAngularImpulse
+---@type fun(...): any
 AddAnimatedModel = sage.anim.Add
 ---@type fun(...): any
 AddBillboard = sage.fx.AddBillboard
 ---@type fun(...): any
 AddCharacterController = sage.physics.AddCharacter
 ---@type fun(...): any
+AddForce = sage.physics.AddForce
+---@type fun(...): any
 AddIKGoal = sage.ik.AddGoal
 ---@type fun(...): any
 AddImpulse = sage.physics.AddImpulse
 ---@type fun(...): any
+AddImpulseAtPoint = sage.physics.AddImpulseAtPoint
+---@type fun(...): any
 AddRenderTexture = sage.rt.Attach
+---@type fun(...): any
+AddTorque = sage.physics.AddTorque
 ---@type fun(...): any
 AnimationCount = sage.anim.Count
 ---@type fun(...): any
@@ -2332,6 +2363,8 @@ FindObjectById = sage.scene.FindById
 ---@type fun(...): any
 GenerateTexture = sage.texture.Generate
 ---@type fun(...): any
+GetAngularVelocity = sage.physics.GetAngularVelocity
+---@type fun(...): any
 GetAxis = sage.input.Axis
 ---@type fun(...): any
 GetCamera = sage.camera.Get
@@ -2389,6 +2422,8 @@ IsInputContextEnabled = sage.input.IsContextEnabled
 IsMouseCaptured = sage.input.IsMouseCaptured
 ---@type fun(...): any
 IsPlaying = sage.audio.IsPlaying
+---@type fun(...): any
+IsSleeping = sage.physics.IsSleeping
 ---@type fun(...): any
 JointIndex = sage.anim.JointIndex
 ---@type fun(...): any
@@ -2493,6 +2528,8 @@ SeekAnimation = sage.anim.Seek
 SendMessage = sage.msg.Send
 ---@type fun(...): any
 SetActionTrigger = sage.input.SetTrigger
+---@type fun(...): any
+SetAngularVelocity = sage.physics.SetAngularVelocity
 ---@type fun(...): any
 SetAnimationLoop = sage.anim.SetLoop
 ---@type fun(...): any

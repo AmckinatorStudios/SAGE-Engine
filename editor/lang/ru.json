@@ -2578,6 +2578,25 @@
     "Round and round": "По кругу",
     "Smooth both ends": "Плавно",
     "Repeat mode": "Повтор",
-    "Pause step": "Пауза"
+    "Pause step": "Пауза",
+    ", asleep": ", спит",
+    "0 floats, 1 is normal weight, 2 falls twice as hard": "0 — парит, 1 — обычный вес, 2 — падает вдвое сильнее",
+    "A falling body uses the convex hull of the mesh": "У падающего тела вместо сетки — её выпуклая оболочка",
+    "Air or water drag: share of speed lost per second": "Сопротивление воздуха или воды: доля скорости, теряемая за секунду",
+    "Angular Damping": "Затухание вращения",
+    "Bounciness: 0 lands dead, 1 bounces back to the same height": "Прыгучесть: 0 — падает замертво, 1 — отскакивает на ту же высоту",
+    "Checks the whole path each step: fast objects neither pass through walls nor sink into the floor": "Проверяет весь путь за шаг: быстрые предметы не пролетают сквозь стены и не тонут в полу",
+    "Choose a collision mesh": "Выберите модель для столкновений",
+    "Continuous Collision": "Непрерывные столкновения",
+    "Convex Hull": "Выпуклая оболочка",
+    "Convex wrap of the mesh: works for falling bodies": "Выпуклый чехол модели: подходит падающим телам",
+    "Exact triangles: for floors, walls and terrain": "Точные треугольники: для пола, стен и ландшафта",
+    "Freeze Position": "Заморозить позицию",
+    "Freeze Rotation": "Заморозить поворот",
+    "Gravity Scale": "Множитель тяготения",
+    "Linear Damping": "Затухание движения",
+    "Slows spinning and rolling: raise it so balls stop sooner": "Гасит вращение и качение: больше — шары останавливаются раньше",
+    "Speed %.2f m/s, spin %.2f rad/s%s": "Скорость %.2f м/с, вращение %.2f рад/с%s",
+    "Uses this object's own mesh": "Берётся меш самого объекта"
   }
 }
