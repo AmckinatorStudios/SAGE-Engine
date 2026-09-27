@@ -97,6 +97,7 @@ add_executable(SageEditor WIN32
     src/interface/InterfaceWidgets.cpp
     src/ui/TreeLines.cpp
     src/panels/AnimationPanel.cpp
+    src/panels/TweenPanel.cpp
     src/panels/NineSlicePanel.cpp
     src/AssetPreview.cpp
 )

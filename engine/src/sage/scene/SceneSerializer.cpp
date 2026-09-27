@@ -815,6 +815,74 @@ static PropertyAnimatorComponent ParsePropertyAnimator(const json& aj) {
     return a;   // Clip/Ready восстановит первый UpdatePropertyAnimators
 }
 
+// Твины объекта — прямо в сцене, а не отдельным файлом, как клип: твин — это
+// «кнопка вздувается при наведении» на ЭТОЙ кнопке, два числа и кривая, и
+// заводить ради него файл — ровно та тяжесть, от которой твин избавляет.
+// Кривая пишется словом («back-out», «curve(…)») — файл читается глазами.
+static void SaveTweens(json& j, const sage::anim::TweenComponent& tc) {
+    json list = json::array();
+    for (const sage::anim::TweenClip& c : tc.Tweens) {
+        json cj;
+        cj["name"] = c.Name;
+        if (c.Target != 0) cj["target"] = c.Target;
+        if (c.Delay != 0.0f) cj["delay"] = c.Delay;
+        if (c.Loop != sage::anim::TweenLoop::Once) cj["loop"] = sage::anim::LoopName(c.Loop);
+        if (c.Speed != 1.0f) cj["speed"] = c.Speed;
+        if (c.Reverse) cj["reverse"] = true;
+        if (c.PlayOnStart) cj["playOnStart"] = true;
+        json tracks = json::array();
+        for (const sage::anim::TweenTrack& t : c.Tracks) {
+            json tj;
+            tj["property"] = t.Property;   // пусто — пауза в последовательности
+            tj["start"] = t.Start;
+            tj["duration"] = t.Duration;
+            if (!t.Property.empty()) {
+                tj["to"] = Vec4ToJson(t.To);
+                if (!t.FromCurrent) tj["from"] = Vec4ToJson(t.From);
+                if (t.ToCurrent) tj["toCurrent"] = true;
+                tj["ease"] = sage::anim::ToString(t.Curve);
+            }
+            tracks.push_back(tj);
+        }
+        cj["tracks"] = tracks;
+        list.push_back(cj);
+    }
+    j["tweens"] = list;
+}
+
+static sage::anim::TweenComponent ParseTweens(const json& list) {
+    sage::anim::TweenComponent tc;
+    if (!list.is_array()) return tc;
+    for (const json& cj : list) {
+        sage::anim::TweenClip c;
+        c.Name = cj.value("name", std::string("Tween"));
+        c.Target = cj.value("target", 0);
+        c.Delay = cj.value("delay", 0.0f);
+        sage::anim::ParseLoop(cj.value("loop", std::string("once")), c.Loop);
+        c.Speed = cj.value("speed", 1.0f);
+        c.Reverse = cj.value("reverse", false);
+        c.PlayOnStart = cj.value("playOnStart", false);
+        if (cj.contains("tracks") && cj["tracks"].is_array()) {
+            for (const json& tj : cj["tracks"]) {
+                sage::anim::TweenTrack t;
+                t.Property = tj.value("property", std::string());
+                t.Start = tj.value("start", 0.0f);
+                t.Duration = tj.value("duration", 1.0f);
+                if (tj.contains("to")) t.To = Vec4FromJson(tj["to"], t.To);
+                if (tj.contains("from")) {
+                    t.From = Vec4FromJson(tj["from"], t.From);
+                    t.FromCurrent = false;
+                }
+                t.ToCurrent = tj.value("toCurrent", false);
+                sage::anim::Parse(tj.value("ease", std::string("quad-out")), t.Curve);
+                c.Tracks.push_back(t);
+            }
+        }
+        tc.Tweens.push_back(std::move(c));
+    }
+    return tc;
+}
+
 // IK: сохраняем только ЗАДАНИЕ (какая кость, куда тянем, как), но не результат.
 // EndJoint/MidJoint/RootJoint — это индексы в конкретном скелете, они
 // разрешаются заново после загрузки модели, а Locked/LockedAt — состояние
@@ -1261,6 +1329,8 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const AnimationComponent* am = reg.try_get<AnimationComponent>(e)) SaveAnimation(j, *am);
         if (const PropertyAnimatorComponent* pa = reg.try_get<PropertyAnimatorComponent>(e))
             SavePropertyAnimator(j, *pa);
+        if (const sage::anim::TweenComponent* tw = reg.try_get<sage::anim::TweenComponent>(e))
+            SaveTweens(j, *tw);
         if (const IKComponent* ik = reg.try_get<IKComponent>(e)) SaveIK(j, *ik);
         if (const ReflectionProbeComponent* rp = reg.try_get<ReflectionProbeComponent>(e))
             SaveReflectionProbe(j, *rp);
@@ -1406,6 +1476,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("propertyAnimator"))
             obj.Registry()->emplace<PropertyAnimatorComponent>(
                 obj.Entity(), ParsePropertyAnimator(j["propertyAnimator"]));
+        if (j.contains("tweens"))
+            obj.Registry()->emplace<sage::anim::TweenComponent>(obj.Entity(), ParseTweens(j["tweens"]));
         if (j.contains("ik"))
             obj.Registry()->emplace<IKComponent>(obj.Entity(), ParseIK(j["ik"]));
         if (j.contains("character"))

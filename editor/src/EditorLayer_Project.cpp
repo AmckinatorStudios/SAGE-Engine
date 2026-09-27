@@ -604,6 +604,8 @@ void EditorLayer::DrawUnsavedPrompt() {
 }
 
 bool EditorLayer::SaveSceneToFile(const fs::path& path) {
+    // Посмотренный твин в файл не уезжает: вернуть значения до записи.
+    m_tween.StopPreview(*this);
     try {
         std::error_code ec;
         if (path.has_parent_path()) fs::create_directories(path.parent_path(), ec);

@@ -112,6 +112,7 @@ Backend::Backend(const LuaBackendConfig& config) : m_interop(config.Interop) {
     RegisterGlobals(*this);
     RegisterSignals(*this);
     RegisterTest(*this);
+    RegisterTweens(*this);
     RegisterFields(*this);
 
     // Мост из прежнего движка: сообщения и выход обязаны доходить и до
@@ -490,6 +491,7 @@ void Backend::Reset() {
     m_tests.clear();
     m_instances.clear();
     m_byEntity.clear();
+    m_tweenCallbacks = sol::table();
     m_chunks.clear();
 }
 

@@ -51,6 +51,7 @@
 #include "sage/render/ModelMaterial.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/anim/PropertyAnimator.h"
+#include "sage/anim/Tween.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
@@ -259,6 +260,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     bool rmJoint = false;
     bool rmAnimation = false;
     bool rmPropertyAnim = false;
+    bool rmTween = false;
     bool rmProbe = false;
     bool rmIk = false;
     bool rmEmitter = false;
@@ -992,6 +994,127 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
+    // --- Твины: быстрые изменения свойств без клипа --------------------------
+    //
+    // ТОЛЬКО НУЖНОЕ, по строке на вопрос: кого, что, сколько, после чего, по
+    // какой кривой, повторять ли и как играть. Сами значения и шкала — в окне
+    // Tween (кнопка «Изменить»): таблица из десятка чисел в узком инспекторе
+    // читается хуже, чем в окне, где у каждого свойства своя полоса.
+    if (reg.all_of<sage::anim::TweenComponent>(obj.Entity()) &&
+        EditorTheme::SectionHeader("clock", T("Tween" "###Tween"), ImGuiTreeNodeFlags_DefaultOpen, &rmTween,
+                                   T("Quick changes of properties over time — no clip needed"))) {
+        auto& tc = reg.get<sage::anim::TweenComponent>(obj.Entity());
+        int removeAt = -1;
+        for (size_t i = 0; i < tc.Tweens.size(); ++i) {
+            sage::anim::TweenClip& c = tc.Tweens[i];
+            ImGui::PushID((int)i);
+            if (i) ImGui::Separator();
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(c.Name.c_str());
+            ImGui::SameLine();
+            if (EditorIcons::Button("pencil", T("Edit"), T("Opens this tween in the Tween window")))
+                host.OpenTween(obj.Id(), (int)i);
+            ImGui::SameLine();
+            if (EditorIcons::IconOnlyButton("trash", T("Delete this tween"))) removeAt = (int)i;
+
+            Sage::UI::BeginProperties("tween");
+            Sage::UI::PropertyLabel(T("Target"));
+            objectslot::Options opt;
+            opt.EmptyLabel = "This object";
+            opt.SelfId = obj.Id();
+            const objectslot::Result r = objectslot::Draw(host, "target", c.Target, opt);
+            if (r.Changed) {
+                c.Target = r.Id == obj.Id() ? 0 : r.Id;
+                host.PushUndoSnapshot();
+            }
+
+            Sage::UI::PropertyLabel(T("Properties"));
+            std::string props;
+            for (const sage::anim::TweenTrack& t : c.Tracks) {
+                if (t.Property.empty()) continue;
+                const sage::anim::PropertyType* p = sage::anim::FindProperty(t.Property);
+                if (!props.empty()) props += ", ";
+                props += p ? T(p->Title.c_str()) : t.Property.c_str();
+            }
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextWrapped("%s", props.empty() ? T("none yet — add them in the Tween window") : props.c_str());
+
+            Sage::UI::PropertyLabel(T("Duration"), T("Stretches or squeezes the whole tween in time"));
+            float length = c.Length();
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::DragFloat("##len", &length, 0.01f, 0.01f, 600.0f, "%.2f s") && length > 0.0f &&
+                !c.Tracks.empty())
+                c.Stretch(length);
+            host.TrackLastImGuiItem();
+
+            Sage::UI::PropertyLabel(T("Delay"));
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            ImGui::DragFloat("##delay", &c.Delay, 0.01f, 0.0f, 600.0f, "%.2f s");
+            host.TrackLastImGuiItem();
+
+            // Кривая — одна на весь твин, пока у дорожек она общая; разные —
+            // «Разные», и выбор здесь ставит одну всем.
+            Sage::UI::PropertyLabel(T("Ease"), T("The curve of every property; each can have its own in the Tween window"));
+            std::string ease;
+            bool mixed = false;
+            for (const sage::anim::TweenTrack& t : c.Tracks) {
+                if (t.Property.empty()) continue;
+                const std::string e = sage::anim::ToString(t.Curve);
+                if (ease.empty()) ease = e;
+                else if (ease != e) mixed = true;
+            }
+            static const char* kEases[] = {"linear", "quad-out", "quad-in", "quad-inout", "cubic-out",
+                                           "sine-inout", "expo-out", "back-out", "elastic-out", "bounce-out"};
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::BeginCombo("##ease", mixed ? T("Mixed") : (ease.empty() ? "-" : ease.c_str()))) {
+                for (const char* e : kEases) {
+                    if (ImGui::Selectable(e, !mixed && ease == e)) {
+                        sage::anim::Ease curve;
+                        sage::anim::Parse(e, curve);
+                        for (sage::anim::TweenTrack& t : c.Tracks) t.Curve = curve;
+                        host.PushUndoSnapshot();
+                    }
+                }
+                ImGui::EndCombo();
+            }
+
+            Sage::UI::PropertyLabel(T("Loop"));
+            static const char* kLoops[] = {"Once", "Loop", "Ping-pong"};
+            ImGui::SetNextItemWidth(-FLT_MIN);
+            if (ImGui::BeginCombo("##loop", T(kLoops[(int)c.Loop]))) {
+                for (int k = 0; k < 3; ++k)
+                    if (ImGui::Selectable(T(kLoops[k]), k == (int)c.Loop)) {
+                        c.Loop = (sage::anim::TweenLoop)k;
+                        host.PushUndoSnapshot();
+                    }
+                ImGui::EndCombo();
+            }
+
+            Sage::UI::PropertyLabel(T("Playback"));
+            ImGui::SetNextItemWidth(80.0f);
+            ImGui::DragFloat("##speed", &c.Speed, 0.01f, 0.01f, 20.0f, "x%.2f");
+            host.TrackLastImGuiItem();
+            ImGui::SameLine();
+            if (ImGui::Checkbox(T("Reverse"), &c.Reverse)) host.PushUndoSnapshot();
+            ImGui::SameLine();
+            if (ImGui::Checkbox(T("On start"), &c.PlayOnStart)) host.PushUndoSnapshot();
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Starts by itself when the game starts"));
+            Sage::UI::EndProperties();
+            ImGui::PopID();
+        }
+        if (removeAt >= 0) {
+            tc.Tweens.erase(tc.Tweens.begin() + removeAt);
+            host.PushUndoSnapshot();
+        }
+        if (EditorIcons::Button("plus", T("Add tween"))) {
+            sage::anim::TweenClip c;
+            c.Name = "Tween " + std::to_string(tc.Tweens.size() + 1);
+            tc.Tweens.push_back(c);
+            host.PushUndoSnapshot();
+            host.OpenTween(obj.Id(), (int)tc.Tweens.size() - 1);
+        }
+    }
+
     // --- Зонд отражений -----------------------------------------------------
     if (reg.all_of<ReflectionProbeComponent>(obj.Entity()) &&
         EditorTheme::SectionHeader("probe", T("Reflection Probe" "###Reflection Probe"), ImGuiTreeNodeFlags_DefaultOpen, &rmProbe,
@@ -1421,6 +1544,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         reg.remove<PropertyAnimatorComponent>(obj.Entity());
     }
 
+    if (rmTween) {
+        host.PushUndoSnapshot();
+        reg.remove<sage::anim::TweenComponent>(obj.Entity());
+    }
+
     if (rmProbe) {
         host.PushUndoSnapshot();
         reg.remove<ReflectionProbeComponent>(obj.Entity());
@@ -1494,6 +1622,14 @@ void AddComp(entt::registry& reg, entt::entity e) {
     reg.emplace<T>(e);
 }
 
+// Твин добавляется сразу с первым (пустым) твином: пустой список твинов —
+// лишний щелчок «Добавить твин» на пути к результату.
+void AddTween(entt::registry& reg, entt::entity e) {
+    sage::anim::TweenClip c;
+    c.Name = "Tween";
+    reg.emplace<sage::anim::TweenComponent>(e).Tweens.push_back(c);
+}
+
 const std::vector<ComponentEntry>& ComponentRegistry() {
     static const std::vector<ComponentEntry> kEntries = {
         // ПРОСТО «Mesh»: это то, КАК ОБЪЕКТ ВЫГЛЯДИТ — модель, её материалы и
@@ -1563,6 +1699,11 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         {"Property Animation", "Animation", "clock",
          "Plays a .sageclip: properties of this object and its children",
          HasComp<PropertyAnimatorComponent>, AddComp<PropertyAnimatorComponent>},
+        // ТВИН — «из A в B за секунду» без клипа: кнопка вздувается, дверь
+        // отъезжает, свет гаснет. Добавленный сразу получает первый твин.
+        {"Tween", "Animation", "clock",
+         "Quick change of a property over time — no clip needed",
+         HasComp<sage::anim::TweenComponent>, AddTween},
         // IK В СПИСКЕ НЕТ — НАМЕРЕННО.
         //
         // Обратная кинематика нужна в считаных случаях (стопа на склоне, взгляд

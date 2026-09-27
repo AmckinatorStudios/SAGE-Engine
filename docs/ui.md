@@ -509,25 +509,15 @@ local c    = sage.ui.Cursor()           -- куда рисовать то, чт�
 разойдись они на пиксель — мышь ловит не то, что видно.
 
 ## Твины (интерполяция значений)
-`sage/core/Tween.h` — система inbetweening: плавно ведёт значение из A в B за
-`duration` секунд по кривой сглаживания, без ручного лерпа в каждом `OnUpdate`.
+Твины — одна система на весь движок (`sage/anim/Tween.h`), описана в
+[анимации](animation.md#твины-быстрое-изменение-свойства-без-клипа). Для
+интерфейса важно: у элемента твинятся положение, размер, поворот, **масштаб** и
+**непрозрачность** (`Element::Scale` и `Element::Opacity` — рисуются вокруг
+центра и множатся на прозрачность групп, раскладку не трогают), цвет заливки,
+картинки и текста, кегль, скругление — всё, что есть в реестре свойств.
 
-- **Кривые** (`sage::Easing`): Linear, Quad/Cubic/Sine In/Out/InOut, ExpoOut,
-  **BackOut** и **ElasticOut** (пружинят с перелётом за цель), **BounceOut**.
-  `Ease(e, t)` — чистая функция, покрыта юнит-тестами.
-- **`TweenManager`**: `To<T>(from, to, dur, ease, setter, onComplete, delay,
-  loop)` — интерполирует float/vec2/vec3/vec4 (glm::mix) и кватернионы (slerp);
-  `TweenLoop` None/Restart/**PingPong**; `Cancel`/`CancelAll`. Твины,
-  добавленные из коллбека, безопасно копятся в pending (без порчи вектора).
-  Движком твинов владеет `ScriptEngine` — они тикают со скриптами (`UpdateAll`),
-  замирают на паузе и умирают на Stop.
-- **Из Lua**: `TweenMove(entity, target, dur[, Ease.X])`, `TweenScale`,
-  `TweenRotate`, `TweenColor`, `TweenUIValue` (полоса/значение UI); сеттеры
-  проверяют `Valid()` — уничтоженная в полёте сущность безопасно пропускается.
-  `TweenCancel(id)`/`TweenCancelAll()`/`ActiveTweens()`. Пример — пружинистое
-  появление монеток в `games/testgame` (`pickup_bob.lua`, `Ease.BackOut`).
-- Покрытие: `tests/test_tween.cpp` (кривые, интерполяция, delay, ping-pong,
-  cancel, добавление из коллбека) + Lua-интеграция в `tests/test_scripting.cpp`.
+    Tween.to(button, "opacity", 0, 0.25, Ease.Out)
+    Tween.to(button, {scale = 1.1}, 0.15, Ease.OutBack)
 
 ## Наборы интерфейса: спрайты из листа, девятина, фильтрация
 Готовый UI-набор с itch.io — это один PNG на всё: рамки, кнопки, слоты, иконки

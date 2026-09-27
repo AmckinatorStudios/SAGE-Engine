@@ -152,6 +152,7 @@ void EditorLayer::RegisterCommands() {
         {"panel.assets", "Assets", EditorPanel::Assets, "folder"},
         {"panel.console", "Console", EditorPanel::Console, "code"},
         {"panel.environment", "Environment", EditorPanel::Environment, "sun"},
+        {"panel.tween", "Tween", EditorPanel::Tween, "clock"},
         {"panel.profiler", "Profiler", EditorPanel::Profiler, "grid"},
     };
     for (const PanelCmd& p : kPanels) {
@@ -1438,6 +1439,7 @@ void EditorLayer::OnRender() {
     CheckPreviewResolutionFrame();
     CheckUiInspectorFrame();
     CheckEnvironmentFrame();
+    CheckTweenFrame();
     CheckLuaTestsFrame();
 
     TakeAutoScreenshot(app);

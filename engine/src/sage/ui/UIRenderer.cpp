@@ -203,14 +203,16 @@ UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image, const Font
     return m_segments.back();
 }
 
-void UIRenderer::PushRotation(glm::vec2 center, float degrees) {
+void UIRenderer::PushRotation(glm::vec2 center, float degrees, float scale) {
     m_rotCenter = center;
     const float rad = glm::radians(degrees);
-    m_rotCos = std::cos(rad);
-    m_rotSin = std::sin(rad);
-    // Ноль градусов — не поворот: тратить по два умножения на вершину на
-    // тождественное преобразование не за что, а элементов на экране сотни.
-    m_rotActive = std::fabs(degrees) > 0.0001f;
+    // Масштаб входит в те же два числа: вершина поворачивается и
+    // растягивается одним умножением, а не двумя проходами.
+    m_rotCos = std::cos(rad) * scale;
+    m_rotSin = std::sin(rad) * scale;
+    // Ноль градусов при масштабе 1 — тождество: тратить по два умножения на
+    // вершину не за что, а элементов на экране сотни.
+    m_rotActive = std::fabs(degrees) > 0.0001f || std::fabs(scale - 1.0f) > 0.0001f;
 }
 
 void UIRenderer::PopRotation() { m_rotActive = false; }

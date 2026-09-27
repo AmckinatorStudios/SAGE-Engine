@@ -33,6 +33,14 @@ const std::unordered_map<std::string, Key>& KeyLookup() {
         std::unordered_map<std::string, Key> t;
         const auto& names = KeyNameTable();
         for (size_t i = 1; i < names.size(); ++i) t[names[i]] = (Key)i;
+        // Те же имена без подчёркиваний: «LeftShift», «PageUp» — так клавишу
+        // называет OnKeyDown (FriendlyKeyName) и так её пишут в коде.
+        for (size_t i = 1; i < names.size(); ++i) {
+            std::string joined;
+            for (const char* c = names[i]; *c; ++c)
+                if (*c != '_') joined += *c;
+            if (!t.count(joined)) t[joined] = (Key)i;
+        }
         // Синонимы: так эти клавиши называют в других движках и в привычке.
         // Отказать из-за "RETURN" вместо "ENTER" — значит заставить человека
         // угадывать словарь, которого он не видел.
@@ -56,6 +64,17 @@ const char* KeyName(Key key) {
     const auto& t = KeyNameTable();
     const size_t i = (size_t)key;
     return i < t.size() ? t[i] : t[0];
+}
+
+std::string FriendlyKeyName(Key key) {
+    std::string out;
+    bool upper = true;
+    for (const char* c = KeyName(key); c && *c; ++c) {
+        if (*c == '_') { upper = true; continue; }
+        out += upper ? *c : (char)std::tolower((unsigned char)*c);
+        upper = std::isdigit((unsigned char)*c) != 0;
+    }
+    return out;
 }
 
 Key ParseKey(const std::string& name) {

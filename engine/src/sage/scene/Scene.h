@@ -13,6 +13,7 @@
 #include "sage/scene/Components.h"
 #include "sage/render/Reflection.h"
 #include "sage/events/Events.h"
+#include "sage/anim/Tween.h"
 
 // ---------------------------------------------------------------------------
 // Scene — сцена на базе ECS (entt). Сущности (entity) — это просто id; их
@@ -286,6 +287,12 @@ public:
     // Через неё разговаривают все: кнопка интерфейса, скрипт на Lua и код на
     // C++ (см. sage/events/Events.h).
     sage::events::Bus Events;
+
+    // ТВИНЫ СЦЕНЫ — единственный проигрыватель: и твины из Lua (Tween.to), и
+    // собранные в редакторе (TweenComponent), и кнопка Play окна Tween идут
+    // здесь. Принадлежит сцене по той же причине, что и шина: твины уровня
+    // уходят вместе с ним (см. sage/anim/Tween.h).
+    sage::anim::TweenPlayer Tweens;
 
     // Освещение — часть сцены наравне с сущностями (сохраняется/загружается
     // вместе с ней). Пока это единый environment, а не per-entity компонент —

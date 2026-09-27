@@ -1,7 +1,6 @@
 #pragma once
 #include "sage/scene/Scene.h"
 #include "sage/input/InputSystem.h"
-#include "sage/core/Tween.h"
 #include "sage/render/Camera.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/render/BillboardSystem.h"
@@ -503,7 +502,6 @@ private:
 
     // Твины геймплея — тикают в UpdateAll со скриптами (замирают на паузе,
     // умирают вместе с движком скриптов при Stop). Правятся из Lua (Tween*).
-    sage::TweenManager m_tweens;
 
     // Параметры запуска (LaunchArg из Lua). Таблица Lua завести нельзя до
     // RegisterEngineApi, поэтому храним на стороне C++ и отдаём по запросу.

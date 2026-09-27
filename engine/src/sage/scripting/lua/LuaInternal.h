@@ -311,6 +311,15 @@ private:
     friend void RegisterGlobals(Backend&);
     friend void RegisterSignals(Backend&);
     friend void RegisterTest(Backend&);
+    friend void RegisterTweens(Backend&);
+
+    // on_complete твинов из Lua: номер твина → функция. Функции живут здесь, а
+    // не в проигрывателе сцены: сцена переживает состояние Lua, и функция
+    // Lua внутри проигрывателя отпускалась бы уже из мёртвого состояния.
+    sol::table m_tweenCallbacks;
+public:
+    void SetTweenCallback(uint32_t tween, const sol::protected_function& fn);
+    void FireTweenCallback(uint32_t tween);
 };
 
 // Разделы API — по файлу на раздел (LuaApi_*.cpp).
@@ -327,6 +336,9 @@ void RegisterObjectSignals(Backend& backend, sol::usertype<ObjectRef>& type);
 // Тесты на Lua: библиотека Test (проверки, ожидание кадров, щелчок по
 // интерфейсу, клавиши) и UI.create (см. LuaApi_Test.cpp).
 void RegisterTest(Backend& backend);
+// Твины: Tween.to/from/sequence/play/cancel/pause/resume/is_playing и Ease
+// (см. LuaApi_Tweens.cpp). Проигрыватель — общий у сцены (Scene::Tweens).
+void RegisterTweens(Backend& backend);
 // `field.number(...)` и прочие — они нужны и при ВЫПОЛНЕНИИ файла, а не только
 // при разборе объявления (см. LuaFields.cpp).
 void RegisterFields(Backend& backend);

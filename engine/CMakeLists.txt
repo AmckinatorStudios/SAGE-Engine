@@ -15,6 +15,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/anim/ClipFile.cpp
     src/sage/anim/IK.cpp
     src/sage/anim/PropertyAnimator.cpp
+    src/sage/anim/Tween.cpp
     src/sage/anim/PropertyClip.cpp
     src/sage/anim/Retarget.cpp
     src/sage/anim/Skeleton.cpp
@@ -49,7 +50,6 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/JobSystem.cpp
     src/sage/core/Log.cpp
     src/sage/core/Paths.cpp
-    src/sage/core/Tween.cpp
     src/sage/core/Stats.cpp
     src/sage/core/Systems.cpp
     src/sage/core/Window.cpp
@@ -163,6 +163,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/lua/LuaApi_Object.cpp
     src/sage/scripting/lua/LuaApi_Signals.cpp
     src/sage/scripting/lua/LuaApi_Test.cpp
+    src/sage/scripting/lua/LuaApi_Tweens.cpp
     src/sage/scripting/lua/LuaApi_Components.cpp
     src/sage/scripting/lua/LuaApi_Globals.cpp
     src/sage/scripting/ScriptApi_Math.cpp
@@ -171,6 +172,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_UI.cpp
     src/sage/scripting/ScriptApi_Vars.cpp
     src/sage/scripting/ScriptApi_Tween.cpp
+    src/sage/scripting/ScriptTween.cpp
     src/sage/scripting/ScriptApi_Animation.cpp
     src/sage/scripting/ScriptApi_Scene.cpp
     src/sage/scripting/ScriptApi_Input.cpp
