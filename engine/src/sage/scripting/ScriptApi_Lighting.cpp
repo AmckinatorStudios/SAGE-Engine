@@ -1,3 +1,4 @@
+#include "sage/scene/EnvironmentSchema.h"
 #include "ScriptEngine.h"
 
 #include "sage/core/Config.h"
@@ -52,6 +53,28 @@ void ScriptEngine::RegisterLightingApi() {
     // оставался полуденно-синим — закат был виден везде, кроме собственно неба.
     m_lua.new_usertype<SkyboxSettings>("SkyboxSettings",
         "Enabled", &SkyboxSettings::Enabled,
+        // Тип неба словом: "procedural", "solid", "image", "cubemap", "faces"
+        // (см. sage::env::SkySourceKey). Неизвестное слово — не меняет ничего.
+        "Mode", sol::property(
+            [](const SkyboxSettings& s) { return std::string(sage::env::SkySourceKey(s.Kind)); },
+            [](SkyboxSettings& s, const std::string& key) { sage::env::SkySourceFromKey(key, s.Kind); }),
+        // Ночная палитра процедурного неба и лунный свет.
+        "DayNight", &SkyboxSettings::DayNight,
+        "NightTopColor", &SkyboxSettings::NightTopColor,
+        "NightHorizonColor", &SkyboxSettings::NightHorizonColor,
+        "DuskColor", &SkyboxSettings::DuskColor,
+        "MoonlightColor", &SkyboxSettings::MoonlightColor,
+        "MoonlightIntensity", &SkyboxSettings::MoonlightIntensity,
+        // Текстурное небо: одна картинка, папка или шесть граней.
+        "ImagePath", &SkyboxSettings::ImagePath,
+        "ImageLayout", &SkyboxSettings::ImageLayout,
+        "CubemapDir", &SkyboxSettings::CubemapDir,
+        "GetFace", [](const SkyboxSettings& s, int i) {
+            return (i >= 1 && i <= 6) ? s.FacePaths[i - 1] : std::string();
+        },
+        "SetFace", [](SkyboxSettings& s, int i, const std::string& path) {
+            if (i >= 1 && i <= 6) s.FacePaths[i - 1] = path;
+        },
         "TopColor", &SkyboxSettings::TopColor,
         "HorizonColor", &SkyboxSettings::HorizonColor,
         "Intensity", &SkyboxSettings::Intensity,
@@ -112,6 +135,16 @@ void ScriptEngine::RegisterLightingApi() {
     m_lua.new_usertype<ShadowSettings>("ShadowSettings",
         "Distance", &ShadowSettings::Distance
     );
+    // Цикл дня и ночи: `GetLighting().Cycle.Time = 18` — шесть вечера.
+    m_lua.new_usertype<DayNightCycle>("DayNightCycle",
+        "Enabled", &DayNightCycle::Enabled,
+        "Time", &DayNightCycle::Time,
+        "DayLengthMinutes", &DayNightCycle::DayLengthMinutes,
+        "Speed", &DayNightCycle::Speed,
+        "RunInPlay", &DayNightCycle::RunInPlay,
+        "SunAzimuth", &DayNightCycle::SunAzimuth,
+        "NoonElevation", &DayNightCycle::NoonElevation
+    );
     m_lua.new_usertype<LightingEnvironment>("LightingEnvironment",
         "SkyColor", &LightingEnvironment::SkyColor,
         "GroundColor", &LightingEnvironment::GroundColor,
@@ -119,7 +152,14 @@ void ScriptEngine::RegisterLightingApi() {
         "Sun", &LightingEnvironment::Sun,
         "Fog", &LightingEnvironment::Fog,
         "Skybox", &LightingEnvironment::Skybox,
-        "Shadows", &LightingEnvironment::Shadows
+        "Shadows", &LightingEnvironment::Shadows,
+        "Cycle", &LightingEnvironment::Cycle,
+        "AmbientFromSky", sol::property(
+            [](LightingEnvironment& e) { return e.AmbientMode == LightingEnvironment::AmbientSource::FromSky; },
+            [](LightingEnvironment& e, bool fromSky) {
+                e.AmbientMode = fromSky ? LightingEnvironment::AmbientSource::FromSky
+                                        : LightingEnvironment::AmbientSource::Custom;
+            })
     );
     // --- Отражения ---------------------------------------------------------
     //

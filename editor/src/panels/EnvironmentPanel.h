@@ -1,11 +1,13 @@
 #pragma once
 #include <string>
+#include <vector>
+
+#include "sage/scene/EnvironmentSchema.h"
 
 #include "../FileBrowser.h"
 
 class EditorHost;
 class Scene;
-struct LightingEnvironment;
 
 // Панель «Среда» — окружение сцены (Scene::Lighting): полусферический ambient
 // (небо/земля/сила), туман и небо. Всё сериализуется со сценой, правки попадают
@@ -36,25 +38,37 @@ struct LightingEnvironment;
 // Кнопка, которую жмут и получают «стало хуже», дороже отсутствующей кнопки.
 // Код движка (engine/src/sage/gi) и состояние сцены на месте: вернуть раздел —
 // значит вернуть сюда его UI, а не писать GI заново.
+// ПАНЕЛЬ РИСУЕТ ПО СХЕМЕ (sage/scene/EnvironmentSchema.h). Она не знает ни
+// одного поля неба или тумана по имени: система (небо, цикл суток,
+// окружающий свет, туман) даёт включатель, выбор типа и группы свойств своего
+// типа, а панель показывает ровно их. Новый тип неба — новая запись в схеме;
+// сюда при этом не добавляется ни строчки. Особые виджеты (готовый вид неба,
+// «что сейчас на небе», вычисленный цвет) схема отмечает как Custom, и панель
+// рисует их по ключу.
 class EnvironmentPanel {
 public:
     void Draw(EditorHost& host, bool* open);
 
+    // Самопроверка редактора: сколько строк свойств панель нарисовала в
+    // последнем кадре и какие ключи — «показываем только нужное» проверяется
+    // по факту отрисовки, а не по схеме.
+    const std::vector<std::string>& LastDrawnKeys() const { return m_drawn; }
+
 private:
-    // Небо: режим (процедурное / кубическая карта / шесть граней) и его
-    // настройки. Солнце и луна показываются только у процедурного — у
-    // текстурного неба они запечены в самих гранях, и ползунок «размер солнца»
-    // там означал бы, что настройка есть, а действия у неё нет.
-    void DrawSkySection(EditorHost& host, LightingEnvironment& env);
-    void DrawDiscTexture(EditorHost& host, const char* id, const char* label, std::string& path,
-                         int pick);
-    // Окружающий свет: от неба или свои значения.
-    void DrawAmbientSection(EditorHost& host, LightingEnvironment& env);
-    // Строка про объект-солнце внутри настроек процедурного неба: время суток
-    // задаётся его поворотом, и добраться до него надо отсюда одним нажатием.
+    void DrawSystem(EditorHost& host, const sage::env::System& system, LightingEnvironment& env);
+    void DrawGroup(EditorHost& host, const sage::env::Group& group, LightingEnvironment& env,
+                   bool& changed);
+    void DrawProps(EditorHost& host, const std::vector<sage::env::Prop>& props,
+                   LightingEnvironment& env, bool& changed);
+    bool DrawProp(EditorHost& host, const sage::env::Prop& prop, LightingEnvironment& env);
+    void DrawCustom(EditorHost& host, const std::string& key, LightingEnvironment& env);
+    // Строка про объект-солнце: время суток задаётся его поворотом или циклом,
+    // и добраться до него надо отсюда одним нажатием.
     void DrawSunLink(EditorHost& host, Scene& scene, LightingEnvironment& env);
 
     FileBrowser m_browser;
-    // Что именно выбирают в открытом диалоге: -1 — каталог неба, 0..5 — грань.
-    int m_skyPick = -2;
+    // Ключ свойства, для которого открыт файловый диалог: ответ приходит через
+    // кадр, и указатель на поле за это время мог бы повиснуть (откат, другая сцена).
+    std::string m_pickKey;
+    std::vector<std::string> m_drawn;
 };

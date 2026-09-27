@@ -532,6 +532,7 @@ void PlayerLayer::BuildSceneRuntime() {
     core.Physics = m_physics.get();
     core.Particles = m_particles ? &*m_particles : nullptr;
     core.Audio = m_audio.get();
+    core.DayNight = true;   // игра всегда «в Play»: время суток идёт
     sage::RegisterCoreSystems(m_systems, core);
 
     // Звуковые источники сцены — на старт. Игра всегда «в Play», поэтому

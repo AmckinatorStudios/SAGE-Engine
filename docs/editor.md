@@ -687,6 +687,56 @@ Bg -> Surface -> SurfaceAlt -> Elevated -> Input -> Hover/Selected
 Модульный тест сторожит, что ни одна часть интерфейса не показывает сразу
 больше восьми полей.
 
+### Окно Environment: показывается только нужное
+
+Окно рисуется по **схеме окружения** (`engine/src/sage/scene/EnvironmentSchema.h`),
+а не списком полей с `if` на каждое. Четыре системы, у каждой — включатель,
+выбор типа и группы свойств ЭТОГО типа:
+
+```
+Sky                    Enabled, Type
+    Procedural         Colors · Sun · Moon · Stars · Atmosphere / Horizon · Clouds
+    One colour         Color
+    One image          Texture, Layout, Rotation, Exposure
+    Cubemap folder     Folder, Rotation, Exposure
+    Six separate files Faces (6), Rotation, Exposure
+Day / Night Cycle      Enabled → Time, Speed, Day length, Runs in play · Sun path
+Environment Lighting   Source → From the sky: Intensity (+ вычисленные цвета)
+                                 Custom values: Sky, Ground, Intensity · Shadows
+Fog                    Enabled, Type → Linear: Color, Start, End
+                                       Exponential height: Color, Density, … · Sun glow
+```
+
+- Выключенная система (небо, цикл, туман) — одна строка «Enabled», больше ничего.
+- Группы с включателем (Sun, Moon, Clouds) — галка в заголовке; выключена —
+  одна строка вместо двадцати серых полей. Редкие группы (Stars, Atmosphere,
+  Clouds, Sun path, Sun glow, Shadows) свёрнуты.
+- Поворот и экспозиция — только у текстурных небес: процедурному и
+  одноцветному рендер их не применяет.
+- Цвет — компактный образец с hex, палитра открывается щелчком.
+- Подписи — колонкой слева (таблица «подпись | значение»); слоты картинок и
+  папок — во всю ширину.
+
+Новый тип неба или тумана — новая запись `Variant` в схеме; панель при этом не
+меняется. Схема только описывает поля: значения лежат в `LightingEnvironment`,
+сериализация и Lua (`GetLighting().Skybox.Mode = "image"`, `.Cycle.Time = 18`,
+`Skybox:SetFace(1, path)`) обращаются к ним напрямую — всё, что было доступно,
+доступно и сейчас (тест `Environment_schema_covers_every_existing_setting`
+сверяет каждое поле). Самопроверка `ENVIRONMENT` рисует окно живым кадром и
+сверяет, какие строки оно показало для пяти типов неба, цикла и тумана.
+
+**Цикл дня и ночи** (`DayNightCycle`, `sage/ecs/DayNightCycle.h`) — отдельная
+система, не зависящая от типа неба: время (0..24 ч) превращается в направление
+солнца (путь — «направление восхода» и «высота в полдень») и пишется в поворот
+объекта-солнца; в игре время идёт само (длина суток в минутах × скорость,
+система кадра `daynight`). Процедурное небо темнеет по высоте этого же солнца
+(«Night palette»). Сцены без ключа `dayNightCycle` открываются с выключенным
+циклом.
+
+Попутно: слот ассета (`assetslot::Draw`) заканчивался голым
+`SetCursorScreenPos` — в ячейке таблицы ImGui на это ругался каждый кадр;
+теперь после него стоит пустой элемент.
+
 ### Секция «Events»: On Click → Menu.start_game()
 
 У любого объекта — секция событий (`editor/src/SignalLinksEditor.cpp`):

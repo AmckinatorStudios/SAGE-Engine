@@ -1429,6 +1429,7 @@ void EditorLayer::OnRender() {
     CheckWorkspaceDockFrame();
     CheckPreviewResolutionFrame();
     CheckUiInspectorFrame();
+    CheckEnvironmentFrame();
 
     TakeAutoScreenshot(app);
 }
