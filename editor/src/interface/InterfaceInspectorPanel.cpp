@@ -190,6 +190,7 @@ void InterfaceInspectorPanel::Draw(EditorHost& host, bool& open) {
         ctx.Preview = &m_preview;
         ctx.Browser = &m_browser;
         ctx.BrowseTarget = &m_browseTarget;
+        ctx.ShowEvents = true;
         sage::editor::DrawUIElementProperties(host, obj, ctx);
         ImGui::PopItemWidth();
     }

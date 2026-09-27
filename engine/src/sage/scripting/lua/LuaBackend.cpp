@@ -55,11 +55,17 @@ Backend::Backend(const LuaBackendConfig& config) : m_interop(config.Interop) {
         m_lua = m_owned.get();
     }
 
+    m_signals = std::make_unique<LuaHandlerStore>(
+        [this](const sol::protected_function& fn, const sage::events::Event& e, int owner) {
+            CallHandler(fn, e, owner);
+        });
+
     m_base = m_lua->create_table();
     RegisterMath(*this);
     RegisterObject(*this);
     RegisterComponents(*this);
     RegisterGlobals(*this);
+    RegisterSignals(*this);
     RegisterFields(*this);
 
     // Мост из прежнего движка: сообщения и выход обязаны доходить и до
@@ -87,6 +93,11 @@ Backend::Backend(const LuaBackendConfig& config) : m_interop(config.Interop) {
             function base:GetTransform() return self.gameObject.transform end
             function base:GetScript() return self.gameObject:GetScript() end
             function base:Destroy() return self.gameObject:Destroy() end
+            -- Сигналы своего объекта: self:emit("player_died") = self.gameObject:emit(...)
+            function base:on(name, fn) return self.gameObject:on(name, fn) end
+            function base:once(name, fn) return self.gameObject:once(name, fn) end
+            function base:emit(name, data) return self.gameObject:emit(name, data) end
+            function base:signal(name) return self.gameObject:signal(name) end
         end
     )LUA").get<sol::protected_function>()(m_base);
 }
@@ -204,6 +215,18 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
     sol::protected_function chunk;
     if (!Compile(source, chunk, err)) return kInvalidInstance;
 
+    // Номер — ДО выполнения файла: код верхнего уровня уже может подписаться
+    // (`ui.play.clicked:connect(...)` прямо в теле), и подписка обязана
+    // принадлежать этому экземпляру, а не «никому».
+    const InstanceId id = m_nextId++;
+    CurrentScope scope(*this, id);
+    // Файл не собрался до конца — всё, что он успел подписать, снимается:
+    // обработчики недособранного экземпляра звали бы код, которого нет.
+    auto abandon = [&] {
+        if (Scene* scene = ScenePtr()) scene->Events.DisconnectOwner(m_signals->Group(), (int)id);
+        return kInvalidInstance;
+    };
+
     // Своё окружение у каждого экземпляра: глобальная переменная одного скрипта
     // не имеет права быть видна другому, иначе два врага на уровне делят одно
     // состояние и ведут себя как один.
@@ -212,7 +235,7 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
     sol::protected_function_result result = chunk();
     if (!result.valid()) {
         Explain(result, source.Path, err);
-        return kInvalidInstance;
+        return abandon();
     }
 
     Instance inst;
@@ -230,7 +253,7 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
     sol::protected_function_result made = m_makeInstance(inst.Class, m_base);
     if (!made.valid()) {
         Explain(made, source.Path, err);
-        return kInvalidInstance;
+        return abandon();
     }
     inst.Self = made.get<sol::table>();
     inst.Self["gameObject"] = Wrap(owner);
@@ -247,7 +270,6 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
 
     FillHooks(inst);
 
-    const InstanceId id = m_nextId++;
     m_instances[id] = std::move(inst);
     if (owner.Valid()) m_byEntity[(uint32_t)entt::to_integral(owner.Entity())] = id;
     return id;
@@ -256,7 +278,13 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
 void Backend::Destroy(InstanceId id) {
     auto it = m_instances.find(id);
     if (it == m_instances.end()) return;
-    if (it->second.Owner.Valid()) {
+    // Подписки уничтоженного скрипта уходят вместе с ним: иначе кнопка,
+    // нажатая после удаления объекта со скриптом меню, звала бы его код.
+    if (Scene* scene = ScenePtr()) scene->Events.DisconnectOwner(m_signals->Group(), (int)id);
+    // Запись индекса снимается и у УЖЕ уничтоженного объекта: номер сущности
+    // entt переиспользует, и новая сущность с тем же номером иначе «нашла»
+    // бы чужой скрипт.
+    {
         const uint32_t key = (uint32_t)entt::to_integral(it->second.Owner.Entity());
         auto e = m_byEntity.find(key);
         if (e != m_byEntity.end() && e->second == id) m_byEntity.erase(e);
@@ -275,6 +303,7 @@ bool Backend::CallHook(InstanceId id, Hook hook, sol::object arg, ScriptError& e
     sol::protected_function& fn = inst->Hooks[(size_t)hook];
     if (!fn.valid()) return true;
     sol::object self = inst->Legacy ? inst->LegacyEntity : sol::object(inst->Self);
+    CurrentScope scope(*this, id);
     sol::protected_function_result result = fn(self, arg);
     if (result.valid()) return true;
     Explain(result, std::string(), err);
@@ -305,7 +334,34 @@ bool Backend::Invoke(InstanceId id, const std::string& method,
     for (const sage::vars::Value& v : args) converted.push_back(ToLua(v));
 
     sol::protected_function call = fn.as<sol::protected_function>();
+    CurrentScope scope(*this, id);
     sol::protected_function_result result = call(inst->Self, sol::as_args(converted));
+    if (result.valid()) return true;
+    Explain(result, std::string(), err);
+    return false;
+}
+
+bool Backend::HasMethod(InstanceId id, const std::string& method) const {
+    const Instance* inst = Get(id);
+    if (!inst || method.empty()) return false;
+    sol::object fn = inst->Self[method];
+    return fn.get_type() == sol::type::function;
+}
+
+bool Backend::InvokeEvent(InstanceId id, const std::string& method,
+                          const sage::events::Event& event, ScriptError& err) {
+    Instance* inst = Get(id);
+    if (!inst) return false;
+    sol::object fn = inst->Self[method];
+    if (fn.get_type() != sol::type::function) return false;
+    sol::protected_function call = fn.as<sol::protected_function>();
+    CurrentScope scope(*this, id);
+    // Метод, позванный связью, получает ТО ЖЕ, что функция, подписанная
+    // кодом: (self, event, data).
+    // Скрипт старого стиля (глобальные функции файла) получает первым
+    // аргументом СВОЮ сущность — как и все его хуки.
+    sol::object self = inst->Legacy ? inst->LegacyEntity : sol::object(inst->Self);
+    sol::protected_function_result result = call(self, EventTable(event), EventData(event));
     if (result.valid()) return true;
     Explain(result, std::string(), err);
     return false;
@@ -328,6 +384,10 @@ void Backend::ApplyFields(InstanceId id, const sage::vars::Table& fields) {
 }
 
 void Backend::Reset() {
+    // Подписки всех экземпляров — вон из шины, функции — из хранилища: после
+    // Reset в шине не должно остаться ни одного обработчика, зовущего код,
+    // которого больше нет.
+    if (m_signals) m_signals->Clear(ScenePtr() ? &ScenePtr()->Events : nullptr);
     m_instances.clear();
     m_byEntity.clear();
     m_chunks.clear();
@@ -352,6 +412,7 @@ sol::object Backend::InvokeOn(GameObject object, const std::string& method,
     sol::object fn = inst->Self[method];
     if (fn.get_type() != sol::type::function) return sol::nil;
     sol::protected_function call = fn.as<sol::protected_function>();
+    CurrentScope scope(*this, it->second);
     sol::protected_function_result result = call(inst->Self, args);
     if (!result.valid()) {
         sol::error e = result;
@@ -370,6 +431,7 @@ void Backend::DeliverMessage(int targetId, const std::string& name, sol::object 
         sol::protected_function Fn;
         sol::object Self;
         GameObject Owner;
+        InstanceId Id;
     };
     std::vector<Target> targets;
     for (auto& [id, inst] : m_instances) {
@@ -378,10 +440,11 @@ void Backend::DeliverMessage(int targetId, const std::string& name, sol::object 
         sol::object fn = inst.Class["OnMessage"];
         if (fn.get_type() != sol::type::function) continue;
         targets.push_back({fn.as<sol::protected_function>(),
-                           inst.Legacy ? inst.LegacyEntity : sol::object(inst.Self), inst.Owner});
+                           inst.Legacy ? inst.LegacyEntity : sol::object(inst.Self), inst.Owner, id});
     }
     for (Target& t : targets) {
         if (!t.Owner.Valid()) continue; // мог быть уничтожен предыдущим обработчиком
+        CurrentScope scope(*this, t.Id);
         sol::protected_function_result result = t.Fn(t.Self, name, data);
         if (result.valid()) continue;
         sol::error err = result;
@@ -395,6 +458,7 @@ void Backend::DeliverQuit() {
         sol::object fn = inst.Class["OnQuit"];
         if (fn.get_type() != sol::type::function) continue;
         sol::protected_function call = fn.as<sol::protected_function>();
+        CurrentScope scope(*this, id);
         sol::protected_function_result result =
             call(inst.Legacy ? inst.LegacyEntity : sol::object(inst.Self));
         if (result.valid()) continue;

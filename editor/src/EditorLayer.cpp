@@ -1,4 +1,5 @@
 #include "EditorLayer.h"
+#include "sage/scene/Signals.h"
 #include "sage/audio/AudioEngine.h"
 #include "sage/assets/Pack.h"
 
@@ -748,8 +749,9 @@ void EditorLayer::OnAttach() {
               << "    needs  = { kind = \"entity\", label = \"Нужен ключ\" },\n"
               << "    sound  = { kind = \"asset\", label = \"Звук\" },\n"
               << "}\n\n"
-              << "function OnMessage(entity, name, data)\n"
-              << "    if name == \"Open\" then entity:Vars().locked = false end\n"
+              << "-- Зовётся связью кнопки «On Click → Дверь.Open()»\n"
+              << "function Open(entity, event)\n"
+              << "    entity:Vars().locked = false\n"
               << "end\n";
         }
         GameObject key = m_scene->CreateObject("Ключ");
@@ -770,19 +772,13 @@ void EditorLayer::OnAttach() {
         t.Size = {220.0f, 56.0f};
         reg.emplace_or_replace<sage::ui::Element>(button.Entity(), t);
         reg.emplace_or_replace<sage::ui::Fill>(button.Entity());
-        sage::ui::Interactable& act =
-            reg.emplace_or_replace<sage::ui::Interactable>(button.Entity());
-        sage::events::Binding open;
-        open.Trigger = "click";
-        open.Event = "door.open";
+        reg.emplace_or_replace<sage::ui::Interactable>(button.Entity());
+        // «On Click → Дверь.Open()» — связь сигнала, как её заводят в инспекторе.
+        sage::signals::Link open;
+        open.Signal = sage::signals::kClicked;
         open.Target = sage::vars::EntityRef{door.Id()};
         open.Method = "Open";
-        open.Arg = sage::vars::Value(std::string("медленно"));
-        act.Events.push_back(open);
-        sage::events::Binding sound;
-        sound.Trigger = "hoverIn";
-        sound.Event = "ui.hover";
-        act.Events.push_back(sound);
+        reg.emplace_or_replace<sage::signals::SignalLinksComponent>(button.Entity()).Links.push_back(open);
 
         const char* mode = std::getenv("SAGE_EDITOR_VARS_DEMO");
 

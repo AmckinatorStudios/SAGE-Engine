@@ -219,7 +219,9 @@ function SageTransform:LookAt(target) end
 ---@return Vec3
 function SageTransform:WorldPosition() end
 
----Объект сцены.
+---Объект сцены. Встроенные сигналы — свойства (`button.clicked`,
+---`crate.collision`): их объявляют компоненты объекта. Интерфейс — часть
+---объекта: text, visible, enabled, value (docs/scripting.md, «Сигналы и связи»).
 ---@class SageObject
 ---@field name string
 ---@field id integer
@@ -227,6 +229,22 @@ function SageTransform:WorldPosition() end
 ---@field transform SageTransform
 ---@field parent SageObject|nil
 ---@field children SageObject[]
+---@field clicked SageSignal|nil
+---@field pressed SageSignal|nil
+---@field released SageSignal|nil
+---@field hovered SageSignal|nil
+---@field unhovered SageSignal|nil
+---@field value_changed SageSignal|nil
+---@field text_changed SageSignal|nil
+---@field collision SageSignal|nil
+---@field collision_ended SageSignal|nil
+---@field trigger_entered SageSignal|nil
+---@field trigger_exited SageSignal|nil
+---@field signals string[] сигналы, объявленные компонентами объекта
+---@field text string|nil надпись (своя или первой дочерней надписи)
+---@field visible boolean показан ли (у элемента интерфейса — Active)
+---@field enabled boolean ловит ли мышь (Interactable)
+---@field value number|boolean|nil значение ползунка или галки
 local SageObject = {}
 ---@param name string
 ---@return any компонент или nil
@@ -251,6 +269,72 @@ function SageObject:SetParent(parent) end
 function SageObject:Destroy() end
 ---@return boolean
 function SageObject:IsValid() end
+
+---Сигнал по имени, в том числе свой: `player:signal("player_died")`.
+---@param name string
+---@return SageSignal
+function SageObject:signal(name) end
+---Подписаться на сигнал этого объекта: `player:on("player_died", fn)`.
+---@param name string
+---@param handler fun(event: SageEvent, data: any)
+---@return SageConnection
+function SageObject:on(name, handler) end
+---@param name string
+---@param handler fun(event: SageEvent, data: any)
+---@return SageConnection
+function SageObject:once(name, handler) end
+---Послать сигнал этого объекта: `player:emit("player_died", {score = 10})`.
+---@param name string
+---@param data? any
+function SageObject:emit(name, data) end
+---Снять СВОИ (скриптовые) подписки на сигнал; вернёт их число.
+---@param name string
+---@return integer
+function SageObject:off(name) end
+---@param text string
+function SageObject:set_text(text) end
+function SageObject:show() end
+function SageObject:hide() end
+---@param on boolean
+function SageObject:set_visible(on) end
+---@param on boolean
+function SageObject:set_enabled(on) end
+
+---Что получает обработчик сигнала первым аргументом.
+---@class SageEvent
+---@field name string имя сигнала
+---@field sender SageObject|nil кто послал
+---@field data any что послали (оно же — второй аргумент)
+
+---Сигнал объекта (или глобальный — Events.signal).
+---@class SageSignal
+---@field name string
+---@field object SageObject|nil
+local SageSignal = {}
+---@param handler fun(event: SageEvent, data: any)
+---@return SageConnection
+function SageSignal:connect(handler) end
+---Сработает один раз и снимется сам.
+---@param handler fun(event: SageEvent, data: any)
+---@return SageConnection
+function SageSignal:once(handler) end
+---@param data? any
+function SageSignal:emit(data) end
+---Снять все подписки ИЗ СКРИПТОВ на этот сигнал; вернёт их число.
+---@return integer
+function SageSignal:disconnect_all() end
+---Сколько подписчиков (включая связи инспектора и C++).
+---@return integer
+function SageSignal:count() end
+
+---То, что вернул connect.
+---@class SageConnection
+---@field connected boolean жива ли подписка
+---@field id integer
+local SageConnection = {}
+---Снять подписку. Повторно — безопасно: вернёт false.
+---@return boolean
+function SageConnection:disconnect() end
 
 ---Контроллер персонажа: универсальное управляемое тело. Тяготение, опора,
 ---склон и ступенька — внутри него, а не в скрипте.
@@ -501,21 +585,47 @@ function Physics:OverlapSphere(center, radius) end
 ---@param gravity Vec3
 function Physics:SetGravity(gravity) end
 
----Шина событий сцены — одна на кнопку интерфейса, скрипт и код на C++.
+---Глобальные события: сигналы «ничьего» объекта. Та же шина, что у сигналов
+---объектов, связей инспектора и кода на C++.
 Events = {}
 ---@param name string
----@param arg? any
-function Events:Emit(name, arg) end
+---@param handler fun(event: SageEvent, data: any)
+---@return SageConnection
+function Events.on(name, handler) end
 ---@param name string
----@param handler fun(arg: any)
----@return integer номер подписки
-function Events:On(name, handler) end
+---@param handler fun(event: SageEvent, data: any)
+---@return SageConnection
+function Events.once(name, handler) end
 ---@param name string
----@param handler fun(arg: any)
+---@param data? any
+function Events.emit(name, data) end
+---Снять: соединение, его номер или все свои подписки на имя.
+---@param what SageConnection|integer|string
 ---@return integer
-function Events:Once(name, handler) end
----@param subscription integer
-function Events:Off(subscription) end
+function Events.off(what) end
+---@param name string
+---@return integer
+function Events.count(name) end
+---@param name string
+---@return SageSignal
+function Events.signal(name) end
+---Прежние имена — те же функции.
+Events.On = Events.on
+Events.Once = Events.once
+Events.Emit = Events.emit
+Events.Off = Events.off
+Events.Count = Events.count
+
+---Интерфейс по имени элемента.
+UI = {}
+---Элемент по имени; нет такого — понятная ошибка.
+---@param name string
+---@return SageObject
+function UI.get(name) end
+---Элемент по имени или nil.
+---@param name string
+---@return SageObject|nil
+function UI.find(name) end
 
 ---Звук без объекта: щелчок интерфейса, взрыв в точке мира.
 Audio = {}

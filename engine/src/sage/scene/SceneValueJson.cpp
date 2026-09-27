@@ -89,34 +89,62 @@ void VarsFromJson(const json& in, sage::vars::Table& table) {
     }
 }
 
-json BindingsToJson(const sage::events::Bindings& bindings) {
+json LinksToJson(const std::vector<sage::signals::Link>& links) {
     json out = json::array();
-    for (const sage::events::Binding& b : bindings) {
+    for (const sage::signals::Link& l : links) {
         json j;
-        j["trigger"] = b.Trigger;
-        if (!b.Event.empty()) j["event"] = b.Event;
-        if (b.Target.Valid()) j["target"] = b.Target.Id;
-        if (!b.Method.empty()) j["method"] = b.Method;
-        j["arg"] = ValueToJson(b.Arg);
-        if (!b.Enabled) j["enabled"] = false;
+        j["signal"] = l.Signal;
+        if (l.Target.Valid()) j["target"] = l.Target.Id;
+        if (!l.Method.empty()) j["method"] = l.Method;
+        if (!l.Broadcast.empty()) j["broadcast"] = l.Broadcast;
+        if (!l.Enabled) j["enabled"] = false;
         out.push_back(std::move(j));
     }
     return out;
 }
 
-void BindingsFromJson(const json& in, sage::events::Bindings& out) {
+void LinksFromJson(const json& in, std::vector<sage::signals::Link>& out) {
     out.clear();
     if (!in.is_array()) return;
     for (const json& j : in) {
         if (!j.is_object()) continue;
-        sage::events::Binding b;
-        b.Trigger = j.value("trigger", std::string());
-        b.Event = j.value("event", std::string());
-        b.Target.Id = j.value("target", 0);
-        b.Method = j.value("method", std::string());
-        if (j.contains("arg")) b.Arg = ValueFromJson(j["arg"]);
-        b.Enabled = j.value("enabled", true);
-        out.push_back(std::move(b));
+        sage::signals::Link l;
+        l.Signal = j.value("signal", std::string());
+        l.Target.Id = j.value("target", 0);
+        l.Method = j.value("method", std::string());
+        l.Broadcast = j.value("broadcast", std::string());
+        l.Enabled = j.value("enabled", true);
+        out.push_back(std::move(l));
+    }
+}
+
+void LinksFromLegacyBindings(const json& in, std::vector<sage::signals::Link>& out) {
+    if (!in.is_array()) return;
+    for (const json& j : in) {
+        if (!j.is_object()) continue;
+        const std::string signal =
+            sage::signals::FromLegacyTrigger(j.value("trigger", std::string()));
+        const bool enabled = j.value("enabled", true);
+        const int target = j.value("target", 0);
+        const std::string method = j.value("method", std::string());
+        const std::string event = j.value("event", std::string());
+        // Старая связь делала ДВА дела сразу — звала метод и слала событие по
+        // имени. Становится двумя связями: у каждой одно дело, как и положено.
+        if (target > 0 && !method.empty()) {
+            sage::signals::Link l;
+            l.Signal = signal;
+            l.Target.Id = target;
+            l.Method = method;
+            l.Enabled = enabled;
+            out.push_back(std::move(l));
+        }
+        if (!event.empty()) {
+            sage::signals::Link l;
+            l.Signal = signal;
+            l.Broadcast = event;
+            l.Enabled = enabled;
+            out.push_back(std::move(l));
+        }
     }
 }
 

@@ -296,7 +296,19 @@ void ColorContextMenu(ImGuiID owner, const float rgb[3], const float* alpha, boo
             ImGui::Separator();
             // Вставка доступна, только если в буфере правда цвет: пункт,
             // который молча ничего не делает, хуже серого.
-            const char* clip = ImGui::GetClipboardText();
+            //
+            // Буфер читается ОДИН РАЗ — когда меню открылось, а не каждый кадр,
+            // пока оно открыто. На Windows буфер с картинкой или файлом (не
+            // текстом) GLFW при каждом чтении сообщает ошибкой «Failed to
+            // convert clipboard to string», и открытое меню засыпало ими лог
+            // (тысяча строк за несколько секунд). За время открытого меню
+            // содержимое буфера всё равно никто не меняет.
+            static std::string clipCache;
+            if (ImGui::IsWindowAppearing()) {
+                const char* now = ImGui::GetClipboardText();
+                clipCache = now ? now : "";
+            }
+            const char* clip = clipCache.c_str();
             float pasted[3] = {rgb[0], rgb[1], rgb[2]};
             float pastedA = alpha ? *alpha : 1.0f;
             const bool canPaste = clip && color::ParseAny(clip, pasted, alpha ? &pastedA : nullptr);

@@ -1223,13 +1223,8 @@ const std::vector<PartField>& InteractableFields() {
             {"disabledLook", SAGE_UI_TEXT("When disabled"), PartField::Kind::Look,
              offsetof(Interactable, DisabledLook), 0.0f, 0.0f, nullptr, nullptr, 0, PartField::Widget::Auto,
              "useDisabledLook", 1},
-            {"events", SAGE_UI_TEXT("Events"), PartField::Kind::Bindings, offsetof(Interactable, Events), 0.0f,
-             0.0f,
-             "What the element does itself: send an event, call a method on another\n"
-             "object. Without this a button needs a script polling it every frame."},
         };
         v[0].Content = v[1].Content = v[2].Content = true;
-        v.back().Content = true;
         // Состояния — ВКЛАДКАМИ, и свой вид состояния рисует подложка: без
         // неё (у ползунка, галки) эти поля не делают ничего и не показываются.
         MarkTab(v, SAGE_UI_TEXT("On hover"), nullptr, {"hoverBrightness"});
@@ -1589,10 +1584,6 @@ void CopyField(const PartField& f, const void* src, void* dst) {
         case PartField::Kind::Vec2:   *reinterpret_cast<glm::vec2*>(d) = *reinterpret_cast<const glm::vec2*>(s); break;
         case PartField::Kind::Color:
         case PartField::Kind::Vec4:   *reinterpret_cast<glm::vec4*>(d) = *reinterpret_cast<const glm::vec4*>(s); break;
-        case PartField::Kind::Bindings:
-            *reinterpret_cast<sage::events::Bindings*>(d) =
-                *reinterpret_cast<const sage::events::Bindings*>(s);
-            break;
         case PartField::Kind::Look:
             *reinterpret_cast<Look*>(d) = *reinterpret_cast<const Look*>(s);
             break;

@@ -8,6 +8,7 @@
 #include "sage/render/Texture.h"
 #include "sage/audio/AudioEngine.h"
 #include "sage/physics/PhysicsScene.h"
+#include "sage/scripting/LuaHandlerStore.h"
 
 namespace sage::net { class NetworkSystem; }
 #include <sol/sol.hpp>
@@ -216,17 +217,11 @@ public:
     void DispatchEvent(const std::string& name, sol::object payload = sol::nil);
     void DispatchEvent(const std::string& name, bool flag);
 
-    // --- Мост в шину сцены ---------------------------------------------------
-    //
-    // События движка живут в sage::events::Bus у сцены (Scene::Events): их шлют
-    // кнопки интерфейса и код на C++, у которого нет и не должно быть доступа к
-    // Lua. Здесь шина ПОДКЛЮЧАЕТСЯ к скриптам, чтобы разговор был один, а не
-    // два: событие кнопки слышат подписчики sage.events.On, а адресная часть
-    // (кому и какой метод) доставляется как обычное сообщение объекту.
-    //
-    // Подписка ставится в BindScene и снимается при смене сцены: обработчики
-    // выгруженного уровня, доживи они до следующего, звали бы мёртвые объекты.
-    void OnBusEvent(const sage::events::Event& event);
+    // Шина, в которую говорит sage.events: шина привязанной сцены, а без
+    // сцены (инструмент, тест) — своя. Одна и та же шина сигналов объектов и
+    // глобальных событий, что у нового API (Events.on, obj.clicked:connect) и
+    // у C++: разговор один, а не три.
+    sage::events::Bus& EventBus() { return m_scene ? m_scene->Events : m_ownBus; }
 
     // Перевод значений движка в Lua и обратно (см. ScriptApi_Vars.cpp).
     sol::object ValueToLua(const sage::vars::Value& value);
@@ -470,26 +465,12 @@ private:
 
     // --- Шина событий (sage.events) -----------------------------------------
     //
-    // ПОСЛЕ m_lua намеренно: обработчики держат ссылки в реестр Lua, а члены
-    // уничтожаются в обратном порядке объявления. Объявленные раньше состояния
-    // они пережили бы его и на выходе снимали бы ссылки в уже разрушенном
-    // интерпретаторе — падение при завершении игры, когда всё уже сделано.
-    struct Handler {
-        int Id = 0;
-        sol::protected_function Fn;
-        bool Once = false;
-        bool Dead = false;   // снят; убирается одним проходом после рассылки
-    };
-    std::unordered_map<std::string, std::vector<Handler>> m_handlers;
-    int m_nextHandler = 1;
-    int m_eventDepth = 0;
-    // Номер подписки моста на шину сцены: при смене сцены её надо снять, иначе
-    // мост остался бы висеть на старой шине (а она уже чужая).
-    int m_busSubscription = 0;
-    // Мост молчит, пока событие в шину шлёт сам скрипт: иначе его подписчики
-    // услышали бы одно событие дважды (см. sage.events.Emit).
-    bool m_bridgeMuted = false;
-    static constexpr int kMaxEventDepth = 8;
+    // ПОСЛЕ m_lua намеренно: хранилище держит функции Lua, а члены
+    // уничтожаются в обратном порядке объявления. Объявленное раньше состояния
+    // оно пережило бы его и на выходе снимало бы ссылки в уже разрушенном
+    // интерпретаторе (см. LuaHandlerStore.h).
+    sage::events::Bus m_ownBus;
+    std::unique_ptr<sage::scripting::LuaHandlerStore> m_events;
 
     // Накопитель постоянного шага для OnFixedUpdate: остаток переносится на
     // следующий кадр, иначе шаг «плавает» вместе с кадром.

@@ -34,7 +34,6 @@ set(SAGE_ENGINE_SOURCES
     src/sage/vars/Refs.cpp
     src/sage/events/Events.cpp
     src/sage/events/TypedBus.cpp
-    src/sage/events/Rules.cpp
     src/sage/input/Keys.cpp
     src/sage/input/Binding.cpp
     src/sage/input/Devices.cpp
@@ -149,15 +148,18 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/SceneSerializer.cpp
     src/sage/scene/SceneMigrations.cpp
     src/sage/scene/SceneValueJson.cpp
+    src/sage/scene/Signals.cpp
     src/sage/scripting/ScriptEngine.cpp
     src/sage/render/DebugLines.cpp
     src/sage/scripting/ScriptRuntime.cpp
+    src/sage/scripting/LuaHandlerStore.cpp
     src/sage/scripting/ScriptFields.cpp
     src/sage/scripting/ScriptingSystem.cpp
     src/sage/scripting/lua/LuaBackend.cpp
     src/sage/scripting/lua/LuaFields.cpp
     src/sage/scripting/lua/LuaApi_Math.cpp
     src/sage/scripting/lua/LuaApi_Object.cpp
+    src/sage/scripting/lua/LuaApi_Signals.cpp
     src/sage/scripting/lua/LuaApi_Components.cpp
     src/sage/scripting/lua/LuaApi_Globals.cpp
     src/sage/scripting/ScriptApi_Math.cpp

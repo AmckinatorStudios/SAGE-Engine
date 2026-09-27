@@ -7,6 +7,7 @@
 #include <sol/sol.hpp>
 
 #include "sage/scene/Scene.h"
+#include "sage/scripting/LuaHandlerStore.h"
 #include "sage/scripting/LanguageBackend.h"
 #include "sage/scripting/lua/LuaBackend.h"
 
@@ -60,6 +61,24 @@ struct CameraRef {
     explicit CameraRef(GameObject o) : Obj(o) {}
 };
 
+// Сигнал объекта глазами скрипта: `button.clicked`, `Events` (объект 0).
+// Держит НОМЕР объекта, а не сущность: сигнал — адрес в шине, и номер
+// переживает любые перестановки реестра. Имя объекта запомнено для сообщений:
+// «нельзя подписаться на clicked уничтоженного объекта Play» понятнее, чем
+// «объекта 12».
+struct SignalRef {
+    int Object = 0;
+    std::string Name;
+    std::string ObjectName;
+};
+
+// Соединение: то, что вернул connect. disconnect() снимает его; повторно —
+// безопасно (вернёт false).
+struct ConnectionRef {
+    int Id = 0;
+    std::string Signal;
+};
+
 class Backend : public LanguageBackend {
 public:
     explicit Backend(const LuaBackendConfig& config);
@@ -79,6 +98,9 @@ public:
     bool CallNamed(InstanceId id, Hook hook, const std::string& name, ScriptError& err) override;
     bool Invoke(InstanceId id, const std::string& method,
                 const std::vector<sage::vars::Value>& args, ScriptError& err) override;
+    bool HasMethod(InstanceId id, const std::string& method) const override;
+    bool InvokeEvent(InstanceId id, const std::string& method, const sage::events::Event& event,
+                     ScriptError& err) override;
     void ApplyFields(InstanceId id, const sage::vars::Table& fields) override;
     void Reset() override;
 
@@ -107,6 +129,27 @@ public:
 
     // Готовый прокси объекта (создаётся по требованию, живёт как userdata Lua).
     sol::object Wrap(GameObject object);
+
+    // --- Сигналы (LuaApi_Signals.cpp) ----------------------------------------
+    // Шина сцены или понятная ошибка «сцена не привязана».
+    sage::events::Bus& BusOrThrow(const std::string& who);
+    // Подписать функцию Lua на сигнал объекта (0 — глобальное событие).
+    // Владелец — экземпляр скрипта, который сейчас исполняется: его подписки
+    // уйдут вместе с ним.
+    ConnectionRef ConnectLua(const SignalRef& signal, const sol::object& fn, bool once,
+                             const std::string& who);
+    // Послать сигнал из скрипта: data едет подписчикам Lua как есть, C++ —
+    // значением движка.
+    void EmitLua(int object, const std::string& name, const sol::object& data,
+                 const std::string& who);
+    // Событие в том виде, в каком его видит обработчик: {name, sender, data}.
+    sol::table EventTable(const sage::events::Event& event);
+    sol::object EventData(const sage::events::Event& event);
+    // Позвать обработчик с событием: fn(event, data), ошибка — в лог с именем
+    // сигнала и объекта, соседние обработчики не страдают.
+    void CallHandler(const sol::protected_function& fn, const sage::events::Event& event, int owner);
+    LuaHandlerStore& Signals() { return *m_signals; }
+    InstanceId Current() const { return m_current; }
 
     // Прокси компонента по имени ("CharacterController", "Animation", "Audio",
     // "Camera", "Transform"). Один список имён на весь бэкенд — второй,
@@ -150,6 +193,18 @@ private:
 
     std::unique_ptr<sol::state> m_owned;
     sol::state* m_lua = nullptr;
+    // Функции Lua, подписанные на сигналы. ПОСЛЕ состояния: уничтожается раньше
+    // него (см. LuaHandlerStore.h).
+    std::unique_ptr<LuaHandlerStore> m_signals;
+    // Экземпляр, чей код сейчас исполняется: ему принадлежат подписки,
+    // сделанные в этот момент (см. ConnectLua).
+    InstanceId m_current = kInvalidInstance;
+    struct CurrentScope {
+        Backend& B;
+        InstanceId Saved;
+        CurrentScope(Backend& b, InstanceId id) : B(b), Saved(b.m_current) { b.m_current = id; }
+        ~CurrentScope() { B.m_current = Saved; }
+    };
     ScriptEngine* m_interop = nullptr;
     ScriptServices m_services;
 
@@ -167,6 +222,7 @@ private:
     friend void RegisterObject(Backend&);
     friend void RegisterComponents(Backend&);
     friend void RegisterGlobals(Backend&);
+    friend void RegisterSignals(Backend&);
 };
 
 // Разделы API — по файлу на раздел (LuaApi_*.cpp).
@@ -174,6 +230,12 @@ void RegisterMath(Backend& backend);
 void RegisterObject(Backend& backend);
 void RegisterComponents(Backend& backend);
 void RegisterGlobals(Backend& backend);
+// Сигналы и связи: obj.clicked:connect, obj:on/emit, Events.*, UI.get и
+// свойства интерфейса у объекта (text, visible, enabled).
+void RegisterSignals(Backend& backend);
+// Сигналы и свойства интерфейса у прокси объекта — зовётся из RegisterObject,
+// у которого в руках сам тип.
+void RegisterObjectSignals(Backend& backend, sol::usertype<ObjectRef>& type);
 // `field.number(...)` и прочие — они нужны и при ВЫПОЛНЕНИИ файла, а не только
 // при разборе объявления (см. LuaFields.cpp).
 void RegisterFields(Backend& backend);

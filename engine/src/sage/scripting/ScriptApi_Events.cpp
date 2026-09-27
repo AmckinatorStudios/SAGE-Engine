@@ -29,134 +29,66 @@
 // ---------------------------------------------------------------------------
 
 void ScriptEngine::RegisterEventsApi() {
-    // Подписка. Возвращает номер, по которому подписку снимают: возвращать
-    // саму функцию нельзя — Lua сравнивает замыкания по идентичности, и снять
-    // подписку на `function() ... end`, объявленную по месту, было бы уже
-    // невозможно.
-    Bind("events", "On", "OnEvent", [this](const std::string& name, sol::protected_function fn) -> int {
-        if (!fn.valid()) throw std::runtime_error("sage.events.On: обработчик не функция");
-        const int id = m_nextHandler++;
-        m_handlers[name].push_back({id, fn, false});
-        return id;
+    // ЭТО НЕ ОТДЕЛЬНАЯ ШИНА. sage.events — старое имя глобальных событий, и
+    // подписка отсюда заводится в той же шине сцены (объект 0), что и
+    // Events.on нового API и связи инспектора: событие, посланное кнопкой, C++
+    // или новым скриптом, слышно здесь, и наоборот.
+    //
+    // Подписка возвращает номер соединения: возвращать саму функцию нельзя —
+    // Lua сравнивает замыкания по идентичности, и снять подписку на
+    // `function() ... end`, объявленную по месту, было бы уже невозможно.
+    auto need = [](const std::string& who, const std::string& name, const sol::protected_function& fn) {
+        if (name.empty()) throw std::runtime_error(who + ": пустое имя события");
+        if (!fn.valid()) throw std::runtime_error(who + "('" + name + "'): обработчик не функция");
+    };
+    Bind("events", "On", "OnEvent", [this, need](const std::string& name, sol::protected_function fn) -> int {
+        need("sage.events.On", name, fn);
+        return m_events->Connect(EventBus(), sage::events::Bus::kGlobal, name, fn, false, 0);
     });
 
-    // Одноразовая подписка: сработала — снялась. Без неё «дождаться первого
-    // касания земли» пишется как подписка, которая первым делом снимает сама
-    // себя, и в этой строчке ошибаются все.
-    Bind("events", "Once", "OnceEvent", [this](const std::string& name, sol::protected_function fn) -> int {
-        if (!fn.valid()) throw std::runtime_error("sage.events.Once: обработчик не функция");
-        const int id = m_nextHandler++;
-        m_handlers[name].push_back({id, fn, true});
-        return id;
+    // Одноразовая подписка: сработала — снялась.
+    Bind("events", "Once", "OnceEvent", [this, need](const std::string& name, sol::protected_function fn) -> int {
+        need("sage.events.Once", name, fn);
+        return m_events->Connect(EventBus(), sage::events::Bus::kGlobal, name, fn, true, 0);
     });
 
     Bind("events", "Off", "OffEvent", [this](sol::object arg) {
-        // Снять можно по номеру подписки или по имени события целиком.
+        // Снять можно по номеру подписки или по имени события целиком (только
+        // свои подписки: обработчики C++ и связи инспектора — не наши).
         if (arg.is<int>()) {
-            const int id = arg.as<int>();
-            for (auto& [name, list] : m_handlers)
-                for (Handler& h : list)
-                    if (h.Id == id) h.Dead = true;
+            EventBus().Disconnect(arg.as<int>());
             return;
         }
-        if (arg.is<std::string>()) {
-            auto it = m_handlers.find(arg.as<std::string>());
-            if (it != m_handlers.end())
-                for (Handler& h : it->second) h.Dead = true;
-        }
+        if (arg.is<std::string>())
+            EventBus().DisconnectSignal(sage::events::Bus::kGlobal, arg.as<std::string>(),
+                                        m_events->Group());
     });
 
     // Рассылка. Полезная нагрузка — одно значение (обычно таблица): набор
     // аргументов переменной длины заставил бы каждого подписчика знать
-    // порядок и число полей отправителя, а таблица позволяет добавить поле,
-    // не сломав никого.
-    // Рассылка идёт В ШИНУ СЦЕНЫ, а не сразу подписчикам Lua: иначе разговоров
-    // снова два — событие, посланное скриптом, не услышал бы код на C++, а
-    // событие кнопки не увидел бы тот, кто слушает шину. Мост (OnBusEvent)
-    // вернёт его сюда и раздаст подписчикам sage.events.
-    //
-    // Без привязанной сцены шины нет — тогда рассылаем напрямую: скрипт,
-    // запущенный вне сцены (инструмент, тест), обязан работать так же.
+    // порядок и число полей отправителя. Таблица едет подписчикам Lua КАК ЕСТЬ
+    // (Event::Payload), а код на C++ читает её значение в Arg.
     Bind("events", "Emit", "EmitEvent", [this](const std::string& name, sol::object payload) {
-        if (m_scene) {
-            // Сначала в шину — но БЕЗ обратной раздачи в Lua: мост (OnBusEvent)
-            // позвал бы подписчиков sage.events во второй раз, и обработчик,
-            // считающий очки, насчитал бы вдвое.
-            sage::events::Event e;
-            e.Name = name;
-            e.Arg = ValueFromLua(payload);
-            m_bridgeMuted = true;
-            m_scene->Events.Emit(e);
-            m_bridgeMuted = false;
-        }
-        // Потом подписчикам Lua — С ИСХОДНОЙ нагрузкой. Через шину она поехала
-        // бы одним значением, а скрипты шлют таблицы: терять поля ради
-        // единообразия значило бы сломать всё, что уже написано.
+        if (name.empty()) throw std::runtime_error("sage.events.Emit: пустое имя события");
         DispatchEvent(name, payload);
     });
 
     // Сколько живых подписчиков у события. Нужно не для отладки: рассылка
-    // тяжёлой нагрузки (собрать таблицу с десятком полей) имеет смысл только
-    // если её кто-то слушает.
+    // тяжёлой нагрузки имеет смысл только если её кто-то слушает.
     Bind("events", "Count", "EventCount", [this](const std::string& name) -> int {
-        auto it = m_handlers.find(name);
-        if (it == m_handlers.end()) return 0;
-        int n = 0;
-        for (const Handler& h : it->second)
-            if (!h.Dead) ++n;
-        return n;
+        return EventBus().Count(name);
     });
 }
 
-// Рассылка одного события. Обработчики КОПИРУЮТСЯ перед вызовом: подписка или
-// отписка изнутри обработчика — обычное дело («сработало — отпишись»), а она
-// меняет вектор, по которому мы идём. Без копии первый же такой обработчик
-// оставлял бы висячую ссылку.
+// Рассылка одного глобального события. Снимок подписчиков, защита от
+// рассылки по кругу и снятие одноразовых — у шины (sage/events/Events.cpp):
+// второй копии этих правил здесь больше нет.
 void ScriptEngine::DispatchEvent(const std::string& name, sol::object payload) {
-    auto it = m_handlers.find(name);
-    if (it == m_handlers.end()) return;
-
-    // Ограничение вложенности — по той же причине, что у SendMessage: два
-    // обработчика, шлющие событие друг другу, иначе уронят движок
-    // переполнением стека C++, а не понятной ошибкой в логе.
-    if (m_eventDepth >= kMaxEventDepth) {
-        LOG_ERROR("ScriptEngine") << "sage.events: превышена глубина вложенной рассылки ("
-                                  << kMaxEventDepth << ") на событии '" << name
-                                  << "' — обработчики шлют события друг другу по кругу";
-        return;
-    }
-    ++m_eventDepth;
-
-    std::vector<Handler> snapshot;
-    snapshot.reserve(it->second.size());
-    for (const Handler& h : it->second)
-        if (!h.Dead) snapshot.push_back(h);
-
-    for (const Handler& h : snapshot) {
-        sol::protected_function_result r = payload.valid() ? h.Fn(payload) : h.Fn();
-        if (!r.valid()) {
-            const sol::error err = r;
-            LOG_ERROR("ScriptEngine") << "Ошибка в обработчике события '" << name
-                                      << "': " << err.what();
-        }
-        if (h.Once) {
-            for (Handler& live : it->second)
-                if (live.Id == h.Id) live.Dead = true;
-        }
-    }
-
-    --m_eventDepth;
-
-    // Снятые подписки убираем ОДНИМ проходом и только на верхнем уровне
-    // рассылки: вложенный Emit по тому же событию иначе выдернул бы вектор
-    // из-под внешнего цикла.
-    if (m_eventDepth == 0) {
-        for (auto& [key, list] : m_handlers) {
-            list.erase(std::remove_if(list.begin(), list.end(),
-                                      [](const Handler& h) { return h.Dead; }),
-                       list.end());
-        }
-    }
+    sage::events::Event e;
+    e.Name = name;
+    e.Arg = ValueFromLua(payload);
+    if (payload.valid() && payload.get_type() != sol::type::lua_nil) e.Payload = payload;
+    EventBus().Emit(e);
 }
 
 void ScriptEngine::DispatchEvent(const std::string& name, bool flag) {
@@ -178,7 +110,7 @@ void ScriptEngine::DispatchFrameEvents() {
     if (m_physics) {
         for (const PhysicsScene::EntityContact& c : m_physics->Contacts()) {
             const char* name = c.Sensor ? "trigger" : "collision";
-            if (m_handlers.find(name) == m_handlers.end()) continue;
+            if (EventBus().Count(name) == 0) continue;
             sol::table t = m_lua.create_table();
             t["a"] = GameObject(&m_scene->Registry(), c.A);
             t["b"] = GameObject(&m_scene->Registry(), c.B);
@@ -227,8 +159,8 @@ void ScriptEngine::DispatchFrameEvents() {
     // край, и на просадке WasActionPressed его теряет так же, как всё
     // остальное.
     if (m_input) {
-        const bool wantPressed = m_handlers.count("action.pressed") != 0;
-        const bool wantReleased = m_handlers.count("action.released") != 0;
+        const bool wantPressed = EventBus().Count("action.pressed") != 0;
+        const bool wantReleased = EventBus().Count("action.released") != 0;
         if (wantPressed || wantReleased) {
             // По всем контекстам, а не только по игровому: действие, объявленное
             // в контексте меню, обязано доходить до скрипта так же, как
@@ -304,42 +236,12 @@ void ScriptEngine::RegisterRenderTextureApi() {
     });
 }
 
-// --- Мост «шина сцены -> скрипты» -------------------------------------------
+// --- Привязка сцены ----------------------------------------------------------
 //
 // Шина принадлежит сцене, а не движку: подписки уровня обязаны исчезнуть
-// вместе с ним. Поэтому мост ставится здесь, при привязке сцены, и снимается
-// со старой шины — иначе события следующего уровня доходили бы до
-// обработчиков предыдущего, а объекты, на которые те ссылаются, уже мертвы.
+// вместе с ним. Подписки, заведённые на прежней сцене, снимаются — иначе
+// события следующего уровня доходили бы до обработчиков предыдущего.
 void ScriptEngine::BindScene(Scene& scene) {
-    if (m_scene && m_busSubscription) m_scene->Events.Off(m_busSubscription);
+    if (m_scene && m_scene != &scene) m_scene->Events.DisconnectGroup(m_events->Group());
     m_scene = &scene;
-    m_busSubscription = scene.Events.OnAny([this](const sage::events::Event& e) {
-        OnBusEvent(e);
-    });
-}
-
-void ScriptEngine::OnBusEvent(const sage::events::Event& event) {
-    // Событие, которое сам скрипт только что послал: подписчиков Lua позовёт
-    // sage.events.Emit — со своей, неурезанной нагрузкой (см. там же).
-    if (m_bridgeMuted) return;
-
-    // Полезная нагрузка — таблица, а не голое значение: подписчик «нажали
-    // кнопку» обязан знать, КАКУЮ нажали, и добавить поле в таблицу можно, не
-    // сломав тех, кто читает остальные.
-    sol::table payload = m_lua.create_table();
-    payload["value"] = ValueToLua(event.Arg);
-    payload["sender"] = event.Sender;
-    if (m_scene && event.Sender > 0) {
-        GameObject from = m_scene->Get(event.Sender);
-        if (from.Valid()) payload["object"] = from;
-    }
-    if (event.Target.Valid()) payload["target"] = event.Target.Id;
-
-    // Сначала адресная часть: связь настраивали ради неё («эта кнопка открывает
-    // эту дверь»), и обработчик по имени, успевший сменить сцену, не должен
-    // отменить главное действие.
-    if (event.Target.Valid() && !event.Method.empty())
-        DispatchMessage(event.Target.Id, event.Method, payload);
-
-    DispatchEvent(event.Name, payload);
 }

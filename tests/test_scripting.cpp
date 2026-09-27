@@ -1513,57 +1513,6 @@ TEST(Scripting_a_lua_event_is_not_heard_twice) {
     CHECK_EQ(count, 1);
 }
 
-// АДРЕСНАЯ ЧАСТЬ СВЯЗИ: «эта кнопка открывает эту дверь». Приходит скрипту
-// объекта тем же путём, что и SendMessage, — второй механизм для этого заводить
-// незачем.
-TEST(Scripting_an_addressed_event_calls_the_method_of_the_target_object) {
-    ScriptEngine se;
-    Scene scene("S");
-    se.BindScene(scene);
-    GameObject door = scene.CreateObject("Door");
-
-    // Скрипт двери докладывает о вызове ОБРАТНО В ШИНУ: заглядывать в его
-    // окружение из теста значило бы проверять не тот путь, которым связь
-    // работает в игре.
-    const std::string path = WriteTempScript("door_target", R"(
-        function OnMessage(entity, name, data)
-            if name == "Open" then
-                sage.events.Emit("door.opened", data.value)
-            end
-        end
-    )");
-    se.AttachScript(door, path);
-
-    int opened = 0;
-    std::string howLong;
-    scene.Events.On("door.opened", [&](const sage::events::Event& e) {
-        ++opened;
-        howLong = e.Arg.AsString();
-    });
-
-    sage::events::Event e;
-    e.Name = "door.open";
-    e.Target = sage::vars::EntityRef{door.Id()};
-    e.Method = "Open";
-    e.Arg = sage::vars::Value(std::string("медленно"));
-    scene.Events.Emit(e);
-    CHECK_EQ(opened, 1);
-    CHECK_EQ(howLong, std::string("медленно"));
-
-    // Каждое событие — свой вызов: связь срабатывает всякий раз, а не однажды.
-    scene.Events.Emit(e);
-    CHECK_EQ(opened, 2);
-
-    // Чужой объект метод не получает: адрес на то и адрес.
-    GameObject other = scene.CreateObject("Window");
-    sage::events::Event miss = e;
-    miss.Target = sage::vars::EntityRef{other.Id()};
-    scene.Events.Emit(miss);
-    CHECK_EQ(opened, 2);
-
-    std::remove(path.c_str());
-}
-
 // ---------------------------------------------------------------------------
 // ГОРЯЧАЯ ПЕРЕЗАГРУЗКА СКРИПТОВ
 //

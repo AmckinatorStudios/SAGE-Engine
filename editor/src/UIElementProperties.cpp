@@ -23,6 +23,7 @@
 
 #include "AssetPreview.h"
 #include "AssetSlot.h"
+#include "SignalLinksEditor.h"
 #include "VarsEditor.h"
 #include "EditorHost.h"
 #include "EditorIcons.h"
@@ -296,22 +297,6 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             break;
         }
 
-        case K::Bindings: {
-            // Связи «когда здесь случилось X — сделать Y». Тот же вид поля, что
-            // и остальные, и это главное: они попадают в сцену и в инспектор по
-            // ОБЩЕЙ таблице, а не отдельной веткой в сериализаторе и второй —
-            // здесь. Своя часть игры получает собственные события одной
-            // строкой в своей таблице полей.
-            sage::events::Bindings& v = ui::FieldAs<sage::events::Bindings>(data, f);
-            if (ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_DefaultOpen)) {
-                if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(f.Tooltip));
-                varsui::DrawBindings(host, f.Key, v, sage::events::UITriggers(), ctx.Preview);
-                ImGui::TreePop();
-            }
-            // Подсказка уже показана внутри — общий хвост её бы задублировал.
-            ImGui::PopID();
-            return;
-        }
 
         // Вид — заголовок группы; его поля рисует DrawPartFields.
         case K::Look:
@@ -386,13 +371,10 @@ int SelectedElements(EditorHost& host) {
 
 // Какие поля части рисовать: у реакции на мышь поля ВИДА (виды состояний)
 // стоят среди оформления, а поля ПОВЕДЕНИЯ (действие, курсор) — своим
-// разделом; связи событий — разделом «События».
-enum class FieldFilter { Look, Behaviour, Bindings };
+// разделом.
+enum class FieldFilter { Look, Behaviour };
 
 bool Passes(const ui::PartField& f, FieldFilter filter, bool splitContent) {
-    const bool bindings = f.Type == ui::PartField::Kind::Bindings;
-    if (filter == FieldFilter::Bindings) return bindings;
-    if (bindings) return false;
     if (!splitContent) return filter == FieldFilter::Look;
     return (filter == FieldFilter::Behaviour) == f.Content;
 }
@@ -864,29 +846,13 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
         DrawLayoutSection(host, e, xf, selected);
     }
 
-    // --- События — только у тех, у кого они бывают ---------------------------
+    // --- События -----------------------------------------------------------
     //
-    // Связи «когда здесь случилось X — сделать Y» — граница между интерфейсом
-    // и игрой, поэтому одним разделом. У надписи и картинки событий нет, и
-    // пустой раздел с советом «включите что-то» был бы шумом.
-    {
-        bool anyEvents = false;
-        for (const ui::PartType& p : ui::Parts()) {
-            if (!p.Fields || !p.Has(reg, e)) continue;
-            for (const ui::PartField& f : *p.Fields)
-                if (f.Type == ui::PartField::Kind::Bindings) anyEvents = true;
-        }
-        if (anyEvents && ImGui::CollapsingHeader(T("Events"), ImGuiTreeNodeFlags_DefaultOpen)) {
-            for (const ui::PartType& p : ui::Parts()) {
-                if (!p.Fields || !p.Has(reg, e)) continue;
-                void* data = p.GetMutable(reg, e);
-                if (!data) continue;
-                ImGui::PushID(p.Id);
-                DrawPartFields(host, obj, ctx, p, data, FieldFilter::Bindings, false, selected);
-                ImGui::PopID();
-            }
-        }
-    }
+    // Та же секция, что у любого объекта в инспекторе (SignalLinksEditor.h):
+    // события — свойство объекта, а не особенность интерфейса. Здесь она
+    // нужна редактору интерфейса, у которого своего инспектора объекта нет.
+    if (ctx.ShowEvents && ImGui::CollapsingHeader(T("Events"), ImGuiTreeNodeFlags_DefaultOpen))
+        DrawSignalLinks(host, obj);
 
     // --- ЧАСТИ СВЕРХ ТИПА ------------------------------------------------------
     //
