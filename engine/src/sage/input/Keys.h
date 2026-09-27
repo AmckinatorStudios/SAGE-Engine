@@ -142,6 +142,9 @@ enum Modifier : uint8_t {
 
 const char* KeyName(Key key);
 Key ParseKey(const std::string& name);           // Key::Unknown, если не понято
+// Имя для кода игры: «Space», «LeftShift», «W», «F1» — так клавишу пишут в
+// `if key == "Space"`. ParseKey понимает его так же, как «SPACE».
+std::string FriendlyKeyName(Key key);
 
 const char* MouseButtonName(MouseButton button);
 MouseButton ParseMouseButton(const std::string& name, bool* ok = nullptr);

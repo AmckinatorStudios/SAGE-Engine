@@ -229,8 +229,9 @@ void ScriptingSystem::DispatchKeys() {
     const sage::input::Keyboard& keys = input->State().Keys();
     for (int k = 1; k < (int)sage::input::Key::Count; ++k) {
         const auto key = (sage::input::Key)k;
-        if (keys.Pressed(key)) m_runtime.DispatchNamedAll(Hook::OnKeyDown, sage::input::KeyName(key));
-        if (keys.Released(key)) m_runtime.DispatchNamedAll(Hook::OnKeyUp, sage::input::KeyName(key));
+        // Имя — как его пишут в коде: «Space», «LeftShift», «W».
+        if (keys.Pressed(key)) m_runtime.DispatchNamedAll(Hook::OnKeyDown, sage::input::FriendlyKeyName(key));
+        if (keys.Released(key)) m_runtime.DispatchNamedAll(Hook::OnKeyUp, sage::input::FriendlyKeyName(key));
     }
 }
 

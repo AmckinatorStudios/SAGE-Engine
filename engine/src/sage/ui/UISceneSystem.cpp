@@ -180,8 +180,9 @@ void DrawElement(const entt::registry& reg, entt::entity e, const UIRect& r, flo
         rect.y += owner->PressedOffset.y * scale;
     }
 
-    const bool rotated = box && std::fabs(box->Rotation) > 0.0001f;
-    if (rotated) ui.PushRotation({rect.x + rect.w * 0.5f, rect.y + rect.h * 0.5f}, box->Rotation);
+    const bool rotated = box && (std::fabs(box->Rotation) > 0.0001f || std::fabs(box->Scale - 1.0f) > 0.0001f);
+    if (rotated)
+        ui.PushRotation({rect.x + rect.w * 0.5f, rect.y + rect.h * 0.5f}, box->Rotation, box->Scale);
 
     PartDrawContext c;
     c.Reg = &reg;
@@ -309,7 +310,7 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
 
     // Групповые свойства накапливаются вниз по дереву: спрятать панель — это
     // одно число на ней, а не проход скриптом по каждому её ребёнку.
-    float myAlpha = alpha;
+    float myAlpha = alpha * glm::clamp(t.Opacity, 0.0f, 1.0f);
     bool myInteractive = interactive;
     if (const Group* g = reg.try_get<Group>(ent)) {
         myAlpha *= glm::clamp(g->Alpha, 0.0f, 1.0f);

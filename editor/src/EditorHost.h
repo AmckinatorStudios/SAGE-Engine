@@ -163,6 +163,8 @@ public:
     // действие, что «открыть сцену» или «поставить префаб»: файл знает, чем
     // его открывают, и спрашивать об этом человека незачем.
     virtual void OpenAnimationClip(const std::string& clipPath) = 0;
+    // Открыть окно Tween на твине объекта (индекс в его TweenComponent).
+    virtual void OpenTween(int objectId, int tweenIndex) = 0;
 
     // Текущее рабочее пространство (см. EditorTypes.h). Панель спрашивает его,
     // когда ей есть что делать по-разному: холст интерфейса, например, не

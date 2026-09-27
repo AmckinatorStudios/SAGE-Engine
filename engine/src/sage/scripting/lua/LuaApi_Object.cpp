@@ -3,7 +3,9 @@
 #include <cctype>
 #include <cmath>
 
+#include "sage/anim/AnimProperty.h"
 #include "sage/physics/PhysicsComponents.h"
+#include "sage/scripting/ScriptTween.h"
 #include "sage/scene/Components.h"
 #include "sage/scripting/ScriptComponent.h"
 #include "sage/scripting/ScriptingSystem.h"
@@ -330,8 +332,69 @@ void RegisterObject(Backend& backend) {
                 throw std::runtime_error("AddComponent(Script): скрипт '" + path + "' не загрузился (причина — в консоли)");
             return self->ScriptOf(r.Obj);
         }
+        // Свет, камера и вид объекта — чтобы собранный кодом объект мог светить,
+        // смотреть и быть покрашенным (а твины — менять яркость, угол и цвет).
+        if (name == "Light") {
+            LightComponent& l = reg.get_or_emplace<LightComponent>(e);
+            const std::string type = str("type", "point");
+            l.Kind = type == "spot" ? LightComponent::Type::Spot
+                   : type == "directional" ? LightComponent::Type::Directional : LightComponent::Type::Point;
+            l.Intensity = num("intensity", l.Intensity);
+            l.Range = num("range", l.Range);
+            if (opts) {
+                sol::object c = (*opts)["color"];
+                if (c.is<glm::vec3>()) l.Color = c.as<glm::vec3>();
+            }
+            return sol::make_object(self->Lua(), true);
+        }
+        if (name == "Camera") {
+            CameraComponent& c = reg.get_or_emplace<CameraComponent>(e);
+            c.Fov = num("fov", c.Fov);
+            // Камера, добавленная кодом, НЕ главная, пока её об этом не
+            // попросят: иначе любой вспомогательный объект перехватывал бы кадр.
+            c.Primary = opts ? opts->get_or("primary", false) : false;
+            return self->ComponentOf(r.Obj, "Camera");
+        }
+        if (name == "Mesh") {
+            MeshRendererComponent& m = reg.get_or_emplace<MeshRendererComponent>(e);
+            if (opts) {
+                sol::object c = (*opts)["color"];
+                if (c.is<glm::vec3>()) m.Color = c.as<glm::vec3>();
+            }
+            return sol::make_object(self->Lua(), true);
+        }
         throw std::runtime_error("AddComponent: компонент '" + name +
-                                 "' из скрипта не добавляется (есть RigidBody, Collider, CharacterController, Script)");
+                                 "' из скрипта не добавляется (есть RigidBody, Collider, CharacterController, "
+                                 "Script, Light, Camera, Mesh)");
+    };
+    // Любое свойство по имени — тем же реестром, что твины и анимация:
+    // obj:get("opacity"), obj:set("color", Color(1, 0, 0)). Имена те же, что у
+    // Tween.to ("position", "scale", "fov", "intensity", "fill.color"…).
+    auto propertyOf = [](ObjectRef& r, const std::string& name, const char* who) {
+        Alive(r.Obj, who);
+        const std::string id = sage::scripting::tween::ResolveProperty(*r.Obj.Registry(), r.Obj.Entity(), name);
+        const sage::anim::PropertyType* p = id.empty() ? nullptr : sage::anim::FindProperty(id);
+        if (!p) throw std::runtime_error(std::string(who) + ": у объекта '" + r.Obj.Name() + "' нет свойства '" + name + "'");
+        return p;
+    };
+    ot["get"] = [self, propertyOf](ObjectRef& r, const std::string& name) -> sol::object {
+        const sage::anim::PropertyType* p = propertyOf(r, name, "get");
+        glm::vec4 v(0.0f);
+        sage::anim::ReadProperty(*p, *r.Obj.Registry(), r.Obj.Entity(), v);
+        sol::state& L = self->Lua();
+        switch (p->Components) {
+            case 1: return sol::make_object(L, v.x);
+            case 2: return sol::make_object(L, glm::vec2(v));
+            case 3: return sol::make_object(L, glm::vec3(v));
+            default: return sol::make_object(L, v);
+        }
+    };
+    ot["set"] = [propertyOf](ObjectRef& r, const std::string& name, sol::object value) {
+        const sage::anim::PropertyType* p = propertyOf(r, name, "set");
+        glm::vec4 v(0.0f);
+        if (!sage::scripting::tween::ValueFrom(value, p->Components, v))
+            throw std::runtime_error("set: значение для '" + name + "' — число, Vector3 или Color");
+        sage::anim::WriteProperty(*p, *r.Obj.Registry(), r.Obj.Entity(), v);
     };
     ot["HasComponent"] = [](ObjectRef& r, const std::string& name) {
         Alive(r.Obj, "HasComponent");
@@ -343,6 +406,7 @@ void RegisterObject(Backend& backend) {
         if (name == "Script") return reg.all_of<ScriptComponent>(e);
         if (name == "Light") return reg.all_of<LightComponent>(e);
         if (name == "Camera") return reg.all_of<CameraComponent>(e);
+        if (name == "Mesh") return reg.all_of<MeshRendererComponent>(e);
         return false;
     };
     ot["RemoveComponent"] = [](ObjectRef& r, const std::string& name) {
@@ -352,6 +416,9 @@ void RegisterObject(Backend& backend) {
         if (name == "RigidBody" || name == "Body") return reg.remove<RigidBodyComponent>(e) > 0;
         if (name == "Collider") return reg.remove<ColliderComponent>(e) > 0;
         if (name == "CharacterController") return reg.remove<CharacterControllerComponent>(e) > 0;
+        if (name == "Light") return reg.remove<LightComponent>(e) > 0;
+        if (name == "Camera") return reg.remove<CameraComponent>(e) > 0;
+        if (name == "Mesh") return reg.remove<MeshRendererComponent>(e) > 0;
         throw std::runtime_error("RemoveComponent: компонент '" + name + "' из скрипта не снимается");
     };
     // Тег — метка для поиска (Scene.FindByTag): «enemy», «pickup».

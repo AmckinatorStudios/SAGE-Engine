@@ -10,6 +10,7 @@
 #include <exception>
 
 #include "sage/anim/AnimationSystem.h"
+#include "sage/anim/Tween.h"
 #include "sage/audio/AudioEngine.h"
 #include "sage/core/Log.h"
 #include "sage/core/Profiler.h"
@@ -183,6 +184,15 @@ void RegisterCoreSystems(SystemScheduler& scheduler, const CoreSystems& systems)
             sage::ecs::UpdateDayNight(scene, dt);
         }, 15);
     }
+
+    // Твины — после скриптов (Tween.to этого кадра даёт движение уже в нём) и
+    // до анимации клипов: у одного свойства клип главнее — ключевой кадр
+    // записан человеком, а твин обычно запущен «поверх» на мгновение.
+    // Регистрируются всегда: зависимостей у них нет, а без системы твины из
+    // редактора молча стояли бы на месте.
+    scheduler.Add(Stage::PostPhysics, "tweens", [](Scene& scene, float dt) {
+        sage::anim::UpdateTweens(scene, dt);
+    }, 5);
 
     // Анимация — ПОСЛЕ физики. Её второй проход (IK) ставит ноги на землю, а
     // где земля, известно только после шага симуляции; до него IK работал бы

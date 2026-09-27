@@ -49,6 +49,7 @@ const Default kDefaults[] = {
     {"Console",    false,  900.0f, 420.0f},
     {"Profiler",   false,  720.0f, 520.0f},
     {"Animation",  false, 1000.0f, 360.0f},
+    {"Tween",      false, 1000.0f, 360.0f},
     // У ассетов, консоли и анимации СВОЁ ОКНО В КАЖДОМ ПРОСТРАНСТВЕ (см.
     // PanelWindowId.h), и состояние «отдельным окном» у каждого своё: окно
     // вёрстки, вытащенное на второй монитор, не обязано тащить туда же окно
@@ -56,6 +57,7 @@ const Default kDefaults[] = {
     {"AssetsUI",    false,  900.0f, 520.0f},
     {"ConsoleUI",   false,  900.0f, 420.0f},
     {"AnimationUI", false, 1000.0f, 360.0f},
+    {"TweenUI",     false, 1000.0f, 360.0f},
 };
 
 struct State {

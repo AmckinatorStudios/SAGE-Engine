@@ -112,6 +112,9 @@ void EditorLayer::StartPlay() {
     // Заметка шаблона отвечала на вопрос «почему в сцене пусто»; Play на него
     // и отвечает делом — держать её дальше значит мешать смотреть.
     m_templateNote.clear();
+    // Просмотр твина вернуть ДО копирования сцены в игру: иначе игра началась
+    // бы с объектом там, куда его довёл просмотр.
+    m_tween.StopPreview(*this);
     m_scenePtr = m_scene.get();
     PlayContext ctx = MakePlayContext();
     if (m_play.Start(ctx) < 0) return;

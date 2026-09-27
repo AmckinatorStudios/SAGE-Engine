@@ -81,6 +81,10 @@ struct MeshRendererComponent {
     // Это материал ОБЪЕКТА: им красится всё, для чего не задан свой слот ниже.
     std::string MaterialPath;
     std::shared_ptr<Material> MaterialPtr;
+    // Своя копия материала, заведённая твином или анимацией (см.
+    // anim::OwnMaterial): совпадает с MaterialPtr — объект уже красится своей
+    // копией и повторно её не заводит. Рантайм, в сцену не пишется.
+    const Material* OwnedMaterial = nullptr;
 
     // Материалы ПОДМЕШЕЙ: слот i красит подмеш i меша (Mesh::Submeshes()).
     //

@@ -154,7 +154,8 @@ public:
     // уже матричный стек, а он тянет за собой обрезку, попадание мышью и
     // раскладку в повёрнутых координатах. Пока такого запроса нет, честнее не
     // делать вид, что оно есть.
-    void PushRotation(glm::vec2 center, float degrees);
+    // Поворот и масштаб вокруг центра — на всё, что нарисуют до PopRotation.
+    void PushRotation(glm::vec2 center, float degrees, float scale = 1.0f);
     void PopRotation();
 
     // Девятина («9-slice»): рамка растягивается, углы — нет.
@@ -306,7 +307,7 @@ private:
     glm::vec2 Rotated(float x, float y) const;
 
     glm::vec2 m_rotCenter{0.0f, 0.0f};
-    float m_rotCos = 1.0f, m_rotSin = 0.0f;
+    float m_rotCos = 1.0f, m_rotSin = 0.0f;   // уже умножены на масштаб
     bool m_rotActive = false;
 
     void PushImageQuad(float x, float y, float w, float h, glm::vec2 uv0, glm::vec2 uv1,

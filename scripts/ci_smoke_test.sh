@@ -89,7 +89,7 @@ fi
 # набор Lua-тестов API скриптинга в настоящем Play (editor/assets/tests/lua).
 # Выход редактора ждёт их конца (EditorLayer::TakeAutoScreenshot), так что
 # отсутствие вердикта — тоже провал: проверка зависла или не запустилась.
-for CHECK in UI_INSPECTOR ENVIRONMENT LUA_TESTS; do
+for CHECK in UI_INSPECTOR ENVIRONMENT TWEEN LUA_TESTS; do
     if ! grep -q "${CHECK}: OK" "${EDITOR_LOG}"; then
         echo "ОШИБКА: проверка ${CHECK} самопроверки редактора не прошла"
         grep -E "${CHECK}|\[Test\]" "${EDITOR_LOG}" || true

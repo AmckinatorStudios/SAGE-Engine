@@ -68,6 +68,7 @@ namespace sage { class Application; }
 #include "panels/InputPanel.h"
 #include "panels/TemplatesPanel.h"
 #include "panels/AnimationPanel.h"
+#include "panels/TweenPanel.h"
 #include "panels/NineSlicePanel.h"
 #include "ui/CommandPalette.h"
 #include "ui/Commands.h"
@@ -162,6 +163,10 @@ public:
         m_panels[EditorPanel::Animation] = true;
         m_animation.RequestFocus();
         m_animation.OpenClip(*this, clipPath);
+    }
+    void OpenTween(int objectId, int tweenIndex) override {
+        m_panels[EditorPanel::Tween] = true;
+        m_tween.Open(objectId, tweenIndex);
     }
     void OpenNineSliceEditor(const NineSliceTarget& target) override {
         m_showNineSlice = true;
@@ -433,6 +438,13 @@ private:
     // Набор Lua-тестов движка (assets/tests/lua) — в настоящем Play через
     // «Run Lua Tests»: весь API скриптинга живым кадром.
     void CheckLuaTestsFrame();
+    // Окно Tween живым кадром: твин объекта играет и сбрасывается общим
+    // проигрывателем сцены, окно и секция инспектора рисуются без ошибок.
+    void CheckTweenFrame();
+    int m_tweenSelfTestStep = 0;
+    bool m_tweenChecked = false;
+    double m_tweenSelfTestAt = 0.0;
+    int m_tweenSelfTestErrors = 0;
     int m_luaSelfTestStep = 0;
     // Выход по SAGE_SCREENSHOT_AT_FRAME ждёт конца Lua-тестов самопроверки.
     bool m_shotWaitStarted = false;
@@ -658,6 +670,7 @@ private:
     // инструмент под задачу: анимацию правят рядом со сценой и рядом с
     // вёрсткой, поэтому она докуется в обоих пространствах.
     AnimationPanel m_animation;
+    TweenPanel m_tween;
     bool m_showNineSlice = false;
 
     // Реестр команд и палитра (Ctrl+K). Реестр наполняется один раз в

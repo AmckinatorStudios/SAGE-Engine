@@ -135,6 +135,7 @@ function OnDoorOpen(data) … end           -- или просто объяви�
 | `Audio` | `play("explosion")`, `play_at(clip, pos)` |
 | `Physics` | `raycast(origin, dir, dist)`, `overlap_sphere(center, r)` |
 | `Vector3` | `new(x, y, z)`, `zero()`, `one()`, `up()`, `forward()`, `distance`, `dot`, `cross`, `lerp`; у вектора `length()`, `normalized()`, `copy()` |
+| `Tween` | `to(obj, "position", v, 1.0, Ease.Out)`, `from`, `sequence`, `play(obj, "Name")`, `cancel`, `pause`, `resume`, `is_playing` — см. [твины](animation.md#твины-быстрое-изменение-свойства-без-клипа) |
 
 **Одно правило имён.** У каждой функции раздела есть имя через подчёркивание:
 `Input.IsKeyDown` — это `Input.is_key_down`, `obj:GetComponent` —

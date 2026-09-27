@@ -554,10 +554,12 @@ TEST(Scripting_tween_moves_entity_over_time) {
     int active = se.Lua().script("return ActiveTweens()");
     CHECK_EQ(active, 1);
 
-    se.UpdateAll(0.5f); // линейно, половина -> x≈5
+    // Прежние твины идут тем же проигрывателем сцены, что Tween.to и окно
+    // Tween (Scene::Tweens): шагает его система кадра, а не UpdateAll.
+    scene.Tweens.Update(0.5f); // линейно, половина -> x≈5
     CHECK_NEAR(o.GetTransform().Position.x, 5.0f, 1e-2);
 
-    se.UpdateAll(0.6f); // перелёт за конец -> x=10, твин завершён
+    scene.Tweens.Update(0.6f); // перелёт за конец -> x=10, твин завершён
     CHECK_NEAR(o.GetTransform().Position.x, 10.0f, 1e-2);
     int activeAfter = se.Lua().script("return ActiveTweens()");
     CHECK_EQ(activeAfter, 0);
@@ -573,7 +575,7 @@ TEST(Scripting_tween_cancel_all) {
     se.Lua().script("TweenScale(e, Vec3.new(2,2,2), 2.0); TweenColor(e, Vec3.new(1,0,0), 2.0)");
     CHECK_EQ((int)se.Lua().script("return ActiveTweens()"), 2);
     se.Lua().script("TweenCancelAll()");
-    se.UpdateAll(0.1f);
+    scene.Tweens.Update(0.1f);
     CHECK_EQ((int)se.Lua().script("return ActiveTweens()"), 0);
 }
 

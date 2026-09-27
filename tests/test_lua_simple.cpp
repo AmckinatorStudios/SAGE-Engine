@@ -294,6 +294,14 @@ function Pull() Events.emit("door_open", "lever") end
     w.input.Push(sage::input::InputEvent::KeyUp(sage::input::Key::E));
     w.Frame();
     CHECK_EQ(w.Global<std::string>(door, "released"), std::string("E"));
+    // Имя — как пишут в коде: «Space», «LeftShift», а не «SPACE».
+    w.input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::Space));
+    w.Frame();
+    CHECK_EQ(w.Global<std::string>(door, "last_key"), std::string("Space"));
+    w.input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::LeftShift));
+    w.Frame();
+    CHECK_EQ(w.Global<std::string>(door, "last_key"), std::string("LeftShift"));
+    CHECK_TRUE(sage::input::ParseKey("LeftShift") == sage::input::Key::LeftShift);
     (void)rock;
     CHECK_TRUE(w.errors.empty());
 }

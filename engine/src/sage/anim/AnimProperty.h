@@ -29,6 +29,11 @@
 // файле и в рисовании кривой. Сколько компонент на самом деле значимо, говорит
 // Components; остальные — нули и в файл идут нулями.
 // ---------------------------------------------------------------------------
+namespace sage::ui {
+struct PartType;
+struct PartField;
+} // namespace sage::ui
+
 namespace sage::anim {
 
 struct PropertyType {
@@ -80,5 +85,23 @@ bool HasProperty(const PropertyType& p, const entt::registry& reg, entt::entity 
 // Свойства, которые ИМЕЕТ СМЫСЛ анимировать у этой сущности: те, чья часть на
 // ней есть. По ним редактор предлагает «добавить дорожку».
 std::vector<const PropertyType*> PropertiesFor(const entt::registry& reg, entt::entity e);
+
+// --- Быстрый доступ ------------------------------------------------------------
+//
+// ReadProperty/WriteProperty разбирают ключ части при каждом обращении — для
+// ключа анимации раз в кадр это копейки, а для тысячи твинов интерфейса это
+// тысяча разборов строк за кадр. Твин разбирает ключ ОДИН раз при старте и
+// дальше пишет по готовым указателям. Живёт доступ столько же, сколько твин:
+// подмена реестра частей посреди полёта твина — не случай, ради которого
+// стоит платить каждый кадр.
+struct PropertyAccess {
+    const PropertyType* Type = nullptr;
+    const ui::PartType* Part = nullptr;
+    const ui::PartField* Field = nullptr;
+    bool Valid() const { return Type != nullptr; }
+};
+PropertyAccess ResolveAccess(const PropertyType& p);
+bool Read(const PropertyAccess& a, const entt::registry& reg, entt::entity e, glm::vec4& out);
+bool Write(const PropertyAccess& a, entt::registry& reg, entt::entity e, const glm::vec4& value);
 
 } // namespace sage::anim

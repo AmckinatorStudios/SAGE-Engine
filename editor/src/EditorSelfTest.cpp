@@ -12,6 +12,7 @@
 // вызываются оттуда же, откуда вызывались.
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
+#include "sage/anim/Tween.h"
 #include "SceneCover.h"
 #include "EditorIcons.h"
 #include "CodeEditorApp.h"
@@ -494,10 +495,94 @@ void EditorLayer::CheckWorkspaceDockFrame() {
 // Tests»: Play, объект на файл, тесты корутинами по кадрам, щелчки по
 // интерфейсу и клавиши — настоящим путём. Проверяется весь API скриптинга
 // живым кадром редактора, а не вызовами функций в пустой сцене.
+void EditorLayer::CheckTweenFrame() {
+    if (m_tweenChecked || !std::getenv("SAGE_EDITOR_SELFTEST") || !m_envChecked) return;
+    entt::registry& reg = m_scene->Registry();
+    auto fail = [&](const std::string& why) {
+        LOG_ERROR("Editor") << "TWEEN: FAIL — " << why;
+        m_tween.Reset(*this);
+        m_panels[EditorPanel::Tween] = false;
+        if (GameObject o = m_scene->FindByName("TweenProbe"); o.Valid()) m_scene->RemoveObject(o.Id());
+        m_tweenChecked = true;
+    };
+    switch (m_tweenSelfTestStep) {
+        case 0: {
+            // Объект с твином «Slide»: сдвиг, затем масштаб — последовательность.
+            GameObject o = m_scene->CreateObject("TweenProbe");
+            reg.get<Transform>(o.Entity()).Position = glm::vec3(0.0f);
+            sage::anim::TweenClip clip;
+            clip.Name = "Slide";
+            sage::anim::TweenTrack move;
+            move.Property = "object.position";
+            move.To = glm::vec4(3.0f, 0.0f, 0.0f, 0.0f);
+            move.Duration = 0.3f;
+            move.Curve = sage::anim::Ease::Make(sage::anim::EaseShape::Back, sage::anim::EaseMode::Out);
+            clip.AppendAfter(move);
+            sage::anim::TweenTrack grow;
+            grow.Property = "object.scale";
+            grow.To = glm::vec4(2.0f, 2.0f, 2.0f, 0.0f);
+            grow.Duration = 0.2f;
+            grow.Curve.Shape = sage::anim::EaseShape::Curve;
+            grow.Curve.Bezier = glm::vec4(0.2f, 0.0f, 0.3f, 1.4f);
+            clip.AppendAfter(grow);
+            reg.emplace<sage::anim::TweenComponent>(o.Entity()).Tweens.push_back(clip);
+            m_selection.SetPrimary(o.Id());
+            OpenTween(o.Id(), 0);
+            m_tweenSelfTestErrors = m_console.ErrorCount();
+            m_tweenSelfTestStep = 1;
+            return;
+        }
+        case 1: case 2: case 3: case 4:   // окно и инспектор рисуются несколько кадров
+            ++m_tweenSelfTestStep;
+            return;
+        case 5:
+            if (m_tween.OwnerId() != m_scene->FindByName("TweenProbe").Id()) return fail("окно Tween не открылось на объекте");
+            m_tween.Play(*this);
+            if (!m_tween.Previewing()) return fail("Play в окне Tween не запустил твин");
+            m_tweenSelfTestAt = glfwGetTime();
+            m_tweenSelfTestStep = 6;
+            return;
+        case 6: {
+            if (glfwGetTime() - m_tweenSelfTestAt < 1.0) return;   // твин 0.5 с — с запасом на медленный кадр
+            GameObject o = m_scene->FindByName("TweenProbe");
+            const Transform& t = reg.get<Transform>(o.Entity());
+            if (std::fabs(t.Position.x - 3.0f) > 1e-3f || std::fabs(t.Scale.x - 2.0f) > 1e-3f)
+                return fail("просмотр не довёл объект: x=" + std::to_string(t.Position.x) +
+                            " scale=" + std::to_string(t.Scale.x));
+            m_tween.Reset(*this);
+            if (std::fabs(t.Position.x) > 1e-5f || std::fabs(t.Scale.x - 1.0f) > 1e-5f)
+                return fail("Reset не вернул объект на место");
+            if (m_console.ErrorCount() != m_tweenSelfTestErrors) return fail("окно Tween дало ошибки в консоли");
+            m_scene->RemoveObject(o.Id());
+            m_panels[EditorPanel::Tween] = false;
+
+            // Твин из редактора для прогона Lua-тестов: сам стартует в Play
+            // (tween.test.lua проверяет, что он доехал и находится по имени).
+            GameObject e = m_scene->CreateObject("LT_EditorTween");
+            reg.get<Transform>(e.Entity()).Position = glm::vec3(420.0f, 0.0f, 0.0f);
+            sage::anim::TweenClip pulse;
+            pulse.Name = "Pulse";
+            pulse.PlayOnStart = true;
+            sage::anim::TweenTrack up;
+            up.Property = "object.position";
+            up.To = glm::vec4(420.0f, 3.0f, 0.0f, 0.0f);
+            up.Duration = 0.3f;
+            pulse.Tracks.push_back(up);
+            reg.emplace<sage::anim::TweenComponent>(e.Entity()).Tweens.push_back(pulse);
+
+            LOG_INFO("Editor") << "TWEEN: OK — окно Tween: Play общим проигрывателем сцены довёл объект "
+                                  "(сдвиг, затем масштаб по своей кривой), Reset вернул его; ошибок нет";
+            m_tweenChecked = true;
+            return;
+        }
+        default: return;
+    }
+}
+
 void EditorLayer::CheckLuaTestsFrame() {
     if (m_luaSelfTestStep < 0) return;
     if (!std::getenv("SAGE_EDITOR_SELFTEST")) return;
-    if (!m_envChecked) return;
+    if (!m_tweenChecked) return;
     namespace fs = std::filesystem;
     if (m_luaSelfTestStep == 0) {
         std::error_code ec;
@@ -531,7 +616,9 @@ void EditorLayer::CheckLuaTestsFrame() {
     const LuaTestRun& r = m_luaTests;
     // Тестов меньше, чем в наборе, — тоже провал: файл, в котором разбор не
     // увидел ни одного test_*, иначе «проходил» бы молча.
-    const bool enough = r.Passed + r.Failed >= 57;
+    const bool enough = r.Passed + r.Failed >= 67;
+    // Твин из редактора своё отыграл — объект больше не нужен.
+    if (GameObject e = m_scene->FindByName("LT_EditorTween"); e.Valid()) m_scene->RemoveObject(e.Id());
     // Инспектор видит глобальные переменные простого скрипта: speed и
     // jump_force у Player.lua — поля секции Script, с типом по значению.
     bool inspectorOk = false;
@@ -551,7 +638,7 @@ void EditorLayer::CheckLuaTestsFrame() {
     if (r.Failed == 0 && enough && inspectorOk && !m_play.Active()) {
         LOG_INFO("Editor") << "LUA_TESTS: OK — тестов на Lua прошло " << r.Passed
                            << " в настоящем Play (объект, жизненный цикл, сигналы, UI, ввод, физика, "
-                           << "скрипты, окружение, прежний API, простой вид скрипта на учебных примерах)";
+                           << "скрипты, окружение, прежний API, простой вид скрипта на учебных примерах, твины)";
         return;
     }
     for (const std::string& f : r.Failures) LOG_ERROR("Editor") << "LUA_TESTS:   " << f;

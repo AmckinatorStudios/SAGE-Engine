@@ -568,7 +568,6 @@ void ScriptEngine::UpdateAll(float deltaTime) {
 
     UpdateTimers(deltaTime);
     UpdateCoroutines(deltaTime);
-    m_tweens.Update(deltaTime); // твины геймплея — в такт со скриптами
     // События сети — в ТОМ ЖЕ кадре, в котором пришли. Отложи их до следующего,
     // и ответ на команду игрока опаздывал бы на кадр на ровном месте.
     DispatchNetEvents();

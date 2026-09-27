@@ -203,6 +203,7 @@ void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
     dock("AssetsUI", bottom);
     dock("ConsoleUI", bottom);
     dock("AnimationUI", bottom);
+    dock("TweenUI", bottom);
     // Холст докается ПЕРВЫМ — он и есть вкладка по умолчанию. Предпросмотр
     // рядом с ним: переключаться между «верстаю» и «смотрю» надо одним щелчком,
     // а не раскладкой заново.
@@ -245,6 +246,7 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     dock("Console", bottom);
     dock("Assets", bottom);
     dock("Animation", bottom);
+    dock("Tween", bottom);
     // Viewport докается ПЕРВЫМ в центральный узел — так он и есть таб по
     // умолчанию (первый добавленный к узлу становится выбранным). Раньше первым
     // шёл Game, из-за чего редактор открывался на «игровом окне» без пикинга/
@@ -696,6 +698,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             EditorIcons::MenuItemToggle("folder-full", T("Assets"), &PanelVisible(EditorPanel::Assets));
             EditorIcons::MenuItemToggle("console", T("Console"), &PanelVisible(EditorPanel::Console));
             EditorIcons::MenuItemToggle("anim", T("Animation"), &PanelVisible(EditorPanel::Animation));
+            EditorIcons::MenuItemToggle("clock", T("Tween"), &PanelVisible(EditorPanel::Tween));
 
             // Инструменты открывают ПОД ЗАДАЧУ и закрывают: они не участвуют в
             // раскладке по умолчанию и не живут на экране постоянно.
@@ -740,6 +743,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
                     {"Assets",    "Assets",      EditorPanel::Assets},
                     {"Console",   "Console",     EditorPanel::Console},
                     {"Animation", "Animation",   EditorPanel::Animation},
+                    {"Tween",     "Tween",       EditorPanel::Tween},
                     // Окно у панели своё в каждом пространстве, а галочка
                     // «отдельным окном» — одна: это свойство ПАНЕЛИ, а не
                     // места, где она сейчас стоит (см. PanelWindowId.h).
@@ -937,6 +941,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
         // Инструмент анимации — тоже в обоих пространствах, тоже своим окном.
         const std::string id = sage::editor::panelid::For("Animation", m_workspace);
         m_animation.Draw(*this, &m_panels[EditorPanel::Animation], id);
+    }
+    {
+        const std::string id = sage::editor::panelid::For("Tween", m_workspace);
+        m_tween.Draw(*this, &m_panels[EditorPanel::Tween], id);
     }
     // Профилировщик — через ту же обёртку, что и остальные панели: он тоже
     // имеет право жить своим окном системы, и панель, которую забыли обернуть,

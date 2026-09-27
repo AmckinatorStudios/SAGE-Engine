@@ -290,7 +290,9 @@ local SageObject = {}
 ---Добавить компонент кодом. Для "Script" вернёт таблицу скрипта (Start уже позван).
 ---"RigidBody": {type="static|dynamic|kinematic", mass, friction, restitution, sensor};
 ---"Collider": {shape="box|sphere|capsule", size=Vec3, radius, halfHeight};
----"Script": {path="assets/..."}; "CharacterController".
+---"Script": {path="assets/..."}; "CharacterController";
+---"Light": {type="point|spot|directional", intensity, range, color}; "Camera": {fov, primary};
+---"Mesh": {color}.
 ---@param name string
 ---@param opts? table
 ---@return any
@@ -346,6 +348,13 @@ function SageObject:emit(name, data) end
 ---@param name string
 ---@return integer
 function SageObject:off(name) end
+---Любое свойство по имени (как у Tween.to): obj:get("opacity").
+---@param property string
+---@return any
+function SageObject:get(property) end
+---@param property string
+---@param value any
+function SageObject:set(property, value) end
 -- Нынешние имена тех же методов.
 ---Позвать функцию скрипта объекта: `player:call("TakeDamage", 10)`.
 ---@param method string
@@ -881,6 +890,149 @@ function Audio.play(clip, volume) end
 ---@param position Vec3
 ---@param volume? number
 function Audio.play_at(clip, position, volume) end
+
+-- --- Твины ----------------------------------------------------------------
+-- Быстрое изменение свойства за время. Тот же проигрыватель, что у окна Tween
+-- редактора (docs/scripting.md, «Твины»).
+
+---Кривые: Ease.Linear, Ease.In, Ease.Out, Ease.InOut, Ease.OutBack, Ease.InOutSine…
+---Своя кривая — таблица {x1, y1, x2, y2} (кубическая Безье, как в CSS).
+---@class SageEase
+---@field Linear string
+---@field In string
+---@field Out string
+---@field InOut string
+---@field InQuad string
+---@field OutQuad string
+---@field InOutQuad string
+---@field InCubic string
+---@field OutCubic string
+---@field InOutCubic string
+---@field InQuart string
+---@field OutQuart string
+---@field InOutQuart string
+---@field InQuint string
+---@field OutQuint string
+---@field InOutQuint string
+---@field InSine string
+---@field OutSine string
+---@field InOutSine string
+---@field InExpo string
+---@field OutExpo string
+---@field InOutExpo string
+---@field InCirc string
+---@field OutCirc string
+---@field InOutCirc string
+---@field InBack string
+---@field OutBack string
+---@field InOutBack string
+---@field InElastic string
+---@field OutElastic string
+---@field InOutElastic string
+---@field InBounce string
+---@field OutBounce string
+---@field InOutBounce string
+Ease = {}
+
+---@alias SageEaseValue string|number[]
+
+---Запущенный твин. Методы цепочки возвращают его же.
+---@class SageTween
+local SageTween = {}
+---Затем: следующий шаг начинается, когда кончился предыдущий.
+---@param property string|table
+---@param value any
+---@param duration number
+---@param ease? SageEaseValue
+---@return SageTween
+function SageTween:then_to(property, value, duration, ease) end
+---Вместе: шаг идёт одновременно с предыдущим.
+---@param property string|table
+---@param value any
+---@param duration number
+---@param ease? SageEaseValue
+---@return SageTween
+function SageTween:with(property, value, duration, ease) end
+---Пауза в последовательности.
+---@param seconds number
+---@return SageTween
+function SageTween:wait(seconds) end
+---Задержка перед стартом.
+---@param seconds number
+---@return SageTween
+function SageTween:delay(seconds) end
+---Повторять: "loop" (по умолчанию), "pingpong", "once".
+---@param mode? string
+---@return SageTween
+function SageTween:loop(mode) end
+---@return SageTween
+function SageTween:ping_pong() end
+---@param k number 2 — вдвое быстрее
+---@return SageTween
+function SageTween:speed(k) end
+---@param on? boolean
+---@return SageTween
+function SageTween:reverse(on) end
+---Одна кривая всем шагам.
+---@param ease SageEaseValue
+---@return SageTween
+function SageTween:ease(ease) end
+---@param fn fun()
+---@return SageTween
+function SageTween:on_complete(fn) end
+function SageTween:pause() end
+function SageTween:resume() end
+function SageTween:cancel() end
+---@return boolean
+function SageTween:is_playing() end
+---@return number секунды от начала
+function SageTween:time() end
+---@return number длина одного прохода
+function SageTween:duration() end
+
+---Твины: Tween.to(self, "position", Vector3.new(5, 2, 0), 1.0, Ease.Out).
+Tween = {}
+---Довести свойство (или несколько: {position = …, scale = …}) до значения.
+---Свойства: position, rotation, scale, color, opacity, size, text_size,
+---corner_radius, intensity, fov, volume — или полный ключ ("fill.color").
+---@param target SageObject|table объект или self
+---@param property string|table
+---@param value any число, Vector3, Vector2, Color
+---@param duration number
+---@param ease? SageEaseValue по умолчанию Ease.Out
+---@return SageTween
+function Tween.to(target, property, value, duration, ease) end
+---Из значения — к тому, что есть сейчас: «появиться из 0».
+---@param target SageObject|table
+---@param property string|table
+---@param value any
+---@param duration number
+---@param ease? SageEaseValue
+---@return SageTween
+function Tween.from(target, property, value, duration, ease) end
+---Пустая последовательность: шаги — :then_to / :with / :wait.
+---@param target SageObject|table
+---@return SageTween
+function Tween.sequence(target) end
+---Твин, собранный в окне Tween редактора, по имени.
+---@param target SageObject|table
+---@param name string
+---@return SageTween|nil
+function Tween.play(target, name) end
+---Снять: твин или все твины объекта (со свойством — только его).
+---@param what SageTween|SageObject|table
+---@param property? string
+---@return integer
+function Tween.cancel(what, property) end
+---@param what SageTween|SageObject|table
+function Tween.pause(what) end
+---@param what SageTween|SageObject|table
+function Tween.resume(what) end
+---@param what SageTween|SageObject|table
+---@return boolean
+function Tween.is_playing(what) end
+---@return integer
+function Tween.count() end
 
 ---Vector3 — не второй тип, а конструктор и статические функции поверх Vec3.
 ---@overload fun(x: number, y: number, z: number): Vec3
@@ -1959,31 +2111,26 @@ function sage.tween.CancelAll() end
 ---@param to Vec3
 ---@param dur number
 ---@param ease any
----@return any
 function sage.tween.Color(entity, to, dur, ease) end
 ---@param entity Entity
 ---@param to Vec3
 ---@param dur number
 ---@param ease any
----@return any
 function sage.tween.Move(entity, to, dur, ease) end
 ---@param entity Entity
 ---@param toEulerDeg Vec3
 ---@param dur number
 ---@param ease any
----@return any
 function sage.tween.Rotate(entity, toEulerDeg, dur, ease) end
 ---@param entity Entity
 ---@param to Vec3
 ---@param dur number
 ---@param ease any
----@return any
 function sage.tween.Scale(entity, to, dur, ease) end
 ---@param entity Entity
 ---@param to number
 ---@param dur number
 ---@param ease any
----@return any
 function sage.tween.UIValue(entity, to, dur, ease) end
 
 ---@class sage.ui
