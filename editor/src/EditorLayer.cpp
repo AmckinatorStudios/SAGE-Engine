@@ -32,6 +32,9 @@
 #include "sage/assets/Quarantine.h"
 #include "sage/render/DebugView.h"
 #include "sage/core/Application.h"
+#include "ScreenColor.h"
+#include "ui/ColorPicker.h"
+#include "sage/rhi/GraphicsDevice.h"
 #include "sage/core/Paths.h"
 #include "sage/render/ModelMaterial.h"
 #include "sage/assets/AssetDatabase.h"
@@ -220,6 +223,22 @@ void EditorLayer::OnAttach() {
     // из дока, и раскладка «разъезжалась» сама собой, без единого осознанного
     // действия.
     io.ConfigWindowsMoveFromTitleBarOnly = true;
+
+    // ПИПЕТКА ПОЛЕЙ ЦВЕТА — экран системы за пределами окна (ScreenColor.h),
+    // кнопки мыши и Esc где угодно, и «курсор над своим окном» — тогда цвет
+    // берётся из своего кадра (см. чтение пикселя после отрисовки ниже).
+    {
+        namespace sc = sage::editor::screencolor;
+        Sage::UI::eyedropper::Backend dropper;
+        dropper.SampleScreen = [](float rgb[3]) { return sc::SampleAtCursor(rgb); };
+        dropper.GlobalMouseDown = [](int button) { return sc::GlobalMouseDown(button); };
+        dropper.GlobalEscapeDown = [] { return sc::GlobalEscapeDown(); };
+        dropper.OverOwnWindow = [] {
+            return glfwGetWindowAttrib(sage::Application::Get().GetWindow().Handle(), GLFW_HOVERED) != 0;
+        };
+        Sage::UI::eyedropper::SetBackend(dropper);
+        LOG_INFO("Editor") << "Пипетка: " << (sc::GlobalAvailable() ? "весь экран" : "только окно редактора");
+    }
 
     // ОТДЕЛЬНОЕ ОКНО — НАСТОЯЩЕЕ ОКНО СИСТЕМЫ, С РАМКОЙ И КНОПКАМИ.
     //
@@ -1386,9 +1405,25 @@ void EditorLayer::OnRender() {
         if (m_project.Dir().string() != was) m_launcherRequested = false;
     }
 
+    // Пипетка — поверх всего: её ловушка щелчка обязана лежать выше панелей.
+    Sage::UI::eyedropper::Frame();
     CloseGhostPopups();
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    // ПИКСЕЛЬ ПОД КУРСОРОМ — ИЗ ОТРИСОВАННОГО КАДРА, до показа: так пипетка
+    // над своим окном видит ровно то, что на экране (3D-вьюпорт, панели), и не
+    // зависит от того, умеет ли система отдавать чужие окна (Wayland не умеет).
+    if (int fx = 0, fy = 0; Sage::UI::eyedropper::FramebufferPoint(&fx, &fy)) {
+        const ImGuiIO& fio = ImGui::GetIO();
+        const int fbW = (int)(fio.DisplaySize.x * fio.DisplayFramebufferScale.x);
+        const int fbH = (int)(fio.DisplaySize.y * fio.DisplayFramebufferScale.y);
+        if (fx >= 0 && fy >= 0 && fx < fbW && fy < fbH) {
+            unsigned char px[3] = {0, 0, 0};
+            sage::rhi::GraphicsDevice::Get().ReadPixelsRGB(fx, fbH - 1 - fy, 1, 1, px);
+            const float c[3] = {px[0] / 255.0f, px[1] / 255.0f, px[2] / 255.0f};
+            Sage::UI::eyedropper::SetFramebufferColor(c);
+        }
+    }
 
     PresentExtraViewports();
 

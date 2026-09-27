@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2338.
+// Язык: Русский. Строк: 2346.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -834,6 +834,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Щёлкните, чтобы выбрать из списка, или перетащите сюда объект из иерархии.\nСсылка держит номер объекта: переименование ничего не сломает."},
     {"Click to pick a colour. Drag it onto another colour to copy it.",
      "Щелчок — выбрать цвет. Перетащите на другой цвет, чтобы скопировать."},
+    {"Click to pick a colour. Drag it onto another colour to copy it.\nRight-click: copy, paste, pick from the screen.",
+     "Щелчок — выбрать цвет. Перетащите на другое поле, чтобы скопировать.\nПКМ — копировать, вставить, пипетка."},
     {"Click to reassign",
      "Щёлкните, чтобы переназначить"},
     {"Click to reassign, right-click for settings",
@@ -842,6 +844,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Щелчок — смотреть вдоль этой оси; перетаскивание — вращать вид"},
     {"Click — show in Assets",
      "Клик — показать в Assets"},
+    {"Click — take, Esc — cancel",
+     "Щелчок — взять, Esc — отмена"},
     {"Clip",
      "Клип"},
     {"Clip Area",
@@ -1020,6 +1024,12 @@ constexpr TranslationPair kRussianStrings[] = {
      "Скопировать файл со стороны в текущую папку проекта.\nМодель переезжает вместе со своими .mtl/.bin и текстурами."},
     {"Copy an outside file, folder or .zip into the current project folder.\nA model moves together with its .mtl/.bin files and textures;\nan archive is unpacked into a folder of its own.",
      "Скопировать чужой файл, папку или .zip в текущую папку проекта.\nМодель переезжает вместе со своими .mtl/.bin и текстурами,\nа архив распаковывается в отдельную папку."},
+    {"Copy as RGB",
+     "Копировать как RGB"},
+    {"Copy as numbers 0..1",
+     "Копировать числами 0..1"},
+    {"Copy colour",
+     "Копировать цвет"},
     {"Copy path",
      "Копировать путь"},
     {"Copy report",
@@ -2832,6 +2842,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Пароль"},
     {"Paste",
      "Вставить"},
+    {"Paste colour",
+     "Вставить цвет"},
     {"Path",
      "Путь"},
     {"Path copied to the clipboard",
@@ -2852,12 +2864,16 @@ constexpr TranslationPair kRussianStrings[] = {
      "Перспектива"},
     {"Physics",
      "Физика"},
+    {"Pick a colour from the screen — anywhere, even outside the editor. Click to take it, Esc to cancel.",
+     "Взять цвет с экрана — где угодно, даже за пределами редактора. Щелчок — взять, Esc — отмена."},
     {"Pick a context on the left.",
      "Выберите контекст слева."},
     {"Pick a picture: a frame, a panel, a button from a UI set.",
      "Выберите картинку: рамку, панель, кнопку из набора интерфейса."},
     {"Pick a project on the left to see what is inside.",
      "Выберите проект слева — здесь появится, что в нём."},
+    {"Pick from screen",
+     "Пипетка (взять с экрана)"},
     {"Pick in the scene: click the object in the viewport or in Hierarchy (Esc — cancel)",
      "Пипетка: щёлкните объект во вьюпорте или в иерархии (Esc — отмена)"},
     {"Pick one from the list, or create a new one on the left.",
