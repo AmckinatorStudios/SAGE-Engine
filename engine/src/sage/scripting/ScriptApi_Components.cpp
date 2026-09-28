@@ -76,7 +76,18 @@ void ScriptEngine::RegisterComponentTypes() {
         // Замороженные оси — битовая маска AxisLock: 1/2/4 — позиция X/Y/Z,
         // 8/16/32 — поворот X/Y/Z. Правка на ходу пересобирает тело.
         "Locks", sol::property([](const RigidBodyComponent& rb) { return (int)rb.Locks; },
-                               [](RigidBodyComponent& rb, int v) { rb.Locks = (uint8_t)(v & 0x3F); })
+                               [](RigidBodyComponent& rb, int v) { rb.Locks = (uint8_t)(v & 0x3F); }),
+        // Раньше их не было вовсе — скрипт не мог ни прочитать, ни поставить
+        // «эта стена — триггер» напрямую на компоненте (только через
+        // sage.physics.SetSensor/SetTriggerMask, отдельными функциями). Само
+        // поле молчало нулём (nil), и `if rb.Sensor then` читалось как «не
+        // сенсор», даже когда сенсор включён — ловушка, которую находишь
+        // только руками потрогав в Lua.
+        "Sensor", &RigidBodyComponent::Sensor,
+        "Layer", sol::property([](const RigidBodyComponent& rb) { return (unsigned)rb.Layer; },
+                               [](RigidBodyComponent& rb, unsigned v) { rb.Layer = v; }),
+        "TriggerMask", sol::property([](const RigidBodyComponent& rb) { return (unsigned)rb.TriggerMask; },
+                                     [](RigidBodyComponent& rb, unsigned v) { rb.TriggerMask = v; })
     );
     m_lua.new_usertype<ColliderComponent>("ColliderComponent",
         "Shape", &ColliderComponent::Shape,

@@ -173,6 +173,14 @@ jobs:
           PYEOF
           cat templates.json
 
+      # Пак Lua-скриптов для проверки физики — отдельным файлом релиза, а не
+      # частью архива редактора: как и Витрина, это СОДЕРЖИМОЕ, а не часть
+      # программы, и большинству скачавших редактор он не нужен. Скрипты
+      # готовы к работе сами по себе (tools/lua-test-pack/README.txt), без
+      # сборки — просто zip исходного каталога.
+      - name: Пак Lua-скриптов
+        run: zip -j LuaScriptsPack.zip tools/lua-test-pack/*.lua tools/lua-test-pack/README.txt >/dev/null
+
       - name: Сборка архива
         run: |
           PKG=SageEditor-Windows
@@ -295,9 +303,10 @@ jobs:
           SUBJECT="$(git log -1 --pretty=%s)"
           WHEN="$(git log -1 --date=format:'%d.%m.%Y %H:%M' --pretty=%cd)"
           SHORT="$(git rev-parse --short HEAD)"
-          NOTES="$(printf '%s\n\n%s\n\n%s\n%s\n%s' \
+          NOTES="$(printf '%s\n\n%s\n\n%s\n\n%s\n%s\n%s' \
             'Скачайте SageEditor-Windows.zip, распакуйте папку целиком и запустите SageEditor.exe. Устанавливать ничего не нужно.' \
             'В архиве: редактор, плеер (runtime/), темы оформления и плагин-пример. Готовые проекты-шаблоны ставятся из самого редактора: Окно > Шаблоны проектов.' \
+            'LuaScriptsPack.zip — девять Lua-скриптов для проверки физики живьём (ходьба от первого лица с прыжком, падение и столкновения, вращение и момент, коллайдеры по мешу, соединения, зоны-триггеры и т.д.), у каждого своя инструкция в начале файла — см. README.txt внутри архива.' \
             "Собрано из: $SHORT — $SUBJECT" \
             "Дата коммита: $WHEN" \
             'Если что-то не запускается — рядом с exe появляется sage_editor.log, в нём написана причина.')"
@@ -308,7 +317,7 @@ jobs:
           # репозиторий, и всё, что в него не попало, для него не существует.
           published=""
           for attempt in 1 2 3; do
-            if gh release create "$TAG" SageEditor-Windows.zip showcase.sagetemplate templates.json \
+            if gh release create "$TAG" SageEditor-Windows.zip showcase.sagetemplate templates.json LuaScriptsPack.zip \
                  --title "$TITLE" --notes "$NOTES"; then
               published=1
               break
@@ -319,6 +328,6 @@ jobs:
           if [[ -z "$published" ]]; then
             echo "создать релиз не вышло — обновляю существующий"
             gh release edit "$TAG" --title "$TITLE" --notes "$NOTES"
-            gh release upload "$TAG" SageEditor-Windows.zip showcase.sagetemplate templates.json \
+            gh release upload "$TAG" SageEditor-Windows.zip showcase.sagetemplate templates.json LuaScriptsPack.zip \
               --clobber
           fi
