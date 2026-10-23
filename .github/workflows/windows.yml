@@ -88,7 +88,11 @@ jobs:
           test -f build-windows/editor/themes/example-amber.json \
             || { echo "::error::темы оформления не скопировались в themes/"; exit 1; }
           file "$EXE"
-          file "$EXE" | grep -q "PE32+ executable (GUI)" \
+          # Подсистема — ИЗ ЗАГОЛОВКА PE (objdump), а не из строки `file`: формат
+          # строки у `file` меняется от версии к версии («PE32+ executable (GUI)»
+          # стало «PE32+ executable for MS Windows 5.02 (GUI)»), и проверка
+          # падала на исправном exe после обновления раннера.
+          x86_64-w64-mingw32-objdump -p "$EXE" | grep -Eq "^Subsystem[[:space:]]+[0-9a-fA-F]+[[:space:]]+\(Windows GUI\)" \
             || { echo "::error::Это не оконное windows-приложение"; exit 1; }
 
           # Список разрешённых DLL — это список того, что ЕСТЬ НА ЧИСТОЙ WINDOWS.
