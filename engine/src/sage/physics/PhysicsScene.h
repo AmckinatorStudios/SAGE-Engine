@@ -198,6 +198,8 @@ private:
     // Пересчитывает m_inside по событиям сенсоров бэкенда и по персонажам и
     // дописывает в m_contacts разницу с прошлым шагом.
     void UpdateTriggers(Scene& scene);
+    // Касания контроллеров персонажа -> пары входа/выхода в m_contacts.
+    void UpdateCharacterContacts(Scene& scene);
     // Сообщение бэкенда о касании сенсора: пополняет/чистит m_bodyInside.
     void NoteSensorContact(Scene& scene, entt::entity a, entt::entity b, bool begin);
 
@@ -238,6 +240,7 @@ private:
     std::unordered_map<sage::physics::BodyHandle, entt::entity> m_bodyToEntity;
     std::vector<EntityContact> m_contacts;
     std::vector<sage::physics::ContactEvent> m_rawContacts;   // буфер, чтобы не выделять каждый кадр
+    std::vector<sage::physics::BodyHandle> m_touchBuffer;      // то же для касаний персонажей
     std::vector<std::pair<entt::entity, sage::physics::CharacterHandle>> m_characters;
     // Пары «зона — гость», что касались по сообщениям бэкенда (тело с телом).
     // Отдельно от персонажей: те пересчитываются геометрией каждый шаг.

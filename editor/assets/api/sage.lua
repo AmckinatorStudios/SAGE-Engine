@@ -230,12 +230,14 @@ function SageTransform:SetScale(x, y, z) end
 ---@param delta Vec3
 function SageTransform:Translate(delta) end
 function SageTransform:Rotate(x, y, z) end
+---Куда смотрит объект — локальный −Z, то же направление, что у камеры.
 ---@return Vec3
 function SageTransform:Forward() end
 ---@return Vec3
 function SageTransform:Right() end
 ---@return Vec3
 function SageTransform:Up() end
+---Разворачивает Forward() (и камеру на объекте) к цели.
 ---@param target Vec3
 function SageTransform:LookAt(target) end
 ---Позиция с учётом цепочки родителей.
@@ -456,6 +458,25 @@ function SageCharacterController:LeftGround() end
 function SageCharacterController:IsBlocked() end
 ---@param position Vec3
 function SageCharacterController:Teleport(position) end
+---Слой персонажа — маской битов (бит 0 — слой 1), как у RigidBody.
+---@param mask integer
+function SageCharacterController:SetLayer(mask) end
+---@return integer
+function SageCharacterController:GetLayer() end
+---С какими слоями сталкивается (маска битов).
+---@param mask integer
+function SageCharacterController:SetCollidesWith(mask) end
+---@return integer
+function SageCharacterController:GetCollidesWith() end
+---Слать ли OnCollisionEnter/Exit о касаниях персонажа.
+---@param on boolean
+function SageCharacterController:SetCollisionEvents(on) end
+---Касается ли персонаж объекта сейчас (пол, стена, ящик).
+---@param other SageObject
+---@return boolean
+function SageCharacterController:IsTouching(other) end
+---@return integer
+function SageCharacterController:GetTouchCount() end
 
 ---@class SageAnimation
 local SageAnimation = {}
@@ -576,6 +597,24 @@ function Input:GetVector2(action) end
 ---@param source string
 ---@return boolean
 function Input:BindAction(action, source) end
+---Действие-вектор из четырёх клавиш (y — вперёд, x — вправо). Не трогает
+---действие, у которого уже есть привязки (раскладка проекта главнее).
+---@param action string
+---@param up string
+---@param down string
+---@param left string
+---@param right string
+---@return boolean
+function Input:BindVector(action, up, down, left, right) end
+---Ось из двух клавиш: positive даёт +1, negative — −1.
+---@param action string
+---@param positive string
+---@param negative string
+---@return boolean
+function Input:BindAxis(action, positive, negative) end
+---@param action string
+---@return boolean
+function Input:HasAction(action) end
 ---@param captured boolean
 function Input:SetCursorCaptured(captured) end
 ---@return boolean
@@ -1055,6 +1094,7 @@ function Vector3.down() end
 function Vector3.right() end
 ---@return Vec3
 function Vector3.left() end
+---(0, 0, −1) — как Transform:Forward() без поворота.
 ---@return Vec3
 function Vector3.forward() end
 ---@return Vec3

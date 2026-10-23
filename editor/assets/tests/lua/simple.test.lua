@@ -25,8 +25,11 @@ function S:test_player_walks_forward_while_W_is_held()
     Test.wait(0.5)
     Test.key("W", false)
     Test.frames(1)
-    local z = player.transform.position.z
-    Test.expect(z > 1.5 and z < 3.5, "за полсекунды при speed=5 ожидалось ~2.5, вышло " .. z)
+    -- Вперёд — туда, куда смотрит камера объекта: локальный −Z (см.
+    -- docs/scripting.md, «Направления»). Прежнее +Z здесь закрепляло ошибку,
+    -- из-за которой W вела персонажей назад.
+    local z = -player.transform.position.z
+    Test.expect(z > 1.5 and z < 3.5, "за полсекунды при speed=5 ожидалось ~2.5 вперёд (−Z), вышло " .. z)
     Test.near(player.transform.position.x, 300, 1e-4, "W не должна сдвигать вбок")
 end
 

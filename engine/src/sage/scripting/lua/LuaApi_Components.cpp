@@ -1,5 +1,6 @@
 #include "sage/scripting/lua/LuaInternal.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include "sage/audio/AudioEngine.h"
@@ -110,6 +111,36 @@ void RegisterComponents(Backend& backend) {
     };
     ch["SetStepOffset"] = [](CharacterRef& r, float v) {
         Need<CharacterControllerComponent>(r.Obj, "SetStepOffset").StepOffset = v;
+    };
+    // Столкновения — масками битов, как Layer/TriggerMask у RigidBody: бит 0 —
+    // слой 1. Одно соглашение на весь API, иначе «слой 3» у тела и у
+    // персонажа означал бы разное.
+    ch["SetLayer"] = [](CharacterRef& r, unsigned mask) {
+        Need<CharacterControllerComponent>(r.Obj, "SetLayer").Layer = mask;
+    };
+    ch["GetLayer"] = [](CharacterRef& r) {
+        return (unsigned)Need<CharacterControllerComponent>(r.Obj, "GetLayer").Layer;
+    };
+    ch["SetCollidesWith"] = [](CharacterRef& r, unsigned mask) {
+        Need<CharacterControllerComponent>(r.Obj, "SetCollidesWith").CollidesWith = mask;
+    };
+    ch["GetCollidesWith"] = [](CharacterRef& r) {
+        return (unsigned)Need<CharacterControllerComponent>(r.Obj, "GetCollidesWith").CollidesWith;
+    };
+    ch["SetCollisionEvents"] = [](CharacterRef& r, bool on) {
+        Need<CharacterControllerComponent>(r.Obj, "SetCollisionEvents").CollisionEvents = on;
+    };
+    // Касается ли персонаж объекта СЕЙЧАС — без подписки на события: «стою на
+    // платформе?» спрашивают каждый кадр, и копить для этого вход/выход в
+    // своих переменных незачем.
+    ch["IsTouching"] = [](CharacterRef& r, sol::object other) {
+        const CharacterControllerComponent& c = Need<CharacterControllerComponent>(r.Obj, "IsTouching");
+        if (!other.is<ObjectRef>()) return false;
+        const entt::entity e = other.as<ObjectRef>().Obj.Entity();
+        return std::find(c.Touching.begin(), c.Touching.end(), e) != c.Touching.end();
+    };
+    ch["GetTouchCount"] = [](CharacterRef& r) {
+        return (int)Need<CharacterControllerComponent>(r.Obj, "GetTouchCount").Touching.size();
     };
     ch["Teleport"] = [](CharacterRef& r, const glm::vec3& position) {
         // Перенос мимо симуляции: контроллер и Transform обязаны оказаться в

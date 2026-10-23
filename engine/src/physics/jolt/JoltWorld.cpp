@@ -484,9 +484,42 @@ void JoltWorld::MoveCharacter(CharacterHandle character, const glm::vec3& veloci
     // задаёт игра (CharacterDesc::StepHeight); здесь стояла константа, и
     // настройка не работала вовсе.
     upd.mWalkStairsStepUp = JPH::Vec3(0, it->second->StepHeight, 0);
-    ch->ExtendedUpdate(dt, m_system->GetGravity(), upd,
-                       m_system->GetDefaultBroadPhaseLayerFilter(ObjectLayers::MOVING),
-                       m_system->GetDefaultLayerFilter(ObjectLayers::MOVING), {}, {}, *m_tempAllocator);
+    // МАСКА СЛОЁВ — фильтром тел. Поле CollidesWith хранилось с самого начала,
+    // но в шаг не передавалось: персонаж сталкивался со всеми слоями, что бы
+    // ни стояло в настройках. Всё-слои — без фильтра: так шаг не платит
+    // поиском по карте слоёв за каждое тело рядом.
+    const LayerMask mask = it->second->CollidesWith;
+    if (mask == kAllLayers) {
+        ch->ExtendedUpdate(dt, m_system->GetGravity(), upd,
+                           m_system->GetDefaultBroadPhaseLayerFilter(ObjectLayers::MOVING),
+                           m_system->GetDefaultLayerFilter(ObjectLayers::MOVING), {}, {},
+                           *m_tempAllocator);
+    } else {
+        const MaskBodyFilter filter(this, mask);
+        ch->ExtendedUpdate(dt, m_system->GetGravity(), upd,
+                           m_system->GetDefaultBroadPhaseLayerFilter(ObjectLayers::MOVING),
+                           m_system->GetDefaultLayerFilter(ObjectLayers::MOVING), filter, {},
+                           *m_tempAllocator);
+    }
+}
+
+void JoltWorld::SetCharacterCollidesWith(CharacterHandle character, LayerMask mask) {
+    auto it = m_characters.find(character);
+    if (it != m_characters.end()) it->second->CollidesWith = mask;
+}
+
+void JoltWorld::CharacterContacts(CharacterHandle character, std::vector<BodyHandle>& out) const {
+    out.clear();
+    auto it = m_characters.find(character);
+    if (it == m_characters.end()) return;
+    // Активные контакты Jolt — и те, что лишь в зоне предсказания (рядом, но не
+    // касаясь). Берём только настоящие: стена в сантиметре — ещё не удар.
+    for (const JPH::CharacterVirtual::Contact& c : it->second->Ptr->GetActiveContacts()) {
+        if (!c.mHadCollision || c.mIsSensorB) continue;
+        const BodyHandle h = HandleOf(c.mBodyB.GetIndexAndSequenceNumber());
+        if (h == kInvalidBody) continue;
+        if (std::find(out.begin(), out.end(), h) == out.end()) out.push_back(h);
+    }
 }
 
 CharacterState JoltWorld::GetCharacterState(CharacterHandle character) const {

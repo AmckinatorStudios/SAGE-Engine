@@ -73,7 +73,10 @@ function Update(dt)
     if Input.IsCursorCaptured() then
         local delta = Input.GetMouseDelta()
         yaw = yaw - delta.x * look_sensitivity
-        pitch = pitch - delta.y * look_sensitivity
+        -- delta.y > 0 — мышь ОТ СЕБЯ (вверх): взгляд поднимается, угол
+        -- наклона растёт. Здесь стоял минус, и обзор по вертикали был
+        -- перевёрнут.
+        pitch = pitch + delta.y * look_sensitivity
         if pitch > 89.0 then pitch = 89.0 end
         if pitch < -89.0 then pitch = -89.0 end
         -- Поворот ТЕЛА — только по рысканию (yaw): тангаж (pitch) — только
@@ -86,6 +89,7 @@ function Update(dt)
 
     -- Желаемое направление — из ТЕКУЩЕГО поворота тела (уже только рыскание,
     -- поэтому Forward()/Right() лежат строго в горизонтальной плоскости).
+    -- Forward() — туда, куда смотрит камера (локальный −Z).
     local moveForward = 0.0
     local moveRight = 0.0
     if Input.IsKeyDown("W") then moveForward = moveForward + 1.0 end

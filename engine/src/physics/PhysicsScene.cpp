@@ -612,7 +612,49 @@ void PhysicsScene::Step(Scene& scene, float dt) {
             m_contacts.push_back(c);
         }
     }
+    UpdateCharacterContacts(scene);
     UpdateTriggers(scene);
+}
+
+// КАСАНИЯ ПЕРСОНАЖА -> OnCollisionEnter/Exit.
+//
+// Контроллер — не тело мира, и очередь контактов бэкенда о нём молчит: персонаж
+// упирался в стену, вставал на ящик, бился головой о балку, а скрипт не узнавал
+// ни о чём. Бэкенд отвечает на вопрос «кого касается», разница с прошлым шагом
+// — это вход и выход. Пары — те же EntityContact, что у тел, поэтому скриптам
+// всё равно, тело ударилось или персонаж.
+void PhysicsScene::UpdateCharacterContacts(Scene& scene) {
+    entt::registry& reg = scene.Registry();
+    std::vector<entt::entity> now;
+    for (const auto& [entity, handle] : m_characters) {
+        if (!reg.valid(entity)) continue;
+        auto* cc = reg.try_get<CharacterControllerComponent>(entity);
+        if (!cc) continue;
+        if (!cc->CollisionEvents) {
+            cc->Touching.clear();
+            continue;
+        }
+        m_world->CharacterContacts(handle, m_touchBuffer);
+        now.clear();
+        for (BodyHandle body : m_touchBuffer) {
+            auto it = m_bodyToEntity.find(body);
+            if (it == m_bodyToEntity.end() || it->second == entity) continue;
+            if (std::find(now.begin(), now.end(), it->second) == now.end()) now.push_back(it->second);
+        }
+        auto emit = [&](entt::entity other, bool begin) {
+            EntityContact c;
+            c.Begin = begin;
+            c.A = entity;
+            c.B = other;
+            m_contacts.push_back(c);
+        };
+        for (entt::entity other : now)
+            if (std::find(cc->Touching.begin(), cc->Touching.end(), other) == cc->Touching.end())
+                emit(other, true);
+        for (entt::entity other : cc->Touching)
+            if (std::find(now.begin(), now.end(), other) == now.end()) emit(other, false);
+        cc->Touching.swap(now);
+    }
 }
 
 // Заводит контроллеры для сущностей, у которых есть компонент, но ещё нет
@@ -637,6 +679,7 @@ void PhysicsScene::SyncCharacters(Scene& scene) {
         d.SkinWidth = cc.SkinWidth;
         d.Mass = cc.Mass;
         d.Layer = cc.Layer;
+        d.CollidesWith = cc.CollidesWith;
         // Позиция контроллера — ПОДОШВЫ; точка объекта может быть не там
         // (начало координат модели — в поясе, в центре, где угодно).
         d.Position = tr.Position + cc.Center;
@@ -742,6 +785,8 @@ void PhysicsScene::StepCharacters(Scene& scene, float dt) {
             cc.StepUp = cc.Motor->StepUp();
             cc.Velocity = (st.Position - before) / dt;
         } else {
+            // Маска — каждый шаг: её правят в инспекторе посреди Play.
+            m_world->SetCharacterCollidesWith(cc.Runtime, cc.CollidesWith);
             m_world->MoveCharacter(cc.Runtime, velocity, dt);
             // Положение и опора приедут в PullCharacters после шага мира —
             // читать их здесь значило бы видеть состояние ДО столкновения.

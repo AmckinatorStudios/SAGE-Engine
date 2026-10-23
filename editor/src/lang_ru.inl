@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2597.
+// Язык: Русский. Строк: 2606.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1000,8 +1000,12 @@ constexpr TranslationPair kRussianStrings[] = {
      "Коллайдер (C): тянуть форму столкновения"},
     {"Collider display",
      "Вид коллайдеров"},
+    {"Collides With",
+     "Сталкивается со слоями"},
     {"Collision",
      "Столкновения"},
+    {"Collision Events",
+     "События столкновений"},
     {"Color",
      "Цвет"},
     {"Color Adjustments",
@@ -1530,6 +1534,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Изменить в окне Tween"},
     {"Edit layout in the viewport",
      "Править вёрстку во вьюпорте"},
+    {"Edit material",
+     "Править материал"},
     {"Edit on the picture…",
      "Править по картинке…"},
     {"Edit the anchor on the canvas",
@@ -2094,6 +2100,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Спрятать"},
     {"Hide hidden files",
      "Скрыть скрытые файлы"},
+    {"Hide material settings",
+     "Скрыть настройки материала"},
     {"Hierarchy",
      "Иерархия"},
     {"High",
@@ -2350,6 +2358,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Слой"},
     {"Layer %d",
      "Слой %d"},
+    {"Layer of the character itself: rays, triggers and other masks see it here",
+     "Слой самого персонажа: по нему его видят лучи, триггеры и чужие маски"},
+    {"Layers the character bumps into; the rest it walks through",
+     "Слои, в которые персонаж упирается; сквозь остальные он проходит"},
     {"Layout",
      "Раскладка"},
     {"Layout mode is off — the viewport shows no UI frames.",
@@ -3768,6 +3780,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сохранить .sage9"},
     {"Save Material",
      "Сохранить материал"},
+    {"Save Material *",
+     "Сохранить материал *"},
     {"Save Scene",
      "Сохранить сцену"},
     {"Save Scene As",
@@ -3848,6 +3862,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Объект со скриптом"},
     {"Scripts (*.lua)",
      "Скрипты (*.lua)"},
+    {"Scripts get OnCollisionEnter / Exit when the character touches something",
+     "Скрипты получают OnCollisionEnter / Exit, когда персонаж чего-то касается"},
     {"Scripts reloaded: ",
      "Скриптов перечитано: "},
     {"Scroll",
@@ -4724,6 +4740,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Верх: небо прямо над головой"},
     {"Top: transparency keys, bottom: colour keys. Double-click adds, right-click removes.",
      "Сверху — ключи прозрачности, снизу — ключи цвета. Двойной щелчок добавляет, правый — удаляет."},
+    {"Touching now: %d",
+     "Касается сейчас: %d"},
     {"Track",
      "Дорожка"},
     {"Track colour",

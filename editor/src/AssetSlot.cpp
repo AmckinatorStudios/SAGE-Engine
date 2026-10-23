@@ -42,7 +42,16 @@ struct Cached {
     uint64_t Id = 0;
     long long Stamp = 0; // время правки файла: правка материала обязана обновить обложку
     int LastFrame = 0;
+    // Правка БЕЗ сохранения файла: отпечаток материала разошёлся с тем, с
+    // которого снята обложка (см. Material::Fingerprint).
+    std::weak_ptr<Material> Mat;
+    uint64_t Print = 0;
 };
+
+bool Fresh(const Cached& c) {
+    const std::shared_ptr<Material> mat = c.Mat.lock();
+    return !mat || mat->Fingerprint() == c.Print;
+}
 
 std::unordered_map<std::string, Cached>& Cache() {
     static std::unordered_map<std::string, Cached> cache;
@@ -73,7 +82,7 @@ uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
     auto& cache = Cache();
     const int frame = ImGui::GetFrameCount();
     auto it = cache.find(key);
-    if (it != cache.end() && it->second.Stamp == stamp) {
+    if (it != cache.end() && it->second.Stamp == stamp && Fresh(it->second)) {
         it->second.LastFrame = frame;
         return it->second.Id;
     }
@@ -88,9 +97,10 @@ uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
     uint64_t id = 0;
     // См. AssetsPanel::CoverFor: снимок с картами «в пути» не запоминается.
     bool provisional = false;
+    std::shared_ptr<Material> shot;
     if (ext == ".sagemat") {
-        if (std::shared_ptr<Material> mat = ResourceManager::Instance().GetMaterial(key))
-            id = preview->RenderMaterial(mat, size, bufferKey);
+        shot = ResourceManager::Instance().GetMaterial(key);
+        if (shot) id = preview->RenderMaterial(shot, size, bufferKey);
         provisional = ResourceManager::Instance().PendingAsyncTextures() > 0;
     } else if (ext == ".sageprefab") {
         id = preview->RenderPrefab(key, size, bufferKey);
@@ -103,7 +113,7 @@ uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
         if (pending) return it != cache.end() ? it->second.Id : 0;
     }
     lastRenderFrame = frame;
-    cache[key] = Cached{id, provisional ? -1 : stamp, frame};
+    cache[key] = Cached{id, provisional ? -1 : stamp, frame, shot, shot ? shot->Fingerprint() : 0};
 
     // Обложки, на которые давно никто не смотрел, отпускаем вместе с их
     // буферами: слот, которому за сеанс назначили десяток разных материалов,

@@ -1,6 +1,7 @@
 #pragma once
 #include "sage/render/TextureFiltering.h"
 #include <memory>
+#include <cstdint>
 #include <string>
 #include <glm/glm.hpp>
 
@@ -338,6 +339,21 @@ struct Material {
     bool HasMaps() const {
         return AlbedoTex || NormalTex || MetallicTex || RoughnessTex || AOTex || EmissiveTex;
     }
+
+    // ОТПЕЧАТОК того, что материал запишет на диск: цвета, числа, свойства
+    // рендера, пути карт и шейдера, параметры. Совпал — материал выглядит так
+    // же; разошёлся — его правили.
+    //
+    // Зачем. Обложки материала (шарик в Assets и в слоте объекта) сверялись
+    // только со временем правки ФАЙЛА: человек тянул ползунок, сцена менялась
+    // сразу, а шарик в слоте и в панели ассетов показывал прежний вид до
+    // нажатия «Сохранить» — и правка выглядела как «материал не обновляется».
+    // Отпечаток считается за доли микросекунды и не трогает диск.
+    uint64_t Fingerprint() const;
+    // Отпечаток того, что лежит в файле (ставят загрузка и запись). Не совпал
+    // с текущим — в материале есть несохранённые правки.
+    mutable uint64_t DiskFingerprint = 0;
+    bool HasUnsavedChanges() const { return Fingerprint() != DiskFingerprint; }
 
     // Читает .sagemat (JSON). Бросает std::runtime_error, если файл не
     // открывается/не парсится — вызывающий решает, чем ответить (редактор

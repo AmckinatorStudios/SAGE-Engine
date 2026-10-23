@@ -434,6 +434,58 @@ character:GetGroundNormal()
 объявляет это одним вызовом и получает прежнее поведение: второго, движкового
 тяготения поверх своего у неё не появится.
 
+### Столкновения персонажа
+
+Слой персонажа и слои, с которыми он сталкивается, — в инспекторе (раздел
+«Столкновения» секции Character Controller) и из скрипта, масками битов, как у
+RigidBody (бит 0 — слой 1):
+
+```lua
+character:SetLayer(1 << 1)                      -- сам персонаж на слое 2
+character:SetCollidesWith(0xFFFFFFFF & ~(1 << 2)) -- проходит сквозь слой 3
+character:IsTouching(door)                      -- касается сейчас?
+self.gameObject:AddComponent("CharacterController",
+    {radius = 0.3, height = 1.7, collidesWith = 0x0F})
+```
+
+О касаниях (пол, стена, ящик) скрипты обеих сторон получают обычные
+`OnCollisionEnter`/`OnCollisionExit` — ровно один вход на касание, а не событие
+на каждый шаг стояния на полу. Выключается галочкой «События столкновений»
+(`SetCollisionEvents(false)`) — для толпы статистов. Маска раньше хранилась, но
+в шаг Jolt не передавалась: персонаж сталкивался со всеми слоями.
+Проверки: `Character_collision_events_for_floor_and_wall`,
+`Character_collides_with_mask_lets_it_walk_through_other_layers`
+(`tests/test_triggers.cpp`, оба бэкенда).
+
+### Направления: вперёд — туда, куда смотрит камера
+
+| Что | Знак |
+|---|---|
+| `transform:Forward()`, `Vector3.forward()` | локальный **−Z** — туда же смотрит камера |
+| `transform:Right()` | +X |
+| `transform:LookAt(p)` | разворачивает `Forward()` (и камеру на объекте) к точке |
+| `Input:GetVector2("Move")` | y > 0 — вперёд, x > 0 — вправо |
+| `Input:GetMouseDelta()` | x > 0 — мышь вправо, **y > 0 — мышь от себя** |
+| поворот `Rotate(0, +a, 0)` | влево (правая тройка): мышь вправо — `-look.x` |
+| наклон `rotation.x` | > 0 — взгляд вверх: `pitch + look.y` |
+
+До 0.5 `Forward()` отдавал +Z — «назад» с точки зрения камеры — и у каждого
+персонажа, собранного по нему, W вела назад; `LookAt` разворачивал камеру к
+цели затылком; примеры вычитали смещение мыши по Y, которое движок уже отдаёт
+«вверх = плюс», и обзор по вертикали был перевёрнут. Проверки:
+`ScriptSystem_lua_forward_and_look_at_match_the_camera`,
+`ScriptSystem_shipped_fps_example_walks_and_looks_the_right_way` — сверяют со
+САМОЙ камерой (`CameraFrameFor`), а не с числом.
+
+Раскладку вектора и оси скрипт объявляет сам: `Input:BindVector("Move", "W",
+"S", "A", "D")`, `Input:BindAxis("Turn", "E", "Q")`, `Input:HasAction(name)`.
+Действие, у которого привязки уже есть (из настроек проекта), не трогается.
+
+У примера `player_fps.lua` настройки курсора — публичные переменные: **Lock
+Cursor** (захватить мышь при старте), **Cursor Toggle Key** (клавиша, которая
+отпускает и снова захватывает курсор, по умолчанию Escape), **Look Only When
+Locked** (не крутить обзор свободным курсором) и **Invert Look Y**.
+
 ## Отладочная графика
 
 ```lua

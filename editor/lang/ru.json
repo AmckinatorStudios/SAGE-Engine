@@ -2597,6 +2597,15 @@
     "Linear Damping": "Затухание движения",
     "Slows spinning and rolling: raise it so balls stop sooner": "Гасит вращение и качение: больше — шары останавливаются раньше",
     "Speed %.2f m/s, spin %.2f rad/s%s": "Скорость %.2f м/с, вращение %.2f рад/с%s",
-    "Uses this object's own mesh": "Берётся меш самого объекта"
+    "Uses this object's own mesh": "Берётся меш самого объекта",
+    "Layer of the character itself: rays, triggers and other masks see it here": "Слой самого персонажа: по нему его видят лучи, триггеры и чужие маски",
+    "Collides With": "Сталкивается со слоями",
+    "Layers the character bumps into; the rest it walks through": "Слои, в которые персонаж упирается; сквозь остальные он проходит",
+    "Collision Events": "События столкновений",
+    "Scripts get OnCollisionEnter / Exit when the character touches something": "Скрипты получают OnCollisionEnter / Exit, когда персонаж чего-то касается",
+    "Touching now: %d": "Касается сейчас: %d",
+    "Save Material *": "Сохранить материал *",
+    "Edit material": "Править материал",
+    "Hide material settings": "Скрыть настройки материала"
   }
 }

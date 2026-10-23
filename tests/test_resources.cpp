@@ -859,3 +859,40 @@ TEST(ModelLoader_reads_gltf_not_only_obj) {
 
     afs::remove_all(dir);
 }
+
+// --- ЖИВАЯ ПРАВКА МАТЕРИАЛА ---------------------------------------------------
+//
+// Сцена видит правку материала сразу (общий экземпляр из кэша), а обложки —
+// шарик в Assets и в слоте объекта — сверялись только со временем правки
+// файла и показывали старый вид до «Сохранить». Отпечаток обязан меняться от
+// любой видимой правки и совпадать с файлом после записи и чтения.
+TEST(Material_fingerprint_follows_live_edits_and_the_file) {
+    Material m;
+    const uint64_t base = m.Fingerprint();
+    CHECK_TRUE(m.Fingerprint() == base);   // стабилен без правок
+
+    m.Roughness = 0.8f;
+    const uint64_t rough = m.Fingerprint();
+    CHECK_TRUE(rough != base);
+    m.Render.UVScaleX = 4.0f;              // свойство рендера из таблицы
+    CHECK_TRUE(m.Fingerprint() != rough);
+    m.Render.UVScaleX = 1.0f;
+    CHECK_TRUE(m.Fingerprint() == rough);  // вернули — отпечаток прежний
+    m.TexturePath = "assets/wood.png";
+    CHECK_TRUE(m.Fingerprint() != rough);
+    m.Params["Wave"] = ShaderParam::Make(0.5f);
+    const uint64_t withParam = m.Fingerprint();
+    m.Params["Wave"] = ShaderParam::Make(0.6f);
+    CHECK_TRUE(m.Fingerprint() != withParam);
+
+    CHECK_TRUE(m.HasUnsavedChanges());     // ни разу не писался
+    const std::string path = "sage_fingerprint_test.sagemat";
+    m.SaveToFile(path);
+    CHECK_FALSE(m.HasUnsavedChanges());
+    const Material back = Material::LoadFromFile(path);
+    CHECK_TRUE(back.Fingerprint() == m.Fingerprint());
+    CHECK_FALSE(back.HasUnsavedChanges());
+    m.Albedo = glm::vec3(1.0f, 0.0f, 0.0f);
+    CHECK_TRUE(m.HasUnsavedChanges());     // правка после записи — видна
+    std::remove(path.c_str());
+}

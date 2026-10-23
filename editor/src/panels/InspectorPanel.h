@@ -83,6 +83,13 @@ private:
     std::string m_lastAssetPath;
 
     void DrawMaterialEditor(EditorHost& host);
+    // Поля материала — общие для редактора ассета и для блока «Править
+    // материал» в секции Mesh объекта. preview — 3D-шарик (в инспекторе
+    // объекта его заменяет обложка слота, второй шарик там лишний).
+    void DrawMaterialFields(EditorHost& host, const std::shared_ptr<Material>& material,
+                            const std::string& path, bool preview);
+    // Какие материалы раскрыты для правки прямо в секции Mesh (по пути).
+    std::string m_inlineMaterial;
     // --- ПРОИГРЫВАТЕЛЬ ЗВУКОВОГО ФАЙЛА --------------------------------------
     //
     // Выбрал .wav в Assets — слышишь его. До этого послушать файл можно было
@@ -121,7 +128,8 @@ private:
     // единственной обратной связью была строчка в консоли. Слот показывает саму
     // картинку: назначено ли что-то и то ли это, что хотели, видно сразу.
     void DrawTextureSlot(EditorHost& host, const char* label, std::string& path,
-                         const std::shared_ptr<Texture>& tex, const char* tooltip);
+                         const std::shared_ptr<Texture>& tex, const char* tooltip,
+                         Material& material);
 
     // Свой шейдер материала — тем же слотом и по той же причине. Пара .vert/
     // .frag выбиралась двумя полями ввода с применением по Enter: набранное без

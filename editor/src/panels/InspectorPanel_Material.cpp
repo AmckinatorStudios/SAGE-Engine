@@ -90,7 +90,8 @@ void InspectorPanel::DrawShaderSlot(EditorHost& host, const char* label, std::st
 }
 
 void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::string& path,
-                                     const std::shared_ptr<Texture>& tex, const char* tooltip) {
+                                     const std::shared_ptr<Texture>& tex, const char* tooltip,
+                                     Material& material) {
     ImGui::PushID(label);
     ImGui::TextUnformatted(label);
     if (tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", tooltip);
@@ -101,11 +102,10 @@ void InspectorPanel::DrawTextureSlot(EditorHost& host, const char* label, std::s
         host.PushUndoSnapshot();
         path = r.Path;
         // Материал держит СВОИ указатели на текстуры: без пересборки картинка в
-        // слоте новая, а объект в сцене остаётся со старой.
-        if (std::shared_ptr<Material> mat =
-                ResourceManager::Instance().GetMaterial(host.InspectedAssetPath().string())) {
-            ResourceManager::Instance().ResolveMaterialTextures(*mat);
-        }
+        // слоте новая, а объект в сцене остаётся со старой. Материал — тот,
+        // что правят, а не «выбранный в Assets»: тот же слот стоит и в секции
+        // Mesh объекта, где в Assets выбрано что угодно.
+        ResourceManager::Instance().ResolveMaterialTextures(material);
     }
     if (r.BrowseRequested) {
         FileBrowser::Config c;
@@ -141,6 +141,15 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
         ImGui::TextDisabled("%s", T("The file is gone or damaged — details in the console."));
         return;
     }
+    DrawMaterialFields(host, material, pathStr, /*preview=*/true);
+}
+
+void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<Material>& material,
+                                        const std::string& pathStr, bool preview) {
+    if (!material) return;
+    // Пути карт могли смениться выбором в диалоге «Обзор…» — пересборка карт
+    // по слепку путей (шесть сравнений строк, если ничего не менялось).
+    ResourceManager::Instance().RefreshMaterialTextures(*material);
 
     // --- 3D-превью ------------------------------------------------------------
     //
@@ -148,7 +157,7 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     // понять ничего из того, ради чего материал и настраивают: металл или
     // диэлектрик, гладкий или матовый, как легла карта нормалей. Всё это видно
     // только на изогнутой поверхности при свете.
-    if (material) {
+    if (preview) {
         const float side = std::min(ImGui::GetContentRegionAvail().x, 220.0f);
         const uint64_t tex = m_preview.RenderMaterial(material, (int)side);
         if (tex) {
@@ -221,17 +230,17 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     // обратной связью была строчка в консоли. Слот показывает саму картинку —
     // назначено ли что-то и то ли это, что хотели, видно сразу.
     DrawTextureSlot(host, "Albedo", material->TexturePath, material->AlbedoTex,
-                    T("Base colour. Multiplied by the Albedo above."));
+                    T("Base colour. Multiplied by the Albedo above."), *material);
     DrawTextureSlot(host, "Normal", material->NormalMapPath, material->NormalTex,
-                    T("Normal map, tangent space (OpenGL: green is up)."));
+                    T("Normal map, tangent space (OpenGL: green is up)."), *material);
     DrawTextureSlot(host, "Metallic", material->MetallicMapPath, material->MetallicTex,
-                    T("Channel R. Multiplied by the Metallic factor above."));
+                    T("Channel R. Multiplied by the Metallic factor above."), *material);
     DrawTextureSlot(host, "Roughness", material->RoughnessMapPath, material->RoughnessTex,
-                    T("Channel R. Multiplied by the Roughness factor above."));
+                    T("Channel R. Multiplied by the Roughness factor above."), *material);
     DrawTextureSlot(host, "Emissive", material->EmissiveMap, material->EmissiveTex,
-                    T("Where it glows and where it does not. Multiplied by the emissive colour and strength."));
+                    T("Where it glows and where it does not. Multiplied by the emissive colour and strength."), *material);
     DrawTextureSlot(host, "AO", material->AOMapPath, material->AOTex,
-                    T("Ambient occlusion, channel R. Empty means AO = 1."));
+                    T("Ambient occlusion, channel R. Empty means AO = 1."), *material);
 
     // ФИЛЬТРАЦИЯ — сразу под картами: решают её, глядя на картинку (чёткие
     // пиксели или сглаживание), а не на поведение рендера. Подписи и ключи —
@@ -343,9 +352,16 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
 
     ImGui::TextDisabled("%s", T("Edits apply live to every entity using this material."));
 
-    if (ImGui::Button(T("Save Material"))) {
+    // Правка видна сразу, а на диск попадает по «Сохранить»: о том, что в
+    // файле ещё старое, говорит метка, иначе это узнают, только перезапустив
+    // редактор и потеряв полчаса настройки.
+    const bool unsaved = material->HasUnsavedChanges();
+    if (ImGui::Button(unsaved ? T("Save Material *###SaveMaterial") : T("Save Material###SaveMaterial"))) {
         try {
-            material->SaveToFile(pathStr);
+            // Путь объекта — относительно проекта («assets/x.sagemat»), а
+            // редактор живёт в своём каталоге: пишем туда, откуда материал
+            // читался (LocatePath), а не в каталог процесса.
+            material->SaveToFile(sage::AssetDatabase::Instance().LocatePath(pathStr));
             LOG_INFO("Editor") << "Material saved: " << pathStr;
         } catch (const std::exception& e) {
             LOG_ERROR("Editor") << "Material save failed: " << e.what();
@@ -353,6 +369,10 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     }
     ImGui::SameLine();
     if (ImGui::Button(T("Revert"))) ResourceManager::Instance().ReloadMaterial(pathStr);
+    if (unsaved) {
+        ImGui::SameLine();
+        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", T("unsaved changes"));
+    }
 }
 
 // Настройки импорта выбранной модели — ТЕ ЖЕ, что в окне импорта
@@ -687,6 +707,29 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
     }
     if (!mr.MaterialPath.empty() && !mr.MaterialPtr) {
         ImGui::TextColored(ImVec4(1, 0.45f, 0.45f, 1), "%s", T("File cannot be read"));
+    }
+
+    // ПРАВИТЬ МАТЕРИАЛ НА МЕСТЕ, не уходя в Assets.
+    //
+    // Раньше материал правился только после выбора его ФАЙЛА в панели ассетов:
+    // выделил объект — видишь слот, хочешь покрутить шероховатость — ищи файл,
+    // теряй выделение объекта, возвращайся. Правится тот же общий экземпляр
+    // из кэша, что рисует сцена, поэтому изменения видны во вьюпорте сразу.
+    if (mr.MaterialPtr && !mr.MaterialPath.empty()) {
+        const bool open = m_inlineMaterial == mr.MaterialPath;
+        const char* label = open ? T("Hide material settings") : T("Edit material");
+        if (EditorIcons::Button("material", label)) m_inlineMaterial = open ? std::string() : mr.MaterialPath;
+        if (mr.MaterialPtr->HasUnsavedChanges()) {
+            ImGui::SameLine();
+            ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", T("unsaved changes"));
+        }
+        if (m_inlineMaterial == mr.MaterialPath) {
+            ImGui::PushID("inlineMaterial");
+            ImGui::Indent();
+            DrawMaterialFields(host, mr.MaterialPtr, mr.MaterialPath, /*preview=*/false);
+            ImGui::Unindent();
+            ImGui::PopID();
+        }
     }
 
     // СОЗДАТЬ материал — отдельной строкой, а не ещё одной кнопкой в слоте.

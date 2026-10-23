@@ -113,8 +113,9 @@ end
 
 function P.Update(dt, input)
     -- Взгляд. Мышь опрашивается движком и приходит уже в пикселях за кадр.
+    -- lookY > 0 — мышь от себя (движок считает Y вверх), то есть взгляд вверх.
     P.yaw = (P.yaw - input.lookX) % 360.0
-    P.pitch = math.max(-MAX_PITCH, math.min(MAX_PITCH, P.pitch - input.lookY))
+    P.pitch = math.max(-MAX_PITCH, math.min(MAX_PITCH, P.pitch + input.lookY))
 
     -- Желаемая горизонтальная скорость.
     local fx, _, fz = P.ForwardFlat()

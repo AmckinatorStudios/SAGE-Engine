@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "sage/anim/AnimProperty.h"
+#include "sage/ecs/LightSystem.h"
 #include "sage/physics/PhysicsComponents.h"
 #include "sage/scripting/ScriptTween.h"
 #include "sage/scene/Components.h"
@@ -174,17 +175,26 @@ void RegisterObject(Backend& backend) {
     tr["Rotate"] = [](TransformRef& r, float x, float y, float z) {
         Tr(r.Obj, "Rotate").Rotation += glm::vec3(x, y, z);
     };
-    tr["Forward"] = [](TransformRef& r) { return AxisOf(Tr(r.Obj, "Forward"), 2); };
+    // «ВПЕРЁД» — ЛОКАЛЬНЫЙ -Z, ТУДА ЖЕ, КУДА СМОТРИТ КАМЕРА (CameraFrameFor,
+    // ForwardFromEuler у прожекторов). Здесь стояла ось +Z — то есть «назад»
+    // с точки зрения камеры, — и каждый персонаж, собранный по Forward(), шёл
+    // от W спиной вперёд: W и S, «вперёд» и «назад» были переставлены во всех
+    // скриптах движения сразу. Right() при этом верен (+X): у камеры, глядящей
+    // в -Z с верхом +Y, правая рука — +X.
+    tr["Forward"] = [](TransformRef& r) { return -AxisOf(Tr(r.Obj, "Forward"), 2); };
     tr["Right"] = [](TransformRef& r) { return AxisOf(Tr(r.Obj, "Right"), 0); };
     tr["Up"] = [](TransformRef& r) { return AxisOf(Tr(r.Obj, "Up"), 1); };
+    // Поворачивает объект так, чтобы его Forward() — и камера на нём — смотрел
+    // на цель. Та же формула, что у солнца и прожекторов (EulerFromForward):
+    // своя здесь разворачивала к цели +Z, и камера после LookAt глядела ровно
+    // в противоположную сторону.
     tr["LookAt"] = [](TransformRef& r, const glm::vec3& target) {
         Transform& t = Tr(r.Obj, "LookAt");
         const glm::vec3 d = target - t.Position;
-        const float len = glm::length(d);
-        if (len < 1e-6f) return;
-        const glm::vec3 n = d / len;
-        t.Rotation.y = glm::degrees(std::atan2(n.x, n.z));
-        t.Rotation.x = glm::degrees(std::asin(-n.y));
+        if (glm::length(d) < 1e-6f) return;
+        const glm::vec3 e = sage::ecs::EulerFromForward(d);
+        t.Rotation.x = e.x;
+        t.Rotation.y = e.y;
     };
     // translate, look_at, forward… — нынешние имена тех же методов.
     tr[sol::meta_function::index] = [](TransformRef&, sol::stack_object key) {
@@ -328,7 +338,19 @@ void RegisterObject(Backend& backend) {
             return sol::make_object(self->Lua(), true);
         }
         if (name == "CharacterController") {
-            reg.get_or_emplace<CharacterControllerComponent>(e);
+            CharacterControllerComponent& c = reg.get_or_emplace<CharacterControllerComponent>(e);
+            c.Radius = num("radius", c.Radius);
+            c.Height = num("height", c.Height);
+            c.SlopeLimit = num("slopeLimit", c.SlopeLimit);
+            c.StepOffset = num("stepOffset", c.StepOffset);
+            c.Gravity = num("gravity", c.Gravity);
+            c.Mass = num("mass", c.Mass);
+            if (opts) {
+                if (sol::optional<glm::vec3> center = (*opts)["center"]) c.Center = *center;
+                c.Layer = opts->get_or("layer", (unsigned)c.Layer);
+                c.CollidesWith = opts->get_or("collidesWith", (unsigned)c.CollidesWith);
+                c.CollisionEvents = opts->get_or("collisionEvents", c.CollisionEvents);
+            }
             return self->ComponentOf(r.Obj, "CharacterController");
         }
         // Скрипт на объект — и сразу в работу (Start зовётся здесь же):

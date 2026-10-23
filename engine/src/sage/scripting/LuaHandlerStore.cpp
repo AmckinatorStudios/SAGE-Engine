@@ -13,6 +13,14 @@ LuaHandlerStore::~LuaHandlerStore() = default;
 
 size_t LuaHandlerStore::Size() const { return m_shared->Fns.size(); }
 
+bool LuaHandlerStore::AllOnMainThread() const {
+    for (const auto& [key, e] : m_shared->Fns) {
+        lua_State* L = e.Fn.lua_state();
+        if (L && sol::main_thread(L, L) != L) return false;
+    }
+    return true;
+}
+
 int LuaHandlerStore::Connect(sage::events::Bus& bus, int object, const std::string& name,
                              sol::protected_function fn, bool once, int owner) {
     const int key = m_nextKey++;
@@ -34,7 +42,29 @@ int LuaHandlerStore::Connect(sage::events::Bus& bus, int object, const std::stri
         if (s->Call) s->Call(call, e, owner);
     }, opt);
     if (id == 0) return 0;
-    m_shared->Fns[key] = Entry{std::move(fn), once, id, &bus, owner};
+    // ССЫЛКА — НА ГЛАВНЫЙ ПОТОК Lua, а не на тот, из которого подписали.
+    // sol::protected_function помнит lua_State, на котором её взяли, и снимает
+    // ссылку (luaL_unref) через него же. Подписка из корутины (тесты на Lua
+    // идут корутинами, игра — тоже, когда ждёт) запоминала поток корутины;
+    // корутину собирал сборщик мусора, а при выходе из Play Clear() звал
+    // luaL_unref на освобождённом потоке — и писал в чужую память. Куча
+    // портилась молча, а падало потом где попало: в деструкторе Jolt, при
+    // закрытии Lua (AddressSanitizer: heap-use-after-free в lua_rawgeti).
+    //
+    // НОВОЙ ПЕРЕМЕННОЙ, а не присваиванием: operator= у ссылок sol2 оставляет
+    // ссылке ЕЁ прежний поток и переносит значение туда же.
+    lua_State* L = fn.lua_state();
+    lua_State* main = L ? sol::main_thread(L, L) : nullptr;
+    if (main && main != L) {
+        // Через стек главного потока: реестр у потоков общий, и ссылка,
+        // взятая заново на main, принадлежит уже ему.
+        fn.push(main);
+        sol::protected_function onMain(main, -1);
+        lua_pop(main, 1);
+        m_shared->Fns.emplace(key, Entry{std::move(onMain), once, id, &bus, owner});
+    } else {
+        m_shared->Fns.emplace(key, Entry{std::move(fn), once, id, &bus, owner});
+    }
 
     // Соединения, снятые без ведома хранилища (объект уничтожен, disconnect
     // из скрипта), оставляют здесь функцию. Чистим изредка, по росту: игра,
