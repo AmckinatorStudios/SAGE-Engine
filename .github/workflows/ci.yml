@@ -27,6 +27,12 @@ jobs:
       - name: RHI boundary check (no gl* outside the backend)
         run: python3 scripts/check_rhi_boundary.py
 
+      # Слои модулей: нижний модуль не включает верхний (core — ни один из
+      # подсистемных). Известные старые нарушения — в scripts/layer_baseline.json,
+      # и база может только уменьшаться.
+      - name: Module layer check (no include upward)
+        run: python3 scripts/check_layers.py
+
       # Локализация редактора: каждая подпись обёрнута в T(), каждой есть
       # перевод, спецификаторы формата у ключа и перевода совпадают. Тоже до
       # сборки: проверка читает исходники и падает за секунду.

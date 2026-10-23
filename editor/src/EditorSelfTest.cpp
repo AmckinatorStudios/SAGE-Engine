@@ -43,7 +43,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
-#include "sage/core/Application.h"
+#include "sage/app/Application.h"
 #include "sage/core/Paths.h"
 #include <nlohmann/json.hpp>
 

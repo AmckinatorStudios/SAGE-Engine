@@ -1,4 +1,4 @@
-#include "sage/core/GameModule.h"
+#include "sage/app/GameModule.h"
 
 #include <cstdio>
 #include <string>

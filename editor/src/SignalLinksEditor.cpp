@@ -16,7 +16,7 @@
 #include "Project.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Signals.h"
-#include "sage/scripting/ScriptComponent.h"
+#include "sage/scene/ScriptComponent.h"
 #include "sage/scripting/ScriptFields.h"
 #include "ui/UI.h"
 

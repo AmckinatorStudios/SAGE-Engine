@@ -39,7 +39,7 @@
 #include "sage/scene/Prefab.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
-#include "sage/scripting/ScriptComponent.h"
+#include "sage/scene/ScriptComponent.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPresets.h"
 

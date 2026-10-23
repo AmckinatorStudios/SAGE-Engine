@@ -1,4 +1,5 @@
 #include "sage/anim/ClipFile.h"
+#include "sage/core/FormatVersion.h"
 
 #include <algorithm>
 #include <fstream>
@@ -86,6 +87,11 @@ ClipAsset LoadClip(const std::string& path) {
         root = json::parse(text);
     } catch (const std::exception& e) {
         throw std::runtime_error("не разобран как JSON: " + std::string(e.what()));
+    }
+    {
+        static const sage::format::Spec spec{"sage_anim_version", kClipVersion, "клип анимации", {}};
+        std::string err;
+        if (!sage::format::Upgrade(root, spec, err)) throw std::runtime_error(err);
     }
 
     ClipAsset clip;

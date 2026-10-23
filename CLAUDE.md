@@ -46,6 +46,7 @@ cd build/editor && SAGE_EDITOR_SELFTEST=1 xvfb-run -a ./SageEditor  # самоп
 bash scripts/ci_smoke_test.sh                                     # smoke
 python3 scripts/check_localization.py                             # переводы
 python3 scripts/check_rhi_boundary.py                             # граница RHI
+python3 scripts/check_layers.py                                   # слои модулей
 python3 scripts/check_paths.py                                    # пути из окружения
 python3 scripts/check_asset_slots.py                              # ассеты — слотами
 python3 scripts/check_popup_ids.py                                # имена всплывающих окон
@@ -79,6 +80,14 @@ mingw) — половина поломок Windows-сборки на Linux не 
   `scripts/check_localization.py`.
 - **Вызовы `gl*` — только в `engine/src/rhi/`.** Проверяет
   `scripts/check_rhi_boundary.py`.
+- **Модуль включает только свой слой и ниже** (слои — в
+  `scripts/check_layers.py`, описание — `docs/architecture.md`, «Слои
+  движка»). Нужное нижнему — объявить в нём (интерфейс, крючок), реализацию
+  держать наверху. Переехавший заголовок оставляет на старом месте мост с
+  пометкой `SAGE_FORWARD_HEADER`. Проверяет `scripts/check_layers.py`.
+- **Свой компонент — через реестр** (`sage::scene::RegisterComponent`,
+  `sage/scene/ComponentRegistry.h`), а не новой веткой в сериализаторе,
+  копировании и обходе ссылок.
 - **Ассет выбирается СЛОТОМ** (`assetslot::Draw`,
   `editor/src/AssetSlot.h`), не полем с путём. Исключение — путь НАРУЖУ
   проекта (папка проекта, создание/открытие проекта, папка сборки).

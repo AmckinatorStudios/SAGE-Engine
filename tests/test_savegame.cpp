@@ -9,7 +9,7 @@
 // ===========================================================================
 #include "TestFramework.h"
 
-#include "sage/core/SaveGame.h"
+#include "sage/assets/SaveGame.h"
 
 #include <cstdio>
 #include <cstdlib>

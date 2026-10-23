@@ -1,4 +1,5 @@
 #include "sage/render/Material.h"
+#include "sage/core/FormatVersion.h"
 
 #include <algorithm>
 #include <glm/gtc/matrix_transform.hpp>
@@ -152,6 +153,15 @@ glm::vec2 TilingFactor(const MaterialRender& render, const glm::vec3& worldScale
     return base * face;
 }
 
+namespace {
+// Материал: версии у файла не было вовсе. Файлы без номера — версия 1
+// (так они и читались); с этого момента номер пишется и проверяется.
+const sage::format::Spec& MaterialFormat() {
+    static const sage::format::Spec spec{"sage_material_version", 1, "материал", {}};
+    return spec;
+}
+} // namespace
+
 Material Material::LoadFromFile(const std::string& path) {
     // Через vfs — см. пояснение в SceneSerializer::Load.
     std::string text;
@@ -163,6 +173,10 @@ Material Material::LoadFromFile(const std::string& path) {
         root = json::parse(text);
     } catch (const std::exception& e) {
         throw std::runtime_error("Ошибка парсинга материала (" + path + "): " + e.what());
+    }
+    {
+        std::string err;
+        if (!sage::format::Upgrade(root, MaterialFormat(), err)) throw std::runtime_error(err + " (" + path + ")");
     }
 
     Material m;
@@ -290,6 +304,7 @@ uint64_t Material::Fingerprint() const {
 
 void Material::SaveToFile(const std::string& path) const {
     json root;
+    sage::format::Stamp(root, MaterialFormat());
     root["albedo"] = Vec3ToJson(Albedo);
     root["emissive"] = Vec3ToJson(Emissive);
     root["metallic"] = Metallic;

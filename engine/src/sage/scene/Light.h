@@ -1,5 +1,5 @@
 #pragma once
-#include "sage/render/TextureFiltering.h"
+#include "sage/core/TextureFiltering.h"
 #include <glm/glm.hpp>
 #include <glm/trigonometric.hpp>
 #include <string>

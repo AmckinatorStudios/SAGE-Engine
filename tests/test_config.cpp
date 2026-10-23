@@ -246,7 +246,7 @@ TEST(Config_preset_roundtrip_through_file) {
 // Сериализовалась только сцена — редакторный формат. Сохранять прогресс было
 // нечем, и игре оставалось либо писать файлы в обход движка, либо не
 // сохраняться вовсе.
-#include "sage/core/SaveGame.h"
+#include "sage/assets/SaveGame.h"
 
 #include <cstdlib>
 #include <vector>

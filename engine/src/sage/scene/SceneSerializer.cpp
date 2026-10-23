@@ -22,6 +22,7 @@
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISerialize.h"
 #include "sage/scene/SceneJson.h"
+#include "sage/scene/ComponentRegistry.h"
 #include "sage/scene/SceneValueJson.h"
 #include "sage/scene/SceneMigrations.h"
 
@@ -1322,6 +1323,8 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         // момент, когда игру собрали и раздали.
         if (reg.all_of<HiddenComponent>(e)) j["hidden"] = true;
         if (reg.all_of<KeepOnLoadComponent>(e)) j["keepOnLoad"] = true;
+        // Компоненты игры (реестр) и непонятые этим кодом — как есть.
+        sage::scene::SaveRegisteredComponents(reg, e, j);
         // Съёмка в текстуру: только настройки, не картинка — её снимают заново.
         // Раньше компонент не писался вовсе, и иконка предмета или экран
         // камеры наблюдения пропадали после сохранения сцены.
@@ -1463,6 +1466,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
 
         if (j.value("hidden", false)) obj.Registry()->emplace<HiddenComponent>(obj.Entity());
         if (j.value("keepOnLoad", false)) obj.Registry()->emplace<KeepOnLoadComponent>(obj.Entity());
+        sage::scene::LoadRegisteredComponents(*obj.Registry(), obj.Entity(), j);
         if (j.contains("renderTexture") && j["renderTexture"].is_object()) {
             const nlohmann::json& o = j["renderTexture"];
             RenderTextureComponent rt;

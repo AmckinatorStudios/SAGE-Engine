@@ -1,4 +1,5 @@
 #include "sage/core/Paths.h"
+#include "sage/core/FormatVersion.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/EngineContext.h"
 #include "sage/assets/Pack.h"
@@ -258,7 +259,15 @@ std::string AssetDatabase::ExportIndex() const {
 int AssetDatabase::LoadIndex(const std::string& text) {
     int loaded = 0;
     try {
-        const nlohmann::json j = nlohmann::json::parse(text);
+        nlohmann::json j = nlohmann::json::parse(text);
+        static const sage::format::Spec spec{"version", 1, "оглавление ассетов", {}};
+        std::string err;
+        if (!sage::format::Upgrade(j, spec, err)) {
+            // Оглавление из более новой версии — не повод угадывать пути:
+            // ссылки, прочитанные наполовину, хуже честного отказа.
+            LOG_ERROR("Assets") << err;
+            return 0;
+        }
         for (const nlohmann::json& a : j.value("assets", nlohmann::json::array())) {
             const AssetGuid guid = AssetGuid::FromString(a.value("g", std::string()));
             const std::string rel = Normalize(a.value("p", std::string()));

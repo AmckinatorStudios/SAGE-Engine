@@ -14,7 +14,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtx/euler_angles.hpp>
 
-#include "sage/core/Application.h"
+#include "sage/app/Application.h"
 #include "sage/anim/AnimationSystem.h"
 #include "sage/core/Config.h"
 #include "sage/render/DebugView.h"

@@ -19,7 +19,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
-#include "sage/core/Application.h"
+#include "sage/app/Application.h"
 #include "sage/ecs/RenderBatch.h"
 #include "sage/render/Material.h"
 #include "sage/render/Mesh.h"

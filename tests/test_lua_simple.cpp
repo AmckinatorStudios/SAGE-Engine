@@ -20,7 +20,7 @@
 #include "sage/input/InputSystem.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
-#include "sage/scripting/ScriptComponent.h"
+#include "sage/scene/ScriptComponent.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/scripting/ScriptFields.h"
 #include "sage/scripting/ScriptingSystem.h"

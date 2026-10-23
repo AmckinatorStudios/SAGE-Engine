@@ -1,4 +1,5 @@
 #include "sage/input/InputSystem.h"
+#include "sage/core/FormatVersion.h"
 
 #include <algorithm>
 #include <fstream>
@@ -411,9 +412,17 @@ bool InputSystem::CursorCaptured() const { return m_cursor && m_cursor->CursorCa
 
 // --- Сохранение раскладки ---------------------------------------------------
 
+namespace {
+// Раскладка управления: формат 1. Ломающее изменение — Current + 1 и шаг в Steps.
+const sage::format::Spec& MappingFormat() {
+    static const sage::format::Spec spec{"version", 1, "раскладка управления", {}};
+    return spec;
+}
+} // namespace
+
 std::string InputSystem::SaveMappingToString() const {
     nlohmann::json root;
-    root["version"] = 1;
+    sage::format::Stamp(root, MappingFormat());
     nlohmann::json contexts = nlohmann::json::array();
     for (const auto& ctx : m_contexts) {
         nlohmann::json jctx;
@@ -465,6 +474,13 @@ bool InputSystem::LoadMappingFromString(const std::string& json) {
     if (root.is_discarded() || !root.contains("contexts")) {
         LOG_ERROR("Input") << "Раскладка не прочитана: файл не разобрался как JSON";
         return false;
+    }
+    {
+        std::string err;
+        if (!sage::format::Upgrade(root, MappingFormat(), err)) {
+            LOG_ERROR("Input") << "Раскладка не прочитана: " << err;
+            return false;
+        }
     }
 
     for (const auto& jctx : root["contexts"]) {

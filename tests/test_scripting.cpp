@@ -1026,7 +1026,7 @@ TEST(Scripting_every_legacy_global_still_answers) {
 // значит, что главной её операции — поставить заготовленный объект в мир — из
 // скрипта не существовало.
 #include "sage/scene/Prefab.h"
-#include "sage/core/SaveGame.h"
+#include "sage/assets/SaveGame.h"
 
 #include <cstdlib>
 #include <chrono>

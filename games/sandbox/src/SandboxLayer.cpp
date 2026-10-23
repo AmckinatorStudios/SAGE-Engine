@@ -6,7 +6,7 @@
 #include <GLFW/glfw3.h>
 #include <glm/glm.hpp>
 
-#include "sage/core/Application.h"
+#include "sage/app/Application.h"
 #include "sage/core/Paths.h"
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
