@@ -366,6 +366,16 @@ if (SAGE_VULKAN)
       GIT_TAG 14.3.0
     )
     FetchContent_MakeAvailable(glslang)
+    # glslang 14.3 берёт uint32_t, не подключив <cstdint> (SPIRV/SpvBuilder.h):
+    # старые libstdc++ подтягивали его транзитивно, новые — нет, и на раннере
+    # с новым GCC сборка падала в чужом коде. Подключаем заголовок сами, только
+    # для C++ и только целям glslang — править скачанные исходники незачем.
+    foreach(_glslang_target SPIRV glslang MachineIndependent GenericCodeGen)
+        if (TARGET ${_glslang_target})
+            target_compile_options(${_glslang_target} PRIVATE
+                $<$<COMPILE_LANGUAGE:CXX>:-include cstdint>)
+        endif()
+    endforeach()
 
     add_library(volk STATIC ${volk_src_SOURCE_DIR}/volk.c)
     target_include_directories(volk PUBLIC ${volk_src_SOURCE_DIR})
