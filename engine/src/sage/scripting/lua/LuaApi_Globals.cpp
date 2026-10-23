@@ -179,14 +179,14 @@ void RegisterGlobals(Backend& backend) {
     sol::table timeMeta = lua.create_table();
     timeMeta[sol::meta_function::index] = [self](sol::table, const std::string& key) -> sol::object {
         ScriptClock* clock = self->Clock();
-        if (!clock) return sol::nil;
+        if (!clock) return sol::lua_nil;
         sol::state& L = self->Lua();
         if (key == "deltaTime") return sol::make_object(L, clock->Delta);
         if (key == "fixedDeltaTime") return sol::make_object(L, clock->FixedDelta);
         if (key == "time") return sol::make_object(L, clock->Time);
         if (key == "unscaledTime") return sol::make_object(L, clock->Unscaled);
         if (key == "timeScale") return sol::make_object(L, clock->Scale);
-        return sol::nil;
+        return sol::lua_nil;
     };
     // Масштаб времени ПИШЕТСЯ: замедление — обычный приём игры, и делать ради
     // него отдельную функцию, когда есть поле, незачем.
@@ -270,12 +270,12 @@ void RegisterGlobals(Backend& backend) {
     scene.set_function("Find", [self](sol::variadic_args va) -> sol::object {
         Scene* s = SceneOrThrow(*self, "scene:Find");
         GameObject found = s->FindByName(Str(va, Skip(va)));
-        return found.Valid() ? self->Wrap(found) : sol::nil;
+        return found.Valid() ? self->Wrap(found) : sol::lua_nil;
     });
     scene.set_function("FindById", [self](sol::variadic_args va) -> sol::object {
         Scene* s = SceneOrThrow(*self, "scene:FindById");
         GameObject found = s->Get((int)Num(va, Skip(va)));
-        return found.Valid() ? self->Wrap(found) : sol::nil;
+        return found.Valid() ? self->Wrap(found) : sol::lua_nil;
     });
     scene.set_function("FindByTag", [self](sol::variadic_args va) -> sol::object {
         Scene* s = SceneOrThrow(*self, "scene:FindByTag");
@@ -284,7 +284,7 @@ void RegisterGlobals(Backend& backend) {
         for (auto e : view)
             if (view.get<TagComponent>(e).Tag == tag)
                 return self->Wrap(GameObject(&s->Registry(), e));
-        return sol::nil;
+        return sol::lua_nil;
     });
     scene.set_function("FindAllByTag", [self](sol::variadic_args va) {
         Scene* s = SceneOrThrow(*self, "scene:FindAllByTag");
@@ -309,13 +309,13 @@ void RegisterGlobals(Backend& backend) {
         Scene* s = SceneOrThrow(*self, "scene:Instantiate");
         const size_t b = Skip(va);
         const std::string path = Str(va, b);
-        if (path.empty()) return sol::nil;
+        if (path.empty()) return sol::lua_nil;
         int id = -1;
         if (b + 1 < va.size() && va[b + 1].is<glm::vec3>())
             id = sage::scene::InstantiatePrefabAt(*s, path, va[b + 1].as<glm::vec3>());
         else
             id = sage::scene::InstantiatePrefab(*s, path);
-        if (id < 0) return sol::nil;
+        if (id < 0) return sol::lua_nil;
         // Скрипты поставленного — сразу в работу: без этого префаб со
         // скриптом появлялся в игре мёртвым (Start не звался никогда).
         if (ScriptingSystem* system = self->Services().System) system->AttachSubtree(s->Get(id));
@@ -395,7 +395,7 @@ void RegisterGlobals(Backend& backend) {
         const std::vector<int> made = sage::scene::LoadAdditive(*s, name, err, group, hasOffset ? &offset : nullptr);
         if (!err.empty()) {
             LOG_ERROR("Lua") << "scene:LoadAdditive: " << err;
-            return sol::nil;
+            return sol::lua_nil;
         }
         ScriptingSystem* system = self->Services().System;
         sol::table out = self->Lua().create_table();
@@ -440,15 +440,15 @@ void RegisterGlobals(Backend& backend) {
         PhysicsScene* ps = self->Services().Physics;
         if (!ps) throw std::runtime_error("Physics:Raycast: физика не привязана");
         const size_t b = Skip(va);
-        if (b + 1 >= va.size()) return sol::nil;
+        if (b + 1 >= va.size()) return sol::lua_nil;
         const glm::vec3 origin = va[b].as<glm::vec3>();
         const glm::vec3 dir = va[b + 1].as<glm::vec3>();
         const float maxDistance = Num(va, b + 2, 1000.0f);
         const PhysicsScene::EntityHit hit = ps->Raycast(origin, dir, maxDistance);
-        if (!hit.Hit) return sol::nil;
+        if (!hit.Hit) return sol::lua_nil;
         sol::table out = self->Lua().create_table();
         Scene* s = self->ScenePtr();
-        out["object"] = s ? self->Wrap(GameObject(&s->Registry(), hit.Entity)) : sol::nil;
+        out["object"] = s ? self->Wrap(GameObject(&s->Registry(), hit.Entity)) : sol::lua_nil;
         out["point"] = hit.Point;
         out["normal"] = hit.Normal;
         out["distance"] = hit.Distance;
@@ -630,12 +630,12 @@ sol::object Backend::ToLua(const sage::vars::Value& value) {
             // искать объект вручную при каждом обращении.
             Scene* scene = m_services.ScenePtr;
             const sage::vars::EntityRef ref = value.AsEntity();
-            if (!scene || !ref.Valid()) return sol::nil;
+            if (!scene || !ref.Valid()) return sol::lua_nil;
             return Wrap(scene->Get(ref.Id));
         }
         case K::Asset: return sol::make_object(*m_lua, value.AsAsset().Path);
     }
-    return sol::nil;
+    return sol::lua_nil;
 }
 
 sage::vars::Value Backend::FromLua(const sol::object& object) {

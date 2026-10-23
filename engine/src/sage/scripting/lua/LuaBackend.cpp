@@ -375,7 +375,7 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
     sol::table selfTable = m_lua->create_table();
     selfTable["gameObject"] = Wrap(owner);
     selfTable["game_object"] = selfTable["gameObject"];
-    selfTable["transform"] = owner.Valid() ? sol::make_object(*m_lua, TransformRef(owner)) : sol::object(sol::nil);
+    selfTable["transform"] = owner.Valid() ? sol::make_object(*m_lua, TransformRef(owner)) : sol::object(sol::lua_nil);
     env["self"] = selfTable;
     sol::set_environment(env, chunk);
     sol::protected_function_result result = chunk();
@@ -574,30 +574,30 @@ void Backend::Reset() {
 }
 
 sol::object Backend::ScriptOf(GameObject object) {
-    if (!object.Valid()) return sol::nil;
+    if (!object.Valid()) return sol::lua_nil;
     auto it = m_byEntity.find((uint32_t)entt::to_integral(object.Entity()));
-    if (it == m_byEntity.end()) return sol::nil;
+    if (it == m_byEntity.end()) return sol::lua_nil;
     Instance* inst = Get(it->second);
-    if (!inst) return sol::nil;
+    if (!inst) return sol::lua_nil;
     return inst->Self;
 }
 
 sol::object Backend::InvokeOn(GameObject object, const std::string& method,
                               sol::variadic_args args) {
-    if (!object.Valid()) return sol::nil;
+    if (!object.Valid()) return sol::lua_nil;
     auto it = m_byEntity.find((uint32_t)entt::to_integral(object.Entity()));
-    if (it == m_byEntity.end()) return sol::nil;
+    if (it == m_byEntity.end()) return sol::lua_nil;
     Instance* inst = Get(it->second);
-    if (!inst) return sol::nil;
+    if (!inst) return sol::lua_nil;
     sol::protected_function call = MethodOf(*inst, method);
-    if (!call.valid()) return sol::nil;
+    if (!call.valid()) return sol::lua_nil;
     CurrentScope scope(*this, it->second);
     sol::protected_function_result result = inst->Simple ? call(args) : call(inst->Self, args);
     if (!result.valid()) {
         ScriptError err;
         Explain(result, std::string(), err);
         LOG_ERROR("Lua") << err.Format() << " (" << object.Name() << ":call(\"" << method << "\"))";
-        return sol::nil;
+        return sol::lua_nil;
     }
     return result.get<sol::object>();
 }
@@ -737,7 +737,7 @@ void Backend::CallEventFunctions(const sage::events::Event& event) {
 }
 
 sol::object Backend::Wrap(GameObject object) {
-    if (!object.Valid()) return sol::nil;
+    if (!object.Valid()) return sol::lua_nil;
     return sol::make_object(*m_lua, ObjectRef(object));
 }
 

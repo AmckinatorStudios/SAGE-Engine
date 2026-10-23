@@ -290,41 +290,41 @@ void RegisterComponents(Backend& backend) {
 // одно и то же в обоих местах — и остаётся значить после добавления нового
 // компонента.
 sol::object Backend::ComponentOf(GameObject object, const std::string& component) {
-    if (!object.Valid()) return sol::nil;
+    if (!object.Valid()) return sol::lua_nil;
     entt::registry& reg = *object.Registry();
     const entt::entity e = object.Entity();
 
     if (component == "Transform") {
-        return reg.all_of<Transform>(e) ? sol::make_object(*m_lua, TransformRef(object)) : sol::nil;
+        return reg.all_of<Transform>(e) ? sol::make_object(*m_lua, TransformRef(object)) : sol::lua_nil;
     }
     if (component == "CharacterController") {
         return reg.all_of<CharacterControllerComponent>(e)
                    ? sol::make_object(*m_lua, CharacterRef(object))
-                   : sol::nil;
+                   : sol::lua_nil;
     }
     if (component == "Animation" || component == "Animator") {
         return reg.all_of<AnimationComponent>(e) ? sol::make_object(*m_lua, AnimatorRef(object))
-                                                 : sol::nil;
+                                                 : sol::lua_nil;
     }
     if (component == "Audio" || component == "AudioSource") {
         return reg.all_of<AudioSourceComponent>(e) ? sol::make_object(*m_lua, AudioRef(object))
-                                                   : sol::nil;
+                                                   : sol::lua_nil;
     }
     if (component == "Camera") {
         return reg.all_of<CameraComponent>(e) ? sol::make_object(*m_lua, CameraRef(object))
-                                              : sol::nil;
+                                              : sol::lua_nil;
     }
     if (component == "Script") return ScriptOf(object);
     // Неизвестное имя — не ошибка, а nil: список компонентов растёт, и скрипт,
     // спросивший то, чего в этой сборке нет, должен уметь это проверить.
-    return sol::nil;
+    return sol::lua_nil;
 }
 
 sol::object Backend::ComponentOf(const sage::vars::EntityRef& ref, const std::string& component) {
     Scene* scene = m_services.ScenePtr;
-    if (!scene || !ref.Valid()) return sol::nil;
+    if (!scene || !ref.Valid()) return sol::lua_nil;
     GameObject object = scene->Get(ref.Id);
-    if (!object.Valid()) return sol::nil;
+    if (!object.Valid()) return sol::lua_nil;
     // Пустое уточнение — сам объект (field.entity()).
     if (component.empty()) return Wrap(object);
     return ComponentOf(object, component);

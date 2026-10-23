@@ -100,7 +100,7 @@ sol::object JsonToLua(const nlohmann::json& j, sol::state_view lua) {
         for (auto it = j.begin(); it != j.end(); ++it) t[it.key()] = JsonToLua(it.value(), lua);
         return t;
     }
-    return sol::nil;
+    return sol::lua_nil;
 }
 
 
