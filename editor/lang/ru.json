@@ -2634,6 +2634,12 @@
     "time, s": "время, с",
     "times original size": "раз от исходного",
     "Starts at": "Начало",
-    "Ends at": "Конец"
+    "Ends at": "Конец",
+    "Group name for scripts: scene:FindByTag(\"Enemy\")": "Имя группы для скриптов: scene:FindByTag(\"Enemy\")",
+    "Keep on scene change": "Переходит в следующую сцену",
+    "New Scene (.sage)": "Новая сцена (.sage)",
+    "Tag": "Тег",
+    "When a script loads another scene (scene:Load), this object moves there with its children: the player, music, a game manager.": "Когда скрипт загружает другую сцену (scene:Load), объект переезжает туда вместе с потомками: игрок, музыка, менеджер игры.",
+    "none": "нет"
   }
 }

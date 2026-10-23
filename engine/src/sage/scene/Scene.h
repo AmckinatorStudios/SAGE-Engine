@@ -276,6 +276,24 @@ public:
 
     size_t Count() const { return m_idToEntity.size(); }
 
+    // Объекты верхнего уровня (без родителя), по возрастанию номера — в том
+    // же порядке, в каком их видит человек и пишет файл. Порядок обхода entt
+    // для этого не годится: он зависит от истории создания и удаления.
+    std::vector<entt::entity> Roots() const {
+        std::vector<std::pair<int, entt::entity>> found;
+        for (const auto& [id, e] : m_idToEntity) {
+            if (!m_registry.valid(e)) continue;
+            const auto* h = m_registry.try_get<HierarchyComponent>(e);
+            if (h && h->Parent != entt::null && m_registry.valid(h->Parent)) continue;
+            found.emplace_back(id, e);
+        }
+        std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+        std::vector<entt::entity> out;
+        out.reserve(found.size());
+        for (const auto& f : found) out.push_back(f.second);
+        return out;
+    }
+
     int NextId() const { return m_nextId; }
     void SetNextId(int id) { m_nextId = id; }
 

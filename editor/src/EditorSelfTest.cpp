@@ -2158,6 +2158,7 @@ bool EditorLayer::SelfTestProjectAndAssets() {
             {AssetsPanel::CreateKind::Folder, "selftest_dir", "selftest_dir"},
             {AssetsPanel::CreateKind::Script, "selftest_script", "selftest_script.lua"},
             {AssetsPanel::CreateKind::SageScript, "selftest_sage", "selftest_sage.slua"},
+            {AssetsPanel::CreateKind::Scene, "selftest_new_scene", "selftest_new_scene.sage"},
             {AssetsPanel::CreateKind::Material, "selftest_mat", "selftest_mat.sagemat"},
         };
         for (const auto& c : cases) {
@@ -2169,6 +2170,23 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                                     << " (" << createErr << ")";
                 ok = false;
                 break;
+            }
+        }
+        // Новая сцена из панели — сразу рабочая: открывается, в ней камера и
+        // солнце (без них — чёрный кадр и «нет камеры» в Play).
+        if (ok) {
+            try {
+                auto made = SceneSerializer::Load((m_assetsCwd / "selftest_new_scene.sage").string());
+                bool camera = false, sun = false;
+                for (auto e : made->Registry().view<CameraComponent>()) { (void)e; camera = true; }
+                for (auto e : made->Registry().view<LightComponent>()) { (void)e; sun = true; }
+                if (!camera || !sun || made->Name() != "selftest_new_scene") {
+                    LOG_ERROR("Editor") << "SELFTEST: новая сцена из панели без камеры или солнца";
+                    ok = false;
+                }
+            } catch (const std::exception& ex) {
+                LOG_ERROR("Editor") << "SELFTEST: новая сцена из панели не открывается: " << ex.what();
+                ok = false;
             }
         }
         // Заготовка .slua обязана компилироваться как есть: новый скрипт с

@@ -268,6 +268,17 @@ void RegisterObject(Backend& backend) {
         self->DropDeadSubscriptions();
     };
 
+    // Объект переживает смену сцены (игрок, музыка, менеджер игры): при
+    // scene:Load он переезжает в новую сцену вместе с потомками.
+    ot["KeepOnLoad"] = [](ObjectRef& r, sol::optional<bool> on) {
+        Alive(r.Obj, "KeepOnLoad");
+        if (on.value_or(true)) r.Obj.Registry()->emplace_or_replace<KeepOnLoadComponent>(r.Obj.Entity());
+        else r.Obj.Registry()->remove<KeepOnLoadComponent>(r.Obj.Entity());
+    };
+    ot["IsKeptOnLoad"] = [](ObjectRef& r) {
+        return r.Obj.Valid() && r.Obj.Registry()->all_of<KeepOnLoadComponent>(r.Obj.Entity());
+    };
+
     // Компоненты: универсальный GetComponent и типизированные короткие пути.
     ot["GetComponent"] = [self](ObjectRef& r, const std::string& name) {
         return self->ComponentOf(r.Obj, name);

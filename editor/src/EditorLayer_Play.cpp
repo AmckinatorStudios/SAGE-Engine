@@ -16,6 +16,7 @@
 
 #include "sage/audio/AudioSystem.h"
 #include "sage/assets/Pack.h"
+#include "sage/scene/SceneFlow.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -116,6 +117,29 @@ void EditorLayer::StartPlay() {
     // бы с объектом там, куда его довёл просмотр.
     m_tween.StopPreview(*this);
     m_scenePtr = m_scene.get();
+    // Где лежат сцены — для scene:Load/LoadAdditive/List в игре: папка сцен
+    // проекта. И ход игры — с чистого листа: параметры и «откуда пришли» от
+    // прошлого запуска Play этому не принадлежат.
+    {
+        namespace fs = std::filesystem;
+        const fs::path dir = m_project.Loaded() ? m_project.ScenesDir() : fs::path();
+        sage::scene::SceneLocator where;
+        where.Resolve = [dir](const std::string& name) {
+            std::error_code ec;
+            const fs::path p = dir / (name + ".sage");
+            return !dir.empty() && fs::is_regular_file(p, ec) ? p.string() : std::string();
+        };
+        where.List = [dir] {
+            std::vector<std::string> names;
+            std::error_code ec;
+            if (!dir.empty())
+                for (const auto& entry : fs::directory_iterator(dir, ec))
+                    if (entry.path().extension() == ".sage") names.push_back(entry.path().stem().string());
+            return names;
+        };
+        sage::scene::SetSceneLocator(std::move(where));
+        sage::scene::ResetTransit(m_scenePath.empty() ? m_scene->Name() : m_scenePath.stem().string());
+    }
     PlayContext ctx = MakePlayContext();
     if (m_play.Start(ctx) < 0) return;
     FocusPlayTarget();

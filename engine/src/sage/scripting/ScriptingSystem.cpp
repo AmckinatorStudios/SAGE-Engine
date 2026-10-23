@@ -7,6 +7,7 @@
 #include "sage/input/Keys.h"
 
 #include "sage/core/Log.h"
+#include "sage/scene/SceneFlow.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
@@ -184,6 +185,17 @@ bool ScriptingSystem::Attach(GameObject object) {
     return attached;
 }
 
+int ScriptingSystem::AttachSubtree(GameObject root) {
+    if (!root.Valid()) return 0;
+    int n = Attach(root) ? 1 : 0;
+    if (const auto* h = root.Registry()->try_get<HierarchyComponent>(root.Entity())) {
+        const std::vector<entt::entity> kids = h->Children;   // скрипт в Start вправе менять иерархию
+        for (entt::entity k : kids)
+            if (root.Registry()->valid(k)) n += AttachSubtree(GameObject(root.Registry(), k));
+    }
+    return n;
+}
+
 void ScriptingSystem::Update(float dt) {
     const float scaled = dt * m_clock.Scale;
     m_clock.Delta = scaled;
@@ -316,12 +328,13 @@ void ScriptingSystem::DispatchAnimationEvent(GameObject object, const std::strin
     m_runtime.DispatchNamed(object.Entity(), Hook::OnAnimationEvent, name);
 }
 
-void ScriptingSystem::RequestScene(const std::string& name) {
+void ScriptingSystem::RequestScene(const std::string& name, const std::string& paramsJson) {
     // Первый запрос кадра выигрывает: два скрипта, попросивших разные уровни в
     // одном кадре, — ошибка игры, и молча выполнить ПОСЛЕДНИЙ значило бы, что
     // исход зависит от порядка обхода сущностей.
     if (m_sceneRequested) return;
     m_pendingScene = name;
+    m_pendingParams = paramsJson;
     m_sceneRequested = true;
 }
 
@@ -330,6 +343,10 @@ bool ScriptingSystem::TakeSceneRequest(std::string& name) {
     m_sceneRequested = false;
     name = m_pendingScene;
     m_pendingScene.clear();
+    // Параметры уходят в ход игры: сама система при переходе пересоздаётся,
+    // а прочитать их обязана уже НОВАЯ сцена.
+    sage::scene::Transit().NextParams = std::move(m_pendingParams);
+    m_pendingParams.clear();
     return true;
 }
 
@@ -342,6 +359,7 @@ void ScriptingSystem::Shutdown() {
     // запуск начался бы с чужой сцены, попрошенной в прошлой жизни.
     m_sceneRequested = false;
     m_pendingScene.clear();
+    m_pendingParams.clear();
 }
 
 } // namespace sage::scripting

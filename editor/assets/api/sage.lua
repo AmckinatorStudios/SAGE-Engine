@@ -326,6 +326,11 @@ function SageObject:Call(method, ...) end
 ---@param parent SageObject|nil
 function SageObject:SetParent(parent) end
 function SageObject:Destroy() end
+---Объект переходит в следующую сцену при scene:Load (вместе с потомками).
+---@param on? boolean по умолчанию true
+function SageObject:KeepOnLoad(on) end
+---@return boolean
+function SageObject:IsKeptOnLoad() end
 ---@return boolean
 function SageObject:IsValid() end
 
@@ -704,10 +709,36 @@ function Scene:Destroy(target) end
 function Scene:Name() end
 ---Перейти на другой уровень. Имя — без папки и расширения ("level2").
 ---ЗАПРОС: выполнит его движок между кадрами, когда ни один скрипт не идёт.
+---params — таблица, которую новая сцена получит через scene:Params().
 ---@param name string
-function Scene:Load(name) end
+---@param params? table
+function Scene:Load(name, params) end
 ---Начать этот же уровень заново.
 function Scene:Reload() end
+---Параметры, с которыми пришли в эту сцену (пустая таблица — без них).
+---@return table
+function Scene:Params() end
+---Из какой сцены пришли ("" — эта первая).
+---@return string
+function Scene:Previous() end
+---Есть ли сцена с таким именем.
+---@param name string
+---@return boolean
+function Scene:Exists(name) end
+---Имена всех сцен игры.
+---@return string[]
+function Scene:List() end
+---Добавить содержимое другой сцены в эту (общий интерфейс, кусок карты).
+---Возвращает корни добавленного; убирается UnloadAdditive(группа).
+---@param name string
+---@param offset? Vec3
+---@param group? string группа; по умолчанию — имя сцены
+---@return SageObject[]|nil
+function Scene:LoadAdditive(name, offset, group) end
+---Убрать всё, что добавлено группой. Возвращает число снятых корней.
+---@param group string
+---@return integer
+function Scene:UnloadAdditive(group) end
 
 ---Физические запросы.
 Physics = {}
