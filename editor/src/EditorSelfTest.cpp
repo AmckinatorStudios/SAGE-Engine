@@ -12,6 +12,7 @@
 // вызываются оттуда же, откуда вызывались.
 // ---------------------------------------------------------------------------
 #include "EditorLayer.h"
+#include "sage/lang/SageCompiler.h"
 #include "sage/anim/Tween.h"
 #include "SceneCover.h"
 #include "EditorIcons.h"
@@ -2153,6 +2154,7 @@ bool EditorLayer::SelfTestProjectAndAssets() {
         struct { AssetsPanel::CreateKind kind; const char* name; const char* expect; } cases[] = {
             {AssetsPanel::CreateKind::Folder, "selftest_dir", "selftest_dir"},
             {AssetsPanel::CreateKind::Script, "selftest_script", "selftest_script.lua"},
+            {AssetsPanel::CreateKind::SageScript, "selftest_sage", "selftest_sage.slua"},
             {AssetsPanel::CreateKind::Material, "selftest_mat", "selftest_mat.sagemat"},
         };
         for (const auto& c : cases) {
@@ -2164,6 +2166,19 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                                     << " (" << createErr << ")";
                 ok = false;
                 break;
+            }
+        }
+        // Заготовка .slua обязана компилироваться как есть: новый скрипт с
+        // ошибкой в первой же строке — худшее знакомство с языком.
+        if (ok) {
+            std::ifstream in(m_assetsCwd / "selftest_sage.slua", std::ios::binary);
+            const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+            const sage::lang::CompileResult r = sage::lang::Compile("selftest_sage.slua", text);
+            if (!r.Ok || r.MainClass != "SelftestSage" || sage::lang::FieldsOf(r).Find("speed") == nullptr) {
+                const sage::lang::Diagnostic* d = r.FirstError();
+                LOG_ERROR("Editor") << "SELFTEST: заготовка .slua не компилируется: "
+                                    << (d ? d->Format() : r.MainClass);
+                ok = false;
             }
         }
     }

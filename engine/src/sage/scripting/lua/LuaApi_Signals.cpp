@@ -269,6 +269,17 @@ void RegisterObjectSignals(Backend& backend, sol::usertype<ObjectRef>& ot) {
     // любого найденного объекта.
     ot[sol::meta_function::index] = [signalOf, self](ObjectRef& r, sol::stack_object key) -> sol::object {
         if (!key.is<std::string>()) return sol::lua_nil;
+        // Методы SAGE Lua (entity:addComponent(Movement)) — РАНЬШЕ имён
+        // движка: addComponent иначе нашёлся бы как AddComponent и получил бы
+        // класс SAGE вместо имени компонента. Строку они передают движку сами.
+        {
+            sol::state_view lua(key.lua_state());
+            sol::object sageMethods = lua["__SageObjectMethods"];
+            if (sageMethods.get_type() == sol::type::table) {
+                sol::object m = sageMethods.as<sol::table>().raw_get<sol::object>(key);
+                if (m.get_type() == sol::type::function) return m;
+            }
+        }
         sol::object method = SnakeMethod(key.lua_state(), "SageObject", key);
         if (method.valid() && method.get_type() != sol::type::lua_nil) return method;
         if (!r.Obj.Valid()) return sol::lua_nil;

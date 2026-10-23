@@ -30,7 +30,7 @@ public:
     static std::filesystem::path AssetsRoot(EditorHost& host);
     static void ClampCwd(EditorHost& host);
 
-    enum class CreateKind { None, Folder, Script, TextFile, Material };
+    enum class CreateKind { None, Folder, Script, SageScript, TextFile, Material };
 
     // ИМЯ ОКНА приходит снаружи: у каждого рабочего пространства оно своё
     // (см. PanelWindowId.h). Панель одна, а окон два — иначе раскладки сцены и

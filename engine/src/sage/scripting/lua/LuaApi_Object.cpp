@@ -121,6 +121,7 @@ void RegisterObject(Backend& backend) {
         },
         "copy", [](const glm::vec3& a) { return a; },
         "length", [](const glm::vec3& a) { return glm::length(a); },
+        "lengthSquared", [](const glm::vec3& a) { return glm::dot(a, a); },
         "normalized", [](const glm::vec3& a) {
             const float len = glm::length(a);
             return len > 1e-6f ? a / len : glm::vec3(0.0f);

@@ -525,7 +525,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 FileBrowser::Config c;
                 c.Title = T("Choose a script");
                 c.Filters = assetslot::Extensions(assetslot::Kind::Script);
-                c.FilterLabel = T("Scripts (*.lua)");
+                c.FilterLabel = T("Scripts (*.lua, *.slua)");
                 // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
                 c.StartDir = c.Root = assetslot::ProjectRoot(host);
                 m_browser.Open(c);

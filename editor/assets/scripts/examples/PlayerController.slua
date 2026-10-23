@@ -1,0 +1,36 @@
+-- PlayerController.slua — пример компонента на SAGE Lua (docs/sage_lua.md).
+-- Повесьте на объект с CharacterController: WASD — ходьба, пробел — прыжок.
+
+event PlayerJumped(height: number)
+
+@serializable
+@require(CharacterController)
+class PlayerController extends Component
+    @field(editable = true, name = "Скорость", tooltip = "Метры в секунду", range = { min = 0, max = 20, step = 0.1 })
+    public speed: number = 5
+
+    @field(editable = true, name = "Сила прыжка", range = { min = 0, max = 30, step = 0.5 })
+    public jumpForce: number = 8
+
+    private body: CharacterController? = nil
+    private jumps: integer = 0
+
+    function onStart()
+        self.body = self.entity:getComponent(CharacterController)
+        if self.body == nil then
+            Log.warn("PlayerController: на объекте нет CharacterController")
+        end
+    end
+
+    function onUpdate(dt: number)
+        if self.body == nil then return end
+        local move := Input.getAxis2D("Move")
+        -- Вперёд — -Z: та же ось, что у Transform:Forward() и камеры.
+        self.body:Move(Vector3(move.x * self.speed, 0, -move.y * self.speed))
+        if Input.isPressed(Key.Space) and self.body:IsGrounded() then
+            self.body:Jump(self.jumpForce)
+            self.jumps = self.jumps + 1
+            Events.emit(PlayerJumped, self.jumpForce)
+        end
+    end
+end

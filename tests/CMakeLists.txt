@@ -27,6 +27,8 @@ add_executable(sage_tests
     test_framegraph.cpp
     test_lod.cpp
     test_resources.cpp
+    test_sagelua.cpp
+    test_sagelua_engine.cpp
     test_jobsystem.cpp
     test_net.cpp
     test_builtinphysics.cpp

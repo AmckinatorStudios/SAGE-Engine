@@ -6,6 +6,7 @@
 
 #include "sage/assets/Pack.h"
 #include "sage/core/Log.h"
+#include "sage/lang/SageCompiler.h"
 
 namespace fs = std::filesystem;
 
@@ -57,6 +58,15 @@ void ScriptRuntime::AddBackend(std::unique_ptr<LanguageBackend> backend) {
     if (!backend) return;
     backend->Bind(m_services);
     m_backends.push_back(std::move(backend));
+}
+
+void ScriptRuntime::SetProjectDir(const std::filesystem::path& dir) {
+    m_projectDir = dir;
+    // import "Game/Player" в .slua ищется и от корня проекта: рабочий каталог
+    // редактора — не папка проекта.
+    std::vector<std::string> roots;
+    if (!dir.empty()) roots.push_back(dir.generic_string());
+    sage::lang::SetModuleRoots(roots);
 }
 
 LanguageBackend* ScriptRuntime::BackendFor(const std::string& path) const {
@@ -126,7 +136,7 @@ sage::vars::Table ScriptRuntime::ParseFields(const std::string& path) const {
     if (!backend) return empty;
     ScriptSource src;
     if (!ReadSource(path, src)) return empty;
-    return backend->ParseFields(src.Text);
+    return backend->ParseFields(path, src.Text);
 }
 
 void ScriptRuntime::Reindex() {
@@ -168,7 +178,7 @@ InstanceId ScriptRuntime::Build(LanguageBackend& backend, const ScriptSource& sr
 sage::vars::Table ScriptRuntime::MergeFields(LanguageBackend& backend, const ScriptSource& src,
                                              const sage::vars::Table& fields) const {
     sage::vars::Table merged = fields;
-    merged.MergeDeclaration(backend.ParseFields(src.Text));
+    merged.MergeDeclaration(backend.ParseFields(src.Path, src.Text));
     return merged;
 }
 

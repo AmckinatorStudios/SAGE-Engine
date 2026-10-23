@@ -88,7 +88,7 @@ public:
     // переменных чужой файл нельзя — он на верхнем уровне может открыть сокет,
     // начать грузить уровень или уронить редактор ошибкой в коде, до которого
     // в игре дело дошло бы через час.
-    virtual sage::vars::Table ParseFields(const std::string& source) const = 0;
+    virtual sage::vars::Table ParseFields(const std::string& path, const std::string& source) const = 0;
 
     // --- Жизнь экземпляра ----------------------------------------------------
 
