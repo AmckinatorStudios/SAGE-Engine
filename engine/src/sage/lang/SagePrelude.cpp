@@ -469,6 +469,7 @@ G.__SageObjectMethods = {
     hasComponent = function(self, T) return S.getComponent(self, T) ~= nil end,
     removeComponent = function(self, T) return S.removeComponent(self, T) end,
     destroy = function(self) return self:Destroy() end,
+    keepOnLoad = function(self, on) return self:KeepOnLoad(on) end,
     isValid = function(self) return self:IsValid() end,
 }
 
@@ -855,11 +856,20 @@ function Scene.findById(id) return gscene().FindById(id) end
 function Scene.findWithTag(tag) return gscene().FindByTag(tag) end
 function Scene.findAllWithTag(tag) return gscene().FindAllByTag(tag) end
 function Scene.destroy(e) if e ~= nil then return e:Destroy() end end
-function Scene.load(name)
+function Scene.load(name, params)
     local n = type(name) == "table" and name.path or name
-    gscene().Load(n)
+    gscene().Load(n, params)
     return {path = n, __scene = true}
 end
+function Scene.reload() return gscene().Reload() end
+-- Параметры, с которыми пришли в эту сцену, и откуда пришли.
+function Scene.params() return gscene().Params() end
+function Scene.previous() return gscene().Previous() end
+function Scene.exists(name) return gscene().Exists(name) end
+function Scene.list() return gscene().List() end
+-- Сцена поверх сцены: возвращает корни добавленного; убирается группой.
+function Scene.loadAdditive(name, offset, group) return gscene().LoadAdditive(name, offset, group) end
+function Scene.unloadAdditive(group) return gscene().UnloadAdditive(group) end
 function Scene.tryLoad(name)
     if name == nil or name == "" then return nil end
     return {path = name, __scene = true}

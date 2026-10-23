@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2634.
+// Язык: Русский. Строк: 2640.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -2070,6 +2070,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "На земле: %s"},
     {"Group",
      "Группа"},
+    {"Group name for scripts: scene:FindByTag(\"Enemy\")",
+     "Имя группы для скриптов: scene:FindByTag(\"Enemy\")"},
     {"Grow",
      "Рост"},
     {"Grows",
@@ -2324,6 +2326,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "КБ"},
     {"Keep aspect",
      "Сохранять пропорции"},
+    {"Keep on scene change",
+     "Переходит в следующую сцену"},
     {"Keep the file",
      "Оставить файл"},
     {"Keeps the current look, but no longer follows the file.",
@@ -2738,6 +2742,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Новый скрипт SAGE Lua (.slua)"},
     {"New Scene",
      "Новая сцена"},
+    {"New Scene (.sage)",
+     "Новая сцена (.sage)"},
     {"New Script (.lua)",
      "Новый скрипт (.lua)"},
     {"New Text File (.txt)",
@@ -4394,6 +4400,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Нужен свет без неба — переключите на «Свои значения»"},
     {"Switch to layout and open this interface",
      "Перейти к вёрстке и открыть этот интерфейс"},
+    {"Tag",
+     "Тег"},
     {"Take the end from the object: move/rotate/paint the object in the scene, then click",
      "Взять конец у объекта: подвиньте, поверните или перекрасьте объект в сцене и щёлкните"},
     {"Take the value the object has now",
@@ -4972,6 +4980,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Колесо — масштаб, средняя кнопка — панорама, Shift+F — вписать всё, включая уехавшее."},
     {"When",
      "Когда"},
+    {"When a script loads another scene (scene:Load), this object moves there with its children: the player, music, a game manager.",
+     "Когда скрипт загружает другую сцену (scene:Load), объект переезжает туда вместе с потомками: игрок, музыка, менеджер игры."},
     {"When disabled",
      "Когда недоступен"},
     {"When finished",
@@ -5178,6 +5188,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "нет драйвера на этом ПК"},
     {"no key assigned",
      "клавиша не назначена"},
+    {"none",
+     "нет"},
     {"none yet — add them in the Tween window",
      "пока нет — добавьте в окне Tween"},
     {"not implemented yet",

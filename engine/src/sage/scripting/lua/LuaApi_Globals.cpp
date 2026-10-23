@@ -11,6 +11,8 @@
 #include "sage/scripting/ScriptingSystem.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Prefab.h"
+#include "sage/scene/SceneFlow.h"
+#include "sage/scripting/LuaJson.h"
 #include "sage/scene/Scene.h"
 
 // ---------------------------------------------------------------------------
@@ -314,6 +316,9 @@ void RegisterGlobals(Backend& backend) {
         else
             id = sage::scene::InstantiatePrefab(*s, path);
         if (id < 0) return sol::nil;
+        // Скрипты поставленного — сразу в работу: без этого префаб со
+        // скриптом появлялся в игре мёртвым (Start не звался никогда).
+        if (ScriptingSystem* system = self->Services().System) system->AttachSubtree(s->Get(id));
         return self->Wrap(s->Get(id));
     });
     scene.set_function("Destroy", [self](sol::variadic_args va) {
@@ -338,12 +343,74 @@ void RegisterGlobals(Backend& backend) {
     // папки и расширения: "level2", а не "scenes/level2.sage". Путь в скрипте
     // означал бы, что игра знает, как разложены её файлы на диске, — а в
     // собранной игре они лежат внутри пакета.
+    // Вторым аргументом — таблица параметров: новая сцена читает её через
+    // scene:Params() («у какой двери встать», «сколько монет принёс»).
     scene.set_function("Load", [self](sol::variadic_args va) {
         ScriptingSystem* system = self->Services().System;
         if (!system) throw std::runtime_error("scene:Load: система скриптинга не привязана");
-        const std::string name = Str(va, Skip(va));
+        const size_t b = Skip(va);
+        const std::string name = Str(va, b);
         if (name.empty()) throw std::runtime_error("scene:Load: не задано имя сцены");
-        system->RequestScene(name);
+        std::string params;
+        if (b + 1 < va.size() && va[b + 1].get_type() == sol::type::table)
+            params = sage::scripting::LuaTableToJson(va[b + 1].as<sol::table>()).dump();
+        system->RequestScene(name, params);
+    });
+    // Параметры, с которыми пришли в эту сцену; без них — пустая таблица, а не
+    // nil: `scene:Params().door` не должно падать в первой сцене игры.
+    scene.set_function("Params", [self](sol::variadic_args) -> sol::object {
+        const std::string& p = sage::scene::Transit().ParamsJson;
+        if (p.empty()) return self->Lua().create_table();
+        try {
+            return sage::scripting::JsonToLua(nlohmann::json::parse(p), self->Lua());
+        } catch (const std::exception&) {
+            return self->Lua().create_table();
+        }
+    });
+    // Из какой сцены пришли ("" — эта первая).
+    scene.set_function("Previous", [](sol::variadic_args) { return sage::scene::Transit().Previous; });
+    scene.set_function("Exists", [](sol::variadic_args va) { return sage::scene::SceneExists(Str(va, Skip(va))); });
+    scene.set_function("List", [self](sol::variadic_args) {
+        sol::table out = self->Lua().create_table();
+        int i = 1;
+        for (const std::string& n : sage::scene::ListScenes()) out[i++] = n;
+        return out;
+    });
+    // СЦЕНА ПОВЕРХ СЦЕНЫ: содержимое другой сцены — в эту (общий интерфейс,
+    // кусок карты). Сразу, а не запросом: это то же, что поставить префаб, и
+    // так же безопасно посреди кадра. Возвращает корни добавленного.
+    //   scene:LoadAdditive("hud")
+    //   scene:LoadAdditive("room_b", Vector3(20, 0, 0))   -- со сдвигом
+    //   scene:LoadAdditive("room_b", Vector3(40, 0, 0), "room_b_2")  -- своя группа
+    scene.set_function("LoadAdditive", [self](sol::variadic_args va) -> sol::object {
+        Scene* s = SceneOrThrow(*self, "scene:LoadAdditive");
+        const size_t b = Skip(va);
+        const std::string name = Str(va, b);
+        if (name.empty()) throw std::runtime_error("scene:LoadAdditive: не задано имя сцены");
+        glm::vec3 offset(0.0f);
+        const bool hasOffset = b + 1 < va.size() && va[b + 1].is<glm::vec3>();
+        if (hasOffset) offset = va[b + 1].as<glm::vec3>();
+        const std::string group = b + 2 < va.size() ? Str(va, b + 2) : std::string();
+        std::string err;
+        const std::vector<int> made = sage::scene::LoadAdditive(*s, name, err, group, hasOffset ? &offset : nullptr);
+        if (!err.empty()) {
+            LOG_ERROR("Lua") << "scene:LoadAdditive: " << err;
+            return sol::nil;
+        }
+        ScriptingSystem* system = self->Services().System;
+        sol::table out = self->Lua().create_table();
+        int i = 1;
+        for (int id : made) {
+            if (system) system->AttachSubtree(s->Get(id));
+            out[i++] = self->Wrap(s->Get(id));
+        }
+        return out;
+    });
+    scene.set_function("UnloadAdditive", [self](sol::variadic_args va) {
+        Scene* s = SceneOrThrow(*self, "scene:UnloadAdditive");
+        const int n = sage::scene::UnloadAdditive(*s, Str(va, Skip(va)));
+        self->DropDeadSubscriptions();
+        return n;
     });
     // Начать уровень заново. Отдельно от Load(текущая), потому что имя текущей
     // сцены скрипту знать незачем — а перезапуск нужен каждой второй игре.

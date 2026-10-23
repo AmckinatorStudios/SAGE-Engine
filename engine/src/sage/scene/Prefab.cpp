@@ -6,7 +6,9 @@
 
 #include "sage/core/Log.h"
 #include "sage/scene/Components.h"
+#include "sage/render/LodGroup.h"
 #include "sage/scene/Signals.h"
+#include "sage/ui/components/InterfaceComponent.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPart.h"
 #include "sage/vars/Refs.h"
@@ -81,7 +83,28 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     } else {
         dst.Registry()->remove<HiddenComponent>(dst.Entity());
     }
+    // Метки без полей — так же, фактом наличия.
+    auto copyMark = [&](auto tag) {
+        using M = decltype(tag);
+        if (src.Registry()->all_of<M>(src.Entity())) dst.Registry()->emplace_or_replace<M>(dst.Entity());
+        else dst.Registry()->remove<M>(dst.Entity());
+    };
+    copyMark(KeepOnLoadComponent{});
     CopyIfPresent<FolderComponent>(src, dst);
+    // Тег, звук, твины, наклейка, LOD, пост-обработка, сеть, съёмка в
+    // текстуру. Этого списка здесь не было — и копия (Ctrl+D, префаб,
+    // вставка) теряла их молча: сериализатор их писал, а копирование — нет.
+    // Сторожит tests/test_scene_lossless.cpp.
+    CopyIfPresent<TagComponent>(src, dst);
+    CopyIfPresent<AudioSourceComponent>(src, dst);
+    CopyIfPresent<sage::anim::TweenComponent>(src, dst);
+    CopyIfPresent<PropertyAnimatorComponent>(src, dst);
+    CopyIfPresent<DecalComponent>(src, dst);
+    CopyIfPresent<sage::render::LodComponent>(src, dst);
+    CopyIfPresent<sage::render::PostProcessComponent>(src, dst);
+    CopyIfPresent<sage::ui::InterfaceComponent>(src, dst);
+    CopyIfPresent<NetReplicatedComponent>(src, dst);
+    CopyIfPresent<RenderTextureComponent>(src, dst);
     CopyIfPresent<ScriptComponent>(src, dst);
     // Публичные переменные едут с объектом: префаб без своих настроек — это
     // объект, который после постановки в сцену надо настраивать заново.
@@ -146,6 +169,26 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
         pe->PendingEmit = 0;
         pe->RestartRequested = pe->ClearRequested = false;
     }
+    // Голос звука принадлежит оригиналу: копия с его номером глушила бы чужой
+    // звук и считала бы себя уже играющей (AutoPlay не сработал бы).
+    if (auto* au = dst.Registry()->try_get<AudioSourceComponent>(dst.Entity())) {
+        au->Handle = 0;
+        au->Playing = au->Paused = false;
+        au->Request = AudioRequest::None;
+    }
+    // «Уже запущены при старте» — про оригинал; копия запускает свои сама.
+    if (auto* tw = dst.Registry()->try_get<sage::anim::TweenComponent>(dst.Entity())) tw->Started = false;
+    // Геометрия наклейки строится по месту — у копии место другое.
+    if (auto* dc = dst.Registry()->try_get<DecalComponent>(dst.Entity())) {
+        dc->Dirty = true;
+        dc->Triangles = 0;
+    }
+    if (auto* pa = dst.Registry()->try_get<PropertyAnimatorComponent>(dst.Entity())) {
+        pa->Clip.reset();
+        pa->Ready = false;
+        pa->Time = 0.0f;
+    }
+    if (auto* rt = dst.Registry()->try_get<RenderTextureComponent>(dst.Entity())) rt->Dirty = true;
 }
 
 namespace {

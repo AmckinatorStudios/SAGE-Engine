@@ -1321,6 +1321,28 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         // игре: иначе «выключил и забыл» означало бы сюрприз ровно в тот
         // момент, когда игру собрали и раздали.
         if (reg.all_of<HiddenComponent>(e)) j["hidden"] = true;
+        if (reg.all_of<KeepOnLoadComponent>(e)) j["keepOnLoad"] = true;
+        // Съёмка в текстуру: только настройки, не картинка — её снимают заново.
+        // Раньше компонент не писался вовсе, и иконка предмета или экран
+        // камеры наблюдения пропадали после сохранения сцены.
+        if (const RenderTextureComponent* rt = reg.try_get<RenderTextureComponent>(e)) {
+            nlohmann::json& o = j["renderTexture"];
+            o["target"] = rt->Target;
+            o["width"] = rt->Width;
+            o["height"] = rt->Height;
+            o["clearColor"] = Vec4ToJson(rt->ClearColor);
+            o["ortho"] = rt->Ortho;
+            o["orthoSize"] = rt->OrthoSize;
+            o["fov"] = rt->Fov;
+            o["near"] = rt->Near;
+            o["far"] = rt->Far;
+            o["lookAt"] = Vec3ToJson(rt->LookAt);
+            o["continuous"] = rt->Continuous;
+            o["studioLight"] = rt->StudioLight;
+            o["lightDir"] = Vec3ToJson(rt->LightDir);
+            o["lightIntensity"] = rt->LightIntensity;
+            o["ambient"] = rt->Ambient;
+        }
         if (const FolderComponent* fc = reg.try_get<FolderComponent>(e)) {
             j["folder"]["color"] = Vec3ToJson(fc->Color);
         }
@@ -1440,6 +1462,28 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         }
 
         if (j.value("hidden", false)) obj.Registry()->emplace<HiddenComponent>(obj.Entity());
+        if (j.value("keepOnLoad", false)) obj.Registry()->emplace<KeepOnLoadComponent>(obj.Entity());
+        if (j.contains("renderTexture") && j["renderTexture"].is_object()) {
+            const nlohmann::json& o = j["renderTexture"];
+            RenderTextureComponent rt;
+            rt.Target = o.value("target", rt.Target);
+            rt.Width = o.value("width", rt.Width);
+            rt.Height = o.value("height", rt.Height);
+            if (o.contains("clearColor")) rt.ClearColor = Vec4FromJson(o["clearColor"], rt.ClearColor);
+            rt.Ortho = o.value("ortho", rt.Ortho);
+            rt.OrthoSize = o.value("orthoSize", rt.OrthoSize);
+            rt.Fov = o.value("fov", rt.Fov);
+            rt.Near = o.value("near", rt.Near);
+            rt.Far = o.value("far", rt.Far);
+            if (o.contains("lookAt")) rt.LookAt = Vec3FromJson(o["lookAt"]);
+            rt.Continuous = o.value("continuous", rt.Continuous);
+            rt.StudioLight = o.value("studioLight", rt.StudioLight);
+            if (o.contains("lightDir")) rt.LightDir = Vec3FromJson(o["lightDir"]);
+            rt.LightIntensity = o.value("lightIntensity", rt.LightIntensity);
+            rt.Ambient = o.value("ambient", rt.Ambient);
+            rt.Dirty = true;
+            obj.Registry()->emplace<RenderTextureComponent>(obj.Entity(), rt);
+        }
         if (j.contains("folder")) {
             FolderComponent fc;
             if (j["folder"].contains("color")) fc.Color = Vec3FromJson(j["folder"]["color"]);

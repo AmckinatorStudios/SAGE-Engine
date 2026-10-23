@@ -35,6 +35,7 @@
 #include "sage/render/ScenePasses.h"
 #include "sage/render/Screenshot.h"
 #include "sage/scene/Components.h"
+#include "sage/scene/SceneFlow.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/scripting/ScriptingSystem.h"
@@ -284,6 +285,23 @@ void PlayerLayer::OnAttach() {
     }
 
     m_scenePath = scenePath;
+    // Где лежат сцены игры — для scene:Load, scene:LoadAdditive, scene:List.
+    // Через vfs: в собранной игре сцены лежат в пакете, а не на диске.
+    {
+        sage::scene::SceneLocator where;
+        where.Resolve = [](const std::string& name) {
+            const std::string path = (fs::path("scenes") / (name + ".sage")).generic_string();
+            return sage::assets::vfs::Exists(path) ? path : std::string();
+        };
+        where.List = [] {
+            std::vector<std::string> names;
+            for (const std::string& f : sage::assets::vfs::ListFiles("scenes", ".sage"))
+                names.push_back(fs::path(f).stem().string());
+            return names;
+        };
+        sage::scene::SetSceneLocator(std::move(where));
+        sage::scene::ResetTransit(scenePath.stem().string());
+    }
     BuildSceneRuntime();
 
     // Запасная камера, если в сцене НЕТ Primary-камеры. НАРОЧНО отличается от
@@ -549,13 +567,16 @@ bool PlayerLayer::SwitchScene(const std::string& sceneName) {
     fs::path path = m_scenePath;
     if (!sceneName.empty()) {
         // Имя, а не путь: скрипт не знает и не должен знать, где лежат сцены.
-        path = fs::path("scenes") / (sceneName + ".sage");
-        std::error_code ec;
-        if (!fs::exists(path, ec)) {
-            LOG_ERROR("Player") << "сцена не найдена: " << path.string()
+        // Через общий поиск (vfs): проверка fs::exists не находила сцену в
+        // пакете собранной игры, и переход там не работал вовсе.
+        const std::string found = sage::scene::ResolveScene(sceneName);
+        if (found.empty()) {
+            LOG_ERROR("Player") << "сцена не найдена: scenes/" << sceneName << ".sage"
                                 << " — остаюсь в текущей";
+            sage::scene::DropNextParams();
             return false;
         }
+        path = found;
     }
 
     std::unique_ptr<Scene> loaded;
@@ -565,7 +586,14 @@ bool PlayerLayer::SwitchScene(const std::string& sceneName) {
         // Битая сцена НЕ обрывает игру: остаёмся в текущей и говорим почему.
         // Вылет на середине уровня хуже, чем не открывшаяся дверь.
         LOG_ERROR("Player") << "сцена не загрузилась (" << path.string() << "): " << e.what();
+        sage::scene::DropNextParams();
         return false;
+    }
+    // Объекты с меткой «переходит в следующую сцену» — пока старая сцена ещё
+    // жива: после её разрушения копировать будет не из чего.
+    if (m_scene) {
+        std::unique_ptr<Scene> kept = sage::scene::TakeKept(*m_scene);
+        sage::scene::PutKept(*kept, *loaded);
     }
 
     // Порядок разрушения важен. Сначала снимаем состав кадра: он держит
@@ -587,6 +615,7 @@ bool PlayerLayer::SwitchScene(const std::string& sceneName) {
     m_scene = std::move(loaded);
     m_scenePath = path;
     m_sceneTime = 0.0f;
+    sage::scene::EnterScene(path.stem().string());
 
     BuildSceneRuntime();
     LOG_INFO("Player") << "сцена: " << path.filename().string() << " (" << m_scene->Count()

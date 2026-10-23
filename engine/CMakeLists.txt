@@ -146,6 +146,7 @@ set(SAGE_ENGINE_SOURCES
     src/physics/builtin/Collide.cpp
     src/sage/scene/CopyName.cpp
     src/sage/scene/Prefab.cpp
+    src/sage/scene/SceneFlow.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scene/SceneMigrations.cpp
     src/sage/scene/SceneValueJson.cpp
@@ -184,6 +185,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_Input.cpp
     src/sage/scripting/ScriptApi_Effects.cpp
     src/sage/scripting/ScriptApi_Runtime.cpp
+    src/sage/scripting/LuaJson.cpp
     src/sage/scripting/ScriptApi_Lighting.cpp
     src/sage/scripting/ScriptApi_Events.cpp
     src/sage/scripting/ScriptApi_Physics.cpp

@@ -265,6 +265,33 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
     if (ImGui::InputText(T("Name"), buf, sizeof(buf))) obj.SetName(buf);
     host.TrackLastImGuiItem();
+
+    // Тег и «переходит в следующую сцену» — свойства объекта В СЦЕНЕ, а не
+    // компоненты. Тег раньше задавался только из скрипта (а искали по нему —
+    // scene:FindByTag — именно объекты, расставленные в редакторе).
+    if (!reg.all_of<FolderComponent>(obj.Entity())) {
+        Sage::UI::BeginProperties("objectflags");
+        Sage::UI::PropertyLabel(T("Tag"), T("Group name for scripts: scene:FindByTag(\"Enemy\")"));
+        char tag[64];
+        const TagComponent* tc = reg.try_get<TagComponent>(obj.Entity());
+        std::snprintf(tag, sizeof(tag), "%s", tc ? tc->Tag.c_str() : "");
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::InputTextWithHint("##tag", T("none"), tag, sizeof(tag))) {
+            if (tag[0]) reg.emplace_or_replace<TagComponent>(obj.Entity(), TagComponent{tag});
+            else reg.remove<TagComponent>(obj.Entity());
+        }
+        host.TrackLastImGuiItem();
+        Sage::UI::PropertyLabel(T("Keep on scene change"),
+                                T("When a script loads another scene (scene:Load), this object moves there "
+                                  "with its children: the player, music, a game manager."));
+        bool keep = reg.all_of<KeepOnLoadComponent>(obj.Entity());
+        if (ImGui::Checkbox("##keep", &keep)) {
+            if (keep) reg.emplace_or_replace<KeepOnLoadComponent>(obj.Entity());
+            else reg.remove<KeepOnLoadComponent>(obj.Entity());
+            host.PushUndoSnapshot();
+        }
+        Sage::UI::EndProperties();
+    }
     ImGui::Separator();
 
     // --- ПАПКА СПИСКА: имя, цвет и всё -------------------------------------

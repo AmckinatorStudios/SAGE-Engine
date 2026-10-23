@@ -38,6 +38,9 @@
 #include "sage/assets/Zip.h"
 #include "Project.h"
 #include "sage/core/Log.h"
+#include "sage/ecs/LightSystem.h"
+#include "sage/scene/Components.h"
+#include "sage/scene/SceneSerializer.h"
 #include "../Localization.h"
 
 namespace fs = std::filesystem;
@@ -1378,6 +1381,7 @@ bool AssetsPanel::CreateAsset(CreateKind kind, const std::string& rawName, const
     switch (kind) {
         case CreateKind::Script:   wantExt = ".lua"; break;
         case CreateKind::SageScript: wantExt = ".slua"; break;
+        case CreateKind::Scene:    wantExt = ".sage"; break;
         case CreateKind::TextFile: wantExt = ".txt"; break;
         case CreateKind::Material: wantExt = ".sagemat"; break;
         default: break;
@@ -1418,6 +1422,17 @@ bool AssetsPanel::CreateAsset(CreateKind kind, const std::string& rawName, const
                 "function OnUpdate(entity, dt)\n"
                 "    -- entity.Transform.Rotation.y = entity.Transform.Rotation.y + dt * 45.0\n"
                 "end\n";
+        } else if (kind == CreateKind::Scene) {
+            // Новая сцена — сразу рабочая: солнце и камера. Без них открытая
+            // сцена — чёрный кадр (свет мира сам собой не горит), а Play —
+            // «нет камеры», и непонятно, что сделано не так.
+            Scene scene(fs::path(name).stem().string());
+            sage::ecs::CreateSunEntity(scene);
+            GameObject cam = scene.CreateEmptyObject("Main Camera");
+            cam.GetTransform().Position = glm::vec3(0.0f, 2.0f, 6.0f);
+            cam.GetTransform().Rotation = glm::vec3(-12.0f, 0.0f, 0.0f);
+            scene.Registry().emplace<CameraComponent>(cam.Entity());
+            content = SceneSerializer::SaveToString(scene);
         } else if (kind == CreateKind::SageScript) {
             // Имя класса — из имени файла: главный компонент файла тот, чьё
             // имя совпадает с файлом (иначе — последний объявленный).
@@ -1483,6 +1498,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
             case CreateKind::Folder:   kindLabel = "Folder"; break;
             case CreateKind::Script:   kindLabel = "Lua script"; break;
             case CreateKind::SageScript: kindLabel = "SAGE Lua script"; break;
+            case CreateKind::Scene:    kindLabel = "Scene"; break;
             case CreateKind::TextFile: kindLabel = "Text file"; break;
             case CreateKind::Material: kindLabel = "Material"; break;
             default: break;
@@ -1778,6 +1794,7 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
             m_error.clear();
         };
         if (EditorIcons::MenuItem("folder-plus", T("New Folder"))) startCreate(CreateKind::Folder, "NewFolder");
+        if (EditorIcons::MenuItem("scene", T("New Scene (.sage)"))) startCreate(CreateKind::Scene, "NewScene");
         if (EditorIcons::MenuItem("script", T("New Script (.lua)"))) startCreate(CreateKind::Script, "new_script");
         if (EditorIcons::MenuItem("script", T("New SAGE Lua Script (.slua)")))
             startCreate(CreateKind::SageScript, "NewBehaviour");

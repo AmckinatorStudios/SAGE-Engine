@@ -68,6 +68,9 @@ public:
 
     // Один объект — например, только что созданный из префаба.
     bool Attach(GameObject object);
+    // Объект и всё его поддерево — то, что поставил префаб или добавила
+    // сцена поверх сцены. Возвращает, сколько скриптов привязано.
+    int AttachSubtree(GameObject root);
     void Detach(GameObject object) {
         if (object.Valid()) m_runtime.Detach(object.Entity());
     }
@@ -115,7 +118,9 @@ public:
     //
     // Поэтому запрос ЗАПОМИНАЕТСЯ, а выполняет его хозяин кадра (плеер или
     // Play-режим редактора) между кадрами, когда ни один скрипт не исполняется.
-    void RequestScene(const std::string& name);
+    // paramsJson — то, что получит следующая сцена (scene:Params()); JSON,
+    // чтобы пережить пересоздание состояния языка (см. sage/scene/SceneFlow.h).
+    void RequestScene(const std::string& name, const std::string& paramsJson = {});
     // Перезагрузить ТЕКУЩУЮ (начать уровень заново).
     void RequestSceneReload() { RequestScene(std::string()); }
 
@@ -161,6 +166,7 @@ private:
     sage::render::DebugLines m_debug;
     float m_fixedAccum = 0.0f;
     std::string m_pendingScene;
+    std::string m_pendingParams;
     bool m_sceneRequested = false;
     // Максимум шагов постоянного шага за кадр: после долгой паузы (перетащили
     // окно, открыли меню) накопитель иначе требует сотни шагов подряд, и игра

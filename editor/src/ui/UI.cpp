@@ -3,6 +3,7 @@
 #include <cstdarg>
 #include <cstdio>
 #include <cstring>
+#include <vector>
 
 #include "imgui_internal.h"
 
@@ -171,6 +172,17 @@ void Separator() {
     ImGui::Dummy(ImVec2(0.0f, ui.SpacingXS));
 }
 
+namespace {
+// Открылась ли таблица свойств. BeginTable возвращает false, когда окно не
+// рисуется (свёрнуто, за соседней вкладкой, нулевой ширины), и тогда
+// TableNextRow в PropertyLabel обращался к несуществующей таблице — редактор
+// падал (SIGSEGV в ImGui::TableNextRow). Стек — таблицы свойств вкладываются.
+std::vector<bool>& OpenTables() {
+    static std::vector<bool> s;
+    return s;
+}
+} // namespace
+
 void BeginProperties(const char* id) {
     const Style& ui = Get();
     // Колонка подписей адаптивная: на широкой панели она фиксирована (значения
@@ -179,17 +191,24 @@ void BeginProperties(const char* id) {
     const float avail = ImGui::GetContentRegionAvail().x;
     LabelWidthRef() = ImMin(ui.LabelColumn, avail * 0.42f);
     ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(0.0f, ui.SpacingXS));
-    ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingFixedFit);
+    const bool open = ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingFixedFit);
+    OpenTables().push_back(open);
+    if (!open) return;
     ImGui::TableSetupColumn("l", ImGuiTableColumnFlags_WidthFixed, LabelWidthRef());
     ImGui::TableSetupColumn("v", ImGuiTableColumnFlags_WidthStretch);
 }
 
 void EndProperties() {
-    ImGui::EndTable();
+    const bool open = !OpenTables().empty() && OpenTables().back();
+    if (!OpenTables().empty()) OpenTables().pop_back();
+    if (open) ImGui::EndTable();
     ImGui::PopStyleVar();
 }
 
 void PropertyLabel(const char* label, const char* tooltip) {
+    // Таблица не открылась — окно сейчас не рисуется; поля за подписью ImGui
+    // и так пропустит, а строку таблицы заводить не во что.
+    if (OpenTables().empty() || !OpenTables().back()) return;
     ImGui::TableNextRow();
     ImGui::TableSetColumnIndex(0);
     ImGui::AlignTextToFramePadding();

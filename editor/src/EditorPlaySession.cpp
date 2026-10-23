@@ -11,6 +11,7 @@
 #include "sage/render/ParticleSystem.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
+#include "sage/scene/SceneFlow.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
@@ -200,6 +201,9 @@ bool EditorPlaySession::SwitchScene(const PlayContext& ctx, const std::string& s
     // перезапуск обязан вернуть именно её, а не прошлую версию файла.
     const bool restartCurrent = sceneName.empty();
 
+    // Объекты «переходит в следующую сцену» — ДО того, как старой сцены не
+    // станет: редактор грузит новую на её место (см. sage/scene/SceneFlow.h).
+    std::unique_ptr<Scene> kept = current ? sage::scene::TakeKept(*current) : nullptr;
     TeardownRuntime(ctx, current);
     const bool loaded = restartCurrent ? (ctx.RestoreScene && ctx.RestoreScene(m_snapshot))
                                        : ctx.LoadSceneForPlay(sceneName);
@@ -207,9 +211,13 @@ bool EditorPlaySession::SwitchScene(const PlayContext& ctx, const std::string& s
         LOG_ERROR("Editor") << "Play: сцена «"
                             << (restartCurrent ? std::string("(текущая)") : sceneName)
                             << "» не загрузилась — игра остановлена";
+        sage::scene::DropNextParams();
         return false;
     }
     Scene& fresh = **ctx.ScenePtr;
+    if (kept) sage::scene::PutKept(*kept, fresh);
+    // Перезапуск в редакторе возвращает СНИМОК той сцены, с которой нажали Play.
+    sage::scene::EnterScene(restartCurrent ? sage::scene::Transit().First : sceneName);
     BuildRuntime(ctx, fresh);
     if (ctx.ApplyProjectInputMapping) ctx.ApplyProjectInputMapping();
     return true;
