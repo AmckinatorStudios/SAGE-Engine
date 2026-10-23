@@ -244,8 +244,13 @@ void RegisterObject(Backend& backend) {
         const HierarchyComponent* h =
             r.Obj.Registry()->try_get<HierarchyComponent>(r.Obj.Entity());
         if (!h) return list;
+        // В порядке списка сцены: скрипт, раскладывающий детей «по порядку»
+        // (пункты меню, точки маршрута), видит тот же порядок, что редактор.
+        Scene* scene = self->ScenePtr();
+        const std::vector<entt::entity> kids =
+            scene && &scene->Registry() == r.Obj.Registry() ? scene->ChildrenOf(r.Obj.Entity()) : h->Children;
         int i = 1;
-        for (entt::entity c : h->Children)
+        for (entt::entity c : kids)
             if (r.Obj.Registry()->valid(c))
                 list[i++] = self->Wrap(GameObject(r.Obj.Registry(), c));
         return list;
