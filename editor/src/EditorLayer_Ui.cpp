@@ -776,10 +776,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // проекта, которое уезжает в собранную игру, а не настройка
             // редактора.
             EditorIcons::MenuItemToggle("keyboard", T("Controls..."), &PanelVisible(EditorPanel::Input));
-            // Шаблоны — рядом с настройками игры и языком, потому что это
-            // настройка ОКРУЖЕНИЯ, а не текущей сцены: что установлено у меня
-            // на машине и откуда это брать.
-            EditorIcons::MenuItemToggle("template", T("Project templates..."), &m_showTemplates);
 
             // Язык интерфейса. Здесь, а не в окне Settings: то окно правит
             // настройки ИГРЫ и сохраняется в проект, а язык — настройка
@@ -934,8 +930,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
     m_settingsPanel.Draw(*this, m_panels[EditorPanel::Settings]);
     m_inputPanel.Draw(*this, m_panels[EditorPanel::Input]);
     m_assets.Tick(*this);           // пакетная конвертация идёт по кадрам, а не одним куском
-    m_templatesPanel.Tick(*this);   // фоновая загрузка шаблона доводится до конца и с закрытым окном
-    m_templatesPanel.Draw(*this, m_showTemplates);
     m_nineSlice.Draw(*this, m_showNineSlice);
     {
         // Инструмент анимации — тоже в обоих пространствах, тоже своим окном.

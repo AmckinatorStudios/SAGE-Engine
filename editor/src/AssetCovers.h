@@ -59,6 +59,12 @@ enum class PreviewSource { Image, SceneCover, Rendered, Icon };
 PreviewSource SourceOf(const std::filesystem::path& full, bool isDir, bool hasPreview,
                        const std::filesystem::path& projectDir);
 
+// Показывать ли превью под курсором ВООБЩЕ. Только тем, у кого есть настоящая
+// картинка (Image, SceneCover, Rendered). Значок типа во всю подсказку у
+// звука, скрипта или папки ничего не добавлял к значку на плитке — только
+// закрывал соседние файлы окном, которое выскакивало на каждом движении мыши.
+inline bool ShowsHoverPreview(PreviewSource s) { return s != PreviewSource::Icon; }
+
 // Площадка превью — ПОСТОЯННАЯ И КВАДРАТНАЯ, картинка вписывается в неё по
 // своим пропорциям: раньше размер окошка задавала сама картинка, и оно прыгало
 // от файла к файлу (панорама — лента, иконка 32x32 — квадратик), а два файла

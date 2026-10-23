@@ -559,8 +559,9 @@ void EditorLayer::CheckTweenFrame() {
             m_scene->RemoveObject(o.Id());
 
             // ТРИ ДЕЙСТВИЯ: объект → «+ Tween» → свойство — и твин уже рабочий
-            // (начало — как есть, конец — то же, 0.5 с, плавное замедление);
-            // человеку остаётся конечное значение.
+            // (начало — как есть, конец — ЗАМЕТНО другой, 0.5 с, плавное
+            // замедление). Конец, равный началу, был твином, который ничего не
+            // делает: Play — и объект стоит на месте.
             namespace anim = sage::anim;
             auto offers = [&](GameObject g, const char* id, const char* section) {
                 for (const tweenui::Choice& c : tweenui::Choices(reg, g.Entity()))
@@ -586,7 +587,8 @@ void EditorLayer::CheckTweenFrame() {
                 if (c.Property->Id.find("sprite") != std::string::npos)
                     return fail("в меню свойств техническое поле " + c.Property->Id);
             anim::TweenTrack* fade = quick(button, "element.opacity");
-            if (!fade || std::fabs(fade->To.x - 1.0f) > 1e-6f) return fail("быстрый твин кнопки создан не с умолчаниями");
+            if (!fade || std::fabs(fade->To.x) > 1e-6f)
+                return fail("быстрый твин кнопки: конец непрозрачности не 0 (ничего бы не изменилось)");
             fade->To.x = 0.0f;
             m_scene->RemoveObject(button.Id());
             // Позиция объекта — в разделе Transform.
@@ -594,7 +596,8 @@ void EditorLayer::CheckTweenFrame() {
             if (!offers(cube, "object.position", "Transform")) return fail("у объекта в меню нет «Позиции» в Transform");
             // Куб: масштаб 1 → 1.2 за 0.3 с.
             anim::TweenTrack* pop = quick(cube, "object.scale");
-            if (!pop || std::fabs(pop->To.x - 1.0f) > 1e-6f) return fail("быстрый твин куба создан не с умолчаниями");
+            if (!pop || std::fabs(pop->To.x - 1.5f) > 1e-6f)
+                return fail("быстрый твин куба: конец масштаба не ×1.5 (ничего бы не изменилось)");
             pop->To = glm::vec4(1.2f, 1.2f, 1.2f, 0.0f);
             pop->Duration = 0.3f;
             m_tween.Play(*this);
@@ -5457,12 +5460,10 @@ bool EditorLayer::SelfTestSelection() {
             }
         }
 
-        // И ПРЕВЬЮ ПОД КУРСОРОМ ЕСТЬ У КАЖДОГО ФАЙЛА. Жалоба: «показываются не
-        // все». Так и было: картинка показывалась сама собой, материал и
-        // модель — съёмкой, а сцена, скрипт, звук и шрифт не показывали
-        // ничего — пустая подсказка с одним именем. Обложки у них разные (у
-        // сцены — свой снимок, у остальных — значок типа), но ответ обязан
-        // быть у всех.
+        // ПРЕВЬЮ ПОД КУРСОРОМ — ТОЛЬКО У ТОГО, ЧТО ЕСТЬ ПОКАЗАТЬ. Картинка,
+        // снимок сцены, обложка материала/модели/префаба — да. Звук, скрипт,
+        // шрифт, папка — нет: значок во всю подсказку ничего не добавлял к
+        // значку на плитке и только закрывал соседние файлы.
         if (ok) {
             namespace covers = sage::editor::covers;
             using Src = covers::PreviewSource;
@@ -5487,9 +5488,20 @@ bool EditorLayer::SelfTestSelection() {
                     ok = false;
                 }
             }
-            // Папка — тоже ответ, а не пустота.
             if (ok && covers::SourceOf(root, /*isDir=*/true, true, root) != Src::Icon) {
-                LOG_ERROR("Editor") << "SELFTEST: у папки нет превью";
+                LOG_ERROR("Editor") << "SELFTEST: папка получила не значок";
+                ok = false;
+            }
+            // Подсказка с превью — только у тех, у кого есть картинка.
+            for (const Case& c : cases) {
+                const bool shows = covers::ShowsHoverPreview(covers::SourceOf(c.Path, false, true, root));
+                if (ok && shows != (c.Want != Src::Icon)) {
+                    LOG_ERROR("Editor") << "SELFTEST: превью под курсором не там (" << c.Why << ")";
+                    ok = false;
+                }
+            }
+            if (ok && covers::ShowsHoverPreview(covers::SourceOf(root, true, true, root))) {
+                LOG_ERROR("Editor") << "SELFTEST: у папки всплыло превью под курсором";
                 ok = false;
             }
         }

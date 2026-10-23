@@ -82,6 +82,8 @@ PreviewSource SourceOf(const fs::path& full, bool isDir, bool hasPreview,
 
 void DrawHoverPreview(const fs::path& full, bool isDir, const std::string& name, uintmax_t bytes,
                       AssetPreview* preview, const fs::path& projectDir) {
+    const PreviewSource source = SourceOf(full, isDir, preview != nullptr, projectDir);
+    if (!ShowsHoverPreview(source)) return;   // у значков превью нет — и подсказки нет
     if (!ImGui::BeginTooltip()) return;
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();
@@ -107,16 +109,13 @@ void DrawHoverPreview(const fs::path& full, bool isDir, const std::string& name,
     dl->AddRectFilled(box0, box1, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.30f)), 6.0f);
 
     // Что показывать: картинка — сама собой, сцена — своим снимком, модель,
-    // материал и префаб — снятой обложкой. Остальное (скрипт, звук, шрифт,
-    // папка) обложки не имеет — там значок типа, и это тоже ответ: раньше у
-    // таких файлов превью не появлялось вовсе, и выглядело это как «у одних
-    // работает, у других нет».
+    // материал и префаб — снятой обложкой. Скрипт, звук, шрифт и папка сюда не
+    // доходят (ShowsHoverPreview): у них нет ничего, кроме значка.
     uint64_t cover = 0;
     int coverW = 0, coverH = 0;
     bool failed = false, loading = false;
     std::string error;
 
-    const PreviewSource source = SourceOf(full, isDir, preview != nullptr, projectDir);
     fs::path imageFile;
     if (source == PreviewSource::Image) imageFile = full;
     else if (source == PreviewSource::SceneCover) imageFile = scenecover::For(projectDir, full);

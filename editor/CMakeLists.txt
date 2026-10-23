@@ -76,7 +76,6 @@ add_executable(SageEditor WIN32
     src/panels/ViewportTools.cpp
     src/panels/SettingsPanel.cpp
     src/panels/InputPanel.cpp
-    src/panels/TemplatesPanel.cpp
     src/panels/DialogsPanel.cpp
     src/panels/ProfilerPanel.cpp
     src/AssetCovers.cpp
@@ -181,13 +180,13 @@ add_custom_command(TARGET SageEditor POST_BUILD
 # Здесь стояла копия games/showcase в templates/showcase — и она ехала в архиве
 # релиза к каждому скачавшему. Готовый проект это СОДЕРЖИМОЕ, а не часть
 # программы: он не нужен большинству, растёт со временем и обновляется отдельно
-# от редактора. Теперь такие шаблоны ставятся в работающем редакторе — из
-# каталога по сети или файлом .sagetemplate с диска (см. src/TemplateStore.h), а
-# папку templates/ редактор заводит сам при первой установке.
+# от редактора. Установленные шаблоны (папка templates/, файлы .sagetemplate —
+# см. src/TemplateStore.h) редактор подхватывает сам. Отдельного окна для
+# скачивания шаблонов в редакторе больше нет.
 #
 # Витрина при этом никуда не делась: сборка релиза пакует games/showcase в
 # showcase.sagetemplate и кладёт его в тот же релиз отдельным файлом
-# (.github/workflows/windows.yml), откуда редактор её и скачивает.
+# (.github/workflows/windows.yml).
 
 # Плагины редактора (см. src/PluginAPI.h) — каждый sage_add_editor_plugin()
 # ниже собирается отдельной динамической библиотекой и копируется в plugins/
