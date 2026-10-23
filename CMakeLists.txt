@@ -225,6 +225,14 @@ target_link_libraries(sol2 INTERFACE lua54)
 # для скриптового API, который зовут десятки раз за кадр, это ничто по
 # сравнению с падением.
 target_compile_definitions(sol2 INTERFACE SOL_ALL_SAFETIES_ON=1)
+# GCC 15 проверяет тела шаблонов, которые никто не инстанцирует, и в sol2 3.3
+# такое тело с ошибкой есть (optional<T&>::emplace зовёт несуществующий
+# construct). Это ошибка БИБЛИОТЕКИ в коде, который движок не трогает; без
+# флага новый GCC останавливает сборку на ней. Старые GCC о флаге не знают и
+# молча его пропускают.
+if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 15)
+    target_compile_options(sol2 INTERFACE $<$<COMPILE_LANGUAGE:CXX>:-Wno-template-body>)
+endif()
 
 # ---------- glad (загрузчик функций OpenGL) ----------
 add_library(glad STATIC external/glad/src/glad.c)
