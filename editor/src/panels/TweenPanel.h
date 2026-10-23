@@ -54,6 +54,9 @@ std::vector<Choice> Choices(const entt::registry& reg, entt::entity e);
 std::string TitleOf(const std::string& propertyId);
 // Название кривой для человека («Плавное замедление», а не «quad-out»).
 std::string EaseName(const sage::anim::Ease& e);
+// Конец нового твина: заметно отличный от нынешнего значения (позиция +1 по
+// Y, масштаб ×1.5, непрозрачность → 0…), чтобы Play сразу что-то показал.
+glm::vec4 SuggestedEnd(const std::string& propertyId, const glm::vec4& current);
 // Сводка твина для инспектора: «2 свойства · 1.6 с».
 std::string Summary(const sage::anim::TweenClip& clip);
 
@@ -69,6 +72,9 @@ public:
     // сохранением сцены.
     void StopPreview(EditorHost& host);
     void Open(int objectId, int tweenIndex, Action action = Action::None);
+    // Держать окно наверху столько кадров: док раскладывается не сразу, и
+    // вкладка, открытая на первом кадре, оказывается под соседней.
+    void RequestFocus(int frames) { m_focusFrames = frames; }
 
     // Быстрое создание: свойство в нынешний твин объекта (нет твина — заводит
     // его). Начало — нынешнее значение, конец — оно же, 0.5 с, плавное

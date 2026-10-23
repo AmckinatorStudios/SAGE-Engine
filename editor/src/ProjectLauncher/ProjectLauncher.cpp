@@ -906,8 +906,7 @@ void ProjectLauncher::DrawTemplates() {
     }
     if (index == 0) {
         Sage::UI::EmptyState(T("No templates installed"),
-                             T("Built-in templates come with the editor; extra ones are "
-                               "installed from the editor's Templates window."));
+                             T("Templates come with the editor."));
     }
     ImGui::EndChild();
     ImGui::Unindent(ui.PaddingPanel);

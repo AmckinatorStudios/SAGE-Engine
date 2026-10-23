@@ -160,8 +160,6 @@ void EditorLayer::RegisterCommands() {
         m_commands.Add({p.Id, T(p.Title), window, "", p.Icon, {},
                         [this, panel] { PanelVisible(panel) = !PanelVisible(panel); }});
     }
-    m_commands.Add({"window.templates", T("Project templates..."), window, "", "folder", {},
-                    [this] { m_showTemplates = true; }});
     m_commands.Add({"window.settings", T("Game Settings..."), window, "", "project", {},
                     [this] { m_panels[EditorPanel::Settings] = true; }});
     m_commands.Add({"window.reset", T("Reset Layout"), window, "", "grid", {},
@@ -554,7 +552,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_SELECT_ENTITY",
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_SHOW_ABOUT",
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
-            "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TEMPLATES",
+            "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TWEEN",
             "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
         };
         for (const char* name : kHeadless) {
@@ -678,6 +676,25 @@ void EditorLayer::OnAttach() {
         m_uiPreview.RequestFocus();
     }
     if (std::getenv("SAGE_EDITOR_COLLIDER_MODE")) { m_headlessProject = true; m_tools.ColliderEdit = true; }
+    // Окно Tween с готовым твином — для скриншот-проверки: карточки, подписи
+    // «Начало/Конец» и шкалу проверяют глазами, а пустое окно показывает
+    // только кнопку.
+    if (std::getenv("SAGE_EDITOR_SHOW_TWEEN")) {
+        m_headlessProject = true;
+        GameObject cube = m_scene->CreateObject("TweenDemo");
+        m_selection.SetPrimary(cube.Id());
+        m_panels[EditorPanel::Tween] = true;
+        OpenTween(cube.Id(), 0, TweenOpen::Edit);
+        m_tween.RequestFocus(60);
+        m_tween.AddProperty(*this, "object.position");
+        m_tween.AddProperty(*this, "object.scale");
+        m_tween.AddProperty(*this, "object.rotation");
+        if (auto* tc = m_scene->Registry().try_get<sage::anim::TweenComponent>(cube.Entity()))
+            if (!tc->Tweens.empty() && tc->Tweens[0].Tracks.size() == 3) {
+                tc->Tweens[0].Tracks[2].To = tc->Tweens[0].Tracks[2].From;   // показать предупреждение «ничего не изменится»
+                tc->Tweens[0].ArrangeSequence();
+            }
+    }
     if (const char* name = std::getenv("SAGE_EDITOR_SELECT_ENTITY")) {
         m_headlessProject = true;
         GameObject obj = m_scene->FindByName(name);
@@ -883,10 +900,6 @@ void EditorLayer::OnAttach() {
     }
     // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_headlessProject = true; m_showAbout = true; }
-    // Окно шаблонов — тем же способом, что и остальные: увидеть его иначе можно
-    // только руками на своей машине, а значит и проверить, как оно выглядит,
-    // будет нечем.
-    if (std::getenv("SAGE_EDITOR_SHOW_TEMPLATES")) { m_headlessProject = true; m_showTemplates = true; }
     // Палитра команд — тем же способом: увидеть её иначе можно только руками
     // на своей машине, а значит и проверить, как она выглядит, будет нечем.
     if (const std::string q = sage::EnvString("SAGE_EDITOR_PALETTE"); !q.empty()) {

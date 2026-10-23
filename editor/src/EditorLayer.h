@@ -66,7 +66,6 @@ namespace sage { class Application; }
 #include "panels/TopBarPanel.h"
 #include "panels/SettingsPanel.h"
 #include "panels/InputPanel.h"
-#include "panels/TemplatesPanel.h"
 #include "panels/AnimationPanel.h"
 #include "panels/TweenPanel.h"
 #include "panels/NineSlicePanel.h"
@@ -663,8 +662,6 @@ private:
     TopBarPanel m_topBar;
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
     InputPanel m_inputPanel;       // раскладка управления проекта (input.sageinput)
-    TemplatesPanel m_templatesPanel; // установка/скачивание шаблонов проектов
-    bool m_showTemplates = false;
     // Редактор девятины (см. panels/NineSlicePanel.h) — отдельный инструмент:
     // нарезку подбирают подолгу и по самой картинке, а не по числам вслепую.
     NineSlicePanel m_nineSlice;

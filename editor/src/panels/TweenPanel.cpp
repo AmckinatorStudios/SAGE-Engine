@@ -8,6 +8,7 @@
 #include <string>
 
 #include "imgui.h"
+#include "imgui_internal.h"   // PushMultiItemsWidths: поля осей ровно по ширине колонки
 
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
@@ -143,6 +144,39 @@ void PlotEase(ImDrawList* dl, ImVec2 a, ImVec2 b, const anim::Ease& e, ImU32 col
 
 ImU32 Col(EditorTheme::Role r) { return ImGui::GetColorU32(EditorTheme::Color(r)); }
 
+bool Has(const std::string& id, const char* part) { return id.find(part) != std::string::npos; }
+
+// Значок свойства — тот же, что у этого действия в остальном редакторе
+// (стрелки — сдвиг, круг — поворот): карточку находят по форме, до чтения.
+const char* PropIcon(const std::string& id) {
+    if (id.empty()) return "clock";
+    if (Has(id, "position")) return "move";
+    if (Has(id, "rotation")) return "rotate";
+    if (Has(id, "scale") || Has(id, "size")) return "scale";
+    if (Has(id, "color") || Has(id, "tint")) return "color";
+    if (Has(id, "opacity")) return "eye";
+    if (id.rfind("light.", 0) == 0) return "light";
+    if (id.rfind("camera.", 0) == 0) return "camera";
+    if (id.rfind("audio.", 0) == 0) return "audio";
+    if (id.rfind("bar.", 0) == 0) return "ui-bar";
+    if (id.rfind("range.", 0) == 0) return "ui-slider";
+    if (id.rfind("fill.", 0) == 0) return "ui-panel";
+    return "anim";
+}
+
+// В чём меряется значение. Без этого «1» в поле — загадка: метр? градус?
+// процент? Пусто — единиц у свойства нет (цвет).
+const char* PropUnit(const std::string& id) {
+    if (id == "object.position" || id == "light.range") return T("metres");
+    if (id.rfind("element.", 0) == 0 && (Has(id, "position") || Has(id, "size"))) return T("screen points");
+    if (Has(id, "rotation") || id == "camera.fov") return T("degrees");
+    if (Has(id, "scale")) return T("times original size");
+    if (Has(id, "opacity") || id == "audio.volume") return T("0 = none, 1 = full");
+    if (id == "bar.value") return T("0 = empty, 1 = full");
+    if (id == "audio.pitch") return T("1 = normal");
+    return "";
+}
+
 } // namespace
 
 namespace tweenui {
@@ -187,6 +221,25 @@ std::string EaseName(const anim::Ease& e) {
     if (e.Shape == anim::EaseShape::Curve) return T("Custom curve");
     if (e.Shape == anim::EaseShape::Linear) return T("Steady");
     return std::string(kShapeNames[(int)e.Shape]) + " · " + ModeLabel(e.Mode);
+}
+
+glm::vec4 SuggestedEnd(const std::string& id, const glm::vec4& current) {
+    // Конец, равный началу, — твин, который ничего не делает: человек ставил
+    // «Позицию», жал Play, и объект стоял на месте. Поэтому сразу видимое
+    // движение, а не копия нынешнего значения; править его — одно число.
+    glm::vec4 v = current;
+    if (id == "object.position") v.y += 1.0f;
+    else if (id == "element.position") v.x += 50.0f;
+    else if (id == "object.rotation") v.y += 90.0f;
+    else if (id == "element.rotation") v.x += 45.0f;
+    else if (Has(id, "scale") || id == "element.size") v = glm::vec4(glm::vec3(v) * 1.5f, v.w);
+    else if (Has(id, "opacity") || id == "audio.volume" || id == "bar.value" || id == "range.value")
+        v.x = current.x > 0.5f ? 0.0f : 1.0f;
+    else if (id == "light.intensity" || id == "light.range") v.x = std::max(current.x * 2.0f, 1.0f);
+    else if (id == "camera.fov") v.x = current.x > 30.0f ? current.x - 15.0f : current.x + 15.0f;
+    else if (id == "audio.pitch") v.x = current.x * 1.5f;
+    else if (id == "fill.rounding") v.x += 10.0f;
+    return v;
 }
 
 std::string Summary(const anim::TweenClip& clip) {
@@ -272,12 +325,14 @@ bool TweenPanel::AddProperty(EditorHost& host, const std::string& id) {
     anim::TweenClip& clip = tc.Tweens[(size_t)std::clamp(m_index, 0, (int)tc.Tweens.size() - 1)];
     const entt::entity target = anim::TargetOf(scene, owner.Entity(), clip);
     if (target == entt::null || !anim::HasProperty(*p, reg, target)) return false;
-    // Сразу рабочий твин: конец — нынешнее значение (ничего не прыгнет, пока
-    // его не поправят), начало — «как есть в момент старта».
+    // Сразу рабочий твин: начало — «как есть в момент старта», конец —
+    // заметно другой (SuggestedEnd), чтобы Play сразу показал, что твин делает.
     anim::TweenTrack t;
     t.Property = id;
-    anim::ReadProperty(*p, reg, target, t.To);
-    t.From = t.To;
+    glm::vec4 now(0.0f);
+    anim::ReadProperty(*p, reg, target, now);
+    t.From = now;
+    t.To = tweenui::SuggestedEnd(id, now);
     t.FromCurrent = true;
     t.Duration = 0.5f;
     t.Curve = anim::Ease::Make(anim::EaseShape::Quad, anim::EaseMode::Out);
@@ -521,9 +576,20 @@ void TweenPanel::DrawHeader(EditorHost& host, anim::TweenComponent& tc) {
         ImGui::EndCombo();
         if (!owner.Registry()->all_of<anim::TweenComponent>(owner.Entity())) return;
     }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Which tween of this object you are editing (an object can have several)"));
     ImGui::SameLine();
     ImGui::AlignTextToFramePadding();
+    EditorIcons::Inline("cube");
+    ImGui::SameLine(0.0f, EditorIcons::TextGap());
     ImGui::TextDisabled("%s", owner.Name().c_str());
+    // Как это читать — одной подсказкой, а не угадыванием по полям.
+    ImGui::SameLine();
+    EditorIcons::IconOnlyButton("question", T("How a tween works:\n"
+                                              "• each card is one property that changes from Start to End;\n"
+                                              "• the bar on the right is when it happens: drag the middle to move it,\n"
+                                              "  the dots to change when it starts and how long it lasts;\n"
+                                              "• the curve says how the speed changes along the way;\n"
+                                              "• Play shows it on the object, the round arrow next to it puts the object back."));
 
     // Справа: просмотр и время.
     const anim::TweenClip* c = Clip(host);
@@ -580,6 +646,14 @@ void TweenPanel::DrawRuler(EditorHost& host, anim::TweenClip& clip) {
         dl->AddText(ImVec2(x + 2.0f, origin.y), text, buf);
     }
 
+    // Подписи колонок: слева — что меняется, справа — когда.
+    dl->AddText(ImVec2(origin.x + 6.0f, origin.y), text, T("Property: Start → End"));
+    {
+        const char* timeLabel = T("time, s");
+        const float w = ImGui::CalcTextSize(timeLabel).x;
+        dl->AddText(ImVec2(m_laneX - w - st.ItemSpacing.x, origin.y), text, timeLabel);
+    }
+
     // Бегунок: щелчок или протяжка по шкале — посмотреть момент.
     ImGui::SetCursorScreenPos(ImVec2(m_laneX, origin.y));
     ImGui::InvisibleButton("##scrub", ImVec2(std::max(length * m_pxPerSec - 6.0f, 1.0f), h));
@@ -614,30 +688,48 @@ void TweenPanel::DrawRuler(EditorHost& host, anim::TweenClip& clip) {
 }
 
 // --- Значение свойства по числу компонент ------------------------------------------------
+//
+// У каждой оси — своя буква в поле («X 1.00»): три одинаковых числа подряд не
+// говорят, какое из них высота.
 bool TweenPanel::DrawValue(const char* id, const anim::PropertyType* p, glm::vec4& v, float width, bool uniform) {
     ImGui::PushID(id);
     bool changed = false;
     const int comps = p ? p->Components : 1;
-    ImGui::SetNextItemWidth(width);
     if (IsColor(p)) {
+        ImGui::SetNextItemWidth(width);
         changed = comps >= 4 ? Sage::UI::ColorField4("##c", &v.x) : Sage::UI::ColorField3("##c", &v.x);
-    } else if (uniform) {
+    } else if (uniform || comps == 1) {
         // Масштаб «одним числом»: в 9 из 10 твинов оси меняются вместе.
+        ImGui::SetNextItemWidth(width);
         float s = v.x;
-        if ((changed = ImGui::DragFloat("##v", &s, 0.01f, 0.0f, 0.0f, "%.2f"))) v = glm::vec4(s, s, s, v.w);
+        const float speed = comps == 1 && s > 10.0f ? 0.1f : 0.01f;
+        if ((changed = ImGui::DragFloat("##v", &s, speed, 0.0f, 0.0f, uniform ? "XYZ %.2f" : "%.2f")))
+            v = uniform ? glm::vec4(s, s, s, v.w) : glm::vec4(s, v.y, v.z, v.w);
     } else {
-        switch (comps) {
-            case 1: changed = ImGui::DragFloat("##v", &v.x, 0.01f, 0.0f, 0.0f, "%.2f"); break;
-            case 2: changed = ImGui::DragFloat2("##v", &v.x, 0.05f, 0.0f, 0.0f, "%.2f"); break;
-            case 3: changed = ImGui::DragFloat3("##v", &v.x, 0.05f, 0.0f, 0.0f, "%.2f"); break;
-            default: changed = ImGui::DragFloat4("##v", &v.x, 0.01f, 0.0f, 0.0f, "%.2f"); break;
+        static const char* const kAxis[] = {"X %.2f", "Y %.2f", "Z %.2f", "W %.2f"};
+        const int n = std::min(comps, 4);
+        ImGui::PushMultiItemsWidths(n, width);
+        for (int k = 0; k < n; ++k) {
+            ImGui::PushID(k);
+            if (k) ImGui::SameLine(0.0f, ImGui::GetStyle().ItemInnerSpacing.x);
+            changed |= ImGui::DragFloat("##a", &v[k], 0.05f, 0.0f, 0.0f, kAxis[k]);
+            ImGui::PopItemWidth();
+            ImGui::PopID();
         }
     }
     ImGui::PopID();
     return changed;
 }
 
-// --- Карточка свойства: название, из → в, кривая; справа — полоса -----------------------
+// --- Карточка свойства ---------------------------------------------------------------
+//
+//   [значок] Позиция · метры              [кривая ▾] [⋯]
+//   Начало  [X 0.00][Y 0.00][Z 0.00]   [↻ как сейчас]
+//   Конец   [X 0.00][Y 1.00][Z 0.00]   [⌖ взять из объекта]
+//   (конец = начало — свойство не изменится: …)
+//
+// Подписи «Начало/Конец» и буквы осей — потому что раньше это были два
+// безымянных ряда чисел со стрелкой, и что из них что, приходилось угадывать.
 void TweenPanel::DrawCard(EditorHost& host, anim::TweenClip& clip, size_t index, entt::entity target) {
     anim::TweenTrack& t = clip.Tracks[index];
     const anim::PropertyType* p = anim::FindProperty(t.Property);
@@ -647,10 +739,21 @@ void TweenPanel::DrawCard(EditorHost& host, anim::TweenClip& clip, size_t index,
     const ImGuiStyle& st = ImGui::GetStyle();
     const float fh = ImGui::GetFrameHeight();
     const float pad = 6.0f;
+    const bool present = p && target != entt::null && anim::HasProperty(*p, reg, target);
+
+    // Значения — до раскладки: от них зависит, нужна ли строка-предупреждение.
+    const bool scale = t.Property == "object.scale";
+    const glm::vec4 cur = present ? Current(reg, target, *p) : t.From;
+    glm::vec4 from = t.FromCurrent ? cur : t.From;
+    const int comps = p ? p->Components : 1;
+    bool still = !gap && p != nullptr;
+    for (int k = 0; k < std::min(comps, 4) && still; ++k) still = std::fabs(from[k] - t.To[k]) < 1e-4f;
 
     ImGui::PushID((int)index);
     const ImVec2 a = ImGui::GetCursorScreenPos();
-    const float cardH = gap ? fh + pad * 2.0f : fh * 2.0f + st.ItemSpacing.y + pad * 2.0f;
+    const float row = fh + st.ItemSpacing.y;
+    const float warnH = still ? ImGui::GetTextLineHeightWithSpacing() : 0.0f;
+    const float cardH = gap ? fh + pad * 2.0f : (p ? row * 2.0f + fh : fh) + warnH + pad * 2.0f;
     const float cardR = m_laneX + m_laneW + 34.0f;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     dl->AddRectFilled(a, ImVec2(cardR, a.y + cardH), Col(EditorTheme::Role::SurfaceAlt), 6.0f);
@@ -660,28 +763,39 @@ void TweenPanel::DrawCard(EditorHost& host, anim::TweenClip& clip, size_t index,
     ImGui::SetCursorScreenPos(ImVec2(x0, a.y + pad));
     ImGui::BeginDisabled(play);
 
-    // Строка 1: название … кривая, ⋯
+    // Строка 1: значок, название, единицы … кривая, ⋯
     ImGui::AlignTextToFramePadding();
+    EditorIcons::Inline(PropIcon(t.Property));
+    ImGui::SameLine(0.0f, EditorIcons::TextGap());
     if (gap) {
         ImGui::TextDisabled("%s", T("Pause step"));
-    } else if (!p || !anim::HasProperty(*p, reg, target)) {
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("A pause: what comes after it waits. Drag the bar to change how long."));
+    } else if (!present) {
         ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", tweenui::TitleOf(t.Property).c_str());
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("This object has no such property — it is skipped"));
-    } else {
-        ImGui::TextUnformatted(tweenui::TitleOf(t.Property).c_str());
     }
 
     // ⋯ — у правого края колонки; кривая — слева от него.
     const float dotsX = infoR - fh - pad;
+    const std::string ease = gap ? std::string() : tweenui::EaseName(t.Curve);
+    const float thumb = fh - 6.0f;
+    const float arrow = ImGui::CalcTextSize("v").x;
+    const float chipW = st.FramePadding.x * 2.0f + thumb + 6.0f + ImGui::CalcTextSize(ease.c_str()).x + 8.0f + arrow;
+    if (!gap && present) {
+        ImGui::TextUnformatted(tweenui::TitleOf(t.Property).c_str());
+        // Единицы — только если влезают до кривой; не влезли — в подсказке.
+        const char* unit = PropUnit(t.Property);
+        const std::string unitText = *unit ? std::string("· ") + unit : std::string();
+        const bool fits = *unit && ImGui::GetItemRectMax().x + st.ItemSpacing.x * 2.0f + ImGui::CalcTextSize(unitText.c_str()).x <
+                                       dotsX - st.ItemSpacing.x - chipW;
+        if (fits) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("%s", unitText.c_str());
+        } else if (*unit && ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", unit);
+        }
+    }
     if (!gap) {
-        const std::string ease = tweenui::EaseName(t.Curve);
-        const char* prefix = T("Curve:");
-        const float thumb = fh - 6.0f;
-        const float arrow = ImGui::CalcTextSize("v").x;
-        const float nameW = ImGui::CalcTextSize(ease.c_str()).x;
-        const bool showPrefix = m_infoW >= 430.0f;
-        const float prefixW = showPrefix ? ImGui::CalcTextSize(prefix).x + 6.0f : 0.0f;
-        const float chipW = st.FramePadding.x * 2.0f + prefixW + thumb + 6.0f + nameW + 8.0f + arrow;
         const float chipX = std::max(dotsX - st.ItemSpacing.x - chipW, ImGui::GetItemRectMax().x + st.ItemSpacing.x);
         ImGui::SameLine();
         ImGui::SetCursorScreenPos(ImVec2(chipX, a.y + pad));
@@ -690,15 +804,11 @@ void TweenPanel::DrawCard(EditorHost& host, anim::TweenClip& clip, size_t index,
             m_wantEase = true;
         }
         const bool hot = ImGui::IsItemHovered();
-        if (hot) ImGui::SetTooltip("%s", T("How the speed changes along the way"));
+        if (hot) ImGui::SetTooltip("%s", T("Curve: how the speed changes on the way from Start to End. Click to choose."));
         const ImVec2 c0 = ImGui::GetItemRectMin(), c1 = ImGui::GetItemRectMax();
         dl->AddRectFilled(c0, c1, Col(hot ? EditorTheme::Role::Hover : EditorTheme::Role::Input), st.FrameRounding);
         float cx = c0.x + st.FramePadding.x;
         const float ty = c0.y + (fh - ImGui::GetTextLineHeight()) * 0.5f;
-        if (showPrefix) {
-            dl->AddText(ImVec2(cx, ty), Col(EditorTheme::Role::TextDim), prefix);
-            cx += prefixW;
-        }
         PlotEase(dl, ImVec2(cx, c0.y + 3.0f), ImVec2(cx + thumb, c1.y - 3.0f), t.Curve, Col(EditorTheme::Role::Accent),
                  1.5f, thumb * 0.15f);
         cx += thumb + 6.0f;
@@ -709,23 +819,30 @@ void TweenPanel::DrawCard(EditorHost& host, anim::TweenClip& clip, size_t index,
                               Col(EditorTheme::Role::TextDim));
     }
     ImGui::SetCursorScreenPos(ImVec2(dotsX, a.y + pad));
-    if (EditorIcons::IconOnlyButton("dots", T("More"))) {
+    if (EditorIcons::IconOnlyButton("dots", T("More: order, remove"))) {
         m_popupTrack = (int)index;
         m_wantCardMenu = true;
     }
 
-    // Строка 2: из → в   (у паузы — только длительность, её правят полосой).
+    // Строки 2–3: Начало и Конец, каждая со своей кнопкой справа.
     if (!gap && p) {
-        ImGui::SetCursorScreenPos(ImVec2(x0, a.y + pad + fh + st.ItemSpacing.y));
-        const float arrowW = ImGui::CalcTextSize("→").x + st.ItemSpacing.x * 2.0f;
-        const float fieldW = std::max((infoR - pad - x0 - arrowW) * 0.5f, 40.0f);
-        const bool scale = t.Property == "object.scale";
-        const glm::vec4 cur = anim::HasProperty(*p, reg, target) ? Current(reg, target, *p) : t.From;
-        glm::vec4 from = t.FromCurrent ? cur : t.From;
+        const char* startLabel = T("Starts at");
+        const char* endLabel = T("Ends at");
+        const float labelW = std::max(ImGui::CalcTextSize(startLabel).x, ImGui::CalcTextSize(endLabel).x) + st.ItemSpacing.x;
+        const float fieldX = x0 + labelW;
+        const float fieldW = std::max(infoR - pad - fieldX - fh - st.ItemSpacing.x, 60.0f);
         auto same = [](const glm::vec4& v) { return v.x == v.y && v.y == v.z; };
         const bool uniform = scale && !m_splitAxes.count((int)index) && same(from) && same(t.To);
 
-        // Начало «как есть в момент старта» — приглушено; тронул — стало своим.
+        // Начало
+        const float y1 = a.y + pad + row;
+        ImGui::SetCursorScreenPos(ImVec2(x0, y1));
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(startLabel);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Where the property starts from"));
+        ImGui::SetCursorScreenPos(ImVec2(fieldX, y1));
+        // «Как сейчас» — приглушено: это не число, а «то, что будет у объекта
+        // в момент старта». Тронул поле — стало своим числом.
         if (t.FromCurrent) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, st.Alpha * 0.55f);
         if (DrawValue("from", p, from, fieldW, uniform)) {
             StopPreview(host);
@@ -735,15 +852,40 @@ void TweenPanel::DrawCard(EditorHost& host, anim::TweenClip& clip, size_t index,
         if (t.FromCurrent) ImGui::PopStyleVar();
         host.TrackLastImGuiItem();
         if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", t.FromCurrent ? T("Start: the value the object has when the tween starts. Change it to set your own.")
+            ImGui::SetTooltip("%s", t.FromCurrent ? T("Start = the value the object has when the tween starts. Type a number to set your own.")
                                                   : T("Start value"));
         ImGui::SameLine();
+        if (EditorIcons::IconOnlyButton("refresh", t.FromCurrent ? T("Starts from the current value (on). Click to use a fixed number instead")
+                                                                 : T("Start from the object's current value"),
+                                        t.FromCurrent)) {
+            t.FromCurrent = !t.FromCurrent;
+            if (!t.FromCurrent && present) t.From = cur;
+            Edited(host);
+        }
+
+        // Конец
+        const float y2 = y1 + row;
+        ImGui::SetCursorScreenPos(ImVec2(x0, y2));
         ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("→");
-        ImGui::SameLine();
+        ImGui::TextUnformatted(endLabel);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Where the property ends up when the tween finishes"));
+        ImGui::SetCursorScreenPos(ImVec2(fieldX, y2));
         if (DrawValue("to", p, t.To, fieldW, uniform)) StopPreview(host);
         host.TrackLastImGuiItem();
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("End value"));
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!present);
+        if (EditorIcons::IconOnlyButton("eyedropper", T("Take the end from the object: move/rotate/paint the object in the scene, then click"))) {
+            t.To = cur;
+            Edited(host);
+        }
+        ImGui::EndDisabled();
+
+        if (still) {
+            ImGui::SetCursorScreenPos(ImVec2(fieldX, y2 + fh + st.ItemSpacing.y * 0.5f));
+            ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
+                               T("End = Start: nothing will change. Set the End value."));
+        }
     }
     ImGui::EndDisabled();
 
@@ -848,12 +990,12 @@ void TweenPanel::DrawAdvanced(EditorHost& host, anim::TweenComponent& tc, anim::
     Sage::UI::BeginProperties("tweenadv");
 
     Sage::UI::PropertyLabel(T("Order"), T("How the properties follow each other on the timeline"));
-    if (ImGui::Button(T("One after another"))) {
+    if (EditorIcons::Button("step", T("One after another"), T("Each property starts when the previous one ends"))) {
         clip.ArrangeSequence();
         Edited(host);
     }
     ImGui::SameLine();
-    if (ImGui::Button(T("All together"))) {
+    if (EditorIcons::Button("layout", T("All together"), T("All properties start at the same time"))) {
         clip.ArrangeParallel();
         Edited(host);
     }
@@ -990,14 +1132,20 @@ void TweenPanel::DrawPropertyMenu(EditorHost& host, entt::entity target) {
             Sage::UI::MenuSection(T(section), first);
             first = false;
         }
-        if (ImGui::MenuItem((c.Title + "##" + c.Property->Id).c_str())) picked = c.Property->Id;
+        ImGui::PushID(c.Property->Id.c_str());
+        if (EditorIcons::MenuItem(PropIcon(c.Property->Id), c.Title.c_str())) picked = c.Property->Id;
+        ImGui::PopID();
     }
     const bool more = std::any_of(choices.begin(), choices.end(), [](const tweenui::Choice& c) { return !*c.Section; });
     if (more) {
         if (!first) ImGui::Separator();
-        if (ImGui::BeginMenu(T("More"))) {
-            for (const tweenui::Choice& c : choices)
-                if (!*c.Section && ImGui::MenuItem((c.Title + "##" + c.Property->Id).c_str())) picked = c.Property->Id;
+        if (EditorIcons::BeginMenu("dots", T("More"))) {
+            for (const tweenui::Choice& c : choices) {
+                if (*c.Section) continue;
+                ImGui::PushID(c.Property->Id.c_str());
+                if (EditorIcons::MenuItem(PropIcon(c.Property->Id), c.Title.c_str())) picked = c.Property->Id;
+                ImGui::PopID();
+            }
             ImGui::EndMenu();
         }
     }
@@ -1042,7 +1190,7 @@ void TweenPanel::EasePickerBody(EditorHost& host, anim::TweenClip& clip) {
         ImGui::PopID();
     }
     ImGui::Separator();
-    if (ImGui::BeginMenu(T("Professional"))) {
+    if (EditorIcons::BeginMenu("chart", T("Professional"))) {
         for (int s = (int)anim::EaseShape::Quad; s < (int)anim::EaseShape::Curve; ++s) {
             if (!ImGui::BeginMenu(kShapeNames[s])) continue;
             for (int m = 0; m < (int)anim::EaseMode::Count; ++m) {
@@ -1056,7 +1204,7 @@ void TweenPanel::EasePickerBody(EditorHost& host, anim::TweenClip& clip) {
         }
         ImGui::EndMenu();
     }
-    if (ImGui::MenuItem(T("Edit curve..."))) m_wantCurve = true;
+    if (EditorIcons::MenuItem("pencil", T("Edit curve..."))) m_wantCurve = true;
 }
 
 // Своя кривая — по просьбе. Две ручки: тянешь — меняешь форму.
@@ -1141,7 +1289,7 @@ void TweenPanel::CardMenuBody(EditorHost& host, anim::TweenClip& clip, entt::ent
     entt::registry& reg = host.CurrentScene().Registry();
     const bool has = p && target != entt::null && anim::HasProperty(*p, reg, target);
     if (p) {
-        if (ImGui::MenuItem(T("Start from the current value"), nullptr, t.FromCurrent)) {
+        if (EditorIcons::MenuItemSelected("refresh", T("Start from the current value"), t.FromCurrent)) {
             if (!t.FromCurrent) {
                 t.FromCurrent = true;
             } else {
@@ -1150,25 +1298,25 @@ void TweenPanel::CardMenuBody(EditorHost& host, anim::TweenClip& clip, entt::ent
             }
             Edited(host);
         }
-        if (ImGui::MenuItem(T("Set the end to the current value"), nullptr, false, has)) {
+        if (EditorIcons::MenuItem("eyedropper", T("Set the end to the current value"), nullptr, has)) {
             t.To = Current(reg, target, *p);
             Edited(host);
         }
         if (t.Property == "object.scale") {
             const bool split = m_splitAxes.count(i) != 0;
-            if (ImGui::MenuItem(T("Each axis separately"), nullptr, split)) {
+            if (EditorIcons::MenuItemSelected("scale", T("Each axis separately"), split)) {
                 if (split) m_splitAxes.erase(i);
                 else m_splitAxes.insert(i);
             }
         }
         ImGui::Separator();
     }
-    if (ImGui::MenuItem(T("Move up"), nullptr, false, i > 0)) {
+    if (EditorIcons::MenuItem("up", T("Move up"), nullptr, i > 0)) {
         std::swap(clip.Tracks[(size_t)i], clip.Tracks[(size_t)i - 1]);
         m_splitAxes.clear();
         Edited(host);
     }
-    if (ImGui::MenuItem(T("Move down"), nullptr, false, i + 1 < (int)clip.Tracks.size())) {
+    if (EditorIcons::MenuItem("align-bottom", T("Move down"), nullptr, i + 1 < (int)clip.Tracks.size())) {
         std::swap(clip.Tracks[(size_t)i], clip.Tracks[(size_t)i + 1]);
         m_splitAxes.clear();
         Edited(host);
