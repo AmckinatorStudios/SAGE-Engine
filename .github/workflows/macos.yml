@@ -41,7 +41,10 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
             -DSAGE_VULKAN=OFF -DSAGE_BUILD_SAMPLES=OFF
-          cmake --build build-macos -j"$(sysctl -n hw.ncpu)"
+          # -k 0: собрать всё, что собирается, и показать ВСЕ ошибки разом —
+          # Mac проверяется только здесь, и чинить по одной ошибке за прогон
+          # слишком долго.
+          cmake --build build-macos -j"$(sysctl -n hw.ncpu)" -- -k 0
 
       # Модульные тесты — на той же платформе, которую выпускаем: «собралось»
       # ещё не значит «работает» (порядок байт, размеры типов, файловая
