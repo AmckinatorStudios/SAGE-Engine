@@ -107,10 +107,14 @@ public:
     ~Backend() override;
 
     const char* Name() const override { return "Lua"; }
-    bool Handles(const std::string& extension) const override { return extension == ".lua"; }
+    // .slua — тот же Lua после компилятора SAGE Lua (sage/lang): своего
+    // рантайма у него нет, и два состояния Lua для одной сцены разошлись бы.
+    bool Handles(const std::string& extension) const override {
+        return extension == ".lua" || extension == ".slua";
+    }
     void Bind(const ScriptServices& services) override;
 
-    sage::vars::Table ParseFields(const std::string& source) const override;
+    sage::vars::Table ParseFields(const std::string& path, const std::string& source) const override;
 
     InstanceId Create(const ScriptSource& source, GameObject owner, ScriptError& err) override;
     void Destroy(InstanceId id) override;
@@ -298,6 +302,9 @@ private:
     std::unordered_map<InstanceId, Instance> m_instances;
     std::unordered_map<uint32_t, InstanceId> m_byEntity;
     std::unordered_map<std::string, Chunk> m_chunks;
+    // Runtime SAGE Lua (sage/lang/SagePrelude): ставится в конструкторе.
+    void InstallSage();
+    sol::protected_function m_sageTick;
     InstanceId m_nextId = 1;
 
     // Фабрика экземпляров (Lua): self с метатаблицей, ищущей сначала в классе

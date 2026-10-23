@@ -52,7 +52,7 @@ const char* IconFor(const fs::path& p, bool isDir) {
     if (ext == ".sageproj") return "project";
     if (ext == ".sagemat") return "material";
     if (ext == ".sageprefab") return "prefab";
-    if (ext == ".lua") return "script";
+    if (ext == ".lua" || ext == ".slua") return "script";
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb") return "model";
     if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp" ||
         ext == ".hdr")

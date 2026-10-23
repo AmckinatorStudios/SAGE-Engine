@@ -70,7 +70,7 @@ public:
 
     // Корень проекта: пути скриптов в сцене записаны ОТНОСИТЕЛЬНО него
     // ("assets/scripts/player.lua"), а рабочий каталог редактора — не он.
-    void SetProjectDir(const std::filesystem::path& dir) { m_projectDir = dir; }
+    void SetProjectDir(const std::filesystem::path& dir);
 
     // Читает исходник (диск, затем папка проекта, затем vfs/.sagepak).
     bool ReadSource(const std::string& path, ScriptSource& out) const;

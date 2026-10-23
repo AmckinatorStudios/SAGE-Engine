@@ -152,6 +152,12 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/Signals.cpp
     src/sage/scene/EnvironmentSchema.cpp
     src/sage/scripting/ScriptEngine.cpp
+    src/sage/lang/SageLexer.cpp
+    src/sage/lang/SageParser.cpp
+    src/sage/lang/SageCheck.cpp
+    src/sage/lang/SageCodegen.cpp
+    src/sage/lang/SageCompiler.cpp
+    src/sage/lang/SagePrelude.cpp
     src/sage/render/DebugLines.cpp
     src/sage/scripting/ScriptRuntime.cpp
     src/sage/scripting/LuaHandlerStore.cpp

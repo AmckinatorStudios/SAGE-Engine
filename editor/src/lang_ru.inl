@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2606.
+// Язык: Русский. Строк: 2608.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -2712,6 +2712,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Новый проект"},
     {"New Project...",
      "Новый проект…"},
+    {"New SAGE Lua Script (.slua)",
+     "Новый скрипт SAGE Lua (.slua)"},
     {"New Scene",
      "Новая сцена"},
     {"New Script (.lua)",
@@ -3758,6 +3760,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "SAGE Engine"},
     {"SAGE Engine %s",
      "SAGE Engine %s"},
+    {"SAGE Lua script",
+     "Скрипт SAGE Lua"},
     {"SAGE projects (*.sageproj)",
      "Проекты SAGE (*.sageproj)"},
     {"SAGE templates (*.sagetemplate)",
@@ -3860,8 +3864,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Скрипт назначен: "},
     {"Script object",
      "Объект со скриптом"},
-    {"Scripts (*.lua)",
-     "Скрипты (*.lua)"},
+    {"Scripts (*.lua, *.slua)",
+     "Скрипты (*.lua, *.slua)"},
     {"Scripts get OnCollisionEnter / Exit when the character touches something",
      "Скрипты получают OnCollisionEnter / Exit, когда персонаж чего-то касается"},
     {"Scripts reloaded: ",

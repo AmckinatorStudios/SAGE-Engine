@@ -113,6 +113,21 @@ void RegisterMath(Backend& backend) {
                           [](const glm::quat& q, const glm::vec3& v) { return q * v; }));
     }
 
+    // Имена SAGE Lua (v:lengthSquared(), v:normalized()) — и тем типам, что
+    // завёл прежний API: дописываются к готовому usertype, а не заменяют его.
+    {
+        sol::usertype<glm::vec3> u3 = lua["Vec3"];
+        u3["lengthSquared"] = [](const glm::vec3& a) { return glm::dot(a, a); };
+        u3["sqrMagnitude"] = [](const glm::vec3& a) { return glm::dot(a, a); };
+        sol::usertype<glm::vec2> u2 = lua["Vec2"];
+        u2["length"] = [](const glm::vec2& a) { return glm::length(a); };
+        u2["lengthSquared"] = [](const glm::vec2& a) { return glm::dot(a, a); };
+        u2["normalized"] = [](const glm::vec2& a) {
+            const float len = glm::length(a);
+            return len > 1e-6f ? a / len : glm::vec2(0.0f);
+        };
+    }
+
     // --- Vector3 -------------------------------------------------------------
     sol::table v3 = MakeTypeTable(lua, [&lua](sol::variadic_args args) {
         sol::variadic_args a = args;

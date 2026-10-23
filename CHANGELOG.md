@@ -14,6 +14,24 @@
 
 ### 2026-10-23
 
+**Добавлено**
+- **SAGE Lua** — скрипты `.slua`: Lua с типами (`local x: number`, `T?`,
+  `T[]`, `map<K, V>`, `:=`), классами (`extends`, `super`, `public`/`private`/
+  `protected`, `static`, `override`, `final`), интерфейсами, `enum`, `struct`,
+  обобщениями. Также в языке:
+  - аннотации `@field`/`@serializable`/`@require`/`@method`/`@server`/`@client`;
+  - типизированные события `event X(...)`, `async`/`await`,
+    `Timer.after`/`every`;
+  - модули `import`/`export`, `Result<T, E>`.
+
+  Движок компилирует файл сам при загрузке. Ошибки типов приходят до запуска,
+  с файлом и строкой. Ошибки во время игры указывают на строку `.slua`. Поля
+  `@field(editable = true)` видны в инспекторе. Описание — `docs/sage_lua.md`,
+  пример — `examples/PlayerController.slua`. В панели ассетов появился пункт
+  «Новый скрипт SAGE Lua».
+- Векторам в Lua добавлены `v:lengthSquared()`, у `Vector2` — `v:length()`
+  и `v:normalized()`.
+
 **Изменено**
 - `transform:Forward()` в Lua теперь локальный **−Z** — туда, куда смотрит
   камера; `Vector3.forward()` = (0, 0, −1), `Vector3.back()` = (0, 0, 1).

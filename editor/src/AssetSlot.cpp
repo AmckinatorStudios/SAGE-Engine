@@ -140,7 +140,7 @@ Kind KindOf(const fs::path& path) {
     if (ext == ".sagemat") return Kind::Material;
     if (ext == ".sageprefab") return Kind::Prefab;
     if (ext == ".sage") return Kind::Scene;
-    if (ext == ".lua") return Kind::Script;
+    if (ext == ".lua" || ext == ".slua") return Kind::Script;
     if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".tga" || ext == ".bmp" ||
         ext == ".hdr" || ext == ".sagetex")
         return Kind::Texture;
@@ -208,7 +208,7 @@ std::vector<std::string> Extensions(Kind kind) {
         case Kind::Model:    return sage::assets::ImporterRegistry::Instance().Extensions();
         case Kind::Material: return {".sagemat"};
         case Kind::Texture:  return {".png", ".jpg", ".jpeg", ".tga", ".bmp", ".hdr", ".sagetex"};
-        case Kind::Script:   return {".lua"};
+        case Kind::Script:   return {".lua", ".slua"};
         case Kind::Prefab:   return {".sageprefab"};
         case Kind::Scene:    return {".sage"};
         case Kind::Audio:    return {".wav", ".ogg", ".mp3"};

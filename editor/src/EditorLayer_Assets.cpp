@@ -230,7 +230,7 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
         SetStatusMessage(T("Material assigned: ") + asset.filename().string());
         return true;
     }
-    if (ext == ".lua") {
+    if (ext == ".lua" || ext == ".slua") {
         PushUndoSnapshot();
         m_scene->Registry().emplace_or_replace<ScriptComponent>(obj.Entity(), ScriptComponent{ref});
         SetStatusMessage(T("Script assigned: ") + asset.filename().string());

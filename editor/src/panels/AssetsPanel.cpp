@@ -83,6 +83,7 @@ std::string KindLabel(const fs::path& path, bool isDir) {
     if (ext == ".sageprefab") return T("Prefab");
     if (ext == ".sagemat") return T("Material");
     if (ext == ".lua") return T("Script");
+    if (ext == ".slua") return T("SAGE Lua script");
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".fbx" || ext == ".blend" ||
         ext == ".bbmodel" || ext == ".sagemesh")
         return T("Model");
@@ -107,6 +108,7 @@ AssetStyle StyleForPath(const fs::path& path, bool isDir) {
         return { ImVec4(0.55f, 0.72f, 0.95f, 1.0f), "clip", "anim" };
     if (ext == ".sageimport") return { ImVec4(0.62f, 0.58f, 0.48f, 1.0f), "import", "file" };
     if (ext == ".lua") return { ImVec4(0.45f, 0.82f, 0.50f, 1.0f), "lua", "script" };
+    if (ext == ".slua") return { ImVec4(0.40f, 0.85f, 0.75f, 1.0f), "slua", "script" };
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".fbx" || ext == ".blend" ||
         ext == ".bbmodel" || ext == ".sagemesh")
         return { ImVec4(0.70f, 0.55f, 0.92f, 1.0f), ext.substr(1), "model" };
@@ -746,7 +748,7 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
             // человека уже стоит, а горячая перезагрузка от этого не страдает —
             // движок следит за файлом, а не за тем, кто его сохранил.
             const std::string ext = path.extension().string();
-            if (ext == ".lua" || ext == ".vert" || ext == ".frag" || ext == ".glsl" ||
+            if (ext == ".lua" || ext == ".slua" || ext == ".vert" || ext == ".frag" || ext == ".glsl" ||
                 ext == ".txt" || ext == ".md" || ext == ".json") {
                 // Отказ системы виден: молчащий двойной клик неотличим от
                 // сломанного редактора.
@@ -1375,6 +1377,7 @@ bool AssetsPanel::CreateAsset(CreateKind kind, const std::string& rawName, const
     const char* wantExt = nullptr;
     switch (kind) {
         case CreateKind::Script:   wantExt = ".lua"; break;
+        case CreateKind::SageScript: wantExt = ".slua"; break;
         case CreateKind::TextFile: wantExt = ".txt"; break;
         case CreateKind::Material: wantExt = ".sagemat"; break;
         default: break;
@@ -1414,6 +1417,30 @@ bool AssetsPanel::CreateAsset(CreateKind kind, const std::string& rawName, const
                 "\n"
                 "function OnUpdate(entity, dt)\n"
                 "    -- entity.Transform.Rotation.y = entity.Transform.Rotation.y + dt * 45.0\n"
+                "end\n";
+        } else if (kind == CreateKind::SageScript) {
+            // Имя класса — из имени файла: главный компонент файла тот, чьё
+            // имя совпадает с файлом (иначе — последний объявленный).
+            std::string cls;
+            bool upper = true;
+            for (char c : fs::path(name).stem().string()) {
+                if (!std::isalnum((unsigned char)c)) { upper = true; continue; }
+                cls += upper ? (char)std::toupper((unsigned char)c) : c;
+                upper = false;
+            }
+            if (cls.empty() || std::isdigit((unsigned char)cls[0])) cls = "Behaviour" + cls;
+            content =
+                "-- " + name + " — компонент на SAGE Lua (см. docs/sage_lua.md).\n"
+                "\n"
+                "class " + cls + " extends Component\n"
+                "    @field(editable = true, name = \"Скорость\", range = { min = 0, max = 20, step = 0.1 })\n"
+                "    public speed: number = 5\n"
+                "\n"
+                "    function onStart()\n"
+                "    end\n"
+                "\n"
+                "    function onUpdate(dt: number)\n"
+                "    end\n"
                 "end\n";
         } else if (kind == CreateKind::Material) {
             content =
@@ -1455,6 +1482,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
         switch (m_createKind) {
             case CreateKind::Folder:   kindLabel = "Folder"; break;
             case CreateKind::Script:   kindLabel = "Lua script"; break;
+            case CreateKind::SageScript: kindLabel = "SAGE Lua script"; break;
             case CreateKind::TextFile: kindLabel = "Text file"; break;
             case CreateKind::Material: kindLabel = "Material"; break;
             default: break;
@@ -1751,6 +1779,8 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
         };
         if (EditorIcons::MenuItem("folder-plus", T("New Folder"))) startCreate(CreateKind::Folder, "NewFolder");
         if (EditorIcons::MenuItem("script", T("New Script (.lua)"))) startCreate(CreateKind::Script, "new_script");
+        if (EditorIcons::MenuItem("script", T("New SAGE Lua Script (.slua)")))
+            startCreate(CreateKind::SageScript, "NewBehaviour");
         if (EditorIcons::MenuItem("file", T("New Text File (.txt)"))) startCreate(CreateKind::TextFile, "notes");
         if (EditorIcons::MenuItem("material", T("New Material (.sagemat)"))) startCreate(CreateKind::Material, "NewMaterial");
         ImGui::Separator();

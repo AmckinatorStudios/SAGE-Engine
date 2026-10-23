@@ -2,7 +2,9 @@
 
 #include <cctype>
 
+#include "sage/assets/Pack.h"
 #include "sage/core/Log.h"
+#include "sage/lang/SageCompiler.h"
 #include "sage/scene/Components.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/scripting/ScriptFields.h"
@@ -63,6 +65,22 @@ end
 
 // Старый стиль глобальных функций: OnStart/OnUpdate или первый параметр
 // `entity` у On-функции. Простой (нынешний) — всё остальное без `return`.
+bool IsSagePath(const std::string& path) {
+    if (path.size() < 5) return false;
+    std::string ext = path.substr(path.size() - 5);   // ".slua"
+    for (char& c : ext) c = (char)std::tolower((unsigned char)c);
+    return ext == ".slua";
+}
+
+// Диагностика SAGE -> ошибка скрипта: файл и строка отдельно (консоль
+// открывает файл на месте), текст — без заголовка «файл:строка:столбец».
+void FillFromDiagnostic(const sage::lang::Diagnostic& d, const std::string& path, ScriptError& err) {
+    err.File = d.File.empty() ? path : d.File;
+    err.Line = d.P.Line;
+    err.Message = d.Title + ":";
+    for (const std::string& l : d.Lines) err.Message += "\n" + l;
+}
+
 bool IsLegacySource(const std::string& text) {
     static const char* kOnly[] = {"OnStart", "OnUpdate", "OnFixedUpdate", "OnLateUpdate"};
     for (const char* name : kOnly) {
@@ -124,6 +142,8 @@ Backend::Backend(const LuaBackendConfig& config) : m_interop(config.Interop) {
         m_interop->SetQuitSink([this]() { DeliverQuit(); });
     }
 
+    InstallSage();
+
     sol::protected_function_result made = m_lua->script(kInstanceFactory);
     m_makeInstance = made.get<sol::protected_function>();
 
@@ -156,6 +176,35 @@ Backend::Backend(const LuaBackendConfig& config) : m_interop(config.Interop) {
     )LUA").get<sol::protected_function>()(m_base);
 }
 
+void Backend::InstallSage() {
+    // Загрузчик модулей для runtime: import "Game/Player" в работающей игре.
+    // Компилирует тот же компилятор, что и сам скрипт, — с той же памятью.
+    sol::state& lua = *m_lua;
+    lua["__sage_native_load"] = [](const std::string& spec, const std::string& from,
+                                   sol::this_state ts) -> std::tuple<sol::object, sol::object> {
+        sol::state_view L(ts);
+        std::string resolved, text;
+        if (!sage::lang::ProjectModuleLoader()(spec, from, resolved, text))
+            return {sol::make_object(L, sol::lua_nil),
+                    sol::make_object(L, from + ": модуль '" + spec + "' не найден")};
+        if (!IsSagePath(resolved)) return {sol::make_object(L, text), sol::make_object(L, resolved)};
+        auto r = sage::lang::CompileForEngine(resolved, text);
+        if (!r->Ok) {
+            const sage::lang::Diagnostic* d = r->FirstError();
+            return {sol::make_object(L, sol::lua_nil),
+                    sol::make_object(L, d ? d->Format() : resolved + ": не скомпилировался")};
+        }
+        return {sol::make_object(L, r->Lua), sol::make_object(L, resolved)};
+    };
+    lua["__sage_native_exists"] = [](const std::string& path) { return sage::assets::vfs::Exists(path); };
+    sol::protected_function_result installed = lua.safe_script(sage::lang::PreludeSource(), sol::script_pass_on_error,
+                                                                "@sage_prelude");
+    if (!installed.valid()) {
+        sol::error e = installed;
+        LOG_ERROR("Lua") << "SAGE Lua: runtime не встал: " << e.what();
+    }
+}
+
 Backend::~Backend() {
     // Обработчик шины, переживший бэкенд, видит пустой жетон и молчит.
     *m_tapToken = nullptr;
@@ -171,8 +220,8 @@ Backend::~Backend() {
 
 void Backend::Bind(const ScriptServices& services) { m_services = services; }
 
-sage::vars::Table Backend::ParseFields(const std::string& source) const {
-    return ParsePublicFields(source);
+sage::vars::Table Backend::ParseFields(const std::string& path, const std::string& source) const {
+    return sage::scripting::ParseFields(path, source);
 }
 
 Backend::Instance* Backend::Get(InstanceId id) {
@@ -226,9 +275,29 @@ bool Backend::Compile(const ScriptSource& source, sol::protected_function& out, 
         }
         m_chunks.erase(it);   // байткод не принялся — собираем из текста заново
     }
+    // .slua сначала проходит компилятор SAGE Lua: ошибки типов и аннотаций —
+    // ДО запуска, с файлом и строкой исходника. Lua выходит на тех же строках,
+    // поэтому ошибки выполнения ниже тоже указывают в .slua.
+    const std::string* text = &source.Text;
+    std::shared_ptr<const sage::lang::CompileResult> compiled;
+    if (IsSagePath(source.Path)) {
+        compiled = sage::lang::CompileForEngine(source.Path, source.Text);
+        for (const sage::lang::Diagnostic& d : compiled->Diagnostics)
+            if (!d.IsError()) LOG_WARN("Lua") << d.Format();
+        if (!compiled->Ok) {
+            if (const sage::lang::Diagnostic* d = compiled->FirstError()) {
+                FillFromDiagnostic(*d, source.Path, err);
+            } else {
+                err.File = source.Path;
+                err.Message = "SAGE Lua: файл не скомпилировался";
+            }
+            return false;
+        }
+        text = &compiled->Lua;
+    }
     // Имя куска с '@' — чтобы ошибки внутри ссылались на файл и строку, а не на
     // «[string "..."]»: номер строки в чужом безымянном куске бесполезен.
-    sol::load_result chunk = m_lua->load(source.Text, "@" + source.Path);
+    sol::load_result chunk = m_lua->load(*text, "@" + source.Path);
     if (!chunk.valid()) {
         sol::error e = chunk;
         err.File = source.Path;
@@ -493,6 +562,15 @@ void Backend::Reset() {
     m_byEntity.clear();
     m_tweenCallbacks = sol::table();
     m_chunks.clear();
+    // Задачи, таймеры и подписки SAGE прошлого запуска — вон: они держат
+    // экземпляры, которых больше нет.
+    if (m_lua) {
+        sol::object s = (*m_lua)["__sage"];
+        if (s.get_type() == sol::type::table) {
+            sol::object fn = s.as<sol::table>()["reset"];
+            if (fn.get_type() == sol::type::function) fn.as<sol::protected_function>()();
+        }
+    }
 }
 
 sol::object Backend::ScriptOf(GameObject object) {
@@ -597,8 +675,21 @@ std::string EventFunctionName(const std::string& event) {
 } // namespace
 
 void Backend::Tick(float dt) {
-    (void)dt;
     EnsureEventTap();
+    // Таймеры, await и вспомогательные компоненты SAGE Lua идут кадром движка.
+    if (!m_sageTick.valid()) {
+        sol::object s = (*m_lua)["__sage"];
+        if (s.get_type() == sol::type::table) {
+            sol::object fn = s.as<sol::table>()["tick"];
+            if (fn.get_type() == sol::type::function) m_sageTick = fn.as<sol::protected_function>();
+        }
+    }
+    if (!m_sageTick.valid()) return;
+    sol::protected_function_result r = m_sageTick(dt);
+    if (!r.valid()) {
+        sol::error e = r;
+        LOG_ERROR("Lua") << e.what();
+    }
 }
 
 void Backend::EnsureEventTap() {

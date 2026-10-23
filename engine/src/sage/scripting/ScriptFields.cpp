@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 
+#include "sage/lang/SageCompiler.h"
 #include "sage/scripting/lua/LuaInternal.h"
 
 namespace sage::scripting {
@@ -15,6 +16,14 @@ sage::vars::Table ParseFields(const std::string& path, const std::string& source
                    [](unsigned char c) { return (char)std::tolower(c); });
 
     if (ext == ".lua") return lua::ParsePublicFields(source);
+    // Поля .slua — из объявления класса (@field(editable = true)), а не из
+    // текста по шаблону: тип, подпись и диапазон уже проверил компилятор.
+    // Файл с ошибкой полей не даёт — инспектор не показывает поля, которых,
+    // возможно, нет.
+    if (ext == ".slua") {
+        auto r = sage::lang::CompileForEngine(path, source);
+        return r->Ok ? sage::lang::FieldsOf(*r) : sage::vars::Table{};
+    }
     return {};
 }
 
@@ -75,6 +84,10 @@ std::vector<std::string> ParseMethods(const std::string& path, const std::string
     std::transform(ext.begin(), ext.end(), ext.begin(),
                    [](unsigned char c) { return (char)std::tolower(c); });
     if (ext == ".lua") return ParseLuaMethods(source);
+    if (ext == ".slua") {
+        auto r = sage::lang::CompileForEngine(path, source);
+        return r->Ok ? sage::lang::MethodsOf(*r) : std::vector<std::string>{};
+    }
     return {};
 }
 
