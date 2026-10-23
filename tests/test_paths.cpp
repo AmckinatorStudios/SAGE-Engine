@@ -158,7 +158,9 @@ TEST(Paths_root_working_dir_moves_to_a_writable_one) {
     fs::current_path(before.root_path(), ec);
     const fs::path moved = sage::EnsureWritableWorkDir("probe");
     CHECK_TRUE(moved != moved.root_path());
-    CHECK_TRUE(fs::current_path(ec) == moved);
+    // equivalent, а не ==: на macOS /var — ссылка на /private/var, и одна и
+    // та же папка пишется двумя путями.
+    CHECK_TRUE(fs::equivalent(fs::current_path(ec), moved, ec));
     { std::ofstream f("probe.log"); f << "ok"; CHECK_TRUE(f.good()); }
     fs::current_path(before, ec);
 #if !defined(_WIN32)

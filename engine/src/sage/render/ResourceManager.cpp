@@ -651,10 +651,16 @@ std::shared_ptr<Material> ResourceManager::GetMaterial(const std::string& path) 
 }
 
 std::shared_ptr<Material> ResourceManager::MakeMaterial(const std::string& name) {
-    auto it = m_materials.find(name);
+    // КЛЮЧ — ТОТ ЖЕ, ПО КОТОРОМУ ИЩЕТ GetMaterial. Материал лежал под именем
+    // как его дали, а искался по CacheKey — и они совпадали только случайно:
+    // на macOS (libc++) weakly_canonical делает из «test/lantern» абсолютный
+    // путь, и SetMaterial вместо собранного скриптом материала назначал
+    // пустой. То же везде с именем вида «./a» или «a/../b».
+    const std::string key = CacheKey(name);
+    auto it = m_materials.find(key);
     if (it != m_materials.end()) return it->second;
     auto material = std::make_shared<Material>();
-    m_materials[name] = material;
+    m_materials[key] = material;
     // Штамп НЕ ставим: у материала нет файла, и ReloadChangedAssets, увидев
     // штамп 0 против несуществующего файла, перечитывал бы его каждый кадр,
     // затирая всё, что скрипт в нём настроил.

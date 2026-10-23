@@ -7,6 +7,8 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <chrono>
+#include <thread>
 #include <vector>
 
 #include "sage/net/NetHost.h"
@@ -26,10 +28,18 @@ using namespace sage::net;
 
 namespace {
 
+// ДАТЬ ПАКЕТУ ДОЙТИ. Тесты крутят кадры с ВЫДУМАННЫМ временем, без единой
+// паузы, — а пакет через loopback идёт по-настоящему. На Linux он успевает
+// между sendto и следующим recvfrom, на macOS — нет: десять «кадров» подряд
+// проходили за микросекунды, сервер не видел ни одного пакета, и тест читал
+// это как сломанную сеть. Полмиллисекунды на кадр с запасом хватает.
+void Settle() { std::this_thread::sleep_for(std::chrono::microseconds(500)); }
+
+
 // Прокачивает пару сервер/клиент count шагов по step секунд.
 void Pump(NetServer& server, NetClient& client, double& now, int count, double step = 0.02) {
     for (int i = 0; i < count; ++i) {
-        now += step;
+        now += step; Settle();
         client.Update(now);
         server.Update(now);
     }
@@ -185,7 +195,7 @@ TEST(Net_replication_ghost_lifecycle) {
     double now = 0.0;
     auto pump = [&](int steps) {
         for (int i = 0; i < steps; ++i) {
-            now += 0.05;
+            now += 0.05; Settle();
             server.UpdateAt(serverScene, now);
             client.UpdateAt(clientScene, now);
         }
@@ -264,7 +274,7 @@ TEST(Net_lua_messages_end_to_end) {
 
     double now = 0.0;
     for (int i = 0; i < 40; ++i) {
-        now += 0.05;
+        now += 0.05; Settle();
         serverNet.UpdateAt(serverScene, now);
         clientNet.UpdateAt(clientScene, now);
         serverScripts.UpdateAll(0.05f);
@@ -338,7 +348,7 @@ TEST(Net_replicates_more_entities_than_fit_in_one_packet) {
 
     double now = 0.0;
     for (int i = 0; i < 30; ++i) {
-        now += 0.05;
+        now += 0.05; Settle();
         server.UpdateAt(serverScene, now);
         client.UpdateAt(clientScene, now);
     }
@@ -362,7 +372,7 @@ TEST(Net_replication_survives_packet_loss) {
 
     double now = 0.0;
     for (int i = 0; i < 20; ++i) {   // сперва подключаемся по чистой сети
-        now += 0.05;
+        now += 0.05; Settle();
         server.UpdateAt(serverScene, now);
         client.UpdateAt(clientScene, now);
     }
@@ -370,13 +380,13 @@ TEST(Net_replication_survives_packet_loss) {
 
     client.Client().Socket().SetSimulatedLoss(0.34f, 7);
     for (int i = 0; i < 120; ++i) {
-        now += 0.05;
+        now += 0.05; Settle();
         server.UpdateAt(serverScene, now);
         client.UpdateAt(clientScene, now);
     }
     client.Client().Socket().SetSimulatedLoss(0.0f);
     for (int i = 0; i < 20; ++i) {
-        now += 0.05;
+        now += 0.05; Settle();
         server.UpdateAt(serverScene, now);
         client.UpdateAt(clientScene, now);
     }
@@ -412,7 +422,7 @@ TEST(Net_stale_snapshot_does_not_rewind_entities) {
     double now = 0.0;
     auto pump = [&](int steps) {
         for (int i = 0; i < steps; ++i) {
-            now += 0.05;
+            now += 0.05; Settle();
             server.UpdateAt(serverScene, now);
             client.UpdateAt(clientScene, now);
         }
@@ -450,7 +460,7 @@ TEST(Net_disconnect_removes_ghosts_from_scene) {
 
     double now = 0.0;
     for (int i = 0; i < 20; ++i) {
-        now += 0.05;
+        now += 0.05; Settle();
         server.UpdateAt(serverScene, now);
         client.UpdateAt(clientScene, now);
     }
@@ -460,12 +470,12 @@ TEST(Net_disconnect_removes_ghosts_from_scene) {
     // смены уровня, из деструктора). Призраки помечаются и снимаются ближайшим
     // Update: тем же кадром, в котором игра увидела бы разрыв.
     client.Stop();
-    now += 0.05;
+    now += 0.05; Settle();
     client.UpdateAt(clientScene, now);
     CHECK_EQ(CountGhosts(clientScene, 5), 0);
 
     // И повторный Update не должен ничего ломать (список уже пуст).
-    now += 0.05;
+    now += 0.05; Settle();
     client.UpdateAt(clientScene, now);
     CHECK_EQ(CountGhosts(clientScene, 5), 0);
     server.Stop();
