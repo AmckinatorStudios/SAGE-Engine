@@ -301,6 +301,12 @@ if (SAGE_VULKAN)
       GIT_REPOSITORY https://github.com/KhronosGroup/Vulkan-Headers.git
       GIT_TAG v1.3.290
     )
+    # Модуль C++ (vulkan.cppm) движку не нужен — берём только заголовки C.
+    # Vulkan-Headers включает модуль сам, если CMake и компилятор умеют, а
+    # генератор «Unix Makefiles» модулей не поддерживает: на раннере с новой
+    # CMake конфигурация падала ещё до первой строки кода («Vulkan-Module has
+    # C++ sources that may use modules»).
+    set(VULKAN_HEADERS_ENABLE_MODULE OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(vulkan_headers)
 
     # volk — загрузчик точек входа Vulkan (MIT, два файла). Берём только
