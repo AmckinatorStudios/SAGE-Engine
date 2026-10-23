@@ -16,7 +16,7 @@
 #include <memory>
 #include <string>
 
-#include "sage/core/GameModule.h"
+#include "sage/app/GameModule.h"
 #include "sage/core/Log.h"
 #include "sage/core/Config.h"
 #include "sage/core/Version.h"

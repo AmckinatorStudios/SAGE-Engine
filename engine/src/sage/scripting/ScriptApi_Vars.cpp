@@ -2,7 +2,7 @@
 
 #include "sage/core/Log.h"
 #include "sage/scene/Scene.h"
-#include "sage/scripting/ScriptComponent.h"
+#include "sage/scene/ScriptComponent.h"
 #include "sage/vars/VarsComponent.h"
 
 // ---------------------------------------------------------------------------

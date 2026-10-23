@@ -5,7 +5,7 @@
 #include <glm/glm.hpp>
 
 #include "sage/render/Texture.h"
-#include "sage/render/TextureFiltering.h"
+#include "sage/core/TextureFiltering.h"
 #include "sage/ui/NineSlice.h"
 
 // ---------------------------------------------------------------------------

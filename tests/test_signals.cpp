@@ -27,7 +27,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/scene/Signals.h"
 #include "sage/scripting/LuaHandlerStore.h"
-#include "sage/scripting/ScriptComponent.h"
+#include "sage/scene/ScriptComponent.h"
 #include "sage/scripting/ScriptFields.h"
 #include "sage/scripting/ScriptingSystem.h"
 #include "sage/scripting/lua/LuaBackend.h"

@@ -1,3 +1,4 @@
+#include "sage/app/CoreSystems.h"
 #include "EditorLayer.h"
 #include "sage/scene/Signals.h"
 #include "sage/audio/AudioEngine.h"
@@ -32,7 +33,7 @@
 
 #include "sage/assets/Quarantine.h"
 #include "sage/render/DebugView.h"
-#include "sage/core/Application.h"
+#include "sage/app/Application.h"
 #include "ScreenColor.h"
 #include "ui/ColorPicker.h"
 #include "sage/rhi/GraphicsDevice.h"

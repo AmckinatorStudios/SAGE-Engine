@@ -17,7 +17,7 @@
 #include <set>
 #include <string>
 
-#include "sage/core/SystemScheduler.h"
+#include "sage/app/CoreSystems.h"
 #include "sage/ecs/DayNightCycle.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/scene/EnvironmentSchema.h"

@@ -1,6 +1,5 @@
 #include "sage/vars/Refs.h"
 
-#include "sage/scene/Signals.h"
 #include "sage/vars/VarsComponent.h"
 
 namespace sage::vars {
@@ -18,11 +17,9 @@ void VisitEntityRefs(entt::registry& reg, entt::entity e,
             var.Data = Value(ref);
         }
     }
-
-    // 2. Цели связей сигналов (см. sage/scene/Signals.h): копия кнопки из
-    // префаба обязана звать СВОЮ дверь, а не дверь оригинала.
-    if (sage::signals::SignalLinksComponent* sl = reg.try_get<sage::signals::SignalLinksComponent>(e))
-        for (sage::signals::Link& link : sl->Links) visit(link.Target);
+    // Остальные носители ссылок (связи сигналов, компоненты игры) — слой
+    // сцены: sage::scene::VisitEntityRefs (sage/scene/ComponentRegistry.h).
+    // vars ниже сцены и знать её компоненты не может.
 }
 
 } // namespace sage::vars

@@ -1,3 +1,4 @@
+#include "sage/app/CoreSystems.h"
 #include "EditorPlaySession.h"
 
 #include <cstdint>

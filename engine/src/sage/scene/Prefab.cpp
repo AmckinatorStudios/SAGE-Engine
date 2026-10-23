@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "sage/core/Log.h"
+#include "sage/scene/ComponentRegistry.h"
 #include "sage/scene/Components.h"
 #include "sage/render/LodGroup.h"
 #include "sage/scene/Signals.h"
@@ -106,6 +107,8 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     CopyIfPresent<NetReplicatedComponent>(src, dst);
     CopyIfPresent<RenderTextureComponent>(src, dst);
     CopyIfPresent<ScriptComponent>(src, dst);
+    // Компоненты игры (реестр) и компоненты, которых этот код не знает.
+    CopyRegisteredComponents(*src.Registry(), src.Entity(), *dst.Registry(), dst.Entity());
     // Публичные переменные едут с объектом: префаб без своих настроек — это
     // объект, который после постановки в сцену надо настраивать заново.
     CopyIfPresent<VarsComponent>(src, dst);
@@ -231,7 +234,7 @@ void RemapEntityRefs(Scene& scene, const std::vector<entt::entity>& entities,
                      const std::unordered_map<int, int>& idMap) {
     for (entt::entity e : entities) {
         if (!scene.Registry().valid(e)) continue;
-        sage::vars::VisitEntityRefs(scene.Registry(), e, [&](sage::vars::EntityRef& ref) {
+        sage::scene::VisitEntityRefs(scene.Registry(), e, [&](sage::vars::EntityRef& ref) {
             auto it = idMap.find(ref.Id);
             if (it != idMap.end()) ref.Id = it->second;
         });
@@ -274,7 +277,7 @@ bool SavePrefab(Scene& scene, entt::entity root, const std::string& path, std::s
     int dropped = 0;
     for (entt::entity e : made) {
         if (!temp.Registry().valid(e)) continue;
-        sage::vars::VisitEntityRefs(temp.Registry(), e, [&](sage::vars::EntityRef& ref) {
+        sage::scene::VisitEntityRefs(temp.Registry(), e, [&](sage::vars::EntityRef& ref) {
             if (!ref.Valid()) return;
             if (idMap.count(ref.Id) != 0) return;   // внутрь заготовки — оставляем
             ref.Id = 0;
@@ -319,7 +322,7 @@ int InstantiatePrefab(Scene& scene, const std::string& path) {
     // посторонний объект этой, и «работающая» связь будет дёргать не то.
     for (entt::entity e : made) {
         if (!scene.Registry().valid(e)) continue;
-        sage::vars::VisitEntityRefs(scene.Registry(), e, [&](sage::vars::EntityRef& ref) {
+        sage::scene::VisitEntityRefs(scene.Registry(), e, [&](sage::vars::EntityRef& ref) {
             if (ref.Valid() && idMap.count(ref.Id) == 0) ref.Id = 0;
         });
     }

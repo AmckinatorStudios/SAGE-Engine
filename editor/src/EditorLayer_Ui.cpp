@@ -43,7 +43,7 @@
 #include "HotkeyScope.h"
 #include "ModelMaterialImport.h"
 #include "sage/render/DebugView.h"
-#include "sage/core/Application.h"
+#include "sage/app/Application.h"
 #include "sage/core/Paths.h"
 #include "sage/render/ModelMaterial.h"
 #include "sage/assets/AssetDatabase.h"

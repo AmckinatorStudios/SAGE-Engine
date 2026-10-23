@@ -8,7 +8,7 @@
 #include "sage/physics/PhysicsComponents.h"
 #include "sage/scripting/ScriptTween.h"
 #include "sage/scene/Components.h"
-#include "sage/scripting/ScriptComponent.h"
+#include "sage/scene/ScriptComponent.h"
 #include "sage/scripting/ScriptingSystem.h"
 #include "sage/scene/Scene.h"
 

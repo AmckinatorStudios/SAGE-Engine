@@ -1,3 +1,4 @@
+#include "sage/app/CoreSystems.h"
 #include "PlayerLayer.h"
 
 #include "sage/audio/AudioSystem.h"
@@ -18,10 +19,10 @@
 #include <glm/gtx/euler_angles.hpp>
 #include <nlohmann/json.hpp>
 
-#include "sage/core/Application.h"
+#include "sage/app/Application.h"
 #include "sage/core/Config.h"
 #include "sage/core/Paths.h"
-#include "sage/core/SaveGame.h"
+#include "sage/assets/SaveGame.h"
 #include "sage/scene/Prefab.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"

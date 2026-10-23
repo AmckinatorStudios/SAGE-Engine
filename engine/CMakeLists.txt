@@ -43,18 +43,19 @@ set(SAGE_ENGINE_SOURCES
     src/sage/input/Context.cpp
     src/sage/input/InputSystem.cpp
     src/sage/input/GlfwBridge.cpp
-    src/sage/core/Application.cpp
-    src/sage/core/EngineContext.cpp
-    src/sage/core/FatalReport.cpp
+    src/sage/app/Application.cpp
+    src/sage/app/EngineContext.cpp
+    src/sage/app/FatalReport.cpp
     src/sage/core/Config.cpp
     src/sage/core/JobSystem.cpp
     src/sage/core/Log.cpp
     src/sage/core/Paths.cpp
+    src/sage/core/FormatVersion.cpp
     src/sage/core/Stats.cpp
     src/sage/core/Systems.cpp
     src/sage/core/Window.cpp
     src/sage/core/Profiler.cpp
-    src/sage/core/SaveGame.cpp
+    src/sage/assets/SaveGame.cpp
     src/sage/net/NetConnection.cpp
     src/sage/net/NetHost.cpp
     src/sage/net/NetworkSystem.cpp
@@ -85,6 +86,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/SkyDraw.cpp
     src/sage/core/CrashHandler.cpp
     src/sage/core/SystemScheduler.cpp
+    src/sage/app/CoreSystems.cpp
     src/sage/render/MeshData.cpp
     src/sage/render/MeshRaycast.cpp
     src/sage/assets/format/Blob.cpp
@@ -147,6 +149,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/CopyName.cpp
     src/sage/scene/Prefab.cpp
     src/sage/scene/SceneFlow.cpp
+    src/sage/scene/ComponentRegistry.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scene/SceneMigrations.cpp
     src/sage/scene/SceneValueJson.cpp

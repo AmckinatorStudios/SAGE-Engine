@@ -27,8 +27,8 @@
 // ============================================================================
 #include <memory>
 
-#include "sage/core/Application.h"
-#include "sage/core/GameModule.h"
+#include "sage/app/Application.h"
+#include "sage/app/GameModule.h"
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
 

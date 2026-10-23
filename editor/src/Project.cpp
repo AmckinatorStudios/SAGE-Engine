@@ -1,10 +1,11 @@
 #include "Project.h"
+#include "sage/core/FormatVersion.h"
 
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include "sage/core/Log.h"
 #include "sage/assets/AssetDatabase.h"
-#include "sage/core/SaveGame.h"
+#include "sage/assets/SaveGame.h"
 #include "sage/core/Paths.h"
 #include "sage/scene/Prefab.h"
 
@@ -178,6 +179,15 @@ bool Project::SetStartScene(const std::string& name, std::string& error) {
     return true;
 }
 
+namespace {
+// Файл проекта: тот же закон версий, что у остальных форматов
+// (sage/core/FormatVersion.h). Номер писался всегда, а читался — никогда.
+const sage::format::Spec& ProjectFormat() {
+    static const sage::format::Spec spec{"sage_project_version", 1, "проект", {}};
+    return spec;
+}
+} // namespace
+
 bool Project::Open(const fs::path& fileOrDir, std::string& error) {
     fs::path file = fileOrDir;
     if (fs::is_directory(file)) file /= "project.sageproj";
@@ -191,6 +201,7 @@ bool Project::Open(const fs::path& fileOrDir, std::string& error) {
         error = std::string("Invalid project file: ") + e.what();
         return false;
     }
+    if (!sage::format::Upgrade(j, ProjectFormat(), error)) return false;
 
     m_dir = file.parent_path();
     m_name = j.value("name", m_dir.filename().string());

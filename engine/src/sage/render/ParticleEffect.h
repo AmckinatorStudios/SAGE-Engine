@@ -1,5 +1,5 @@
 #pragma once
-#include "sage/render/TextureFiltering.h"
+#include "sage/core/TextureFiltering.h"
 #include <string>
 #include <vector>
 

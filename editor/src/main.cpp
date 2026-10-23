@@ -7,7 +7,7 @@
 // ============================================================================
 #include <memory>
 
-#include "sage/core/GameModule.h"
+#include "sage/app/GameModule.h"
 #include "sage/core/Log.h"
 #include <cstdio>
 #include <cstdlib>

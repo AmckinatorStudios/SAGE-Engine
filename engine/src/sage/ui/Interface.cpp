@@ -1,4 +1,5 @@
 #include "sage/ui/Interface.h"
+#include "sage/core/FormatVersion.h"
 #include "sage/assets/Pack.h"
 #include "sage/ui/UIPresets.h"
 
@@ -88,13 +89,9 @@ std::string Interface::ToJsonString() const {
 
 bool Interface::FromJsonString(const std::string& text, Interface& out, std::string& err) {
     try {
-        const json root = json::parse(text);
-        const int version = root.value("sage_interface_version", kInterfaceVersion);
-        if (version > kInterfaceVersion) {
-            err = "интерфейс сохранён более новой версией движка (формат " +
-                  std::to_string(version) + ")";
-            return false;
-        }
+        json root = json::parse(text);
+        static const sage::format::Spec spec{"sage_interface_version", kInterfaceVersion, "интерфейс", {}};
+        if (!sage::format::Upgrade(root, spec, err)) return false;
         out = Interface{};
         out.Name = root.value("name", std::string("Interface"));
         if (root.contains("roots") && root["roots"].is_array())

@@ -1,7 +1,7 @@
 #include "ScriptEngine.h"
 
 #include "sage/core/Log.h"
-#include "sage/core/SaveGame.h"
+#include "sage/assets/SaveGame.h"
 
 #include <nlohmann/json.hpp>
 

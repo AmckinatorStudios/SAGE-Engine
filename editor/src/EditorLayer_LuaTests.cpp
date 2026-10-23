@@ -22,7 +22,7 @@
 #include "Localization.h"
 #include "sage/core/Log.h"
 #include "sage/scene/Components.h"
-#include "sage/scripting/ScriptComponent.h"
+#include "sage/scene/ScriptComponent.h"
 #include "sage/scripting/ScriptingSystem.h"
 
 namespace fs = std::filesystem;

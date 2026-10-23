@@ -17,7 +17,7 @@
 #include "ImGuizmo.h"
 
 #include "EditorHost.h"
-#include "sage/core/Application.h"
+#include "sage/app/Application.h"
 #include "sage/scene/Components.h"
 #include "sage/ecs/LightSystem.h"
 #include "../Localization.h"

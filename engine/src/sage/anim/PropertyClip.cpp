@@ -1,4 +1,5 @@
 #include "sage/anim/PropertyClip.h"
+#include "sage/core/FormatVersion.h"
 #include "sage/assets/Pack.h"
 
 #include <algorithm>
@@ -144,9 +145,16 @@ bool RemoveKey(Track& track, int index) {
 
 // --- Файл --------------------------------------------------------------------
 
+namespace {
+const sage::format::Spec& PropertyClipFormat() {
+    static const sage::format::Spec spec{"sage_clip_version", 1, "клип свойств", {}};
+    return spec;
+}
+} // namespace
+
 std::string ToJsonString(const PropertyClip& clip) {
     json j;
-    j["sage_clip_version"] = 1;
+    sage::format::Stamp(j, PropertyClipFormat());
     j["name"] = clip.Name;
     j["duration"] = clip.Duration;
     j["loop"] = clip.Loop;
@@ -182,7 +190,8 @@ std::string ToJsonString(const PropertyClip& clip) {
 
 bool FromJsonString(const std::string& text, PropertyClip& out, std::string& err) {
     try {
-        const json j = json::parse(text);
+        json j = json::parse(text);
+        if (!sage::format::Upgrade(j, PropertyClipFormat(), err)) return false;
         PropertyClip c;
         c.Name = j.value("name", std::string());
         c.Duration = j.value("duration", 1.0f);

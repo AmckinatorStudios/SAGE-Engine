@@ -31,6 +31,8 @@ add_executable(sage_tests
     test_sagelua_engine.cpp
     test_scene_lossless.cpp
     test_scene_flow.cpp
+    test_component_registry.cpp
+    test_format_version.cpp
     test_jobsystem.cpp
     test_net.cpp
     test_builtinphysics.cpp

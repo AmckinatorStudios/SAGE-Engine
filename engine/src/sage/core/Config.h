@@ -1,6 +1,6 @@
 #pragma once
 #include <string>
-#include "sage/render/TextureFiltering.h"
+#include "sage/core/TextureFiltering.h"
 
 // ---------------------------------------------------------------------------
 // EngineConfig — единый гибкий конфиг движка: окно, дисплей и качество графики.
