@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <unordered_map>
@@ -207,10 +208,36 @@ const char* T(const char* key) {
     // столько же, сколько программа.
     if (catalog == nullptr || catalog->Strings.empty()) return key;
 
+    // БЫСТРЫЙ ПУТЬ — ПО АДРЕСУ КЛЮЧА. T() зовут тысячи раз за кадр, почти
+    // всегда с литералом из исходника, а полный путь собирал на каждый вызов
+    // две строки (ключ и «язык + ключ») и хэшировал их целиком — аллокации на
+    // ровном месте в каждом кадре каждой панели. Адрес литерала постоянен, но
+    // тот же адрес может прийти и от временной строки (c_str() буфера), поэтому
+    // попадание подтверждается сравнением текста: strcmp без аллокаций.
+    // Результат указывает в ResolvedCache, а она не чистится — адрес живёт.
+    // Таблица ПОТОЧНАЯ: T() зовут и фоновые работы (сборка игры, обложки), а
+    // запись в общую таблицу из двух потоков сразу портит кучу.
+    struct Fast {
+        std::string Key, Code;
+        const char* Result = nullptr;
+    };
+    thread_local std::unordered_map<const char*, Fast> fast;
+    const std::string& code = CurrentCode();
+    auto hit = fast.find(key);
+    if (hit != fast.end() && hit->second.Code == code && std::strcmp(hit->second.Key.c_str(), key) == 0)
+        return hit->second.Result;
+    auto remember = [&](const char* result) {
+        Fast& f = fast[key];
+        f.Key = key;
+        f.Code = code;
+        f.Result = result;
+        return result;
+    };
+
     const std::string full(key);
-    const std::string cacheKey = CurrentCode() + '\x1f' + full;
+    const std::string cacheKey = code + '\x1f' + full;
     auto cached = ResolvedCache().find(cacheKey);
-    if (cached != ResolvedCache().end()) return cached->second.c_str();
+    if (cached != ResolvedCache().end()) return remember(cached->second.c_str());
 
     // Видимая часть — до «##». Скрытый идентификатор ImGui переводить нельзя:
     // от него зависит, узнает ли библиотека виджет между кадрами (а значит —
@@ -229,7 +256,7 @@ const char* T(const char* key) {
         if (!visible.empty()) NoteMissing(visible);
         result = full;
     }
-    return ResolvedCache().emplace(cacheKey, std::move(result)).first->second.c_str();
+    return remember(ResolvedCache().emplace(cacheKey, std::move(result)).first->second.c_str());
 }
 
 const std::vector<std::string>& MissingKeys() { return Missing(); }

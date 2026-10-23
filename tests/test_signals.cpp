@@ -26,6 +26,7 @@
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Signals.h"
+#include "sage/scripting/LuaHandlerStore.h"
 #include "sage/scripting/ScriptComponent.h"
 #include "sage/scripting/ScriptFields.h"
 #include "sage/scripting/ScriptingSystem.h"
@@ -664,4 +665,37 @@ return W
     CHECK_TRUE(reports.Has("out:Hero"));
     sys->Shutdown();
     std::remove(path.c_str());
+}
+
+// Подписка ИЗ КОРУТИНЫ хранится на главном потоке Lua. Ссылка на поток
+// корутины переживала саму корутину: её собирал сборщик мусора, а при выходе
+// из Play Clear() снимал ссылку через освобождённый поток — запись в чужую
+// память (AddressSanitizer: heap-use-after-free в luaL_unref), после которой
+// редактор падал или зависал в деструкторе Jolt и при закрытии Lua.
+TEST(Signals_handler_connected_from_a_coroutine_outlives_the_coroutine) {
+    sol::state lua;
+    lua.open_libraries(sol::lib::base, sol::lib::coroutine);
+    sage::events::Bus bus;
+    int calls = 0;
+    sage::scripting::LuaHandlerStore store(
+        [&](const sol::protected_function& fn, const sage::events::Event&, int) {
+            fn();
+            ++calls;
+        });
+    lua.set_function("subscribe", [&](sol::protected_function fn) {
+        store.Connect(bus, 1, "ping", std::move(fn), false, 0);
+    });
+    lua.script(R"(
+        local co = coroutine.create(function() subscribe(function() end) end)
+        coroutine.resume(co)
+        co = nil
+        collectgarbage("collect")
+        collectgarbage("collect")
+    )");
+    CHECK_EQ((int)store.Size(), 1);
+    CHECK_TRUE(store.AllOnMainThread());
+    bus.EmitSignal(1, "ping");
+    CHECK_EQ(calls, 1);
+    store.Clear(&bus);
+    CHECK_EQ((int)store.Size(), 0);
 }

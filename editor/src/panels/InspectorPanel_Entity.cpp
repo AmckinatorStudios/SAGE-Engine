@@ -150,6 +150,50 @@ namespace {
 // подсказка у элемента одна, а разносить смысл по разным полям значит заставить
 // искать вторую половину.
 std::string Hint2(const char* a, const char* b) { return std::string(a) + "\n" + b; }
+
+// Слой — номер (1..32), а хранится битом: так его понимает маска лучей и зон,
+// а человек думает «слой 3», а не «бит 4». Общий для тела и персонажа, иначе
+// одно и то же поле в двух секциях рисовалось бы по-разному.
+void LayerSlider(EditorHost& host, sage::physics::LayerMask& mask) {
+    int layer = 1;
+    for (int b = 0; b < 32; ++b)
+        if (mask & (1u << b)) { layer = b + 1; break; }
+    if (ImGui::SliderInt(T("Layer"), &layer, 1, 32)) {
+        host.PushUndoSnapshot();
+        mask = 1u << (layer - 1);
+    }
+}
+
+// Маска слоёв списком галочек: «все», «ничего» или сколько отмечено.
+void LayerMaskCombo(EditorHost& host, const char* label, sage::physics::LayerMask& mask) {
+    char preview[32];
+    if (mask == sage::physics::kAllLayers) std::snprintf(preview, sizeof(preview), "%s", T("All layers"));
+    else if (mask == 0) std::snprintf(preview, sizeof(preview), "%s", T("Nothing"));
+    else {
+        int n = 0;
+        for (int b = 0; b < 32; ++b) n += (mask >> b) & 1u;
+        std::snprintf(preview, sizeof(preview), T("%d layers"), n);
+    }
+    if (ImGui::BeginCombo(label, preview)) {
+        if (ImGui::Selectable(T("All layers"), mask == sage::physics::kAllLayers)) {
+            host.PushUndoSnapshot();
+            mask = sage::physics::kAllLayers;
+        }
+        for (int b = 0; b < 32; ++b) {
+            char item[32];
+            std::snprintf(item, sizeof(item), T("Layer %d"), b + 1);
+            bool on = (mask >> b) & 1u;
+            ImGui::PushID(b);
+            if (ImGui::Checkbox(item, &on)) {
+                host.PushUndoSnapshot();
+                if (on) mask |= 1u << b;
+                else mask &= ~(1u << b);
+            }
+            ImGui::PopID();
+        }
+        ImGui::EndCombo();
+    }
+}
 } // namespace
 
 // Связанные оси масштаба: ось, которую потянули, тянет за собой две другие.
@@ -643,15 +687,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 lockRow(T("Freeze Rotation"), sage::physics::kLockRotX);
             }
 
-            // Слой — номер (1..32), а хранится битом: так его понимает маска
-            // лучей и зон, а человек думает «слой 3», а не «бит 4».
-            int layer = 1;
-            for (int b = 0; b < 32; ++b)
-                if (rb->Layer & (1u << b)) { layer = b + 1; break; }
-            if (ImGui::SliderInt(T("Layer"), &layer, 1, 32)) {
-                host.PushUndoSnapshot();
-                rb->Layer = 1u << (layer - 1);
-            }
+            LayerSlider(host, rb->Layer);
             EditorTheme::EndMore();
             }
 
@@ -666,33 +702,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("%s", T("Objects pass through; scripts get OnTriggerEnter / Stay / Exit"));
             if (rb->Sensor) {
-                char preview[32];
-                if (rb->TriggerMask == sage::physics::kAllLayers) std::snprintf(preview, sizeof(preview), "%s", T("All layers"));
-                else if (rb->TriggerMask == 0) std::snprintf(preview, sizeof(preview), "%s", T("Nothing"));
-                else {
-                    int n = 0;
-                    for (int b = 0; b < 32; ++b) n += (rb->TriggerMask >> b) & 1u;
-                    std::snprintf(preview, sizeof(preview), T("%d layers"), n);
-                }
-                if (ImGui::BeginCombo(T("Detects Layers"), preview)) {
-                    if (ImGui::Selectable(T("All layers"), rb->TriggerMask == sage::physics::kAllLayers)) {
-                        host.PushUndoSnapshot();
-                        rb->TriggerMask = sage::physics::kAllLayers;
-                    }
-                    for (int b = 0; b < 32; ++b) {
-                        char label[32];
-                        std::snprintf(label, sizeof(label), T("Layer %d"), b + 1);
-                        bool on = (rb->TriggerMask >> b) & 1u;
-                        ImGui::PushID(b);
-                        if (ImGui::Checkbox(label, &on)) {
-                            host.PushUndoSnapshot();
-                            if (on) rb->TriggerMask |= 1u << b;
-                            else rb->TriggerMask &= ~(1u << b);
-                        }
-                        ImGui::PopID();
-                    }
-                    ImGui::EndCombo();
-                }
+                LayerMaskCombo(host, T("Detects Layers"), rb->TriggerMask);
                 // Кто внутри прямо сейчас — в игре видно, почему дверь не
                 // открылась: гость не дошёл, или его слой зона не замечает.
                 if (PhysicsScene* physics = host.PlayPhysics()) {
@@ -839,6 +849,31 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             host.TrackLastImGuiItem();
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", T("Body offset from the object origin"));
+            }
+
+            // Столкновения — на виду, а не в «Ещё»: с чем персонаж сталкивается,
+            // спрашивают первым делом («почему он проходит сквозь стену?»).
+            ImGui::SeparatorText(T("Collision"));
+            LayerSlider(host, ch->Layer);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", T("Layer of the character itself: rays, triggers and other masks see it here"));
+            }
+            LayerMaskCombo(host, T("Collides With"), ch->CollidesWith);
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", T("Layers the character bumps into; the rest it walks through"));
+            }
+            bool events = ch->CollisionEvents;
+            if (ImGui::Checkbox(T("Collision Events"), &events)) {
+                host.PushUndoSnapshot();
+                ch->CollisionEvents = events;
+            }
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", T("Scripts get OnCollisionEnter / Exit when the character touches something"));
+            }
+            // Кого касается прямо сейчас — в игре видно, почему событие не
+            // пришло: касания нет, или слой не тот.
+            if (host.PlayPhysics()) {
+                ImGui::TextDisabled(T("Touching now: %d"), (int)ch->Touching.size());
             }
             if (EditorTheme::BeginMore("charMore")) {
             ImGui::DragFloat(T("Slope Limit"), &ch->SlopeLimit, 0.5f, 0.0f, 89.0f, "%.0f°");

@@ -222,7 +222,70 @@ Material Material::LoadFromFile(const std::string& path) {
     m.AOMapPath = root.value("aoMap", m.AOMapPath);
     m.EmissiveMap = root.value("emissiveMap", m.EmissiveMap);
     m.EmissiveStrength = root.value("emissiveStrength", m.EmissiveStrength);
+    m.DiskFingerprint = m.Fingerprint();
     return m;
+}
+
+namespace {
+// FNV-1a: порядок полей важен, а криптостойкость — нет.
+struct Fnv {
+    uint64_t H = 1469598103934665603ull;
+    void Bytes(const void* p, size_t n) {
+        const unsigned char* b = static_cast<const unsigned char*>(p);
+        for (size_t i = 0; i < n; ++i) {
+            H ^= b[i];
+            H *= 1099511628211ull;
+        }
+    }
+    void F(float v) { Bytes(&v, sizeof v); }
+    void I(int v) { Bytes(&v, sizeof v); }
+    void S(const std::string& s) {
+        Bytes(s.data(), s.size());
+        I((int)s.size());   // граница строки: "ab"+"c" не равно "a"+"bc"
+    }
+    void V(const glm::vec3& v) { F(v.x); F(v.y); F(v.z); }
+};
+} // namespace
+
+// Ровно те поля, что пишет SaveToFile, и в том же порядке: отпечаток отвечает
+// на вопрос «изменится ли файл», и поле, которого нет в файле, ему чуждо.
+uint64_t Material::Fingerprint() const {
+    Fnv h;
+    h.V(Albedo);
+    h.V(Emissive);
+    h.F(Metallic);
+    h.F(Roughness);
+    h.F(Opacity);
+    for (const MaterialRenderField& f : MaterialRenderFields()) {
+        if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) h.I(Render.*f.AsBool ? 1 : 0);
+        else if (f.Type == MaterialRenderField::Kind::Enum && f.GetEnum) h.I(f.GetEnum(Render));
+        else if (f.AsFloat) h.F(Render.*f.AsFloat);
+    }
+    h.S(VertexShaderPath);
+    h.S(FragmentShaderPath);
+    // Параметры — в порядке ИМЁН: у unordered_map порядок обхода не задан, и
+    // один и тот же набор давал бы разные отпечатки.
+    if (!Params.empty()) {
+        std::vector<const std::pair<const std::string, ShaderParam>*> sorted;
+        sorted.reserve(Params.size());
+        for (const auto& kv : Params) sorted.push_back(&kv);
+        std::sort(sorted.begin(), sorted.end(),
+                  [](const auto* a, const auto* b) { return a->first < b->first; });
+        for (const auto* kv : sorted) {
+            h.S(kv->first);
+            h.I((int)kv->second.Kind);
+            h.F(kv->second.Value.x); h.F(kv->second.Value.y);
+            h.F(kv->second.Value.z); h.F(kv->second.Value.w);
+        }
+    }
+    h.S(TexturePath);
+    h.S(NormalMapPath);
+    h.S(MetallicMapPath);
+    h.S(RoughnessMapPath);
+    h.S(AOMapPath);
+    h.S(EmissiveMap);
+    h.F(EmissiveStrength);
+    return h.H;
 }
 
 void Material::SaveToFile(const std::string& path) const {
@@ -265,4 +328,5 @@ void Material::SaveToFile(const std::string& path) const {
         throw std::runtime_error("Не удалось открыть материал для записи: " + path);
     }
     file << root.dump(4) << "\n";
+    DiskFingerprint = Fingerprint();
 }

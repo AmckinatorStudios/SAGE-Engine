@@ -1136,4 +1136,37 @@ void BuiltinWorld::SetCharacterPosition(CharacterHandle character, const glm::ve
     if (it != m_characters.end()) it->second.Motor.SetPosition(position);
 }
 
+void BuiltinWorld::SetCharacterCollidesWith(CharacterHandle character, LayerMask mask) {
+    auto it = m_characters.find(character);
+    if (it != m_characters.end()) it->second.CollidesWith = mask;
+}
+
+// Касание — та же коробка, что у мотора, раздутая на пару сантиметров: мотор
+// останавливает персонажа В ЗАЗОРЕ от тверди, и коробка ровно по размеру не
+// пересекала бы ни пол, на котором он стоит, ни стену, в которую упёрся.
+void BuiltinWorld::CharacterContacts(CharacterHandle character, std::vector<BodyHandle>& out) const {
+    out.clear();
+    auto it = m_characters.find(character);
+    if (it == m_characters.end()) return;
+    glm::vec3 min, max;
+    it->second.Motor.Bounds(min, max);
+    const glm::vec3 pad(0.03f);
+    Part probe;
+    probe.Shape = ShapeType::Box;
+    probe.Half = (max - min) * 0.5f + pad;
+    const Pose probePose{(max + min) * 0.5f, glm::quat(1, 0, 0, 0)};
+    const LayerMask mask = it->second.CollidesWith;
+    for (const auto& [h, b] : m_bodies) {
+        if (!b.Alive || b.Sensor || (b.Layer & mask) == 0) continue;
+        const Pose pose{b.Position, b.Rotation};
+        for (const Part& p : b.Parts) {
+            Manifold m;
+            if (builtin::Collide(probe, probePose, p, pose, 0.0f, m) && m.Count > 0) {
+                out.push_back(h);
+                break;
+            }
+        }
+    }
+}
+
 } // namespace sage::physics

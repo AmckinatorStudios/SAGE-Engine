@@ -681,6 +681,8 @@ static void SaveCharacter(json& j, const CharacterControllerComponent& c) {
     j["character"]["gravity"] = c.Gravity;
     j["character"]["mass"] = c.Mass;
     j["character"]["layer"] = (unsigned)c.Layer;
+    j["character"]["collidesWith"] = (unsigned)c.CollidesWith;
+    j["character"]["collisionEvents"] = c.CollisionEvents;
 }
 
 static CharacterControllerComponent ParseCharacter(const json& cj) {
@@ -696,6 +698,8 @@ static CharacterControllerComponent ParseCharacter(const json& cj) {
     c.Gravity = cj.value("gravity", c.Gravity);
     c.Mass = cj.value("mass", c.Mass);
     c.Layer = cj.value("layer", (unsigned)c.Layer);
+    c.CollidesWith = cj.value("collidesWith", (unsigned)c.CollidesWith);
+    c.CollisionEvents = cj.value("collisionEvents", c.CollisionEvents);
     return c;
 }
 

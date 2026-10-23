@@ -17,6 +17,8 @@
 #include <string>
 #include <thread>
 
+#include "sage/ecs/CameraView.h"
+#include "sage/input/InputEvent.h"
 #include "sage/input/InputSystem.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/render/DebugLines.h"
@@ -524,6 +526,168 @@ TEST(ScriptSystem_shipped_fps_example_runs) {
     // Скрипт объявил свои действия сам — раскладка принадлежит игре.
     CHECK_TRUE(input.Has("Jump"));
     CHECK_TRUE(input.Has("Sprint"));
+    sys->Shutdown();
+}
+
+// --- НАПРАВЛЕНИЯ: «ВПЕРЁД» СКРИПТА — ЭТО «ВПЕРЁД» КАМЕРЫ ----------------------
+//
+// Камера смотрит в локальный -Z (CameraFrameFor), а transform:Forward() в Lua
+// отдавал +Z. Итог — у каждого персонажа, собранного по Forward(), W вела
+// назад, а LookAt разворачивал камеру к цели затылком. Сверяем с САМОЙ
+// камерой, а не с числом: число можно переписать вместе с ошибкой.
+namespace {
+glm::vec3 CameraLook(Scene& scene, entt::entity e) {
+    const glm::mat4 view = sage::ecs::CameraFrameFor(scene, e, 1.0f).View;
+    // Строка 2 матрицы вида — ось +Z камеры в мире; смотрит камера в обратную.
+    return -glm::vec3(view[0][2], view[1][2], view[2][2]);
+}
+
+// Курсор без окна: проверяется, что скрипт ПРОСИТ захват, а захватывать здесь
+// нечего.
+struct FakeCursor : sage::input::CursorControl {
+    bool Captured = false;
+    void SetCursorCaptured(bool c) override { Captured = c; }
+    bool CursorCaptured() const override { return Captured; }
+};
+
+std::filesystem::path ShippedScript(const char* relative) {
+    // Тесты гоняют и из корня репозитория, и из каталога сборки.
+    std::filesystem::path dir = std::filesystem::current_path();
+    for (int i = 0; i < 4; ++i) {
+        const std::filesystem::path candidate = dir / relative;
+        if (std::filesystem::exists(candidate)) return candidate;
+        if (!dir.has_parent_path()) break;
+        dir = dir.parent_path();
+    }
+    return {};
+}
+} // namespace
+
+TEST(ScriptSystem_lua_forward_and_look_at_match_the_camera) {
+    Scene scene("test");
+    GameObject eye = scene.CreateObject("Eye");
+    scene.Registry().emplace<CameraComponent>(eye.Entity());
+    GameObject probe = scene.CreateObject("Probe");
+    // Скрипт кладёт Forward() камеры себе в позицию — так его ответ читается
+    // из C++ без лазейки в состояние Lua.
+    const std::string path = WriteScript("forward", R"LUA(
+local P = {}
+function P:Update(dt)
+    local eye = Scene:Find("Eye")
+    if self.lookAt then eye.transform:LookAt(Vector3(10, 3, -4)) end
+    self.transform.position = eye.transform:Forward()
+    self.lookAt = true
+end
+return P
+)LUA");
+    scene.Registry().emplace<ScriptComponent>(probe.Entity(), ScriptComponent{path});
+    auto sys = MakeSystem(scene);
+    sys->AttachScene(scene);
+
+    Transform& et = scene.Registry().get<Transform>(eye.Entity());
+    et.Rotation = glm::vec3(20.0f, 37.0f, 0.0f);
+    sys->Update(0.016f);
+    const glm::vec3 said = scene.Registry().get<Transform>(probe.Entity()).Position;
+    const glm::vec3 seen = CameraLook(scene, eye.Entity());
+    CHECK_NEAR(glm::dot(said, seen), 1.0f, 1e-4f);
+
+    // Второй кадр: LookAt на точку — камера смотрит РОВНО на неё.
+    sys->Update(0.016f);
+    const glm::vec3 want = glm::normalize(glm::vec3(10.0f, 3.0f, -4.0f) - et.Position);
+    CHECK_NEAR(glm::dot(CameraLook(scene, eye.Entity()), want), 1.0f, 1e-4f);
+    CHECK_NEAR(glm::dot(scene.Registry().get<Transform>(probe.Entity()).Position, want), 1.0f, 1e-4f);
+    sys->Shutdown();
+    std::filesystem::remove(path);
+}
+
+// Пример персонажа из поставки: W ведёт туда, куда смотрит камера; мышь
+// вправо — взгляд вправо; мышь от себя — взгляд вверх. Все три знака были
+// перевёрнуты: Forward() смотрел назад, рыскание шло в сторону, обратную мыши,
+// а наклон вычитал смещение, которое движок уже отдаёт «вверх = плюс».
+TEST(ScriptSystem_shipped_fps_example_walks_and_looks_the_right_way) {
+    const std::filesystem::path script = ShippedScript("editor/assets/scripts/player_fps.lua");
+    CHECK_TRUE(!script.empty());
+    if (script.empty()) return;
+
+    Scene scene("test");
+    GameObject hero = scene.CreateObject("Hero");
+    scene.Registry().emplace<CharacterControllerComponent>(hero.Entity());
+    GameObject camera = scene.CreateObject("Camera");
+    scene.Registry().emplace<CameraComponent>(camera.Entity());
+    scene.SetParent(camera.Entity(), hero.Entity());
+
+    ScriptComponent sc;
+    sc.Path = script.string();
+    sage::vars::Var cameraField;
+    cameraField.Name = "Camera";
+    cameraField.Data = sage::vars::Value(sage::vars::EntityRef{camera.Id()});
+    cameraField.Declared = true;
+    sc.Fields.Put(cameraField);
+    scene.Registry().emplace<ScriptComponent>(hero.Entity(), sc);
+
+    sage::input::InputSystem input;
+    FakeCursor cursor;
+    input.SetCursorControl(&cursor);
+    auto sys = std::make_unique<ScriptingSystem>();
+    sys->AddBackend(MakeLuaBackend({}));
+    ScriptServices services;
+    services.ScenePtr = &scene;
+    services.Input = &input;
+    sys->Bind(services);
+    int errors = 0;
+    sys->Runtime().SetErrorSink([&](const ScriptError& e) {
+        ++errors;
+        std::printf("       [пример] %s\n", e.Format().c_str());
+    });
+    auto frame = [&] {
+        input.BeginFrame();
+        input.UpdateActions(1.0f / 60.0f);
+        sys->Update(1.0f / 60.0f);
+    };
+    using sage::input::InputEvent;
+    using sage::input::Key;
+
+    CHECK_EQ(sys->AttachScene(scene), 1);
+    frame();
+    // Настройка «Lock Cursor» включена по умолчанию — курсор захвачен сразу.
+    CHECK_TRUE(cursor.Captured);
+    // Раскладку «Move» скрипт объявил сам: без неё в новом проекте он стоял.
+    CHECK_TRUE(input.Has("Move"));
+
+    // --- W: скорость — туда, куда смотрит камера ---------------------------
+    input.Push(InputEvent::KeyDown(Key::W));
+    frame();
+    const auto& cc = scene.Registry().get<CharacterControllerComponent>(hero.Entity());
+    CHECK_TRUE(cc.HasRequest);
+    glm::vec3 look = CameraLook(scene, camera.Entity());
+    look.y = 0.0f;
+    CHECK_NEAR(glm::dot(glm::normalize(cc.DesiredVelocity), glm::normalize(look)), 1.0f, 1e-4f);
+    input.Push(InputEvent::KeyUp(Key::W));
+    frame();
+
+    // --- Мышь вправо: взгляд уходит вправо (+X при взгляде в -Z) -----------
+    const glm::vec3 before = CameraLook(scene, camera.Entity());
+    input.Push(InputEvent::MouseMove(glm::vec2(10.0f, 0.0f), glm::vec2(100.0f, 0.0f)));
+    frame();
+    const glm::vec3 turned = CameraLook(scene, camera.Entity());
+    CHECK_TRUE(glm::cross(before, turned).y < -1e-3f); // поворот по часовой сверху — вправо
+
+    // --- Мышь от себя: взгляд вверх ----------------------------------------
+    input.Push(InputEvent::MouseMove(glm::vec2(10.0f, 10.0f), glm::vec2(0.0f, 100.0f)));
+    frame();
+    CHECK_TRUE(CameraLook(scene, camera.Entity()).y > 0.1f);
+
+    // --- Escape отпускает курсор, и обзор от мыши больше не крутится -------
+    input.Push(InputEvent::KeyDown(Key::Escape));
+    frame();
+    CHECK_FALSE(cursor.Captured);
+    const float yaw = scene.Registry().get<Transform>(hero.Entity()).Rotation.y;
+    input.Push(InputEvent::KeyUp(Key::Escape));
+    input.Push(InputEvent::MouseMove(glm::vec2(20.0f, 10.0f), glm::vec2(100.0f, 0.0f)));
+    frame();
+    CHECK_NEAR(scene.Registry().get<Transform>(hero.Entity()).Rotation.y, yaw, 1e-5f);
+
+    CHECK_EQ(errors, 0);
     sys->Shutdown();
 }
 

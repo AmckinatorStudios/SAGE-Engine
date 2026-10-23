@@ -155,6 +155,21 @@ public:
     }
     virtual bool SupportsCharacters() const { return false; }
 
+    // С чем персонаж сталкивается. Задаётся НА ХОДУ, а не только при создании:
+    // маску правят в инспекторе посреди Play («пусть проходит сквозь слой 3»),
+    // и пересоздавать ради неё контроллер значило бы терять его скорость.
+    virtual void SetCharacterCollidesWith(CharacterHandle character, LayerMask mask) {
+        (void)character; (void)mask;
+    }
+
+    // Тела, которых персонаж КАСАЕТСЯ после последнего шага: пол, стена, ящик.
+    // По ним сцена шлёт скриптам OnCollisionEnter/Exit — контроллер не тело
+    // мира, и обычная очередь контактов бэкенда о нём молчит.
+    virtual void CharacterContacts(CharacterHandle character, std::vector<BodyHandle>& out) const {
+        (void)character;
+        out.clear();
+    }
+
     // Фабрика бэкенда. Если запрошен Jolt, но он не скомпилирован — вернёт
     // встроенный движок (с предупреждением в лог), чтобы код не падал.
     static std::unique_ptr<PhysicsWorld> Create(Backend backend);

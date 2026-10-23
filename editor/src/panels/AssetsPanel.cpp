@@ -324,7 +324,10 @@ AssetsPanel::Cover AssetsPanel::ThumbnailFor(EditorHost& host, const fs::path& p
 
     // Кадр съёмки квадратный, поэтому пропорции у таких обложек 1:1.
     auto it = m_thumbs.find(key);
-    if (it != m_thumbs.end() && it->second.Stamp == stamp) return {it->second.Id, 1, 1};
+    if (it != m_thumbs.end() && it->second.Stamp == stamp) {
+        const std::shared_ptr<Material> mat = it->second.Mat.lock();
+        if (!mat || mat->Fingerprint() == it->second.Print) return {it->second.Id, 1, 1};
+    }
     if (m_thumbRenderedThisFrame) {
         // Очередь занята — отдаём прошлую обложку, если она была. Мигание
         // «пусто -> картинка» на каждой правке файла заметнее, чем кадр
@@ -340,9 +343,10 @@ AssetsPanel::Cover AssetsPanel::ThumbnailFor(EditorHost& host, const fs::path& p
     // сделанный сейчас, запомнил бы серые заглушки навсегда. Такая обложка
     // показывается, но не запоминается — её переснимут, когда карты доедут.
     bool provisional = false;
+    std::shared_ptr<Material> shot;
     if (ext == ".sagemat") {
-        if (std::shared_ptr<Material> mat = ResourceManager::Instance().GetMaterial(key))
-            id = m_preview.RenderMaterial(mat, 96, key);
+        shot = ResourceManager::Instance().GetMaterial(key);
+        if (shot) id = m_preview.RenderMaterial(shot, 96, key);
         provisional = ResourceManager::Instance().PendingAsyncTextures() > 0;
     } else if (ext == ".sageprefab") {
         id = m_preview.RenderPrefab(key, 96, key);
@@ -360,7 +364,7 @@ AssetsPanel::Cover AssetsPanel::ThumbnailFor(EditorHost& host, const fs::path& p
     // Ноль тоже запоминаем — иначе битый или пустой ассет пытался бы
     // отрисоваться каждый кадр, съедая всю очередь превью и не давая остальным
     // карточкам получить свои обложки.
-    m_thumbs[key] = Thumb{id, provisional ? -1 : stamp};
+    m_thumbs[key] = Thumb{id, provisional ? -1 : stamp, shot, shot ? shot->Fingerprint() : 0};
     if (id) m_thumbRenderedThisFrame = true;
     return {id, 1, 1};
 }

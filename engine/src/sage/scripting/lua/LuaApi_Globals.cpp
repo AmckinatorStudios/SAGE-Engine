@@ -127,6 +127,38 @@ void RegisterGlobals(Backend& backend) {
         in.Register(action);
         return in.AddBinding(action, Str(va, b + 1));
     });
+    // Ось и вектор — из скрипта, как и цифровое действие. Без них скрипт мог
+    // СПРОСИТЬ GetVector2("Move"), но объявить «Move» было нечем: в новом
+    // проекте пример персонажа (player_fps.lua) не двигался вовсе, пока
+    // раскладку не заведут руками в настройках.
+    //
+    // Объявляет ТОЛЬКО если у действия ещё нет привязок: раскладка из настроек
+    // проекта главнее умолчания игры, а повторный вызов (перезапуск Play,
+    // второй экземпляр скрипта) не должен удваивать клавиши.
+    input.set_function("BindVector", [self](sol::variadic_args va) {
+        const size_t b = Skip(va);
+        sage::input::InputSystem& in = NeedInput(*self, "BindVector");
+        const std::string action = Str(va, b);
+        if (action.empty()) return false;
+        if (const sage::input::Action* a = in.Find(action); a && !a->Bindings().empty()) return false;
+        in.Register(action, sage::input::ActionType::Vector)
+            .BindVector(Str(va, b + 1), Str(va, b + 2), Str(va, b + 3), Str(va, b + 4));
+        return true;
+    });
+    input.set_function("BindAxis", [self](sol::variadic_args va) {
+        const size_t b = Skip(va);
+        sage::input::InputSystem& in = NeedInput(*self, "BindAxis");
+        const std::string action = Str(va, b);
+        if (action.empty()) return false;
+        if (const sage::input::Action* a = in.Find(action); a && !a->Bindings().empty()) return false;
+        sage::input::Action& a = in.Register(action, sage::input::ActionType::Axis);
+        a.Bind(Str(va, b + 1));
+        a.Bind("-" + Str(va, b + 2));
+        return true;
+    });
+    input.set_function("HasAction", [self](sol::variadic_args va) {
+        return NeedInput(*self, "HasAction").Has(Str(va, Skip(va)));
+    });
     input.set_function("SetCursorCaptured", [self](sol::variadic_args va) {
         const size_t b = Skip(va);
         bool on = true;

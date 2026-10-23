@@ -88,6 +88,8 @@ public:
     void MoveCharacter(CharacterHandle character, const glm::vec3& velocity, float dt) override;
     CharacterState GetCharacterState(CharacterHandle character) const override;
     void SetCharacterPosition(CharacterHandle character, const glm::vec3& position) override;
+    void SetCharacterCollidesWith(CharacterHandle character, LayerMask mask) override;
+    void CharacterContacts(CharacterHandle character, std::vector<BodyHandle>& out) const override;
     bool SupportsCharacters() const override { return true; }
 
 private:

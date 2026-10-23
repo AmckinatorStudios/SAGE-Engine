@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <glm/glm.hpp>
+#include <entt/entt.hpp>
 #include "sage/physics/CharacterMotor.h"
 #include "sage/physics/PhysicsTypes.h"
 
@@ -102,7 +103,17 @@ struct CharacterControllerComponent {
     // настройка объекта, а не мира. 0 — не падает вовсе.
     float Gravity = -9.81f;
     float Mass = 70.0f;            // с какой силой толкает динамику
+    // --- Столкновения ------------------------------------------------------
+    // Слой самого персонажа (его видят лучи, зоны и чужие маски) и слои, с
+    // которыми он сталкивается. Маска — чтобы призрак проходил сквозь двери
+    // слоя «двери», а игрок — нет: без неё оставалось только убирать коллайдер
+    // у самой двери, то есть для всех сразу.
     sage::physics::LayerMask Layer = sage::physics::kLayerDefault;
+    sage::physics::LayerMask CollidesWith = sage::physics::kAllLayers;
+    // Слать скриптам OnCollisionEnter/Exit о касаниях персонажа (пол, стена,
+    // ящик). Выключают у толпы статистов: событие на каждое касание пола
+    // десятка болванчиков — работа, которой никто не читает.
+    bool CollisionEvents = true;
 
     // --- Что запросил скрипт в этом кадре (рантайм) ------------------------
     //
@@ -151,6 +162,9 @@ struct CharacterControllerComponent {
     bool LeftGround = false;
     bool Blocked = false;
     float StepUp = 0.0f;
+    // Кого персонаж касался на прошлом шаге: разница с нынешним — это и есть
+    // OnCollisionEnter/Exit. Рантайм, не сериализуется.
+    std::vector<entt::entity> Touching;
 };
 
 // Форма коллайдера. Размеры — ЛОКАЛЬНЫЕ (для единичной сущности); при создании

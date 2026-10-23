@@ -207,3 +207,116 @@ TEST(Trigger_mask_survives_save_and_load) {
     }
     CHECK_TRUE(found);
 }
+
+// --- Столкновения ПЕРСОНАЖА: события и маска слоёв ----------------------------
+//
+// Контроллер персонажа — не тело мира, и очередь контактов бэкенда о нём
+// молчала: персонаж вставал на пол и упирался в стену, а скрипт не получал ни
+// OnCollisionEnter, ни Exit. Маска CollidesWith при этом хранилась, но в шаг
+// Jolt не передавалась — персонаж сталкивался со всеми слоями подряд.
+namespace {
+int Touches(const PhysicsScene& p, entt::entity hero, entt::entity other, bool begin) {
+    int n = 0;
+    for (const PhysicsScene::EntityContact& c : p.Contacts())
+        if (!c.Sensor && c.Begin == begin && c.A == hero && c.B == other) ++n;
+    return n;
+}
+
+GameObject MakeWall(Scene& scene, unsigned layer) {
+    GameObject wall = scene.CreateObject("Wall");
+    wall.GetTransform().Position = {2.0f, 1.0f, 0.0f};
+    RigidBodyComponent rb{BodyType::Static};
+    rb.Layer = layer;
+    scene.Registry().emplace<RigidBodyComponent>(wall.Entity(), rb);
+    ColliderComponent col;
+    col.HalfExtents = {0.25f, 1.0f, 3.0f};
+    scene.Registry().emplace<ColliderComponent>(wall.Entity(), col);
+    return wall;
+}
+
+// Идёт на стену (+X) полторы секунды; возвращает, докуда дошёл.
+float WalkIntoWall(Backend backend, LayerMask collidesWith, bool* touchedWall = nullptr) {
+    Scene scene("CharWall");
+    MakeFloor(scene);
+    GameObject wall = MakeWall(scene, 1u << 2);
+    GameObject hero = scene.CreateObject("Hero");
+    auto& cc = scene.Registry().emplace<CharacterControllerComponent>(hero.Entity());
+    cc.CollidesWith = collidesWith;
+    PhysicsScene physics(backend, scene);
+    if (!physics.Available() || !physics.SupportsCharacters()) return -1.0f;
+    bool touched = false;
+    for (int i = 0; i < 90; ++i) {
+        auto& c = scene.Registry().get<CharacterControllerComponent>(hero.Entity());
+        c.DesiredVelocity = {3.0f, 0.0f, 0.0f};
+        c.HasRequest = true;
+        physics.Step(scene, kDt);
+        touched = touched || Touches(physics, hero.Entity(), wall.Entity(), true) > 0;
+    }
+    if (touchedWall) *touchedWall = touched;
+    return hero.GetTransform().Position.x;
+}
+} // namespace
+
+TEST(Character_collision_events_for_floor_and_wall) {
+    for (Backend backend : {Backend::Builtin, Backend::Jolt}) {
+        Scene scene("CharEvents");
+        GameObject floor = MakeFloor(scene);
+        GameObject hero = scene.CreateObject("Hero");
+        hero.GetTransform().Position = {0.0f, 0.5f, 0.0f};   // падает на пол
+        scene.Registry().emplace<CharacterControllerComponent>(hero.Entity());
+        PhysicsScene physics(backend, scene);
+        if (!physics.Available() || !physics.SupportsCharacters()) continue;
+
+        int landed = 0;
+        for (int i = 0; i < 60; ++i) {
+            physics.Step(scene, kDt);
+            landed += Touches(physics, hero.Entity(), floor.Entity(), true);
+        }
+        // Пол — ровно один вход, а не по событию на каждый шаг стояния.
+        CHECK_EQ(landed, 1);
+        const auto& cc = scene.Registry().get<CharacterControllerComponent>(hero.Entity());
+        CHECK_EQ((int)cc.Touching.size(), 1);
+
+        // Подняли над полом — выход.
+        physics.SetCharacterPosition(cc.Runtime, {0.0f, 5.0f, 0.0f});
+        physics.Step(scene, kDt);
+        CHECK_EQ(Touches(physics, hero.Entity(), floor.Entity(), false), 1);
+
+        bool touchedWall = false;
+        const float stopped = WalkIntoWall(backend, kAllLayers, &touchedWall);
+        CHECK_TRUE(touchedWall);
+        CHECK_TRUE(stopped < 1.8f);   // стена с x = 1.75 остановила
+    }
+}
+
+TEST(Character_collides_with_mask_lets_it_walk_through_other_layers) {
+    for (Backend backend : {Backend::Builtin, Backend::Jolt}) {
+        const float blocked = WalkIntoWall(backend, kAllLayers);
+        if (blocked < -0.5f) continue;   // бэкенд без персонажей
+        bool touched = true;
+        const float through = WalkIntoWall(backend, kAllLayers & ~(1u << 2), &touched);
+        CHECK_TRUE(blocked < 1.8f);
+        CHECK_TRUE(through > 3.0f);   // слой стены исключён — прошёл насквозь
+        CHECK_FALSE(touched);         // и не «ударился» о то, сквозь что прошёл
+    }
+}
+
+TEST(Character_collision_settings_survive_save_and_load) {
+    Scene scene("CharSave");
+    GameObject hero = scene.CreateObject("Hero");
+    auto& cc = scene.Registry().emplace<CharacterControllerComponent>(hero.Entity());
+    cc.Layer = 1u << 4;
+    cc.CollidesWith = 0x0Fu;
+    cc.CollisionEvents = false;
+    const std::string text = SceneSerializer::SaveToString(scene);
+    std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(text);
+    bool found = false;
+    loaded->Registry().view<CharacterControllerComponent>().each(
+        [&](entt::entity, const CharacterControllerComponent& c) {
+            found = true;
+            CHECK_EQ((unsigned)c.Layer, 1u << 4);
+            CHECK_EQ((unsigned)c.CollidesWith, 0x0Fu);
+            CHECK_FALSE(c.CollisionEvents);
+        });
+    CHECK_TRUE(found);
+}

@@ -151,8 +151,10 @@ void RegisterMath(Backend& backend) {
     v3["down"] = []() { return glm::vec3(0.0f, -1.0f, 0.0f); };
     v3["right"] = []() { return glm::vec3(1.0f, 0.0f, 0.0f); };
     v3["left"] = []() { return glm::vec3(-1.0f, 0.0f, 0.0f); };
-    v3["forward"] = []() { return glm::vec3(0.0f, 0.0f, 1.0f); };
-    v3["back"] = []() { return glm::vec3(0.0f, 0.0f, -1.0f); };
+    // Вперёд — -Z, как у Transform:Forward() и камеры: два разных «вперёд» в
+    // одном API — та самая перестановка W и S, которую чинили в Forward().
+    v3["forward"] = []() { return glm::vec3(0.0f, 0.0f, -1.0f); };
+    v3["back"] = []() { return glm::vec3(0.0f, 0.0f, 1.0f); };
     // Vector3.new(x, y, z) — то же, что Vector3(x, y, z).
     v3["new"] = [](sol::variadic_args args) {
         sol::variadic_args a = args;
