@@ -7,7 +7,10 @@ on:
 jobs:
   build-and-smoke-test:
     name: Build + headless smoke test (Linux)
-    runs-on: ubuntu-latest
+    # Образ закреплён: на «ubuntu-latest» раннер меняет CMake и GCC без
+    # предупреждения, и CI краснеет на чужом коде (модули Vulkan-Headers,
+    # glslang без <cstdint>, sol2 под GCC 15) — а не на правке.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -99,7 +102,10 @@ jobs:
 
   windows-cross-compile:
     name: Cross-compile check (Windows, build-only)
-    runs-on: ubuntu-latest
+    # Образ закреплён: на «ubuntu-latest» раннер меняет CMake и GCC без
+    # предупреждения, и CI краснеет на чужом коде (модули Vulkan-Headers,
+    # glslang без <cstdint>, sol2 под GCC 15) — а не на правке.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 

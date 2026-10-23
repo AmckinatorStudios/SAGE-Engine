@@ -45,7 +45,8 @@ permissions:
 jobs:
   windows:
     name: Windows (SageEditor.exe)
-    runs-on: ubuntu-latest
+    # Образ закреплён — см. ci.yml.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
