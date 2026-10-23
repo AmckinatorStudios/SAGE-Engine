@@ -35,7 +35,13 @@ function(sage_strip_release target)
     if (MSVC)
         return()   # у MSVC отладочные данные и так лежат отдельным .pdb
     endif()
-    target_link_options(${target} PRIVATE $<$<CONFIG:Release>:-Wl,--strip-debug>)
+    if (APPLE)
+        # ld64 не знает --strip-debug; -S — то же самое: без отладочных
+        # таблиц, но с таблицей символов (имена функций в отчёте о падении).
+        target_link_options(${target} PRIVATE $<$<CONFIG:Release>:-Wl,-S>)
+    else()
+        target_link_options(${target} PRIVATE $<$<CONFIG:Release>:-Wl,--strip-debug>)
+    endif()
 endfunction()
 
 function(sage_windows_manifest target)
@@ -136,6 +142,12 @@ function(sage_add_editor_plugin)
     # SageEditor.exe (см. WINDOWS_EXPORT_ALL_SYMBOLS в editor/CMakeLists.txt).
     if (WIN32)
         target_link_libraries(${PLUGIN_NAME} PRIVATE SageEditor)
+    endif()
+    # macOS: ld64 по умолчанию отказывает в неразрешённых символах даже у
+    # загружаемого модуля — разрешаем им резолвиться при загрузке против
+    # хоста (так же, как это работает на Linux без флагов).
+    if (APPLE)
+        target_link_options(${PLUGIN_NAME} PRIVATE -undefined dynamic_lookup)
     endif()
 
     add_custom_command(TARGET ${PLUGIN_NAME} POST_BUILD

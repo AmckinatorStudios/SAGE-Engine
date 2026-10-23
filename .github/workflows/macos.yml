@@ -1,0 +1,206 @@
+name: Сборка редактора для macOS
+
+# Собирает SageEditor.app для Mac на Apple Silicon и кладёт его в Releases
+# (скользящий релиз «macos-latest»), так же как windows.yml — «windows-latest».
+#
+# Почему отдельный файл, а не ещё одна работа в windows.yml: у сборок разные
+# раннеры, разные упаковки и разные проверки результата, а общего у них —
+# только правило «публиковать с main и только самую свежую сборку». Слитые в
+# одну работу, они падали бы друг за друга: сломанная упаковка .app оставляла
+# бы без свежего релиза и тех, кто качает .exe.
+on:
+  push:
+    # Те же ветки, что у windows.yml, и по той же причине резервные
+    # исключены прямо в списке (см. подробный комментарий там).
+    branches: [main, 'claude/**', '!claude/backup-main-**']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: macOS (SageEditor.app, Apple Silicon)
+    # Образ закреплён: обновление раннера (новый Xcode, новый clang) не должно
+    # ломать сборку посреди дня без единой правки в коде.
+    runs-on: macos-14
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Инструменты
+        run: brew list ninja >/dev/null 2>&1 || brew install ninja
+
+      # Vulkan выключен: на Mac его нет без MoltenVK, а рендерит движок через
+      # OpenGL 3.3 core — его macOS даёт на любом Mac. Минимальная система —
+      # macOS 12: старше нет обновлений безопасности, и проверять сборку там нечем.
+      - name: Сборка
+        run: |
+          cmake -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DSAGE_VULKAN=OFF -DSAGE_BUILD_SAMPLES=OFF
+          cmake --build build-macos -j"$(sysctl -n hw.ncpu)"
+
+      # Модульные тесты — на той же платформе, которую выпускаем: «собралось»
+      # ещё не значит «работает» (порядок байт, размеры типов, файловая
+      # система без учёта регистра, другая libc++).
+      - name: Модульные тесты
+        working-directory: build-macos
+        run: ./tests/sage_tests
+
+      - name: Проверка результата
+        run: |
+          EXE=build-macos/editor/SageEditor
+          test -x "$EXE" || { echo "::error::SageEditor не собрался"; exit 1; }
+          test -x build-macos/runtime/SagePlayer \
+            || { echo "::error::SagePlayer не собрался — Build Game работать не будет"; exit 1; }
+          file "$EXE"
+          lipo -archs "$EXE" | grep -q arm64 || { echo "::error::нет кода для Apple Silicon"; exit 1; }
+          # Только системные библиотеки: всё, что лежит в /opt/homebrew или
+          # /usr/local, есть только на раннере, и у скачавшего программа не
+          # запустится вовсе.
+          LIBS=$(otool -L "$EXE" | tail -n +2 | awk '{print $1}')
+          echo "SageEditor требует:"; echo "$LIBS"
+          for lib in $LIBS; do
+            case "$lib" in
+              /System/Library/*|/usr/lib/*|@rpath/*|@executable_path/*) ;;
+              *) echo "::error::SageEditor просит постороннюю библиотеку $lib — у скачавшего не запустится"; exit 1 ;;
+            esac
+          done
+
+      - name: Сборка SageEditor.app
+        run: |
+          APP=SageEditor.app
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          VERSION="$(cat VERSION)"
+          BUILD="$(git rev-parse --short HEAD)"
+          sed -e "s/@VERSION@/$VERSION/" -e "s/@BUILD@/$BUILD/" cmake/macos/Info.plist.in > "$APP/Contents/Info.plist"
+          plutil -lint "$APP/Contents/Info.plist"
+
+          # Всё, что редактор ищет «рядом с собой» (ExecutableDir), — рядом с
+          # исполняемым файлом внутри пакета: шрифт и шейдеры, плеер для Build
+          # Game, темы, плагин-пример.
+          M="$APP/Contents/MacOS"
+          cp build-macos/editor/SageEditor "$M/"
+          cp -R build-macos/editor/assets "$M/assets"
+          [ -d build-macos/editor/themes ] && cp -R build-macos/editor/themes "$M/themes"
+          [ -d build-macos/editor/plugins ] && cp -R build-macos/editor/plugins "$M/plugins"
+          mkdir -p "$M/runtime"
+          cp build-macos/runtime/SagePlayer "$M/runtime/"
+          cp -R build-macos/runtime/assets "$M/runtime/assets"
+
+          # Подпись «ad hoc» (без сертификата): на Apple Silicon неподписанный
+          # код не запускается совсем. Сертификата Apple у проекта нет, поэтому
+          # первый запуск — правой кнопкой «Открыть» (см. README.txt).
+          codesign --force --deep --sign - "$APP"
+          codesign --verify --deep --strict "$APP"
+
+          PKG=SageEditor-macOS
+          rm -rf "$PKG" && mkdir -p "$PKG"
+          mv "$APP" "$PKG/"
+          cp docs/README-macos.txt "$PKG/README.txt"
+          cp CHANGELOG.md "$PKG/CHANGELOG.md"
+          # ditto, а не zip: он сохраняет атрибуты и подпись пакета — архив из
+          # zip даёт «программа повреждена».
+          ditto -c -k --keepParent "$PKG" "$PKG.zip"
+          ls -la "$PKG.zip"
+
+      # Запуск собранного пакета ДО публикации: редактор поднимается, грузит
+      # шрифт и шейдеры из пакета и проходит самопроверку. Без этого «собралось
+      # и подписалось» ничего не говорит о том, откроется ли окно у скачавшего.
+      - name: Запуск из пакета (самопроверка)
+        run: |
+          # Из папки самой программы, как самопроверка на Linux: она пишет
+          # рядом с собой тестовые проекты. Архив к этому моменту уже собран,
+          # так что в выпуск это не попадает.
+          cd "SageEditor-macOS/SageEditor.app/Contents/MacOS"
+          SAGE_EDITOR_SELFTEST=1 ./SageEditor > run.log 2>&1 &
+          PID=$!
+          for _ in $(seq 1 180); do
+            if grep -qE "SELFTEST: (PASS|FAIL)" sage_editor.log 2>/dev/null; then break; fi
+            if ! kill -0 $PID 2>/dev/null; then break; fi
+            sleep 5
+          done
+          kill $PID 2>/dev/null || true
+          grep -E "SELFTEST: (PASS|FAIL)" sage_editor.log || true
+          if ! grep -q "SELFTEST: PASS" sage_editor.log 2>/dev/null; then
+            echo "::error::самопроверка редактора из пакета не прошла"
+            tail -n 80 sage_editor.log 2>/dev/null || tail -n 80 run.log
+            exit 1
+          fi
+
+      - name: Загрузить архив (вкладка Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SageEditor-macOS
+          path: SageEditor-macOS.zip
+
+      # Публикация — по тем же правилам, что у windows.yml: только с main
+      # (или по тегу) и только если эта сборка всё ещё самая свежая.
+      - name: Опубликовать в Releases
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.ref == 'refs/heads/main' || github.ref_type == 'tag')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ github.ref_type }}" != "tag" ]]; then
+            HEAD_NOW="$(gh api repos/${{ github.repository }}/commits/main --jq .sha)"
+            if [[ -n "$HEAD_NOW" && "$HEAD_NOW" != "${{ github.sha }}" ]]; then
+              echo "main уже ушёл вперёд ($HEAD_NOW), релиз выложит более свежая сборка"
+              exit 0
+            fi
+          fi
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            # У тега один релиз на обе платформы: архив macOS дописывается к
+            # релизу, который создаёт windows.yml (или создаёт его сам).
+            TAG="${{ github.ref_name }}"
+            for _ in $(seq 1 40); do gh release view "$TAG" >/dev/null 2>&1 && break; sleep 15; done
+            if gh release view "$TAG" >/dev/null 2>&1; then
+              gh release upload "$TAG" SageEditor-macOS.zip --clobber
+            else
+              gh release create "$TAG" SageEditor-macOS.zip --title "SAGE Editor $TAG" --notes "Сборка $TAG"
+            fi
+            exit 0
+          fi
+
+          TAG="macos-latest"
+          TITLE="SAGE Editor — последняя сборка для macOS"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            gh release view "$TAG" >/dev/null 2>&1 || break
+            echo "жду, пока старый релиз $TAG исчезнет..."
+            sleep 3
+          done
+          git push --delete origin "$TAG" 2>/dev/null || true
+
+          SUBJECT="$(git log -1 --pretty=%s)"
+          WHEN="$(git log -1 --date=format:'%d.%m.%Y %H:%M' --pretty=%cd)"
+          SHORT="$(git rev-parse --short HEAD)"
+          LATEST="$(awk '/^### /{n++} n==1{print} n==2{exit} /^## / && n>=1{exit}' CHANGELOG.md)"
+          NOTES="$(printf '%s\n\n%s\n\n%s\n\n%s\n%s\n%s' \
+            'Скачайте SageEditor-macOS.zip, распакуйте и откройте SageEditor.app. ПЕРВЫЙ запуск — правой кнопкой по программе → «Открыть»: она не подписана сертификатом Apple (подробно — README.txt в архиве).' \
+            'Для Mac на Apple Silicon (M1 и новее), macOS 12 и новее. Внутри: редактор, плеер для File → Build Game, темы оформления и плагин-пример.' \
+            'Сборка для Windows — релиз windows-latest.' \
+            "Собрано из: $SHORT — $SUBJECT" \
+            "Дата коммита: $WHEN" \
+            'Если что-то не запускается — причина в ~/.config/sage/editor/sage_editor.log.')"
+          if [[ -n "$LATEST" ]]; then
+            NOTES="$(printf '%s\n\n## Что изменилось (версия 0.5, путь к 1.0)\n\n%s\n\nВесь журнал — CHANGELOG.md в архиве и в репозитории.' "$NOTES" "$LATEST")"
+          fi
+          published=""
+          for attempt in 1 2 3; do
+            if gh release create "$TAG" SageEditor-macOS.zip --title "$TITLE" --notes "$NOTES"; then
+              published=1
+              break
+            fi
+            echo "попытка $attempt не удалась, повтор через 5 с"
+            sleep 5
+          done
+          if [[ -z "$published" ]]; then
+            gh release edit "$TAG" --title "$TITLE" --notes "$NOTES"
+            gh release upload "$TAG" SageEditor-macOS.zip --clobber
+          fi

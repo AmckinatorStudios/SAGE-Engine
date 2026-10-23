@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>                <string>SAGE Editor</string>
+    <key>CFBundleDisplayName</key>         <string>SAGE Editor</string>
+    <key>CFBundleIdentifier</key>          <string>studio.amckinator.sage.editor</string>
+    <key>CFBundleExecutable</key>          <string>SageEditor</string>
+    <key>CFBundlePackageType</key>         <string>APPL</string>
+    <key>CFBundleShortVersionString</key>  <string>@VERSION@</string>
+    <key>CFBundleVersion</key>             <string>@BUILD@</string>
+    <key>LSMinimumSystemVersion</key>      <string>12.0</string>
+    <key>NSHighResolutionCapable</key>     <true/>
+    <!-- Пипетка за пределами окна читает экран: macOS спросит разрешение. -->
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>Пипетка редактора берёт цвет с экрана.</string>
+</dict>
+</plist>

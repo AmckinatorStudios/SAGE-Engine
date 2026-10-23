@@ -600,7 +600,12 @@ bool OpenWithSystem(const fs::path& target) {
         else quoted += c;
     }
     quoted += "'";
+#ifdef __APPLE__
+    // macOS: «открыть так, как открывает Finder» — системная команда open.
+    const std::string cmd = "open " + quoted + " >/dev/null 2>&1 &";
+#else
     const std::string cmd = "xdg-open " + quoted + " >/dev/null 2>&1 &";
+#endif
     return std::system(cmd.c_str()) == 0;
 #endif
 }
