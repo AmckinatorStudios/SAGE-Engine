@@ -13,7 +13,12 @@
 add_executable(SageEditor WIN32
     src/main.cpp
     src/EditorLayer.cpp
+    src/EditorLayer_Startup.cpp
+    src/EditorLayer_StartupHooks.cpp
     src/EditorLayer_Project.cpp
+    src/EditorLayer_Build.cpp
+    src/EditorLayer_Prompts.cpp
+    src/EditorLayer_ProjectInput.cpp
     src/EditorLayer_Play.cpp
     src/EditorLayer_LuaTests.cpp
     src/EditorPlaySession.cpp
@@ -27,8 +32,29 @@ add_executable(SageEditor WIN32
     src/EditorTools.cpp
     src/EditorLayer_Assets.cpp
     src/EditorLayer_Ui.cpp
-    src/EditorSelfTest.cpp
+    src/EditorLayer_StatusBar.cpp
+    src/selftest/SelfTestE2E.cpp
+    src/selftest/SelfTestFixtures.cpp
+    src/selftest/SelfTestFrames.cpp
+    src/selftest/SelfTestInputProbe.cpp
+    src/selftest/SelfTestPlugins.cpp
+    src/selftest/SelfTestProjectAndAssets.cpp
+    src/selftest/SelfTestRenderStability.cpp
+    src/selftest/SelfTestRun.cpp
+    src/selftest/SelfTestSceneAndPlay.cpp
+    src/selftest/SelfTestSelection.cpp
+    src/selftest/SelfTestSelection_CatalogAndLiveFiles.cpp
+    src/selftest/SelfTestSelection_IconsAndDialogs.cpp
+    src/selftest/SelfTestSelection_ObjectsAndMarkers.cpp
+    src/selftest/SelfTestSelection_SceneBasics.cpp
+    src/selftest/SelfTestSystems.cpp
+    src/selftest/SelfTestTools.cpp
+    src/selftest/SelfTestTools_AssetsAndPanels.cpp
+    src/selftest/SelfTestTools_Authoring.cpp
+    src/selftest/SelfTestTools_LayoutAndData.cpp
     src/EditorSceneRenderer.cpp
+    src/EditorSceneRenderer_Gizmos.cpp
+    src/EditorSceneRenderer_Game.cpp
     src/EditorTheme.cpp
     src/PostChainUi.cpp
     src/ParticleUi.cpp
@@ -42,7 +68,6 @@ add_executable(SageEditor WIN32
     src/CreateAssetDialog.cpp
     src/LuaPlugins.cpp
     src/PluginsWindow.cpp
-    src/EditorSelfTest_Plugins.cpp
     src/ObjectSlot.cpp
     src/GameBuilder.cpp
     src/ScreenColor.cpp
@@ -53,6 +78,7 @@ add_executable(SageEditor WIN32
     src/Project.cpp
     src/PluginManager.cpp
     src/ProjectLauncher/ProjectLauncher.cpp
+    src/ProjectLauncher/ProjectLauncher_Panes.cpp
     src/ProjectLauncher/ProjectDatabase.cpp
     src/ProjectLauncher/ProjectCard.cpp
     src/ProjectLauncher/ProjectThumbnail.cpp
@@ -63,10 +89,18 @@ add_executable(SageEditor WIN32
     src/panels/InspectorPanel.cpp
     src/panels/InspectorPanel_Material.cpp
     src/panels/InspectorPanel_Entity.cpp
+    src/panels/InspectorPanel_Physics.cpp
+    src/panels/InspectorPanel_Animation.cpp
+    src/panels/InspectorPanel_Effects.cpp
+    src/panels/InspectorPanel_AddComponent.cpp
     src/panels/InspectorPanel_Ui.cpp
     src/panels/ViewportPanel.cpp
+    src/panels/ViewportPanel_Pilot.cpp
     src/panels/GamePanel.cpp
     src/panels/AssetsPanel.cpp
+    src/panels/AssetsPanel_Tile.cpp
+    src/panels/AssetsPanel_Files.cpp
+    src/panels/AssetsPanel_Import.cpp
     src/panels/EnvironmentPanel.cpp
     src/EditorPrefs.cpp
     src/HotkeyScope.cpp
@@ -78,12 +112,15 @@ add_executable(SageEditor WIN32
     src/Progress.cpp
     src/TextureSet.cpp
     src/UIElementProperties.cpp
+    src/UIElementProperties_Layout.cpp
     src/VarsEditor.cpp
     src/SignalLinksEditor.cpp
     src/panels/TopBarPanel.cpp
     src/panels/ViewportTools.cpp
     src/panels/SettingsPanel.cpp
     src/panels/InputPanel.cpp
+    src/panels/InputPanel_Modals.cpp
+    src/panels/InputPanel_Properties.cpp
     src/panels/DialogsPanel.cpp
     src/panels/ProfilerPanel.cpp
     src/AssetCovers.cpp
@@ -104,7 +141,11 @@ add_executable(SageEditor WIN32
     src/interface/InterfaceWidgets.cpp
     src/ui/TreeLines.cpp
     src/panels/AnimationPanel.cpp
+    src/panels/AnimationPanel_Timeline.cpp
     src/panels/TweenPanel.cpp
+    src/TweenUi.cpp
+    src/panels/TweenPanel_Cards.cpp
+    src/panels/TweenPanel_Menus.cpp
     src/panels/NineSlicePanel.cpp
     src/AssetPreview.cpp
 )

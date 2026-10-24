@@ -103,6 +103,11 @@ public:
     EditorLayer();
 
     void OnAttach() override;
+    // Этапы OnAttach (EditorLayer_Startup.cpp, хуки прогонов — _StartupHooks.cpp).
+    void InitImGui();
+    void InitEditorServices();
+    void InitPlugins();
+    void ApplyStartupHooks();
     // Файлы, брошенные в окно из проводника: проект/сцена открываются,
     // остальное вносится в проект. Разбирается в кадре, а не в колбэке GLFW.
     void HandleDroppedFiles();
@@ -421,6 +426,14 @@ private:
     bool SelfTestSceneAndPlay();
     bool SelfTestSystems();
     bool SelfTestSelection();
+    // Части SelfTestSelection и SelfTestTools — по файлу selftest/*.cpp на часть.
+    bool SelfTestSceneBasics();
+    bool SelfTestIconsAndDialogs();
+    bool SelfTestObjectsAndMarkers();
+    bool SelfTestCatalogAndLiveFiles();
+    bool SelfTestToolsAuthoring();
+    bool SelfTestToolsAssetsAndPanels();
+    bool SelfTestToolsLayoutAndData();
     bool SelfTestTools(); // SAGE_EDITOR_SELFTEST=1 (для CI)
     bool SelfTestRenderStability(); // кадр вьюпорта не «уплывает» от повторов
     bool SelfTestPickerAndPrefabs(); // пипетка слота объекта, префабы броском

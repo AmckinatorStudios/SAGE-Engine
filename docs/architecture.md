@@ -170,7 +170,10 @@ SAGE-Engine/
     src/EditorHost.h          — контракт операций редактора для панелей
     src/EditorTheme.*         — темы оформления (роли/метрики/шрифт, themes/*.json)
     src/panels/               — панели: Hierarchy, Inspector, Viewport, Game,
-                                Console, Assets (каждая — свой класс)
+                                Console, Assets (каждая — свой класс; крупная —
+                                несколькими файлами, см. «Модули редактора»)
+    src/selftest/             — самопроверка редактора (SAGE_EDITOR_SELFTEST=1),
+                                по файлу на область
     src/ProjectLauncher/      — стартовое окно проектов: отдельный экран со
                                 своей базой проектов (~/.config/sage/projects.json),
                                 карточками, обложками и созданием проекта
@@ -197,6 +200,40 @@ SAGE-Engine/
 `#include <glad/...>` на уровне устройства есть только в `engine/src/rhi/opengl/`.
 Следующую игру можно собрать, слинковав ту же библиотеку и написав свой слой +
 `CreateApplication`.
+
+## Модули редактора
+
+Редактор — один класс-хозяин (`EditorLayer`, реализует `EditorHost`) и панели,
+которые знают только `EditorHost`. Чтобы файл отвечал на один вопрос, крупные
+части разнесены по файлам **по обязанностям**, а не по счёту строк:
+
+| Что | Файлы |
+|---|---|
+| Запуск редактора | `EditorLayer.cpp` (`OnAttach` — четыре этапа), `EditorLayer_Startup.cpp` (ImGui, службы, плагины), `EditorLayer_StartupHooks.cpp` (переменные `SAGE_EDITOR_*` для прогонов без человека) |
+| Проект | `EditorLayer_Project.cpp` (сцены, создание/открытие), `_Build.cpp` (сборка игры), `_Prompts.cpp` (отчёт о падении, восстановление, несохранённое), `_ProjectInput.cpp` (раскладка управления) |
+| Оболочка | `EditorLayer_Ui.cpp` (докинг, меню), `EditorLayer_StatusBar.cpp` (строка состояния, «О программе») |
+| Рендер редактора | `EditorSceneRenderer.cpp` (вьюпорт), `_Gizmos.cpp` (каркасы невидимых объектов), `_Game.cpp` (панель Game и превью камеры) |
+| Инспектор объекта | `InspectorPanel_Entity.cpp` (имя, Transform, меш, камера, свет, скрипт), `_Physics.cpp`, `_Animation.cpp`, `_Effects.cpp`, `_AddComponent.cpp` |
+| Панель Assets | `AssetsPanel.cpp` (дерево, навигация, отрисовка), `_Tile.cpp` (плитка и обложки), `_Files.cpp` (перенос, переименование, внесение, создание — без интерфейса), `_Import.cpp` |
+| Окна | `TweenPanel` (+ `_Cards`, `_Menus`), `InputPanel` (+ `_Modals`, `_Properties`), `AnimationPanel` (+ `_Timeline`), `ViewportPanel` (+ `_Pilot`), `ProjectLauncher` (+ `_Panes`), `UIElementProperties` (+ `_Layout`) |
+| Самопроверка | `selftest/SelfTest*.cpp` — по файлу на область; `SelfTestCommon.h` — общие заголовки и генераторы эталонных файлов |
+
+**Правила.**
+
+- Внутренние помощники модуля, нужные нескольким его файлам, лежат в
+  `<Модуль>Detail.h` рядом (`InspectorPanelDetail.h`, `AssetsPanelDetail.h`,
+  `TweenPanelDetail.h`, `InputPanelDetail.h`…) в своём пространстве имён.
+  Снаружи модуля их не включают.
+- То, что нужно ДРУГИМ модулям, выносится отдельным модулем, а не берётся из
+  чужой панели: подписи твинов (`tweenui::`) нужны и окну Tween, и
+  инспектору — поэтому они в `TweenUi.h`, и инспектор не зависит от окна.
+- Панель не включает заголовки других панелей: общается через `EditorHost`.
+- Файл не длиннее 1000 строк — сторожит `scripts/check_file_size.py`. Старые
+  длинные файлы записаны в `scripts/file_size_baseline.json` и могут только
+  уменьшаться (сейчас там один — `ViewportPanel.cpp`, у которого `Draw` —
+  одна функция).
+- Отрисовка каждого кадра не ходит на диск: списки папок и время правки файлов
+  берутся из `FsCache` (`fscache::List`, `fscache::Stamp`).
 
 ## Как сделать новую игру
 ```cmake

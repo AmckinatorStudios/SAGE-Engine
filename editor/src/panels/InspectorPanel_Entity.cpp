@@ -18,7 +18,7 @@
 #include "InspectorPanel.h"
 #include "../SignalLinksEditor.h"
 #include "../UIElementProperties.h"
-#include "TweenPanel.h"
+
 
 #include <cmath>
 #include <cstdio>
@@ -148,56 +148,8 @@ void InspectorPanel::DrawSunSection(EditorHost& host, GameObject obj) {
     }
 }
 
-namespace {
-// Две строки пояснения одной подсказкой. Разбивать их на две всплывашки нечем —
-// подсказка у элемента одна, а разносить смысл по разным полям значит заставить
-// искать вторую половину.
-std::string Hint2(const char* a, const char* b) { return std::string(a) + "\n" + b; }
-
-// Слой — номер (1..32), а хранится битом: так его понимает маска лучей и зон,
-// а человек думает «слой 3», а не «бит 4». Общий для тела и персонажа, иначе
-// одно и то же поле в двух секциях рисовалось бы по-разному.
-void LayerSlider(EditorHost& host, sage::physics::LayerMask& mask) {
-    int layer = 1;
-    for (int b = 0; b < 32; ++b)
-        if (mask & (1u << b)) { layer = b + 1; break; }
-    if (ImGui::SliderInt(T("Layer"), &layer, 1, 32)) {
-        host.PushUndoSnapshot();
-        mask = 1u << (layer - 1);
-    }
-}
-
-// Маска слоёв списком галочек: «все», «ничего» или сколько отмечено.
-void LayerMaskCombo(EditorHost& host, const char* label, sage::physics::LayerMask& mask) {
-    char preview[32];
-    if (mask == sage::physics::kAllLayers) std::snprintf(preview, sizeof(preview), "%s", T("All layers"));
-    else if (mask == 0) std::snprintf(preview, sizeof(preview), "%s", T("Nothing"));
-    else {
-        int n = 0;
-        for (int b = 0; b < 32; ++b) n += (mask >> b) & 1u;
-        std::snprintf(preview, sizeof(preview), T("%d layers"), n);
-    }
-    if (ImGui::BeginCombo(label, preview)) {
-        if (ImGui::Selectable(T("All layers"), mask == sage::physics::kAllLayers)) {
-            host.PushUndoSnapshot();
-            mask = sage::physics::kAllLayers;
-        }
-        for (int b = 0; b < 32; ++b) {
-            char item[32];
-            std::snprintf(item, sizeof(item), T("Layer %d"), b + 1);
-            bool on = (mask >> b) & 1u;
-            ImGui::PushID(b);
-            if (ImGui::Checkbox(item, &on)) {
-                host.PushUndoSnapshot();
-                if (on) mask |= 1u << b;
-                else mask &= ~(1u << b);
-            }
-            ImGui::PopID();
-        }
-        ImGui::EndCombo();
-    }
-}
-} // namespace
+#include "InspectorPanelDetail.h"
+using namespace sage::editor::inspectordetail;
 
 // Связанные оси масштаба: ось, которую потянули, тянет за собой две другие.
 //
@@ -320,26 +272,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // Флаги «убрать компонент»: кнопка живёт в ЗАГОЛОВКЕ секции, а снятие
     // происходит в конце разбора — иначе компонент исчезал бы из-под кода,
     // который прямо сейчас рисует его поля.
-    bool rmMesh = false;
-    bool rmCamera = false;
-    bool rmLight = false;
-    bool rmPostProcess = false;
-    bool rmInterface = false;
-    bool rmDecal = false;
-    bool rmGiStatic = false;
-    bool rmNet = false;
-    bool rmScript = false;
-    bool rmBody = false;
-    bool rmCollider = false;
-    bool rmCharacter = false;
-    bool rmJoint = false;
-    bool rmAnimation = false;
-    bool rmPropertyAnim = false;
-    bool rmTween = false;
-    bool rmProbe = false;
-    bool rmIk = false;
-    bool rmEmitter = false;
-    bool rmAudio = false;
+    EntityRemovals rm;   // что снять — снимается после всех секций
 
     if (EditorTheme::SectionHeader("move", T("Transform" "###Transform"), ImGuiTreeNodeFlags_DefaultOpen)) {
         // СЕТКА СВОЙСТВ, а не DragFloat3 с подписью.
@@ -428,14 +361,14 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // того, кто ничем не рисуется; добавляется компонент кнопкой «Добавить
     // компонент», как и все остальные.
     if (reg.all_of<MeshRendererComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader("cube", T("Mesh" "###Mesh"), ImGuiTreeNodeFlags_DefaultOpen, &rmMesh)) {
+        EditorTheme::SectionHeader("cube", T("Mesh" "###Mesh"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Mesh)) {
         MeshRendererComponent& mr = obj.Renderer();
         DrawMeshSlot(host, obj.Entity(), mr, reg.all_of<AnimationComponent>(obj.Entity()));
         DrawMaterialSlot(host, mr);
     }
 
     // --- Камера (игровая): панель Game рендерит от первой Primary-камеры ---
-    if (reg.all_of<CameraComponent>(obj.Entity()) && EditorTheme::SectionHeader("camera", T("Camera" "###Camera"), ImGuiTreeNodeFlags_DefaultOpen, &rmCamera)) {
+    if (reg.all_of<CameraComponent>(obj.Entity()) && EditorTheme::SectionHeader("camera", T("Camera" "###Camera"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Camera)) {
         if (CameraComponent* cam = reg.try_get<CameraComponent>(obj.Entity())) {
             ImGui::DragFloat(T("FOV"), &cam->Fov, 0.5f, 10.0f, 140.0f); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Near"), &cam->NearClip, 0.01f, 0.001f, 10.0f); host.TrackLastImGuiItem();
@@ -447,7 +380,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     // --- Свет (позиция — Transform сущности; тип: точечный / прожектор / солнце) ---
 
-    if (reg.all_of<LightComponent>(obj.Entity()) && EditorTheme::SectionHeader("light", T("Light" "###Light"), ImGuiTreeNodeFlags_DefaultOpen, &rmLight)) {
+    if (reg.all_of<LightComponent>(obj.Entity()) && EditorTheme::SectionHeader("light", T("Light" "###Light"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Light)) {
         if (LightComponent* light = reg.try_get<LightComponent>(obj.Entity())) {
             const char* types[] = {T("Point"), T("Spot"), T("Directional (sun)")};
             int kind = (int)light->Kind;
@@ -488,11 +421,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Тракт пост-обработки камеры ---
-    DrawPostProcessSection(host, reg, obj.Entity(), &rmPostProcess);
+    DrawPostProcessSection(host, reg, obj.Entity(), &rm.PostProcess);
 
     // --- Наклейка (проекция картинки на геометрию сцены) ---
     if (reg.all_of<DecalComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader("texture", T("Decal" "###Decal"), ImGuiTreeNodeFlags_DefaultOpen, &rmDecal,
+        EditorTheme::SectionHeader("texture", T("Decal" "###Decal"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Decal,
                                        T("Projection goes along -Z; Scale sets the size"))) {
         DecalComponent& dc = reg.get<DecalComponent>(obj.Entity());
         bool changed = false;
@@ -540,7 +473,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         EditorTheme::Hint(Hint2(T("Marked as static geometry for baked lighting"),
                                 T("Baking is temporarily unavailable in the editor")).c_str());
         ImGui::SameLine();
-        if (ImGui::Button(T("Remove##gistatic"))) rmGiStatic = true;
+        if (ImGui::Button(T("Remove##gistatic"))) rm.GiStatic = true;
     }
 
     // У этого компонента НЕТ ПОЛЕЙ: он флаг, и вся его настройка — есть он или
@@ -553,10 +486,10 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                                 T("Position, rotation, scale, color and primitive are replicated"))
                               .c_str());
         ImGui::SameLine();
-        if (ImGui::Button(T("Remove##netreplicated"))) rmNet = true;
+        if (ImGui::Button(T("Remove##netreplicated"))) rm.Net = true;
     }
 
-    if (reg.all_of<ScriptComponent>(obj.Entity()) && EditorTheme::SectionHeader("script", T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen, &rmScript,
+    if (reg.all_of<ScriptComponent>(obj.Entity()) && EditorTheme::SectionHeader("script", T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Script,
                                        T("Runs in Play mode: Start, Update, FixedUpdate, collisions"))) {
         if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
             // Тот же слот, что у меша, материала и текстур (см. AssetSlot.h):
@@ -651,876 +584,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
-    // --- Твёрдое тело (симулируется в Play-режиме выбранным бэкендом физики) ---
-    if (reg.all_of<RigidBodyComponent>(obj.Entity()) && EditorTheme::SectionHeader("physics", T("Rigid Body" "###Rigid Body"), ImGuiTreeNodeFlags_DefaultOpen, &rmBody,
-                                       T("Dynamic falls under gravity; Static/Kinematic don't"))) {
-        if (RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(obj.Entity())) {
-            // Порядок строго совпадает с sage::physics::BodyType.
-            const char* types[] = {T("Static"), T("Dynamic"), T("Kinematic")};
-            int kind = (int)rb->Type;
-            if (ImGui::Combo(T("Body Type"), &kind, types, IM_ARRAYSIZE(types))) {
-                host.PushUndoSnapshot();
-                rb->Type = (sage::physics::BodyType)kind;
-            }
-            const bool dynamic = rb->Type == sage::physics::BodyType::Dynamic;
-            // Масса — только у падающего тела: статике и кинематике она ни к
-            // чему, и поле, которое ни на что не влияет, только путает.
-            if (dynamic) {
-                // Логарифмическая шкала: и граммы, и тонны в одном поле без
-                // ввода с клавиатуры.
-                ImGui::DragFloat(T("Mass"), &rb->Mass, 0.05f, 0.001f, 100000.0f, "%.3f",
-                                 ImGuiSliderFlags_Logarithmic);
-                host.TrackLastImGuiItem();
-            }
+    DrawPhysicsSections(host, obj, reg, rm);
 
-            // Как тело движется прямо сейчас — в игре видно, крутится ли оно и
-            // с какой скоростью летит, без отладочного вывода из скрипта.
-            if (PhysicsScene* physics = host.PlayPhysics(); physics && dynamic &&
-                                                            rb->RuntimeBody != sage::physics::kInvalidBody) {
-                const glm::vec3 v = physics->GetLinearVelocity(rb->RuntimeBody);
-                const glm::vec3 w = physics->GetAngularVelocity(rb->RuntimeBody);
-                ImGui::TextDisabled(T("Speed %.2f m/s, spin %.2f rad/s%s"), glm::length(v), glm::length(w),
-                                    physics->IsSleeping(rb->RuntimeBody) ? T(", asleep") : "");
-            }
+    DrawAnimationSections(host, obj, reg, rm);
 
-            // Трение, упругость, слой и тонкая настройка движения — нужны
-            // реже, чем тип и масса.
-            if (EditorTheme::BeginMore("rbMore")) {
-            ImGui::DragFloat(T("Friction"), &rb->Friction, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Restitution"), &rb->Restitution, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", T("Bounciness: 0 lands dead, 1 bounces back to the same height"));
-
-            if (dynamic) {
-                ImGui::DragFloat(T("Linear Damping"), &rb->LinearDamping, 0.005f, 0.0f, 1.0f);
-                host.TrackLastImGuiItem();
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", T("Air or water drag: share of speed lost per second"));
-                ImGui::DragFloat(T("Angular Damping"), &rb->AngularDamping, 0.005f, 0.0f, 1.0f);
-                host.TrackLastImGuiItem();
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", T("Slows spinning and rolling: raise it so balls stop sooner"));
-                ImGui::DragFloat(T("Gravity Scale"), &rb->GravityScale, 0.01f, -10.0f, 10.0f);
-                host.TrackLastImGuiItem();
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", T("0 floats, 1 is normal weight, 2 falls twice as hard"));
-                bool ccd = rb->Continuous;
-                if (ImGui::Checkbox(T("Continuous Collision"), &ccd)) {
-                    host.PushUndoSnapshot();
-                    rb->Continuous = ccd;
-                }
-                if (ImGui::IsItemHovered())
-                    ImGui::SetTooltip("%s", T("Checks the whole path each step: fast objects neither pass through walls nor sink into the floor"));
-
-                // Заморозка осей — одной строкой из трёх галочек на группу:
-                // «не опрокидывается» и «игра в плоскости» так делаются за
-                // клик, без скрипта, который гасил бы скорость каждый кадр.
-                auto lockRow = [&](const char* label, uint8_t firstBit) {
-                    ImGui::PushID(label);
-                    ImGui::TextUnformatted(label);
-                    const char* axes[] = {"X", "Y", "Z"};
-                    for (int i = 0; i < 3; ++i) {
-                        ImGui::SameLine();
-                        const uint8_t bit = (uint8_t)(firstBit << i);
-                        bool on = (rb->Locks & bit) != 0;
-                        if (ImGui::Checkbox(axes[i], &on)) {
-                            host.PushUndoSnapshot();
-                            rb->Locks = on ? (uint8_t)(rb->Locks | bit) : (uint8_t)(rb->Locks & ~bit);
-                        }
-                    }
-                    ImGui::PopID();
-                };
-                lockRow(T("Freeze Position"), sage::physics::kLockPosX);
-                lockRow(T("Freeze Rotation"), sage::physics::kLockRotX);
-            }
-
-            LayerSlider(host, rb->Layer);
-            EditorTheme::EndMore();
-            }
-
-            // Триггер: пропускает сквозь себя и сообщает скриптам
-            // OnTriggerEnter/Stay/Exit. Раньше включался только из скрипта —
-            // в редакторе зону было не сделать вовсе.
-            bool sensor = rb->Sensor;
-            if (ImGui::Checkbox(T("Is Trigger"), &sensor)) {
-                host.PushUndoSnapshot();
-                rb->Sensor = sensor;
-            }
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", T("Objects pass through; scripts get OnTriggerEnter / Stay / Exit"));
-            if (rb->Sensor) {
-                LayerMaskCombo(host, T("Detects Layers"), rb->TriggerMask);
-                // Кто внутри прямо сейчас — в игре видно, почему дверь не
-                // открылась: гость не дошёл, или его слой зона не замечает.
-                if (PhysicsScene* physics = host.PlayPhysics()) {
-                    std::vector<entt::entity> inside;
-                    physics->ObjectsInTrigger(obj.Entity(), inside);
-                    ImGui::TextDisabled(T("Inside now: %d"), (int)inside.size());
-                    for (entt::entity e : inside) {
-                        GameObject g(&reg, e);
-                        if (g.Valid()) ImGui::BulletText("%s", g.Name().c_str());
-                    }
-                }
-            }
-        }
-    }
-
-    // --- Коллайдер (форма для физики; размеры домножаются на Transform.Scale) ---
-    if (reg.all_of<ColliderComponent>(obj.Entity()) && EditorTheme::SectionHeader("physics", T("Collider" "###Collider"), ImGuiTreeNodeFlags_DefaultOpen, &rmCollider,
-                                       Hint2(T("Sizes are scaled by the entity's Transform scale"),
-                                       T("Parts override the single shape above")).c_str())) {
-        if (ColliderComponent* col = reg.try_get<ColliderComponent>(obj.Entity())) {
-            // Порядок строго совпадает с sage::physics::ShapeType.
-            const char* shapes[] = {T("Box"), T("Sphere"), T("Capsule"), T("Convex Hull"), T("Mesh")};
-            int shape = (int)col->Shape;
-            if (ImGui::Combo(T("Shape"), &shape, shapes, IM_ARRAYSIZE(shapes))) {
-                host.PushUndoSnapshot();
-                col->Shape = (sage::physics::ShapeType)shape;
-            }
-            if (col->Shape == sage::physics::ShapeType::ConvexHull ||
-                col->Shape == sage::physics::ShapeType::Mesh) {
-                // Форма — из модели. Пустой слот означает меш самого объекта:
-                // коллайдер «по тому, что нарисовано» без единой настройки.
-                const assetslot::Result slot =
-                    assetslot::Draw(host, "colmesh", assetslot::Kind::Model, col->MeshPath, &m_preview,
-                                    T("Uses this object's own mesh"));
-                if (slot.Changed) {
-                    host.PushUndoSnapshot();
-                    col->MeshPath = slot.Path;
-                }
-                if (slot.BrowseRequested) {
-                    FileBrowser::Config c;
-                    c.Title = T("Choose a collision mesh");
-                    c.Filters = assetslot::Extensions(assetslot::Kind::Model);
-                    c.FilterLabel = T("Models");
-                    // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
-                    c.StartDir = c.Root = assetslot::ProjectRoot(host);
-                    m_browser.Open(c);
-                    m_browseTarget = &col->MeshPath;
-                    m_browseIsShader = false;
-                    m_browseIsMesh = false;
-                    m_browseIsMaterial = false;
-                }
-                // Сетка треугольников у падающего тела невозможна (нет объёма и
-                // массы) — говорим, что будет вместо неё, а не молчим.
-                const RigidBodyComponent* body = reg.try_get<RigidBodyComponent>(obj.Entity());
-                if (col->Shape == sage::physics::ShapeType::Mesh && body &&
-                    body->Type == sage::physics::BodyType::Dynamic)
-                    ImGui::TextDisabled("%s", T("A falling body uses the convex hull of the mesh"));
-                else if (col->Shape == sage::physics::ShapeType::Mesh)
-                    ImGui::TextDisabled("%s", T("Exact triangles: for floors, walls and terrain"));
-                else
-                    ImGui::TextDisabled("%s", T("Convex wrap of the mesh: works for falling bodies"));
-            } else if (col->Shape == sage::physics::ShapeType::Box) {
-                ImGui::DragFloat3(T("Half Extents"), &col->HalfExtents.x, 0.02f, 0.001f, 100.0f);
-                host.TrackLastImGuiItem();
-            } else if (col->Shape == sage::physics::ShapeType::Sphere) {
-                ImGui::DragFloat(T("Radius"), &col->Radius, 0.02f, 0.001f, 100.0f);
-                host.TrackLastImGuiItem();
-            } else { // Capsule
-                ImGui::DragFloat(T("Radius"), &col->Radius, 0.02f, 0.001f, 100.0f);
-                host.TrackLastImGuiItem();
-                ImGui::DragFloat(T("Half Height"), &col->HalfHeight, 0.02f, 0.001f, 100.0f);
-                host.TrackLastImGuiItem();
-            }
-
-
-            // --- Составная (compound) форма: список дочерних примитивов ---
-            //
-            // Нужна редко (тележка из коробки и четырёх колёс), поэтому — под
-            // «Ещё»; но если части уже есть, группа раскрыта: их надо видеть.
-            if (!col->Parts.empty()) ImGui::SetNextItemOpen(true, ImGuiCond_Once);
-            if (EditorTheme::BeginMore("colliderParts")) {
-            ImGui::Text(T("Compound parts: %d"), (int)col->Parts.size());
-
-            const char* shapeNames[] = {T("Box"), T("Sphere"), T("Capsule")};
-            int removePart = -1;
-            for (int pi = 0; pi < (int)col->Parts.size(); ++pi) {
-                ColliderComponent::Part& p = col->Parts[pi];
-                ImGui::PushID(pi);
-                if (ImGui::TreeNodeEx(T("part" "###part"), ImGuiTreeNodeFlags_DefaultOpen, "Part %d", pi)) {
-                    int ps = (int)p.Shape;
-                    if (ImGui::Combo(T("Shape"), &ps, shapeNames, IM_ARRAYSIZE(shapeNames))) {
-                        host.PushUndoSnapshot();
-                        p.Shape = (sage::physics::ShapeType)ps;
-                    }
-                    if (p.Shape == sage::physics::ShapeType::Box) {
-                        ImGui::DragFloat3(T("Half Extents"), &p.HalfExtents.x, 0.02f, 0.001f, 100.0f);
-                        host.TrackLastImGuiItem();
-                    } else {
-                        ImGui::DragFloat(T("Radius"), &p.Radius, 0.02f, 0.001f, 100.0f);
-                        host.TrackLastImGuiItem();
-                        if (p.Shape == sage::physics::ShapeType::Capsule) {
-                            ImGui::DragFloat(T("Half Height"), &p.HalfHeight, 0.02f, 0.001f, 100.0f);
-                            host.TrackLastImGuiItem();
-                        }
-                    }
-                    ImGui::DragFloat3(T("Offset"), &p.Offset.x, 0.02f);
-                    host.TrackLastImGuiItem();
-                    ImGui::DragFloat3(T("Rotation"), &p.EulerDeg.x, 0.5f);
-                    host.TrackLastImGuiItem();
-                    if (ImGui::Button(T("Remove Part"))) removePart = pi;
-                    ImGui::TreePop();
-                }
-                ImGui::PopID();
-            }
-            if (removePart >= 0) {
-                host.PushUndoSnapshot();
-                col->Parts.erase(col->Parts.begin() + removePart);
-            }
-            if (ImGui::Button(T("Add Part"))) {
-                host.PushUndoSnapshot();
-                col->Parts.push_back(ColliderComponent::Part{});
-            }
-            EditorTheme::EndMore();
-            }
-
-        }
-    }
-
-    // --- Контроллер персонажа ------------------------------------------------
-    //
-    // Секции здесь не было ВООБЩЕ: компонент сериализовался, исполнялся физикой
-    // и был доступен из Lua, но настроить его мышью было нельзя — только
-    // скриптом или правкой .sage руками. Компонент, который нельзя увидеть в
-    // редакторе, для человека, работающего в редакторе, не существует.
-    if (reg.all_of<CharacterControllerComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader("physics", T("Character Controller" "###Character Controller"), ImGuiTreeNodeFlags_DefaultOpen, &rmCharacter)) {
-        if (CharacterControllerComponent* ch =
-                reg.try_get<CharacterControllerComponent>(obj.Entity())) {
-            ImGui::DragFloat(T("Radius"), &ch->Radius, 0.01f, 0.05f, 5.0f);
-            host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Height"), &ch->Height, 0.02f, 0.1f, 10.0f);
-            host.TrackLastImGuiItem();
-            ImGui::DragFloat3(T("Center"), &ch->Center.x, 0.01f);
-            host.TrackLastImGuiItem();
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", T("Body offset from the object origin"));
-            }
-
-            // Столкновения — на виду, а не в «Ещё»: с чем персонаж сталкивается,
-            // спрашивают первым делом («почему он проходит сквозь стену?»).
-            ImGui::SeparatorText(T("Collision"));
-            LayerSlider(host, ch->Layer);
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", T("Layer of the character itself: rays, triggers and other masks see it here"));
-            }
-            LayerMaskCombo(host, T("Collides With"), ch->CollidesWith);
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", T("Layers the character bumps into; the rest it walks through"));
-            }
-            bool events = ch->CollisionEvents;
-            if (ImGui::Checkbox(T("Collision Events"), &events)) {
-                host.PushUndoSnapshot();
-                ch->CollisionEvents = events;
-            }
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", T("Scripts get OnCollisionEnter / Exit when the character touches something"));
-            }
-            // Кого касается прямо сейчас — в игре видно, почему событие не
-            // пришло: касания нет, или слой не тот.
-            if (host.PlayPhysics()) {
-                ImGui::TextDisabled(T("Touching now: %d"), (int)ch->Touching.size());
-            }
-            if (EditorTheme::BeginMore("charMore")) {
-            ImGui::DragFloat(T("Slope Limit"), &ch->SlopeLimit, 0.5f, 0.0f, 89.0f, "%.0f°");
-            host.TrackLastImGuiItem();
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Steeper than this and the character slides"));
-            ImGui::DragFloat(T("Step Offset"), &ch->StepOffset, 0.01f, 0.0f, 2.0f);
-            host.TrackLastImGuiItem();
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", T("How tall a step the character climbs without jumping"));
-            }
-            ImGui::DragFloat(T("Skin Width"), &ch->SkinWidth, 0.001f, 0.0f, 0.2f, "%.3f");
-            host.TrackLastImGuiItem();
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", T("Contact gap that keeps the character from jittering on seams"));
-            }
-            ImGui::DragFloat(T("Gravity"), &ch->Gravity, 0.1f, -100.0f, 100.0f);
-            host.TrackLastImGuiItem();
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", T("Own gravity of this character; 0 means it does not fall"));
-            }
-            ImGui::DragFloat(T("Mass"), &ch->Mass, 0.5f, 0.1f, 1000.0f);
-            host.TrackLastImGuiItem();
-            if (ImGui::IsItemHovered()) {
-                ImGui::SetTooltip("%s", T("How hard the character pushes dynamic bodies"));
-            }
-            EditorTheme::EndMore();
-            }
-        }
-    }
-
-    // --- Соединение (constraint/joint) с другим телом или миром ---
-    if (reg.all_of<JointComponent>(obj.Entity()) && EditorTheme::SectionHeader("ik", T("Joint" "###Joint"), ImGuiTreeNodeFlags_DefaultOpen, &rmJoint,
-                                       T("Needs a Rigid Body; only the Jolt backend simulates joints"))) {
-        if (JointComponent* jc = reg.try_get<JointComponent>(obj.Entity())) {
-            const char* types[] = {T("Fixed"), T("Point"), T("Hinge"), T("Slider"),
-                                   T("Distance"), T("Cone")};
-            int t = (int)jc->Type;
-            if (ImGui::Combo(T("Type"), &t, types, IM_ARRAYSIZE(types))) {
-                host.PushUndoSnapshot();
-                jc->Type = (sage::physics::JointType)t;
-            }
-            // Второе тело — СЛОТОМ ОБЪЕКТА, а не номером: номер сущности
-            // человек не видит нигде и сверить его ему не с чем.
-            ImGui::TextUnformatted(T("Connected to"));
-            objectslot::Options target;
-            target.AllowWorld = true;
-            target.WorldId = -1;
-            target.SelfId = obj.Id();
-            target.Accept = [](const entt::registry& r, entt::entity e) {
-                return r.all_of<RigidBodyComponent>(e);
-            };
-            target.AcceptHint = "Only an object with a Rigid Body can hold a joint";
-            const objectslot::Result tr = objectslot::Draw(host, "jointTarget", jc->TargetId, target);
-            if (tr.Changed) {
-                host.PushUndoSnapshot();
-                // Пусто у сустава — это «к миру»: висеть ни на чём он не умеет.
-                jc->TargetId = tr.Id > 0 ? tr.Id : -1;
-            }
-            ImGui::DragFloat3(T("Anchor (offset)"), &jc->Anchor.x, 0.02f);
-            host.TrackLastImGuiItem();
-            using JT = sage::physics::JointType;
-            if (jc->Type == JT::Hinge || jc->Type == JT::Slider || jc->Type == JT::Cone) {
-                ImGui::DragFloat3(T("Axis"), &jc->Axis.x, 0.02f);
-                host.TrackLastImGuiItem();
-            }
-            if (jc->Type == JT::Hinge || jc->Type == JT::Slider) {
-                ImGui::Checkbox(T("Use Limits"), &jc->UseLimits);
-                if (jc->UseLimits) {
-                    ImGui::DragFloat(T("Min"), &jc->MinLimit, 0.5f);
-                    host.TrackLastImGuiItem();
-                    ImGui::DragFloat(T("Max"), &jc->MaxLimit, 0.5f);
-                    host.TrackLastImGuiItem();
-                }
-            } else if (jc->Type == JT::Distance) {
-                ImGui::DragFloat(T("Min Distance"), &jc->MinDistance, 0.02f, 0.0f, 100.0f);
-                host.TrackLastImGuiItem();
-                ImGui::DragFloat(T("Max Distance"), &jc->MaxDistance, 0.02f, 0.0f, 100.0f);
-                host.TrackLastImGuiItem();
-            } else if (jc->Type == JT::Cone) {
-                ImGui::DragFloat(T("Cone Half Angle"), &jc->ConeHalfAngle, 0.5f, 0.0f, 180.0f);
-                host.TrackLastImGuiItem();
-            }
-
-        }
-    }
-
-    // --- Анимация: клип поверх скелета из Mesh -----------------------------
-    //
-    // Модели здесь больше нет: она задаётся в Mesh, как у любого другого
-    // объекта. Секция отвечает только на вопрос «как это движется», и первое,
-    // что она обязана сказать, — ЕСТЬ ЛИ ЧТО анимировать: компонент,
-    // добавленный к кубу, обязан объяснить, почему ничего не происходит.
-    if (reg.all_of<AnimationComponent>(obj.Entity()) && EditorTheme::SectionHeader("anim", T("Animation" "###Animation"), ImGuiTreeNodeFlags_DefaultOpen, &rmAnimation,
-                                       T("Skeleton comes from the Mesh model"))) {
-        if (AnimationComponent* am = reg.try_get<AnimationComponent>(obj.Entity())) {
-            const MeshRendererComponent* mesh = reg.try_get<MeshRendererComponent>(obj.Entity());
-            const bool hasModelRef = mesh && mesh->Ref.type == MeshRef::Type::Model &&
-                                     !mesh->Ref.path.empty();
-            if (!hasModelRef) {
-                // РАНЬШЕ ЗДЕСЬ ЗАВОДИЛОСЬ ДЕМО-ЩУПАЛЬЦЕ. Компонент, добавленный
-                // к объекту без модели, показывал шевелящийся отросток — то есть
-                // на вопрос «почему не работает моя анимация» отвечал чужой
-                // работающей анимацией. Теперь ответ словами и по делу.
-                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
-                                   T("No model in Mesh — there is nothing to animate"));
-                ImGui::TextDisabled("%s", T("Put a model with a skeleton into Mesh (.glb/.gltf/.fbx)."));
-            }
-            // Модель есть, а скелета в ней нет — это тот самый случай, который
-            // ТЗ требует объяснять словами, а не молчанием.
-            if (hasModelRef && am->Ready && !am->Model) {
-                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
-                                   T("This model has no skeleton — nothing to animate"));
-            }
-            if (ImGui::Button(T("Reload"))) { am->Ready = false; am->Model = nullptr; }
-
-            // --- КЛИП ФАЙЛОМ ---------------------------------------------
-            //
-            // Слот ассета, а не номер в списке: номер зависит от порядка клипов
-            // в модели и молча меняется при переэкспорте (см. AnimationComponent).
-            // Пустой слот — играем клип из самой модели, как раньше.
-            ImGui::TextUnformatted(T("Clip file"));
-            const assetslot::Result clipSlot =
-                assetslot::Draw(host, "animclip", assetslot::Kind::Animation, am->ClipPath,
-                                &m_preview, T("Playing a clip from the model itself"));
-            if (clipSlot.Changed) {
-                host.PushUndoSnapshot();
-                am->ClipPath = clipSlot.Path;
-            }
-            if (clipSlot.BrowseRequested) {
-                FileBrowser::Config c;
-                c.Title = T("Choose an animation clip");
-                c.Filters = assetslot::Extensions(assetslot::Kind::Animation);
-                c.FilterLabel = T("Animation");
-                // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
-                c.StartDir = c.Root = assetslot::ProjectRoot(host);
-                m_browser.Open(c);
-                m_browseTarget = &am->ClipPath;
-                m_browseIsShader = false;
-                m_browseIsMesh = false;
-                m_browseIsMaterial = false;
-            }
-            if (!am->ClipPath.empty() && am->MissingBones > 0) {
-                // Клип от другого персонажа подходит частично — и молчать об
-                // этом нельзя: «двигается половина скелета» иначе не объяснить.
-                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn),
-                                   T("%d bones of the clip are missing from this skeleton"),
-                                   am->MissingBones);
-            }
-
-            // Вынуть клипы модели в файлы — то же действие, что импорт
-            // материалов, и в том же месте, где о них вспоминают.
-            if (hasModelRef && EditorIcons::Button("import", T("Extract clips to files"),
-                                                   T("Writes every clip of the model next to it\n"
-                                                     "as .sageanim. Existing files are kept."))) {
-                const ClipImportResult r = ImportModelClips(host.CurrentProject(), mesh->Ref.path);
-                if (r.Found == 0) {
-                    host.SetStatusMessage(T("The model has no animation clips"));
-                } else {
-                    host.SetStatusMessage(T("Clips: ") + std::to_string(r.Found) +
-                                          T(", files written: ") + std::to_string(r.Created));
-                    // Первый клип сразу назначаем: иначе человек нажал кнопку,
-                    // файлы появились, а объект не двинулся — и непонятно, что
-                    // ещё от него хотят.
-                    if (am->ClipPath.empty() && !r.Refs.empty()) {
-                        host.PushUndoSnapshot();
-                        am->ClipPath = r.Refs.front();
-                    }
-                }
-            }
-
-            // Список клипов — из проигрывателя (модель уже загружена системой).
-            int clipCount = am->Anim.ClipCount();
-            if (clipCount > 0 && am->ClipPath.empty()) {
-                if (am->Clip >= clipCount) am->Clip = 0;
-                std::string preview = am->Anim.ClipName(am->Clip);
-                if (ImGui::BeginCombo("Clip", preview.c_str())) {
-                    for (int i = 0; i < clipCount; ++i) {
-                        bool sel = (am->Clip == i);
-                        if (ImGui::Selectable(am->Anim.ClipName(i).c_str(), sel) && i != am->Clip) {
-                            am->Clip = i;
-                            // Плавный кросс-фейд к выбранному клипу (или резко, если 0).
-                            if (am->BlendTime > 0.0f) am->Anim.CrossFade(i, am->BlendTime, am->Loop);
-                            else am->Anim.Play(i, am->Loop);
-                        }
-                    }
-                    ImGui::EndCombo();
-                }
-                ImGui::DragFloat(T("Blend Time"), &am->BlendTime, 0.01f, 0.0f, 2.0f);
-                host.TrackLastImGuiItem();
-                if (am->Anim.Fading())
-                    ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Info), T("cross-fading %.0f%%"),
-                                       am->Anim.FadeWeight() * 100.0f);
-            } else if (clipCount == 0) {
-                ImGui::TextDisabled("%s", T("No animation clips (bind pose)"));
-            }
-            ImGui::DragFloat(T("Speed"), &am->Speed, 0.02f, 0.0f, 8.0f); host.TrackLastImGuiItem();
-            if (ImGui::Checkbox(T("Loop"), &am->Loop)) am->Anim.Play(am->Clip, am->Loop);
-            ImGui::SameLine();
-            ImGui::Checkbox(T("Playing"), &am->Playing);
-            ImGui::Checkbox(T("Root Motion"), &am->RootMotion);
-        }
-    }
-
-    // --- Анимация свойств: клип .sageclip на этом объекте -------------------
-    //
-    // ОТДЕЛЬНО ОТ «Animation», И ЭТО НЕ ДУБЛИРОВАНИЕ. Тот компонент играет
-    // движение КОСТЕЙ модели, этот — движение СВОЙСТВ объекта и его детей
-    // (положение, цвет, прозрачность, размер). Скелета для него не нужно:
-    // мигающая кнопка интерфейса и всплывающая подсказка — это он.
-    //
-    // ИМЕННО ЭТОТ КОМПОНЕНТ ОТВЕЧАЕТ НА ВОПРОС «ЧТО ИГРАЕТ ЭТОТ ОБЪЕКТ».
-    // Пока его не было видно в инспекторе, клип существовал только внутри
-    // инструмента анимации: объект «анимировался», но в сцене не было ничего,
-    // что это подтверждало бы, и после закрытия редактора движение пропадало.
-    if (reg.all_of<PropertyAnimatorComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader("clock", T("Property Animation" "###Property Animation"),
-                                   ImGuiTreeNodeFlags_DefaultOpen, &rmPropertyAnim,
-                                   T("Plays a .sageclip: properties of this object and its children"))) {
-        if (PropertyAnimatorComponent* pa = reg.try_get<PropertyAnimatorComponent>(obj.Entity())) {
-            const assetslot::Result clipSlot =
-                assetslot::Draw(host, "propclip", assetslot::Kind::Animation, pa->ClipPath,
-                                &m_preview, T("No clip — nothing is playing"));
-            if (clipSlot.Changed) {
-                host.PushUndoSnapshot();
-                pa->ClipPath = clipSlot.Path;
-                // Путь сменился — старый клип в памяти больше не тот.
-                pa->Clip.reset();
-                pa->Ready = false;
-            }
-            if (clipSlot.BrowseRequested) {
-                FileBrowser::Config c;
-                c.Title = T("Choose an animation clip");
-                c.Filters = assetslot::Extensions(assetslot::Kind::Animation);
-                c.FilterLabel = T("Animation");
-                // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
-                c.StartDir = c.Root = assetslot::ProjectRoot(host);
-                m_browser.Open(c);
-                m_browseTarget = &pa->ClipPath;
-                m_browseIsShader = false;
-                m_browseIsMesh = false;
-                m_browseIsMaterial = false;
-            }
-            if (pa->ClipPath.empty()) {
-                ImGui::TextDisabled("%s", T("Create a clip in the Animation tool and it lands here."));
-            } else if (EditorIcons::Button("anim", T("Edit the clip"),
-                                           T("Opens this clip in the Animation tool"))) {
-                host.OpenAnimationClip(pa->ClipPath);
-            }
-            ImGui::Checkbox(T("Playing"), &pa->Playing);
-            ImGui::SameLine();
-            ImGui::Checkbox(T("Loop"), &pa->Loop);
-            ImGui::DragFloat(T("Speed"), &pa->Speed, 0.02f, 0.0f, 8.0f);
-            host.TrackLastImGuiItem();
-        }
-    }
-
-    // --- Твины: только сводка -------------------------------------------------
-    //
-    // ОДНО МЕСТО НА НАСТРОЙКУ. Значения, время и кривые правятся в окне Tween;
-    // здесь — что за твин, сколько в нём и две кнопки. Прежде инспектор
-    // повторял длительность, кривую и повтор из окна, и две копии одной
-    // настройки расходились в голове быстрее, чем в данных.
-    if (reg.all_of<sage::anim::TweenComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader("clock", T("Tween" "###Tween"), ImGuiTreeNodeFlags_DefaultOpen, &rmTween,
-                                   T("Quick changes of properties over time — no clip needed"))) {
-        auto& tc = reg.get<sage::anim::TweenComponent>(obj.Entity());
-        const float btn = ImGui::GetFrameHeight();
-        const float gap = ImGui::GetStyle().ItemSpacing.x;
-        for (size_t i = 0; i < tc.Tweens.size(); ++i) {
-            const sage::anim::TweenClip& c = tc.Tweens[i];
-            const bool empty = c.Tracks.empty();
-            ImGui::PushID((int)i);
-            const float lineRight = ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x;
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(c.Name.c_str());
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", tweenui::Summary(c).c_str());
-            const float buttons = empty ? btn : btn * 2.0f + gap;
-            ImGui::SameLine(std::max(ImGui::GetItemRectMax().x - ImGui::GetWindowPos().x + gap, lineRight - buttons));
-            if (empty) {
-                if (EditorIcons::IconOnlyButton("plus", T("Add property")))
-                    host.OpenTween(obj.Id(), (int)i, EditorHost::TweenOpen::AddProperty);
-            } else {
-                ImGui::BeginDisabled(host.InPlayMode());
-                if (EditorIcons::IconOnlyButton("play", T("Play")))
-                    host.OpenTween(obj.Id(), (int)i, EditorHost::TweenOpen::Play);
-                ImGui::EndDisabled();
-                ImGui::SameLine();
-                if (EditorIcons::IconOnlyButton("pencil", T("Edit in the Tween window")))
-                    host.OpenTween(obj.Id(), (int)i, EditorHost::TweenOpen::Edit);
-            }
-            ImGui::PopID();
-        }
-        if (EditorIcons::Button("plus", T("Add tween"))) {
-            sage::anim::TweenClip c;
-            c.Name = "Tween " + std::to_string(tc.Tweens.size() + 1);
-            tc.Tweens.push_back(c);
-            host.PushUndoSnapshot();
-            host.OpenTween(obj.Id(), (int)tc.Tweens.size() - 1, EditorHost::TweenOpen::AddProperty);
-        }
-    }
-
-    // --- Зонд отражений -----------------------------------------------------
-    if (reg.all_of<ReflectionProbeComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader("probe", T("Reflection Probe" "###Reflection Probe"), ImGuiTreeNodeFlags_DefaultOpen, &rmProbe,
-                                       Hint2(T("Captures the scene around this point into a cubemap"),
-                                       T("Realtime = 6 scene passes per frame - use sparingly")).c_str())) {
-        if (ReflectionProbeComponent* p = reg.try_get<ReflectionProbeComponent>(obj.Entity())) {
-
-            // Любая правка охвата или разрешения означает «снять заново»: карта
-            // снята под прежние числа, и оставить её значило бы показывать
-            // отражение, которого в сцене уже нет.
-            const int prevRes = p->Resolution;
-            const char* resNames[] = {"32", "64", "128", "256"};
-            const int resValues[] = {32, 64, 128, 256};
-            int resIdx = 2;
-            for (int i = 0; i < 4; ++i) if (resValues[i] == p->Resolution) resIdx = i;
-            if (ImGui::Combo(T("Resolution"), &resIdx, resNames, 4)) p->Resolution = resValues[resIdx];
-            if (p->Resolution != prevRes) p->Dirty = true;
-
-            if (ImGui::DragFloat3(T("Box Half Extents"), &p->BoxHalfExtents.x, 0.1f, 0.1f, 500.0f))
-                p->Dirty = true;
-            host.TrackLastImGuiItem();
-
-            ImGui::SliderFloat(T("Intensity"), &p->Intensity, 0.0f, 3.0f);
-            host.TrackLastImGuiItem();
-            if (EditorTheme::BeginMore("probeMore")) {
-                if (ImGui::Checkbox(T("Box Parallax"), &p->BoxParallax)) p->Dirty = true;
-                if (ImGui::DragFloat(T("Far Clip"), &p->FarClip, 0.5f, 1.0f, 2000.0f)) p->Dirty = true;
-                host.TrackLastImGuiItem();
-                ImGui::Checkbox(T("Realtime (re-capture every frame)"), &p->Realtime);
-                EditorTheme::EndMore();
-            }
-
-
-            if (ImGui::Button(T("Bake Probe"))) p->Dirty = true;
-        }
-    }
-
-    // --- Обратная кинематика: цели поверх позы клипа ------------------------
-    // Кость задаётся ИМЕНЕМ, а не индексом: модель может смениться (или ещё не
-    // загрузиться), а имя переживает и то, и другое. Список имён показываем
-    // только когда скелет уже есть.
-    if (reg.all_of<IKComponent>(obj.Entity()) && EditorTheme::SectionHeader("ik", T("IK" "###IK"), ImGuiTreeNodeFlags_DefaultOpen, &rmIk)) {
-        if (IKComponent* ik = reg.try_get<IKComponent>(obj.Entity())) {
-            ImGui::Checkbox(T("IK Enabled"), &ik->Enabled);
-            const AnimationComponent* am = reg.try_get<AnimationComponent>(obj.Entity());
-            if (!am) ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn),
-                                        "%s", T("No Animation component - goals do nothing"));
-
-            int remove = -1;
-            for (int gi = 0; gi < (int)ik->Goals.size(); ++gi) {
-                IKGoal& g = ik->Goals[(size_t)gi];
-                ImGui::PushID(gi);
-                const std::string title = "Goal " + std::to_string(gi) +
-                                          (g.Bone.empty() ? "" : " (" + g.Bone + ")");
-                if (ImGui::TreeNodeEx(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
-                    char boneBuf[128];
-                    std::snprintf(boneBuf, sizeof(boneBuf), "%s", g.Bone.c_str());
-                    if (ImGui::InputText(T("Bone"), boneBuf, sizeof(boneBuf))) {
-                        g.Bone = boneBuf;
-                        g.Resolved = false;   // имя сменилось — искать заново
-                    }
-                    host.TrackLastImGuiItem();
-                    // Выбор из реального скелета — чтобы не угадывать написание.
-                    if (am && am->Model) {
-                        const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
-                        if (sk.Count() > 0 && ImGui::BeginCombo("Pick Bone", g.Bone.c_str())) {
-                            for (int b = 0; b < sk.Count(); ++b) {
-                                const std::string& n = sk.Joints[(size_t)b].Name;
-                                if (ImGui::Selectable(n.c_str(), n == g.Bone) && n != g.Bone) {
-                                    g.Bone = n;
-                                    g.Resolved = false;
-                                }
-                            }
-                            ImGui::EndCombo();
-                        }
-                    }
-                    ImGui::Checkbox(T("Enabled"), &g.Enabled);
-                    ImGui::SameLine();
-                    if (ImGui::Checkbox(T("Aim (look-at)"), &g.Aim)) g.Resolved = false;
-                    if (g.Aim) {
-                        ImGui::DragFloat3(T("Aim Axis"), &g.AimAxis.x, 0.01f);
-                        host.TrackLastImGuiItem();
-                        ImGui::SliderFloat(T("Max Angle"), &g.AimMaxAngle, 0.0f, 180.0f);
-                        host.TrackLastImGuiItem();
-                    } else {
-                        if (ImGui::SliderInt(T("Chain Length"), &g.ChainLength, 2, 8)) g.Resolved = false;
-                        host.TrackLastImGuiItem();
-                        ImGui::TextDisabled("%s", T("2 = analytic two-bone, more = FABRIK"));
-                        // Полюс, выравнивание стопы и её фиксация — тонкая
-                        // настройка ног; цель и вес — выше и ниже, на виду.
-                        if (EditorTheme::BeginMore("ikMore")) {
-                        ImGui::Checkbox(T("Use Pole"), &g.UsePole);
-                        if (g.UsePole) {
-                            ImGui::DragFloat3(T("Pole"), &g.Pole.x, 0.02f);
-                            host.TrackLastImGuiItem();
-                        }
-                        ImGui::DragFloat3(T("Align Normal"), &g.AlignNormal.x, 0.02f);
-                        host.TrackLastImGuiItem();
-                        ImGui::Checkbox(T("Foot Lock"), &g.Lock);
-                        if (g.Lock) {
-                            ImGui::DragFloat(T("Plant Height"), &g.PlantHeight, 0.005f, 0.0f, 1.0f);
-                            host.TrackLastImGuiItem();
-                            ImGui::DragFloat(T("Release Time"), &g.ReleaseTime, 0.005f, 0.0f, 1.0f);
-                            host.TrackLastImGuiItem();
-                        }
-                        EditorTheme::EndMore();
-                        }
-                    }
-                    ImGui::DragFloat3(T("Target (world)"), &g.Target.x, 0.02f);
-                    host.TrackLastImGuiItem();
-                    ImGui::SliderFloat(T("Weight"), &g.Weight, 0.0f, 1.0f);
-                    host.TrackLastImGuiItem();
-                    if (g.Resolved && g.EndJoint < 0)
-                        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Danger), "%s",
-                                           T("bone not found in skeleton"));
-                    if (ImGui::Button(T("Remove Goal"))) remove = gi;
-                    ImGui::TreePop();
-                }
-                ImGui::PopID();
-            }
-            if (remove >= 0) {
-                host.PushUndoSnapshot();
-                ik->Goals.erase(ik->Goals.begin() + remove);
-            }
-            if (ImGui::Button(T("Add Goal"))) ik->Goals.emplace_back();
-        }
-    }
-
-    // --- Эмиттер частиц: весь эффект данными, без пресетов ---------------------
-    //
-    // Готовых «огня» и «дыма» нет: эффект собирается модулями (ParticleUi) или
-    // приходит файлом .sagefx — его можно загрузить сюда, а собранное здесь
-    // сохранить в файл и переиспользовать в других сценах.
-    if (reg.all_of<ParticleEmitterComponent>(obj.Entity()) && EditorTheme::SectionHeader("particles", T("Particle Emitter" "###Particle Emitter"), ImGuiTreeNodeFlags_DefaultOpen, &rmEmitter)) {
-        if (ParticleEmitterComponent* em = reg.try_get<ParticleEmitterComponent>(obj.Entity())) {
-            bool playing = em->Playing;
-            if (ImGui::Checkbox(T("Playing"), &playing)) {
-                host.PushUndoSnapshot();
-                em->Playing = playing;
-            }
-            ImGui::SameLine();
-            // Посмотреть эффект с начала, не трогая сцену: залпы, задержка и
-            // разогрев видны только на старте цикла.
-            if (ImGui::Button(T("Restart"))) em->RestartRequested = true;
-            ImGui::SameLine();
-            if (ImGui::Button(T("Clear"))) em->ClearRequested = true;
-
-            // Файл эффекта: загрузить в объект / сохранить объект в файл.
-            ImGui::TextUnformatted(T("Load from an effect file"));
-            std::string none;
-            const assetslot::Result load =
-                assetslot::Draw(host, "fxfile", assetslot::Kind::Effect, none, &m_preview,
-                                T("Drop a .sagefx here to copy it into this emitter"));
-            if (load.Changed && !load.Path.empty()) {
-                sage::fx::ParticleEffect loaded;
-                std::string err;
-                const std::string real = sage::AssetDatabase::Instance().LocatePath(load.Path);
-                if (sage::fx::LoadEffectFile(real, loaded, &err)) {
-                    host.PushUndoSnapshot();
-                    em->Effect = loaded;
-                    em->RestartRequested = true;
-                } else {
-                    LOG_ERROR("Editor") << "Эффект не загрузился: " << err;
-                }
-            }
-            if (load.BrowseRequested) {
-                FileBrowser::Config c;
-                c.Title = T("Choose a particle effect");
-                c.Filters = assetslot::Extensions(assetslot::Kind::Effect);
-                c.FilterLabel = T("Particle effects (*.sagefx)");
-                c.StartDir = c.Root = assetslot::ProjectRoot(host);
-                m_browser.Open(c);
-                m_browseTarget = nullptr;
-                m_browseLoadEffectEntity = obj.Id();
-                m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
-            }
-            if (ImGui::Button(T("Save as effect file..."))) {
-                FileBrowser::Config c;
-                c.Title = T("Save the particle effect");
-                c.Mode = FileBrowser::PickMode::SaveFile;
-                c.DefaultName = obj.Name() + ".sagefx";
-                c.Filters = assetslot::Extensions(assetslot::Kind::Effect);
-                c.FilterLabel = T("Particle effects (*.sagefx)");
-                c.StartDir = c.Root = assetslot::ProjectRoot(host);
-                m_browser.Open(c);
-                m_browseTarget = nullptr;
-                m_browseSaveEffectEntity = obj.Id();
-                m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
-            }
-            ImGui::Separator();
-
-            // Слоты картинок и файлов — крючками: сам редактор эффекта не знает
-            // ни о проекте, ни о диалогах (его проверяют модульные тесты).
-            sage::editor::ParticleUiHooks hooks;
-            hooks.BeforeEdit = [&host] { host.PushUndoSnapshot(); };
-            hooks.TrackItem = [&host] { host.TrackLastImGuiItem(); };
-            auto slot = [this, &host](const char* id, std::string& path, assetslot::Kind kind) {
-                const assetslot::Result r = assetslot::Draw(host, id, kind, path, &m_preview);
-                if (r.Changed) {
-                    host.PushUndoSnapshot();
-                    path = r.Path;
-                }
-                if (r.BrowseRequested) {
-                    FileBrowser::Config c;
-                    c.Title = kind == assetslot::Kind::Effect ? T("Choose a particle effect") : T("Choose a picture");
-                    c.Filters = assetslot::Extensions(kind);
-                    c.FilterLabel = kind == assetslot::Kind::Effect ? T("Particle effects (*.sagefx)") : T("Images");
-                    c.StartDir = c.Root = assetslot::ProjectRoot(host);
-                    m_browser.Open(c);
-                    m_browseTarget = &path;
-                    m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
-                }
-                return r.Changed;
-            };
-            hooks.TextureSlot = [slot](const char* id, std::string& path) {
-                return slot(id, path, assetslot::Kind::Texture);
-            };
-            hooks.EffectSlot = [slot](const char* id, std::string& path) {
-                return slot(id, path, assetslot::Kind::Effect);
-            };
-            hooks.FileExists = [](const std::string& ref) {
-                std::error_code ec;
-                return std::filesystem::exists(
-                    sage::PathFromUtf8(sage::AssetDatabase::Instance().LocatePath(ref)), ec);
-            };
-            sage::editor::DrawParticleEffect(em->Effect, hooks);
-        }
-    }
-
-    // --- Звук объекта ------------------------------------------------------
-    //
-    // Слот тот же, что у меша и скрипта: файл выбирается мышью или бросается
-    // из дерева проекта. Печатать путь к .wav наизусть — ровно тот барьер,
-    // из-за которого звук в сценах не появлялся.
-    if (reg.all_of<AudioSourceComponent>(obj.Entity()) &&
-        EditorTheme::SectionHeader("audio", T("Audio" "###Audio"), ImGuiTreeNodeFlags_DefaultOpen, &rmAudio)) {
-        if (AudioSourceComponent* au = reg.try_get<AudioSourceComponent>(obj.Entity())) {
-            const assetslot::Result r =
-                assetslot::Draw(host, "audioclip", assetslot::Kind::Audio, au->Clip, &m_preview,
-                                T("No sound attached"));
-            if (r.Changed) {
-                host.PushUndoSnapshot();
-                au->Clip = r.Path;
-            }
-            if (r.BrowseRequested) {
-                FileBrowser::Config c;
-                c.Title = T("Choose a sound");
-                c.Filters = assetslot::Extensions(assetslot::Kind::Audio);
-                c.FilterLabel = T("Sounds (*.wav, *.mp3, *.ogg)");
-                // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
-                c.StartDir = c.Root = assetslot::ProjectRoot(host);
-                m_browser.Open(c);
-                m_browseTarget = nullptr;
-                m_browseAudioEntity = obj.Id();
-                m_browseIsShader = false;
-                m_browseIsMesh = false;
-                m_browseIsMaterial = false;
-            }
-
-            ImGui::DragFloat(T("Volume"), &au->Volume, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
-            ImGui::Checkbox(T("Loop"), &au->Loop); host.TrackLastImGuiItem();
-            ImGui::SameLine();
-            ImGui::Checkbox(T("Auto Play"), &au->AutoPlay); host.TrackLastImGuiItem();
-            ImGui::Checkbox(T("Spatial (3D)"), &au->Spatial); host.TrackLastImGuiItem();
-            if (au->Spatial) {
-                ImGui::DragFloat(T("Min Distance"), &au->MinDistance, 0.1f, 0.1f, 1000.0f);
-                host.TrackLastImGuiItem();
-                ImGui::DragFloat(T("Max Distance"), &au->MaxDistance, 0.5f, 0.2f, 5000.0f);
-                host.TrackLastImGuiItem();
-            }
-            // Высота тона, спад и группа микшера — тонкая настройка.
-            if (EditorTheme::BeginMore("audioMore")) {
-                ImGui::DragFloat(T("Pitch"), &au->Pitch, 0.01f, 0.25f, 4.0f); host.TrackLastImGuiItem();
-                if (au->Spatial) {
-                    ImGui::DragFloat(T("Rolloff"), &au->Rolloff, 0.05f, 0.0f, 10.0f);
-                    host.TrackLastImGuiItem();
-                }
-                const char* kCategories[] = {T("Effects"), T("Music"), T("Ambience")};
-                int cat = (int)au->Category;
-                if (ImGui::Combo(T("Mix Group"), &cat, kCategories, 3)) {
-                    host.PushUndoSnapshot();
-                    au->Category = (AudioCategory)cat;
-                }
-                EditorTheme::EndMore();
-            }
-
-            // Послушать ПРЯМО В РЕДАКТОРЕ, не запуская игру. Иначе подбор
-            // громкости и расстояний превращается в цикл «Play — послушал —
-            // Stop — поправил», по десятку секунд на каждую правку.
-            if (au->Clip.empty()) {
-                ImGui::TextDisabled("%s", T("Attach a sound file to preview it"));
-            } else if (au->Playing) {
-                if (EditorIcons::Button("stop", T("Stop"))) au->Stop();
-            } else {
-                if (EditorIcons::Button("play", T("Preview"))) au->Play();
-            }
-        }
-    }
+    DrawEffectSections(host, obj, reg, rm);
 
     // ИНТЕРФЕЙС И ЭЛЕМЕНТ — РАЗНЫЕ РАЗДЕЛЫ, и это главное разделение этого
     // окна. Интерфейс — граница: что показывать, в каком порядке и под какой
@@ -1530,7 +598,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // нечем.
     if (reg.all_of<sage::ui::InterfaceComponent>(obj.Entity()) &&
         EditorTheme::SectionHeader("layout", T("Interface" "###Interface"),
-                                   ImGuiTreeNodeFlags_DefaultOpen, &rmInterface)) {
+                                   ImGuiTreeNodeFlags_DefaultOpen, &rm.Interface)) {
         sage::editor::DrawInterfaceProperties(host, obj);
     }
 
@@ -1568,71 +636,71 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // моделью), оставался с ним навсегда. Никакой особости у него нет: это
     // такое же свойство предмета, как свет или звук, и невидимый объект —
     // законное состояние (узел, точка привязки, держатель скрипта).
-    if (rmMesh) {
+    if (rm.Mesh) {
         host.PushUndoSnapshot();
         reg.remove<MeshRendererComponent>(obj.Entity());
     }
-    if (rmCamera) {
+    if (rm.Camera) {
         host.PushUndoSnapshot();
         reg.remove<CameraComponent>(obj.Entity());
     }
 
-    if (rmLight) {
+    if (rm.Light) {
         host.PushUndoSnapshot();
         reg.remove<LightComponent>(obj.Entity());
     }
 
-    if (rmPostProcess) {
+    if (rm.PostProcess) {
         host.PushUndoSnapshot();
         reg.remove<sage::render::PostProcessComponent>(obj.Entity());
     }
 
-    if (rmInterface) {
+    if (rm.Interface) {
         host.PushUndoSnapshot();
         reg.remove<sage::ui::InterfaceComponent>(obj.Entity());
     }
 
-    if (rmDecal) {
+    if (rm.Decal) {
         host.PushUndoSnapshot();
         reg.remove<DecalComponent>(obj.Entity());
     }
 
-    if (rmGiStatic) {
+    if (rm.GiStatic) {
         host.PushUndoSnapshot();
         reg.remove<GIStaticComponent>(obj.Entity());
     }
 
-    if (rmNet) {
+    if (rm.Net) {
         host.PushUndoSnapshot();
         reg.remove<NetReplicatedComponent>(obj.Entity());
     }
 
-    if (rmScript) {
+    if (rm.Script) {
         host.PushUndoSnapshot();
         reg.remove<ScriptComponent>(obj.Entity());
     }
 
-    if (rmBody) {
+    if (rm.Body) {
         host.PushUndoSnapshot();
         reg.remove<RigidBodyComponent>(obj.Entity());
     }
 
-    if (rmCollider) {
+    if (rm.Collider) {
         host.PushUndoSnapshot();
         reg.remove<ColliderComponent>(obj.Entity());
     }
 
-    if (rmCharacter) {
+    if (rm.Character) {
         host.PushUndoSnapshot();
         reg.remove<CharacterControllerComponent>(obj.Entity());
     }
 
-    if (rmJoint) {
+    if (rm.Joint) {
         host.PushUndoSnapshot();
         reg.remove<JointComponent>(obj.Entity());
     }
 
-    if (rmAnimation) {
+    if (rm.Animation) {
         host.PushUndoSnapshot();
         reg.remove<AnimationComponent>(obj.Entity());
         // Статический меш анимированному объекту не грузится (см. загрузчик
@@ -1647,32 +715,32 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         }
     }
 
-    if (rmPropertyAnim) {
+    if (rm.PropertyAnim) {
         host.PushUndoSnapshot();
         reg.remove<PropertyAnimatorComponent>(obj.Entity());
     }
 
-    if (rmTween) {
+    if (rm.Tween) {
         host.PushUndoSnapshot();
         reg.remove<sage::anim::TweenComponent>(obj.Entity());
     }
 
-    if (rmProbe) {
+    if (rm.Probe) {
         host.PushUndoSnapshot();
         reg.remove<ReflectionProbeComponent>(obj.Entity());
     }
 
-    if (rmIk) {
+    if (rm.Ik) {
         host.PushUndoSnapshot();
         reg.remove<IKComponent>(obj.Entity());
     }
 
-    if (rmEmitter) {
+    if (rm.Emitter) {
         host.PushUndoSnapshot();
         reg.remove<ParticleEmitterComponent>(obj.Entity());
     }
 
-    if (rmAudio) {
+    if (rm.Audio) {
         host.PushUndoSnapshot();
         // Глушим ДО снятия компонента: дескриптор звука живёт в нём, и после
         // remove остановить источник было бы нечем — водопад продолжал бы
@@ -1697,302 +765,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // «Объект > Удалить» и правая кнопка на строке в иерархии.
 }
 
-// --- Реестр компонентов: ТАБЛИЦА, а не лестница if-ов ---------------------
-//
-// Список компонентов в меню «Добавить компонент» был написан подряд, строкой на
-// каждый, и отставал от движка чаще всего: Mesh Renderer, Decal и Character
-// Controller ДОЛГО в нём отсутствовали, хотя секции в инспекторе у них были.
-// Получалось противоречие — наклейку можно создать через «Объект > Создать
-// наклейку», но нельзя добавить к существующему объекту.
-//
-// Теперь это данные: строка таблицы — имя, раздел, значок, ОДНА строка о том,
-// что компонент делает, и две операции. Новый компонент = новая строка. Отсюда
-// же берётся поиск (компонентов два десятка, и листать их глазами дороже, чем
-// набрать три буквы) и разбиение по разделам: «Свет» и «Твёрдое тело» в одном
-// плоском списке стоят рядом только потому, что их так написали.
-namespace {
-
-struct ComponentEntry {
-    const char* Name;
-    const char* Category;
-    const char* Icon;
-    const char* Hint;
-    bool (*Has)(entt::registry&, entt::entity);
-    void (*Add)(entt::registry&, entt::entity);
-};
-
-template <typename T>
-bool HasComp(entt::registry& reg, entt::entity e) {
-    return reg.all_of<T>(e);
-}
-template <typename T>
-void AddComp(entt::registry& reg, entt::entity e) {
-    reg.emplace<T>(e);
-}
-
-// Контроллер персонажа — сразу по мешу объекта: подошвы на низ меша, рост и
-// радиус по габаритам (sage/scene/CharacterFit.h). С размерами по умолчанию
-// капсула стояла наполовину в полу.
-void AddCharacter(entt::registry& reg, entt::entity e) {
-    reg.emplace<CharacterControllerComponent>(e);
-    sage::scene::FitCharacterToMesh(reg, e);
-}
-
-// Твин добавляется сразу с первым (пустым) твином: пустой список твинов —
-// лишний щелчок «Добавить твин» на пути к результату.
-void AddTween(entt::registry& reg, entt::entity e) {
-    sage::anim::TweenClip c;
-    c.Name = "Tween";
-    reg.emplace<sage::anim::TweenComponent>(e).Tweens.push_back(c);
-}
-
-const std::vector<ComponentEntry>& ComponentRegistry() {
-    static const std::vector<ComponentEntry> kEntries = {
-        // ПРОСТО «Mesh»: это то, КАК ОБЪЕКТ ВЫГЛЯДИТ — модель, её материалы и
-        // настройки отрисовки. Слово «Renderer» в названии описывало не предмет
-        // сцены, а внутреннее устройство движка, и делило объекты на «модель» и
-        // «модель с рендерером» там, где деления нет. Скелетная модель — тот же
-        // Mesh: анимацию к ней добавляет отдельный компонент Animation.
-        {"Mesh", "Render", "cube",
-         "Model, materials and how it is drawn", HasComp<MeshRendererComponent>,
-         AddComp<MeshRendererComponent>},
-        // НАКЛЕЙКИ И «GI STATIC» В СПИСКЕ НЕТ — НАМЕРЕННО, и не потому, что их
-        // убрали из движка: оба на месте и работают.
-        //
-        // Наклейка — это ПРЕДМЕТ сцены, а не свойство существующего: её ставят
-        // на стену, целясь в место, а не «добавляют кубу». Отдельным
-        // компонентом она к тому же приезжала сломанной: DecalComponent на
-        // объекте с мешем даёт наклейку, спроецированную саму на себя. Ставится
-        // она каталогом: Объект > Эффекты > Наклейка, — там она сразу встаёт
-        // перед камерой и смотрит туда же, куда человек.
-        //
-        // «GI Static» — не решение про ОДИН объект: помечать статикой по
-        // одному пятьдесят стен никто не станет, а пометив три, человек
-        // получит запечённый свет, который хуже незапечённого. Для этого есть
-        // кнопка «Пометить статичную геометрию» в панели Environment, рядом с
-        // самой выпечкой, — она размечает всю сцену разом и по понятному
-        // правилу.
-        {"Particle Emitter", "Render", "particles",
-         "Rain, snow, smoke, fire, magic: any effect", HasComp<ParticleEmitterComponent>,
-         [](entt::registry& reg, entt::entity e) {
-             reg.emplace<ParticleEmitterComponent>(e);
-         }},
-        {"Reflection Probe", "Render", "probe",
-         "Captures the surroundings for reflections", HasComp<ReflectionProbeComponent>,
-         AddComp<ReflectionProbeComponent>},
-
-        {"Camera", "View", "camera",
-         "The game looks through this object", HasComp<CameraComponent>, AddComp<CameraComponent>},
-        {"Post Processing", "View", "camera",
-         "What is done to this camera's frame before it is shown",
-         HasComp<sage::render::PostProcessComponent>,
-         AddComp<sage::render::PostProcessComponent>},
-        {"Light", "View", "light",
-         "Point, spot or directional light", HasComp<LightComponent>, AddComp<LightComponent>},
-
-        {"Rigid Body", "Physics", "physics",
-         "The object falls and collides", HasComp<RigidBodyComponent>, AddComp<RigidBodyComponent>},
-        {"Collider", "Physics", "physics",
-         "The shape physics uses for collisions", HasComp<ColliderComponent>, AddComp<ColliderComponent>},
-        {"Joint", "Physics", "ik",
-         "Ties this body to another one", HasComp<JointComponent>, AddComp<JointComponent>},
-        {"Character Controller", "Physics", "physics",
-         "Walking, jumping, stairs", HasComp<CharacterControllerComponent>,
-         AddCharacter},
-
-        // АНИМАЦИЯ, А НЕ «АНИМИРОВАННАЯ МОДЕЛЬ». Второе делило объекты сцены
-        // на два сорта — «модель» и «анимированная модель», — хотя анимация
-        // это характеристика предмета, а не отдельный вид предмета. Скелет
-        // берётся из модели, заданной в Mesh.
-        {"Animation", "Animation", "anim",
-         "Plays clips on the skeleton of the Mesh model", HasComp<AnimationComponent>,
-         AddComp<AnimationComponent>},
-        // АНИМАЦИЯ СВОЙСТВ — ДЛЯ ТЕХ, У КОГО НЕТ СКЕЛЕТА, то есть для
-        // большинства объектов сцены и для всего интерфейса. Без этой строки
-        // компонент можно было завести только руками в .sage, и инструмент
-        // анимации оставался единственным местом, где движение «существует», —
-        // до закрытия редактора.
-        {"Property Animation", "Animation", "clock",
-         "Plays a .sageclip: properties of this object and its children",
-         HasComp<PropertyAnimatorComponent>, AddComp<PropertyAnimatorComponent>},
-        // ТВИН — «из A в B за секунду» без клипа: кнопка вздувается, дверь
-        // отъезжает, свет гаснет. Добавленный сразу получает первый твин.
-        {"Tween", "Animation", "clock",
-         "Quick change of a property over time — no clip needed",
-         HasComp<sage::anim::TweenComponent>, AddTween},
-        // IK В СПИСКЕ НЕТ — НАМЕРЕННО.
-        //
-        // Обратная кинематика нужна в считаных случаях (стопа на склоне, взгляд
-        // за целью, лекарство от скольжения ног) и требует знания имён костей.
-        // В списке «Добавить компонент» она стояла наравне с мешем и звуком, то
-        // есть предлагалась каждому — и добавлялась по ошибке, после чего ничем
-        // себя не проявляла: без настроенных целей IK не делает НИЧЕГО.
-        // Компонент, который нечем отличить от сломанного, из списка убран.
-        //
-        // Сам механизм на месте: секция IK в инспекторе рисуется у сущности,
-        // которая его уже имеет, работает Lua-API, IK переживает сохранение и
-        // префабы. Добавляется он скриптом — тем, кто знает, зачем.
-
-        // Скрипт добавляется ПУСТЫМ. Раньше сюда подставлялся путь
-        // «assets/scripts/spin.lua» — демонстрационный скрипт движка, которого
-        // в проекте человека нет: компонент добавлялся уже сломанным, и при
-        // первом же Play в консоль летело «Скрипт не найден». Пустой слот
-        // честно говорит «скрипт не прикреплён» и ждёт, когда в него бросят
-        // файл.
-        // ЗВУК — ТАКОЕ ЖЕ СВОЙСТВО ПРЕДМЕТА, КАК ЕГО МЕШ.
-        //
-        // Звуковая подсистема в движке была полной с самого начала, а
-        // дотянуться до неё можно было ровно из скрипта. То есть чтобы у двери
-        // появился скрип, дверь обязана была обзавестись программистом, — и
-        // поэтому звука в сценах не было вовсе.
-        {"Audio", "Audio", "audio",
-         "Sound of this object: ambience, hum, one-shot", HasComp<AudioSourceComponent>,
-         AddComp<AudioSourceComponent>},
-
-        {"Script", "Logic", "script",
-         "Behaviour written in a script file, with its public variables", HasComp<ScriptComponent>,
-         AddComp<ScriptComponent>},
-        {"Net Replicated", "Logic", "network",
-         "The server replicates this object to clients", HasComp<NetReplicatedComponent>,
-         AddComp<NetReplicatedComponent>},
-        // Интерфейс добавляется ОБЯЗАТЕЛЬНОЙ частью — прямоугольником; из чего
-        // элемент состоит дальше, выбирается в самом инспекторе (или заготовкой).
-        // ГРАНИЦА интерфейса — отдельным компонентом и ПЕРВЫМ в разделе:
-        // элементы живут внутри интерфейса, а не сами по себе.
-        {"Interface", "Interface", "layout",
-         "A screen of its own: its elements live inside it and are edited apart",
-         HasComp<sage::ui::InterfaceComponent>, AddComp<sage::ui::InterfaceComponent>},
-        {"UI Element", "Interface", "rect",
-         "Panel, label, image or bar on screen", HasComp<sage::ui::Element>,
-         AddComp<sage::ui::Element>},
-    };
-    return kEntries;
-}
-
-} // namespace
-
-std::vector<std::pair<std::string, std::vector<std::string>>>
-InspectorPanel::AddComponentMenuContents() {
-    std::vector<std::pair<std::string, std::vector<std::string>>> out;
-    for (const ComponentEntry& c : ComponentRegistry()) {
-        if (out.empty() || out.back().first != c.Category) out.push_back({c.Category, {}});
-        out.back().second.push_back(c.Name);
-    }
-    return out;
-}
-
-void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
-    entt::registry& reg = host.CurrentScene().Registry();
-    entt::entity e = obj.Entity();
-
-    ImGui::Separator();
-    if (ImGui::Button(T("Add Component"), ImVec2(-1, 0))) {
-        ImGui::OpenPopup("##add_component");
-        m_addComponentFilter[0] = '\0';
-        m_addComponentFocus = true;
-    }
-    // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
-    // момент открытия (см. Sage::UI::MenuScope).
-    Sage::UI::MenuScope addComponentMenu;
-    if (!ImGui::BeginPopup("##add_component")) return;
-
-    ImGui::SetNextItemWidth(280.0f);
-    if (m_addComponentFocus) {
-        ImGui::SetKeyboardFocusHere(); // курсор сразу в поиске — руки уже на клавиатуре
-        m_addComponentFocus = false;
-    }
-    ImGui::InputTextWithHint("##filter", T("Search..."), m_addComponentFilter,
-                             sizeof(m_addComponentFilter));
-    ImGui::Separator();
-
-    std::string filter = m_addComponentFilter;
-    std::transform(filter.begin(), filter.end(), filter.begin(),
-                   [](unsigned char c) { return (char)std::tolower(c); });
-    auto matches = [&](const ComponentEntry& c) {
-        if (filter.empty()) return true;
-        std::string hay = std::string(c.Name) + " " + c.Hint + " " + c.Category;
-        std::transform(hay.begin(), hay.end(), hay.begin(),
-                       [](unsigned char ch) { return (char)std::tolower(ch); });
-        return hay.find(filter) != std::string::npos;
-    };
-
-    // СПИСОК СВОРАЧИВАЕТСЯ ПО КАТЕГОРИЯМ.
-    //
-    // Категории были подписями, а не узлами: список рос с каждым новым
-    // компонентом и целиком в окно уже не помещался — приходилось листать,
-    // чтобы увидеть, что вообще бывает. Свёрнутые категории показывают ВЕСЬ
-    // состав редактора одним экраном из восьми строк, а раскрывается та одна,
-    // которая нужна. Состояние раскрытия ImGui держит сам, по имени узла, —
-    // открытая категория остаётся открытой и в следующий раз.
-    //
-    // ПРИ ПОИСКЕ КАТЕГОРИИ РАСКРЫВАЮТСЯ ПРИНУДИТЕЛЬНО: найденное, спрятанное
-    // под свёрнутым заголовком, читается как «ничего не нашлось».
-    const bool searching = !filter.empty();
-
-    // Сколько подходящих в категории — числом рядом с названием: свёрнутая
-    // категория иначе не отвечает на вопрос «а есть ли там что-нибудь».
-    auto countIn = [&](const char* category) {
-        int n = 0;
-        for (const ComponentEntry& c : ComponentRegistry())
-            if (std::strcmp(c.Category, category) == 0 && !c.Has(reg, e) && matches(c)) ++n;
-        return n;
-    };
-
-    const char* lastCategory = nullptr;
-    bool categoryOpen = false;
-    // ПОДХОДЯЩИЕ, а не НАРИСОВАННЫЕ. Считать нарисованные значило бы писать
-    // «все компоненты уже добавлены» всякий раз, когда категории свёрнуты, —
-    // то есть по умолчанию.
-    int shown = 0;
-    auto closeCategory = [&]() {
-        if (categoryOpen) ImGui::TreePop();
-        categoryOpen = false;
-    };
-    for (const ComponentEntry& c : ComponentRegistry()) {
-        if (c.Has(reg, e) || !matches(c)) continue;
-        ++shown;
-        if (!lastCategory || std::strcmp(lastCategory, c.Category) != 0) {
-            closeCategory();
-            lastCategory = c.Category;
-            char label[128];
-            std::snprintf(label, sizeof(label), "%s (%d)###cat_%s", T(c.Category), countIn(c.Category),
-                          c.Category);
-            if (searching) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
-            categoryOpen = ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_SpanAvailWidth |
-                                                        ImGuiTreeNodeFlags_FramePadding);
-        }
-        if (!categoryOpen) continue;
-        ImGui::PushID(c.Name);
-        const ImVec2 rowPos = ImGui::GetCursorScreenPos();
-        const float iconSize = ImGui::GetTextLineHeight();
-        // Строка — один Selectable на две строки текста: имя и что оно делает.
-        // Без второй строки список компонентов читается только теми, кто и так
-        // знает, что такое «GI Static».
-        const bool picked = ImGui::Selectable("##row", false, ImGuiSelectableFlags_None,
-                                              ImVec2(300.0f, iconSize * 2.0f + 4.0f));
-        EditorIcons::Overlay(rowPos.x + 2.0f, rowPos.y + iconSize * 0.5f - 1.0f, iconSize, c.Icon,
-                             glm::vec3(0.62f, 0.72f, 0.85f));
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->AddText(ImVec2(rowPos.x + iconSize + 10.0f, rowPos.y + 1.0f),
-                    ImGui::GetColorU32(ImGuiCol_Text), T(c.Name));
-        dl->AddText(ImVec2(rowPos.x + iconSize + 10.0f, rowPos.y + iconSize + 2.0f),
-                    ImGui::GetColorU32(ImGuiCol_TextDisabled), T(c.Hint));
-        if (picked) {
-            host.PushUndoSnapshot();
-            c.Add(reg, e);
-            ImGui::CloseCurrentPopup();
-            // Пустой твин ни на что не годен: сразу — выбрать свойство.
-            if (c.Add == AddTween) host.OpenTween(obj.Id(), 0, EditorHost::TweenOpen::AddProperty);
-        }
-        ImGui::PopID();
-    }
-    closeCategory();
-    if (shown == 0) {
-        ImGui::TextDisabled("%s", filter.empty() ? T("All components already added")
-                                                 : T("Nothing matches the search."));
-    }
-    ImGui::EndPopup();
-}
 
 // Префаб в инспекторе: та же вращаемая обложка, что у материала. Крупнее, чем в
 // панели Assets, потому что здесь на неё и смотрят — выбирают, тот ли это ящик.

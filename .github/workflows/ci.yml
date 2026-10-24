@@ -74,6 +74,11 @@ jobs:
       - name: ImGui pairing check (EndCombo, icon button labels)
         run: python3 scripts/check_imgui_pairs.py
 
+      # Файл редактора — не длиннее 1000 строк; старые длинные — только
+      # уменьшаются (scripts/file_size_baseline.json).
+      - name: Editor file size check
+        run: python3 scripts/check_file_size.py
+
       # Подсказка по скриптовому API для редакторов кода собирается из вызовов
       # Bind(...) движка. Устареет — начнёт врать: предлагать то, чего нет, и
       # молчать о том, что появилось. Врущая подсказка хуже отсутствующей.

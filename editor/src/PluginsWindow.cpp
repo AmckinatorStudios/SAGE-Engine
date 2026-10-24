@@ -4,6 +4,7 @@
 #include <cstring>
 #include <fstream>
 #include <sstream>
+#include <unordered_map>
 
 #include "imgui.h"
 
@@ -11,6 +12,7 @@
 #include "EditorIcons.h"
 #include "EditorPrefs.h"
 #include "FileBrowser.h"
+#include "FsCache.h"
 #include "Localization.h"
 #include "LuaPlugins.h"
 #include "PluginManager.h"
@@ -95,13 +97,35 @@ std::string ReadAll(const fs::path& p) {
 // Настройки = объявленные в runtime.lua переменные + значения из plugin.json.
 // Объявление даёт ВИД и умолчание (как у скрипта объекта в инспекторе), файл —
 // то, что выбрал человек.
+//
+// ОБЪЯВЛЕНИЕ — ИЗ КЭША. Окно рисуется каждый кадр, и чтение с разбором
+// runtime.lua шестьдесят раз в секунду ради неизменного файла — это диск и
+// разбор Lua в каждом кадре, пока окно открыто. Перечитываем, только когда
+// файл поменялся (штамп времени — тоже из кэша, раз в секунду).
 sage::vars::Table SettingsOf(const sage::plugins::Manifest& m) {
     sage::vars::Table t = m.Settings;
     if (m.HasRuntime()) {
+        struct Declared { long long Stamp = -1; sage::vars::Table Fields; };
+        static std::unordered_map<std::string, Declared> cache;
         const fs::path file = m.RuntimePath();
-        t.MergeDeclaration(sage::scripting::ParseFields(sage::PathToUtf8(file), ReadAll(file)));
+        const long long stamp = sage::editor::fscache::Stamp(file);
+        Declared& d = cache[sage::PathToUtf8(file)];
+        if (d.Stamp != stamp) {
+            d.Fields = sage::scripting::ParseFields(sage::PathToUtf8(file), ReadAll(file));
+            d.Stamp = stamp;
+        }
+        t.MergeDeclaration(d.Fields);
     }
     return t;
+}
+
+// Файлы плагинов C++ — из кэша списка папки, а не перебором каталога в каждом кадре.
+std::vector<fs::path> NativeFiles(const fs::path& dir) {
+    std::vector<fs::path> out;
+    if (dir.empty()) return out;
+    for (const fs::path& f : sage::editor::fscache::List(dir).Files)
+        if (f.extension() == PluginManager::Extension()) out.push_back(f);
+    return out;
 }
 
 // Одна строка настройки. true — значение поменяли (сохранить).
@@ -398,7 +422,7 @@ void Draw(EditorHost& host, const Native& native) {
 
     // --- Список ---------------------------------------------------------------
     const std::vector<lp::PluginInfo> list = lp::List();
-    const std::vector<fs::path> natives = native.Dir.empty() ? std::vector<fs::path>() : PluginManager::Find(native.Dir);
+    const std::vector<fs::path> natives = NativeFiles(native.Dir);
     ImGui::BeginChild("##plugin_list", ImVec2(ImGui::GetFontSize() * 17.0f, -ImGui::GetFrameHeightWithSpacing()),
                       ImGuiChildFlags_Borders);
     int shown = 0;
