@@ -90,7 +90,13 @@ jobs:
           cp build-macos/editor/SageEditor "$M/"
           cp -R build-macos/editor/assets "$M/assets"
           [ -d build-macos/editor/themes ] && cp -R build-macos/editor/themes "$M/themes"
-          [ -d build-macos/editor/plugins ] && cp -R build-macos/editor/plugins "$M/plugins"
+          # Из папки плагинов — только сами библиотеки: рядом лежит их папка
+          # сборки (CMakeFiles), и codesign отказывается подписывать пакет с
+          # таким «подкомпонентом».
+          mkdir -p "$M/plugins"
+          find build-macos/editor/plugins -maxdepth 1 -type f \( -name '*.so' -o -name '*.dylib' \) \
+            -exec cp {} "$M/plugins/" \;
+          ls "$M/plugins"
           mkdir -p "$M/runtime"
           cp build-macos/runtime/SagePlayer "$M/runtime/"
           cp -R build-macos/runtime/assets "$M/runtime/assets"
