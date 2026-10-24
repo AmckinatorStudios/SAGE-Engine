@@ -112,6 +112,18 @@ Window::Window(int width, int height, const std::string& title, Params params)
 
     m_handle = glfwCreateWindow(createW, createH, title.c_str(), useMonitor, nullptr);
     if (!m_handle) {
+        // ВТОРАЯ ПОПЫТКА — БЕЗ ЗАПРОСОВ «СВЕРХ НЕОБХОДИМОГО». Сглаживание
+        // экранного буфера и sRGB — пожелания, а не условия: часть драйверов
+        // (виртуальные машины, старые Mac, удалённый рабочий стол) не даёт
+        // такой формат пикселей вовсе, и из-за пожелания программа не
+        // запускалась совсем. Без них картинка чуть грубее по краям — и только.
+        LOG_WARN("Window") << "Окно (сглаживание x" << params.Msaa
+                           << ", sRGB) не создалось — пробую без них";
+        glfwWindowHint(GLFW_SAMPLES, 0);
+        glfwWindowHint(GLFW_SRGB_CAPABLE, GLFW_FALSE);
+        m_handle = glfwCreateWindow(createW, createH, title.c_str(), useMonitor, nullptr);
+    }
+    if (!m_handle) {
         // Причину GLFW уже написал в лог колбэком выше. Наружу отдаём текст,
         // по которому человеку понятно, что делать: почти всегда это
         // «драйвер видеокарты не умеет OpenGL 3.3».
