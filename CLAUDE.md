@@ -53,6 +53,7 @@ python3 scripts/check_asset_slots.py                              # ассеты
 python3 scripts/check_popup_ids.py                                # имена всплывающих окон
 python3 scripts/check_menu_style.py                               # отступы меню
 python3 scripts/check_imgui_pairs.py                              # EndCombo и подписи кнопок
+python3 scripts/check_file_size.py                                # файлы редактора ≤ 1000 строк
 python3 scripts/gen_script_api.py --check                         # подсказка по API скриптов
 cmake --build build-windows -j"$(nproc)"                          # кросс-сборка mingw
 ```
@@ -116,4 +117,8 @@ mingw) — половина поломок Windows-сборки на Linux не 
   `engine/src/sage/scripting/`, затем `python3 scripts/gen_script_api.py`
   (собирает подсказку `editor/assets/api/sage.lua`). Сторожит `--check`.
 - **Новый файл в редакторе** — дописать в `editor/CMakeLists.txt`.
+- **Файл редактора — не длиннее 1000 строк.** Вырос — разделить по
+  обязанностям (секция, этап, операция), помощники модуля — в `<Модуль>Detail.h`
+  (docs/architecture.md, «Модули редактора»). Отрисовка кадра не ходит на диск —
+  через `FsCache`. Проверяет `scripts/check_file_size.py`.
 - **Правка поведения — вместе с проверкой**, которая на старом коде падает.

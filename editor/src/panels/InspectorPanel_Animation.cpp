@@ -18,7 +18,7 @@
 #include "InspectorPanel.h"
 #include "../SignalLinksEditor.h"
 #include "../UIElementProperties.h"
-#include "TweenPanel.h"
+#include "../TweenUi.h"
 
 #include <cmath>
 #include <cstdio>

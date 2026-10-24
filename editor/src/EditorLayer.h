@@ -103,6 +103,11 @@ public:
     EditorLayer();
 
     void OnAttach() override;
+    // Этапы OnAttach (EditorLayer_Startup.cpp, хуки прогонов — _StartupHooks.cpp).
+    void InitImGui();
+    void InitEditorServices();
+    void InitPlugins();
+    void ApplyStartupHooks();
     // Файлы, брошенные в окно из проводника: проект/сцена открываются,
     // остальное вносится в проект. Разбирается в кадре, а не в колбэке GLFW.
     void HandleDroppedFiles();
