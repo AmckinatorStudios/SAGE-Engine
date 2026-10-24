@@ -41,12 +41,42 @@ public:
     // Play закончился (Stop) — курсор безусловно возвращается человеку.
     void ReleaseCapture() {
         m_wantCapture = false;
+        m_releasedByEditor = false;
         Apply(false);
     }
 
     void SetCursorCaptured(bool captured) override {
         m_wantCapture = captured;
+        if (captured) m_releasedByEditor = false;
         SyncCapture();
+    }
+
+    // ESC редактора: отпустить курсор, который захватила игра, и запомнить это —
+    // щелчок по окну игры вернёт захват (как в собранной игре клик по окну).
+    void ReleaseByEditor() {
+        SetCursorCaptured(false);
+        m_releasedByEditor = true;
+    }
+    bool ReleasedByEditor() const { return m_releasedByEditor; }
+    void ResumeCapture() {
+        if (m_releasedByEditor) SetCursorCaptured(true);
+    }
+
+    // Раз за кадр, пока игра в фокусе, ДО скриптов. ESC по нажатию отпускает
+    // захваченный курсор и забирает нажатие у игры; щелчок по окну игры после
+    // этого возвращает захват.
+    //
+    // Раньше курсор отпускался всё время, пока ESC зажат, а скрипт («ESC —
+    // переключить курсор») на том же нажатии захватывал его снова: следующий
+    // ESC игра захватывала, редактор тут же отпускал — вернуть мышь в игру
+    // можно было ровно один раз.
+    void HandleEscape(sage::input::InputSystem& input) {
+        if (CursorCaptured() && input.State().Keys().Pressed(sage::input::Key::Escape)) {
+            ReleaseByEditor();
+            input.MutableState().MutableKeys().Swallow(sage::input::Key::Escape);
+        } else if (m_releasedByEditor && input.State().MouseState().Pressed(sage::input::MouseButton::Left)) {
+            ResumeCapture();
+        }
     }
     bool CursorCaptured() const override { return m_wantCapture; }
 
@@ -58,4 +88,5 @@ private:
     sage::input::GlfwBridge* m_bridge = nullptr;
     bool m_gameFocused = false;
     bool m_wantCapture = false;
+    bool m_releasedByEditor = false;   // курсор отпустил ESC редактора, а не игра
 };

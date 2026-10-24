@@ -64,6 +64,8 @@ struct ButtonState {
     // Ввод отобрали (окно потеряло фокус, редактор увёл фокус из игры). Всё
     // гасится ЧЕСТНО, через Released: иначе действие навсегда останется
     // нажатым, и игрок вернётся в игру, которая сама идёт вперёд.
+    void Swallow() { Pressed = false; }
+
     void ForceUp() {
         if (Down) Released = true;
         Down = false;
@@ -100,6 +102,15 @@ public:
     void BeginFrame();
     void Handle(const InputEvent& e, uint64_t frame);
     void ReleaseAll();
+
+    // Нажатие этого кадра забрал кто-то раньше игры (редактор отпустил по ESC
+    // захваченный курсор). Скрипт его не увидит: иначе тот же ESC в игре
+    // («ESC — переключить курсор») тут же захватил бы курсор обратно.
+    // Удержание остаётся — клавиша и правда зажата.
+    void Swallow(Key key) {
+        const size_t i = (size_t)key;
+        if (i < m_keys.size()) m_keys[i].Swallow();
+    }
 
 private:
     const ButtonState& State(Key key) const {
@@ -199,6 +210,7 @@ public:
     void ReleaseAll();
 
     const Keyboard& Keys() const { return m_keyboard; }
+    Keyboard& MutableKeys() { return m_keyboard; }
     const Mouse& MouseState() const { return m_mouse; }
     const Gamepad& Pad(int index) const {
         return (index >= 0 && index < kMaxGamepads) ? m_gamepads[(size_t)index] : m_gamepads[0];

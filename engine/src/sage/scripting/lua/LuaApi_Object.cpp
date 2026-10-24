@@ -8,6 +8,7 @@
 #include "sage/ecs/LightSystem.h"
 #include "sage/physics/PhysicsComponents.h"
 #include "sage/scripting/ScriptTween.h"
+#include "sage/render/PostProcessComponent.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/ScriptComponent.h"
 #include "sage/scripting/ScriptingSystem.h"
@@ -479,6 +480,30 @@ void RegisterObject(Backend& backend) {
         if (name == "Camera") return reg.remove<CameraComponent>(e) > 0;
         if (name == "Mesh") return reg.remove<MeshRendererComponent>(e) > 0;
         throw std::runtime_error("RemoveComponent: компонент '" + name + "' из скрипта не снимается");
+    };
+    // Перенести компонент на другой объект ЦЕЛИКОМ, со всеми настройками.
+    // Нужен персонажу от первого лица: камера, висящая на самом теле, наклоняла
+    // бы вместе со взглядом всё тело, — её переносят на дочерний «взгляд».
+    // Камера едет вместе со своей пост-обработкой: та принадлежит именно ей.
+    ot["MoveComponent"] = [](ObjectRef& r, const std::string& name, ObjectRef& to) {
+        Alive(r.Obj, "MoveComponent");
+        Alive(to.Obj, "MoveComponent");
+        entt::registry& reg = *r.Obj.Registry();
+        const entt::entity from = r.Obj.Entity();
+        const entt::entity dst = to.Obj.Entity();
+        if (from == dst) return true;
+        if (name == "Camera") {
+            const CameraComponent* cam = reg.try_get<CameraComponent>(from);
+            if (!cam) return false;
+            reg.emplace_or_replace<CameraComponent>(dst, *cam);
+            reg.remove<CameraComponent>(from);
+            if (const sage::render::PostProcessComponent* pp = reg.try_get<sage::render::PostProcessComponent>(from)) {
+                reg.emplace_or_replace<sage::render::PostProcessComponent>(dst, *pp);
+                reg.remove<sage::render::PostProcessComponent>(from);
+            }
+            return true;
+        }
+        throw std::runtime_error("MoveComponent: переносится только 'Camera' (а не '" + name + "')");
     };
     // Тег — метка для поиска (Scene.FindByTag): «enemy», «pickup».
     ot["tag"] = sol::property(

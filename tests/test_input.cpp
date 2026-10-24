@@ -740,3 +740,51 @@ TEST(Input_move_action_refuses_the_impossible) {
     CHECK_FALSE(input.MoveAction("Nowhere", "Gameplay", "Jump"));        // источника нет
     CHECK_FALSE(input.MoveAction("Gameplay", "Gameplay", "Jump"));       // сам в себя
 }
+
+// --- ESC в Play редактора: курсор возвращается в игру СКОЛЬКО УГОДНО раз ------
+//
+// Редактор отпускал курсор всё время, пока ESC зажат, а скрипт игры («ESC —
+// переключить курсор») на том же нажатии захватывал его снова. Вернуть мышь в
+// игру получалось один раз. Теперь ESC редактора срабатывает по нажатию и
+// забирает его у игры, а щелчок по окну игры возвращает захват.
+#include "../editor/src/EditorPlayInput.h"
+
+TEST(Input_editor_escape_releases_and_the_game_recaptures_every_time) {
+    using sage::input::InputEvent;
+    using sage::input::Key;
+    sage::input::InputSystem input;
+    EditorPlayInput cursor;
+    cursor.SetGameFocused(true);
+    input.SetCursorControl(&cursor);
+    // Скрипт игры, как player_fps.lua: ESC переключает захват.
+    auto frame = [&] {
+        input.BeginFrame();
+        cursor.HandleEscape(input);
+        if (input.State().Keys().Pressed(Key::Escape)) cursor.SetCursorCaptured(!cursor.CursorCaptured());
+    };
+    cursor.SetCursorCaptured(true);
+    for (int round = 0; round < 3; ++round) {
+        input.Push(InputEvent::KeyDown(Key::Escape));
+        frame();
+        CHECK_FALSE(cursor.CursorCaptured());   // редактор отпустил, игра нажатия не видела
+        frame();                                // ESC ещё зажат — ничего не меняется
+        CHECK_FALSE(cursor.CursorCaptured());
+        input.Push(InputEvent::KeyUp(Key::Escape));
+        frame();
+        input.Push(InputEvent::KeyDown(Key::Escape));
+        frame();
+        CHECK_TRUE(cursor.CursorCaptured());    // второй ESC — игра захватила снова
+        input.Push(InputEvent::KeyUp(Key::Escape));
+        frame();
+        CHECK_TRUE(cursor.CursorCaptured());
+    }
+    // Щелчок по окну игры после ESC — тоже обратно в игру.
+    input.Push(InputEvent::KeyDown(Key::Escape));
+    frame();
+    input.Push(InputEvent::KeyUp(Key::Escape));
+    frame();
+    CHECK_FALSE(cursor.CursorCaptured());
+    input.Push(InputEvent::MouseDown(sage::input::MouseButton::Left));
+    frame();
+    CHECK_TRUE(cursor.CursorCaptured());
+}

@@ -691,6 +691,78 @@ TEST(ScriptSystem_shipped_fps_example_walks_and_looks_the_right_way) {
     sys->Shutdown();
 }
 
+// Камера висит НА САМОЙ капсуле (её перетащили в поле Camera или поле пусто).
+// Наклон взгляда ставился тому же объекту, что и рыскание: SetLocalRotation(
+// pitch, 0, 0) стирал рыскание («голова крутится только по X»), а при взгляде
+// вниз заваливалась вся капсула. Теперь камера уезжает на дочерний «взгляд»,
+// тело крутится только вокруг Y и стоит прямо даже после наклона гизмо.
+TEST(ScriptSystem_shipped_fps_with_camera_on_the_body_keeps_the_body_upright) {
+    const std::filesystem::path script = ShippedScript("editor/assets/scripts/player_fps.lua");
+    CHECK_TRUE(!script.empty());
+    if (script.empty()) return;
+
+    Scene scene("test");
+    GameObject hero = scene.CreateObject("Hero");
+    hero.GetTransform().Rotation = glm::vec3(0.0f, 0.0f, 12.0f);   // наклон от гизмо
+    scene.Registry().emplace<CharacterControllerComponent>(hero.Entity());
+    scene.Registry().emplace<CameraComponent>(hero.Entity()).Primary = true;
+
+    ScriptComponent sc;
+    sc.Path = script.string();
+    sage::vars::Var cameraField;
+    cameraField.Name = "Camera";
+    cameraField.Data = sage::vars::Value(sage::vars::EntityRef{hero.Id()});
+    cameraField.Declared = true;
+    sc.Fields.Put(cameraField);
+    scene.Registry().emplace<ScriptComponent>(hero.Entity(), sc);
+
+    sage::input::InputSystem input;
+    FakeCursor cursor;
+    input.SetCursorControl(&cursor);
+    auto sys = std::make_unique<ScriptingSystem>();
+    sys->AddBackend(MakeLuaBackend({}));
+    ScriptServices services;
+    services.ScenePtr = &scene;
+    services.Input = &input;
+    sys->Bind(services);
+    int errors = 0;
+    sys->Runtime().SetErrorSink([&](const ScriptError& e) {
+        ++errors;
+        std::printf("       [пример] %s\n", e.Format().c_str());
+    });
+    auto frame = [&] {
+        input.BeginFrame();
+        input.UpdateActions(1.0f / 60.0f);
+        sys->Update(1.0f / 60.0f);
+    };
+    using sage::input::InputEvent;
+
+    CHECK_EQ(sys->AttachScene(scene), 1);
+    frame();
+    // Камера переехала на дочерний объект, со своими настройками.
+    CHECK_FALSE(scene.Registry().all_of<CameraComponent>(hero.Entity()));
+    entt::entity eye = entt::null;
+    for (auto e : scene.Registry().view<CameraComponent>()) eye = e;
+    CHECK_TRUE(eye != entt::null && scene.ParentOf(eye) == hero.Entity());
+    if (eye == entt::null) return;
+    CHECK_TRUE(scene.Registry().get<CameraComponent>(eye).Primary);
+
+    // Мышь вправо и вниз: тело — только рыскание, взгляд — вниз.
+    input.Push(InputEvent::MouseMove(glm::vec2(10.0f, 0.0f), glm::vec2(100.0f, -150.0f)));
+    frame();
+    const glm::vec3 body = hero.GetTransform().Rotation;
+    std::printf("       тело (%.1f, %.1f, %.1f)\n", body.x, body.y, body.z);
+    CHECK_NEAR(body.x, 0.0f, 1e-4f);
+    CHECK_NEAR(body.z, 0.0f, 1e-4f);
+    CHECK_TRUE(std::abs(body.y) > 1.0f);
+    const glm::vec3 look = CameraLook(scene, eye);
+    CHECK_TRUE(look.y < -0.1f);   // смотрит вниз
+    // Рыскание при наклоне не потерялось: взгляд повернул вправо от -Z.
+    CHECK_TRUE(look.x > 0.05f);
+    CHECK_EQ(errors, 0);
+    sys->Shutdown();
+}
+
 // --- Отладочная графика ------------------------------------------------------
 //
 // Debug:DrawLine обязан РАБОТАТЬ, а не быть объявленным: отладочная графика —
