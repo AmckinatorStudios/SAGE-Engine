@@ -374,8 +374,8 @@ void EditorLayer::DrawStatusBar(float height) {
                            warningsShown,
                            plural(warningsShown, T("warning"), T("warnings"),
                                   T("warnings (many)")));
-        if (ImGui::IsItemClicked()) ImGui::SetWindowFocus("Console");
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Open console"));
+        if (ImGui::IsItemClicked()) m_console.ShowProblems();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Show the problems: what broke and how to fix it"));
     }
 
     if (InPlayMode()) {

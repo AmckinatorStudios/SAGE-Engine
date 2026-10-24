@@ -345,7 +345,7 @@ sage::Problem ToProblem(const ScriptError& err, const std::string& source) {
     if (!err.Title.empty()) {
         // Диагностика SAGE Lua: одной строкой в заголовок, а подробности —
         // как есть: они уже написаны для человека.
-        p.Title = err.Title;
+        p.Title = err.Title + ":";
         for (const std::string& d : err.Details) p.Title += " " + d;
     } else {
         p.Title = err.Message;

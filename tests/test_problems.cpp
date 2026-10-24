@@ -281,3 +281,57 @@ TEST(Watchdog_endless_loop_is_stopped_and_other_scripts_keep_running) {
     CHECK_TRUE(FindCode(all, "script.muted", "Stuck") != nullptr);
     CHECK_EQ(w.Global<int>(good, "ticks"), 3);
 }
+
+#include "../editor/src/ProblemGroups.h"
+
+TEST(ProblemGroups_root_on_top_errors_first_and_search_finds_effects) {
+    Problems::Clear();
+    Problem warn;
+    warn.Level = Severity::Warning;
+    warn.Code = "test.warn";
+    warn.Title = "Звук не найден";
+    warn.Resource = "assets/a.wav";
+    Problems::Report(warn);
+    Problem root;
+    root.Code = "test.root";
+    root.Title = "Скрипт не собрался";
+    root.Resource = "assets/scripts/hero.lua";
+    Problems::Report(root);
+    Problem effect;
+    effect.Code = "test.effect";
+    effect.Title = "Объект без скрипта";
+    effect.Subject = "Player";
+    effect.Resource = "assets/scripts/hero.lua";
+    Problems::Report(effect);
+
+    const auto all = Problems::Snapshot();
+    auto groups = sage::editor::problems::Build(all, {});
+    CHECK_EQ(groups.size(), (size_t)2);
+    if (groups.size() == 2) {
+        CHECK_EQ(groups[0].Root->Code, std::string("test.root"));   // ошибка выше предупреждения
+        CHECK_EQ(groups[0].Effects.size(), (size_t)1);
+    }
+    // Ищут «Player» — находится группа, где Player лишь последствие.
+    sage::editor::problems::Filter f;
+    f.Text = "player";
+    groups = sage::editor::problems::Build(all, f);
+    CHECK_EQ(groups.size(), (size_t)1);
+    if (!groups.empty()) CHECK_EQ(groups[0].Root->Code, std::string("test.root"));
+    Problems::Clear();
+}
+
+TEST(Problems_a_flood_of_distinct_errors_stays_bounded_and_fast) {
+    Problems::Clear();
+    const auto t0 = std::chrono::steady_clock::now();
+    for (int i = 0; i < 5000; ++i) {
+        Problem p;
+        p.Code = "test.flood";
+        p.Title = "ошибка номер " + std::to_string(i);
+        Problems::Report(p);
+    }
+    const double spent = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    CHECK_TRUE(Problems::Count() <= Problems::kLimit);
+    std::printf("       5000 разных ошибок: %.0f мс\n", spent * 1000.0);
+    CHECK_TRUE(spent < 3.0);
+    Problems::Clear();
+}

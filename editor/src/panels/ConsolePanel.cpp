@@ -88,6 +88,11 @@ std::string NowStamp() {
 
 } // namespace
 
+// Та же кнопка уровня — вкладке «Проблемы» (ProblemsView.cpp).
+bool ConsoleLevelChip(const char* id, LogLevel level, int count, bool on, const char* tooltip) {
+    return LevelChip(id, level, count, on, tooltip);
+}
+
 void ConsolePanel::Attach() {
     Log::SetSink([this](LogLevel level, const std::string& cat, const std::string& msg) {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -120,7 +125,7 @@ void ConsolePanel::Clear() {
     MarkSeen();
 }
 
-void ConsolePanel::Draw(bool* open, const std::string& windowId) {
+void ConsolePanel::Draw(bool* open, const std::string& windowId, EditorHost* host) {
     if (m_focusFrames > 0) {
         ImGui::SetNextWindowFocus();
         --m_focusFrames;
@@ -128,9 +133,32 @@ void ConsolePanel::Draw(bool* open, const std::string& windowId) {
     ImGui::Begin(sage::editor::panelid::Title("console", T("Console"), windowId).c_str(), open,
                  panelwindows::WindowFlags("Console"));
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) MarkSeen();
-    DrawToolbar();
-    ImGui::Separator();
-    DrawRows();
+
+    // ДВЕ ВКЛАДКИ: журнал — «что происходило», проблемы — «что сломано и как
+    // починить» (ProblemsView.h). Число у вкладки — открытые ошибки: оно
+    // видно, даже когда смотрят журнал.
+    if (ImGui::BeginTabBar("##console_modes")) {
+        if (ImGui::BeginTabItem(T("Log###console_log"))) {
+            DrawToolbar();
+            ImGui::Separator();
+            DrawRows();
+            ImGui::EndTabItem();
+        }
+        const int open = m_problems.OpenErrors();
+        char label[64];
+        if (open > 0) std::snprintf(label, sizeof(label), T("Problems (%d)###console_problems"), open);
+        else std::snprintf(label, sizeof(label), "%s", T("Problems###console_problems"));
+        const ImGuiTabItemFlags flags = m_showProblems ? ImGuiTabItemFlags_SetSelected : 0;
+        m_showProblems = false;
+        if (open > 0) ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Danger));
+        const bool problemsTab = ImGui::BeginTabItem(label, nullptr, flags);
+        if (open > 0) ImGui::PopStyleColor();
+        if (problemsTab) {
+            m_problems.Draw(host);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
     ImGui::End();
 }
 

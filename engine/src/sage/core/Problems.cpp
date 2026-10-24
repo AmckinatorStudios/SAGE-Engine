@@ -7,6 +7,7 @@
 #include <mutex>
 #include <regex>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "sage/core/CrashHandler.h"
 #include "sage/core/Log.h"
@@ -112,12 +113,13 @@ void Reindex(State& s) {
     for (size_t i = 0; i < s.Items.size(); ++i) s.ByKey[Key(s.Items[i])] = i;
     // Причина ушла — последствия становятся самостоятельными, а не висят на
     // несуществующем номере.
-    for (Problem& q : s.Items) {
-        if (!q.Parent) continue;
-        const bool alive = std::any_of(s.Items.begin(), s.Items.end(),
-                                       [&](const Problem& r) { return r.Id == q.Parent; });
-        if (!alive) q.Parent = 0;
-    }
+    // Множеством, а не поиском по списку: при потоке ошибок сверх предела
+    // это зовётся на каждую новую, и квадрат от тысячи записей — заметная пауза.
+    std::unordered_set<uint64_t> alive;
+    alive.reserve(s.Items.size());
+    for (const Problem& q : s.Items) alive.insert(q.Id);
+    for (Problem& q : s.Items)
+        if (q.Parent && !alive.count(q.Parent)) q.Parent = 0;
 }
 
 uint64_t Insert(Problem p, bool& isNew) {
@@ -156,18 +158,29 @@ uint64_t Insert(Problem p, bool& isNew) {
     }
     s.Items.push_back(std::move(p));
     s.ByKey[key] = s.Items.size() - 1;
+    const uint64_t id = s.Items.back().Id;
     if (s.Items.size() > Problems::kLimit) {
-        // Вытесняем самое старое НЕкритичное: аварию и ошибку держим дольше
-        // предупреждений — ради них журнал и открывают.
-        auto victim = std::find_if(s.Items.begin(), s.Items.end(),
-                                   [](const Problem& q) { return Rank(q.Level) < Rank(Severity::Error); });
-        if (victim == s.Items.end()) victim = s.Items.begin();
-        s.Items.erase(victim);
-        ++s.Dropped;
+        // Вытесняем ПАЧКОЙ (десятую часть) и самое старое некритичное:
+        // аварию и ошибку держим дольше предупреждений — ради них журнал и
+        // открывают. По одной за раз — значило бы перестраивать индекс на
+        // каждую новую ошибку потока.
+        size_t drop = Problems::kLimit / 10;
+        for (int pass = 0; pass < 2 && drop > 0; ++pass) {
+            for (auto it = s.Items.begin(); it != s.Items.end() && drop > 0;) {
+                const bool minor = Rank(it->Level) < Rank(Severity::Error);
+                if ((pass == 0 && minor) || pass == 1) {
+                    it = s.Items.erase(it);
+                    --drop;
+                    ++s.Dropped;
+                } else {
+                    ++it;
+                }
+            }
+        }
         Reindex(s);
     }
     s.Revision.fetch_add(1);
-    return s.Items.back().Id;
+    return id;
 }
 
 LogLevel ToLog(Severity s) {

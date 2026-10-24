@@ -86,6 +86,7 @@ add_executable(sage_tests
     ../editor/src/EditorSelection.cpp
     ../editor/src/DragSet.cpp
     ../editor/src/ConsoleLog.cpp
+    ../editor/src/ProblemGroups.cpp
     ../editor/src/EditorHistory.cpp
     ../editor/src/Project.cpp
     # Выбор цвета и то, на чём он стоит (подписи, отступы меню, тема).
