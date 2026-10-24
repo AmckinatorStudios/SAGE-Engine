@@ -1925,3 +1925,18 @@ TEST(Scripting_camera_screen_to_ray_and_world_to_screen_are_consistent) {
     const glm::vec3 expected = glm::normalize(world - cam.Position);
     CHECK_NEAR(glm::dot(dir, expected), 1.0f, 1e-3);
 }
+
+// Вращение камеры редактора вокруг точки (средняя кнопка): камера едет по
+// сфере, расстояние до точки не меняется, и точка остаётся прямо по взгляду.
+TEST(Camera_orbit_keeps_distance_and_looks_at_the_pivot) {
+    Camera cam;
+    cam.Position = {0.0f, 2.0f, 10.0f};
+    cam.SetAngles(-90.0f, 0.0f);   // смотрит в -Z
+    const glm::vec3 pivot = cam.Position + cam.Front * 6.0f;
+    for (int i = 0; i < 20; ++i) cam.Orbit(pivot, 35.0f, 12.0f);
+    CHECK_NEAR(glm::length(cam.Position - pivot), 6.0f, 1e-3f);
+    const glm::vec3 toPivot = glm::normalize(pivot - cam.Position);
+    CHECK_NEAR(glm::dot(toPivot, cam.Front), 1.0f, 1e-4f);
+    // И действительно повернулась: не стоит на прежнем месте.
+    CHECK_TRUE(glm::length(cam.Position - glm::vec3(0.0f, 2.0f, 10.0f)) > 1.0f);
+}

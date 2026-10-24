@@ -127,7 +127,11 @@ void Rename(const fs::path& from, const fs::path& to) {
 
 void DrawPaletteMenu(const fs::path& folder) {
     if (!EditorIcons::BeginMenu("color", T("Folder Colour"))) return;
+    int index = 0;
     for (const Tint& tint : Palette()) {
+            // Свой номер у каждого цвета: подписи двух оттенков могут совпасть
+            // в переводе, а идентификатор ImGui берётся из подписи.
+            ImGui::PushID(index++);
             // Образец рядом с названием: цвет выбирают глазами, а
             // список из восьми слов цвета не показывает.
             const ImVec2 at = ImGui::GetCursorScreenPos();
@@ -149,10 +153,12 @@ void DrawPaletteMenu(const fs::path& folder) {
                 ImGui::GetColorU32(ImVec4(tint.Color.r, tint.Color.g, tint.Color.b, 1.0f)),
                 3.0f);
             if (picked) Set(folder, tint.Color);
+            ImGui::PopID();
         }
-        ImGui::Separator();
-        if (EditorIcons::MenuItem("folder", T("No colour"))) Clear(folder);
     ImGui::Separator();
+    // ОДИН пункт «без цвета». Он стоял дважды подряд, и ImGui видел два
+    // элемента с одной подписью, то есть с одним идентификатором: второй не
+    // нажимался, а в отладочной сборке поверх меню вылезало предупреждение.
     if (EditorIcons::MenuItem("folder", T("No colour"))) Clear(folder);
     ImGui::EndMenu();
 }
