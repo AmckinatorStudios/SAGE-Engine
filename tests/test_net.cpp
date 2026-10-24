@@ -133,7 +133,7 @@ TEST(Net_reliable_ordered_under_loss) {
     // Прокачиваем достаточно долго, чтобы переотправки пробились сквозь потери.
     std::vector<std::string> received;
     for (int step = 0; step < 400 && (int)received.size() < kCount; ++step) {
-        now += 0.03;
+        now += 0.03; Settle();
         client.Update(now);
         server.Update(now);
         for (auto& ev : server.DrainEvents())
@@ -165,7 +165,7 @@ TEST(Net_fragmentation_large_message) {
 
     std::vector<uint8_t> got;
     for (int step = 0; step < 100 && got.empty(); ++step) {
-        now += 0.02;
+        now += 0.02; Settle();
         client.Update(now);
         server.Update(now);
         for (auto& ev : server.DrainEvents())
@@ -297,11 +297,11 @@ TEST(Net_server_full_denies_connection) {
     NetClient a, b;
     CHECK_TRUE(a.Connect(NetAddress::Loopback(server.Port())));
     double now = 0.0;
-    for (int i = 0; i < 10; ++i) { now += 0.02; a.Update(now); server.Update(now); }
+    for (int i = 0; i < 10; ++i) { now += 0.02; Settle(); a.Update(now); server.Update(now); }
     CHECK_TRUE(a.Connected());
 
     CHECK_TRUE(b.Connect(NetAddress::Loopback(server.Port())));
-    for (int i = 0; i < 10; ++i) { now += 0.02; b.Update(now); server.Update(now); }
+    for (int i = 0; i < 10; ++i) { now += 0.02; Settle(); b.Update(now); server.Update(now); }
     CHECK_FALSE(b.Connected()); // сервер заполнен -> ConnectDeny
     CHECK_EQ(server.ClientCount(), 1);
 }
@@ -548,7 +548,7 @@ TEST(Net_interpolation_actually_smooths_motion) {
     double now = 0.0;
     const double dt = 1.0 / 80.0;   // кадр 80 Гц против снапшота 20 Гц
     auto step = [&]() {
-        now += dt;
+        now += dt; Settle();
         cube.GetTransform().Position.x = (float)(now * 4.0);  // ровное движение
         server.UpdateAt(serverScene, now);
         client.UpdateAt(clientScene, now);
@@ -634,7 +634,7 @@ TEST(Net_server_caps_max_clients_at_one_byte) {
 
     double now = 0.0;
     for (int i = 0; i < 20; ++i) {
-        now += 0.02;
+        now += 0.02; Settle();
         for (auto& c : clients) c->Update(now);
         server.Update(now);
     }
