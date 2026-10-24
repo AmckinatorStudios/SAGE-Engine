@@ -1,3 +1,4 @@
+#include "sage/scene/ScaleLock.h"
 #include "../DragSet.h"
 #include "../PanelWindows.h"
 #include "ViewportPanel.h"
@@ -583,6 +584,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // Гизмо объекта. В режиме «только выбор» его нет вовсе: ни ручек на экране,
     // ни перехвата кликов. У управляемой камеры — тоже: её положение задаёт
     // полёт вида, и ручки, тянущие то же самое, спорили бы с ним каждый кадр.
+    m_scaleLockHint = sage::scene::ScaleLock::None;
     if (selected.Valid() && !colliderGizmo && selected.Id() != m_pilotId &&
         host.Tools().GizmoOp != EditorHost::kGizmoSelectOnly) {
         Transform& tr = selected.GetTransform();
@@ -594,7 +596,11 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         glm::mat4 parentWorld = (parent != entt::null) ? scene.WorldMatrix(parent) : glm::mat4(1.0f);
         glm::mat4 model = scene.WorldMatrix(selected.Entity());
 
-        const bool rectTool = (ImGuizmo::OPERATION)host.Tools().GizmoOp == ImGuizmo::BOUNDS;
+        // МАСШТАБ ТОЛЬКО У ТОГО, У ЧЕГО ЕСТЬ РАЗМЕР (sage/scene/ScaleLock.h). У
+        // камеры, света, звука ручки масштаба и рамка не рисуются вовсе:
+        // ручка, которая тянется и ничего не значит, хуже отсутствующей.
+        const bool canScale = sage::scene::CanScale(scene.Registry(), selected.Entity());
+        const bool rectTool = canScale && (ImGuizmo::OPERATION)host.Tools().GizmoOp == ImGuizmo::BOUNDS;
 
         // Пока гизмо не тащат, но курсор над ним — запоминаем состояние «до»:
         // первый же кадр перетаскивания уже мутирует Transform, поэтому снапшот
@@ -615,6 +621,16 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         // постройки из блоков размером в единицу шаг 0.5 означал, что половина
         // построек встаёт со сдвигом на полблока.
         auto op = (ImGuizmo::OPERATION)host.Tools().GizmoOp;
+        if (!canScale) {
+            // Универсальный — без масштаба, рамка — переносом за центр, а у
+            // «чистого» масштаба остаётся перенос: инструмент выбран для всей
+            // сцены, и объект под ним не должен становиться неподвижным.
+            if (op == ImGuizmo::UNIVERSAL) op = ImGuizmo::TRANSLATE | ImGuizmo::ROTATE;
+            else if (op == ImGuizmo::SCALE || op == ImGuizmo::BOUNDS) op = ImGuizmo::TRANSLATE;
+            const bool scaleTool = host.Tools().GizmoOp == (int)ImGuizmo::SCALE ||
+                                   host.Tools().GizmoOp == (int)ImGuizmo::BOUNDS;
+            if (scaleTool) m_scaleLockHint = sage::scene::ScaleLockOf(scene.Registry(), selected.Entity());
+        }
         float snapValues[3];
         const float snapUnit = host.Tools().SnapStepForCurrentOp();
         snapValues[0] = snapValues[1] = snapValues[2] = snapUnit;
@@ -709,7 +725,9 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         if (manipulated) {
             // Мировая -> локальная: убираем вклад родителя.
             glm::mat4 local = (parent != entt::null) ? glm::inverse(parentWorld) * model : model;
+            const glm::vec3 scaleBefore = tr.Scale;
             DecomposeToTransform(local, tr);
+            tr.Scale = sage::scene::AllowedScale(scene.Registry(), selected.Entity(), scaleBefore, tr.Scale);
             // ВО ВРЕМЯ ИГРЫ ПОЛОЖЕНИЕ ВЕДЁТ ФИЗИКА, и правку Transform она
             // затирает на следующем же шаге: объект возвращался на место, будто
             // мышь ничего не делала. Переставляем и само тело — тогда ящик
@@ -738,7 +756,12 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                     entt::entity p = scene.ParentOf(o.Entity());
                     glm::mat4 pw = (p != entt::null) ? scene.WorldMatrix(p) : glm::mat4(1.0f);
                     glm::mat4 loc = (p != entt::null) ? glm::inverse(pw) * newWorld : newWorld;
+                    // В группе масштабируют все, кому можно: камера, попавшая в
+                    // набор с ящиками, едет вместе с ними, но не растёт.
+                    const glm::vec3 otherBefore = o.GetTransform().Scale;
                     DecomposeToTransform(loc, o.GetTransform());
+                    o.GetTransform().Scale =
+                        sage::scene::AllowedScale(scene.Registry(), o.Entity(), otherBefore, o.GetTransform().Scale);
                     host.SyncBodyToTransform(o);
                 }
             }
@@ -746,6 +769,28 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         m_gizmoWasUsing = usingNow;
     } else {
         m_gizmoWasUsing = false;
+    }
+    // Выбран инструмент масштаба, а у объекта размера нет — говорим это
+    // прямо у вида: иначе вместо ручек масштаба человек видит стрелки
+    // переноса и решает, что инструмент не переключился.
+    if (m_scaleLockHint != sage::scene::ScaleLock::None) {
+        const char* why = T("This object has no size, so it cannot be scaled");
+        switch (m_scaleLockHint) {
+            case sage::scene::ScaleLock::Camera: why = T("A camera has no size: it cannot be scaled"); break;
+            case sage::scene::ScaleLock::Light:  why = T("A light has no size: it cannot be scaled"); break;
+            case sage::scene::ScaleLock::Audio:  why = T("A sound source has no size: it cannot be scaled"); break;
+            case sage::scene::ScaleLock::Probe:
+                why = T("A reflection probe is sized by its box in the inspector, not by scale");
+                break;
+            case sage::scene::ScaleLock::Folder: why = T("A folder only sorts the list: it cannot be scaled"); break;
+            default: break;
+        }
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const ImVec2 size = ImGui::CalcTextSize(why);
+        const ImVec2 p0(std::floor(imgPos.x + (avail.x - size.x) * 0.5f - 10.0f), imgPos.y + avail.y - size.y - 44.0f);
+        const ImVec2 p1(p0.x + size.x + 20.0f, p0.y + size.y + 10.0f);
+        dl->AddRectFilled(p0, p1, IM_COL32(20, 22, 28, 220), 6.0f);
+        dl->AddText(ImVec2(p0.x + 10.0f, p0.y + 5.0f), IM_COL32(240, 200, 90, 255), why);
     }
 
     // Ассет, бро́шенный в этот вид, ставится в сцену (см. приём ниже, у
