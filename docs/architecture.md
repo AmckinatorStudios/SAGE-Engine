@@ -174,8 +174,10 @@ SAGE-Engine/
     src/ProjectLauncher/      — стартовое окно проектов: отдельный экран со
                                 своей базой проектов (~/.config/sage/projects.json),
                                 карточками, обложками и созданием проекта
-    src/PluginAPI.h, PluginManager.*  — система плагинов редактора (см. ниже)
-    plugins/example_stats/    — плагин-пример (собирается в plugins/ рядом с exe)
+    src/LuaPlugins.*, PluginsWindow.* — плагины на Lua и окно «Плагины» (docs/plugins.md)
+    src/PluginAPI.h, PluginManager.*  — плагины C++ редактора (см. ниже)
+    plugins/lua/scatter/      — встроенный плагин «Расстановка» (копируется в plugins/)
+    plugins/example_stats/    — плагин-пример C++ (собирается в plugins/ рядом с exe)
 
   games/sandbox/              → exe Sandbox (минимальный showcase движка)
     src/  main.cpp (тонкий), SandboxLayer.*

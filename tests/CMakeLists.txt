@@ -101,6 +101,9 @@ add_executable(sage_tests
     ../editor/src/EditorIcons.cpp
     ../editor/src/EditorPrefs.cpp
     ../editor/src/Localization.cpp
+    # Плагины редактора на Lua: шаблоны и сторож проверяются без окна.
+    ../editor/src/LuaPlugins.cpp
+    ../editor/src/ObjectCatalog.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

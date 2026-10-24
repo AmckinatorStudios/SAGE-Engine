@@ -424,6 +424,7 @@ private:
     bool SelfTestTools(); // SAGE_EDITOR_SELFTEST=1 (для CI)
     bool SelfTestRenderStability(); // кадр вьюпорта не «уплывает» от повторов
     bool SelfTestPickerAndPrefabs(); // пипетка слота объекта, префабы броском
+    bool SelfTestPlugins();          // плагины на Lua: шаблон, меню, отмена, ошибки, Play
     // Многооконность — проверка В ЖИВОМ КАДРЕ: окно системы заводит платформа,
     // а не флаг, и этот последний шаг ломается молча (см. EditorSelfTest.cpp).
     void CheckMultiWindowFrame();
@@ -715,6 +716,7 @@ private:
         mutable std::string m_selectedNameBuf;
     };
     PluginManager m_plugins;
+    std::filesystem::path m_nativePluginsDir;   // каталог плагинов C++ (окно «Плагины»)
     PluginContextImpl m_pluginCtx{*this};
     std::string m_pluginStatusMessage;
 

@@ -1,6 +1,8 @@
 #include "sage/core/Problems.h"
 #include "sage/app/CoreSystems.h"
 #include "EditorLayer.h"
+#include "LuaPlugins.h"
+#include "PluginsWindow.h"
 #include "sage/scene/Signals.h"
 #include "sage/audio/AudioEngine.h"
 #include "sage/assets/Pack.h"
@@ -462,21 +464,25 @@ void EditorLayer::OnAttach() {
 
     LOG_INFO("Editor") << "SAGE Editor started (entities: " << m_scene->Count() << ")";
 
-    // --- Плагины (v1, только редактор — см. PluginAPI.h) ---
-    // ПО УМОЛЧАНИЮ ОТКЛЮЧЕНЫ: система плагинов v1 экспериментальная (нестабильный
-    // ABI между сборками), поэтому редактор их не грузит, пока явно не разрешено
-    // переменной SAGE_EDITOR_PLUGINS=1. Без неё plugins/ игнорируется.
-    if (std::getenv("SAGE_EDITOR_PLUGINS")) {
+    // --- Плагины -----------------------------------------------------------
+    // C++ (PluginAPI.h): каждый включается в окне «Плагины» по отдельности и по
+    // умолчанию ВЫКЛЮЧЕН — нестабильный ABI и код без песочницы. Переменная
+    // SAGE_EDITOR_PLUGINS=1 по-прежнему включает все разом (CI, отладка).
+    {
         fs::path pluginsDir = fs::current_path() / "plugins";
         // Плагины, положенные рядом с самим редактором (архив, .app на macOS),
         // — когда текущая папка не его.
         if (std::error_code pec; !fs::is_directory(pluginsDir, pec)) pluginsDir = sage::ExecutableDir() / "plugins";
         if (const fs::path dir = sage::EnvPath("SAGE_PLUGINS_DIR"); !dir.empty())
             pluginsDir = dir;
-        m_plugins.LoadAll(pluginsDir, m_pluginCtx);
-    } else {
-        LOG_INFO("Editor") << "Плагины редактора отключены (SAGE_EDITOR_PLUGINS не задан)";
+        m_nativePluginsDir = pluginsDir;
+        const bool all = !sage::EnvString("SAGE_EDITOR_PLUGINS").empty();
+        m_plugins.LoadAll(pluginsDir, m_pluginCtx, [all](const fs::path& file) {
+            return all || sage::editor::pluginswindow::NativeEnabled(file);
+        });
     }
+    // Lua (LuaPlugins.h): встроенные, «мои» и плагины проекта.
+    sage::editor::luaplugins::Rescan(*this);
 
     // Скачивание шаблона из каталога — БЕЗ ЧЕЛОВЕКА.
     //
@@ -564,6 +570,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TWEEN",
             "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
             "SAGE_EDITOR_SHOW_CONSOLE",  "SAGE_EDITOR_SHOW_PROBLEMS",
+            "SAGE_EDITOR_SHOW_PLUGINS",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -578,6 +585,15 @@ void EditorLayer::OnAttach() {
         }
     }
 
+    // Окно «Плагины» с примером плагина в проекте — для скриншот-проверки.
+    if (std::getenv("SAGE_EDITOR_SHOW_PLUGINS")) {
+        std::string err;
+        namespace lp = sage::editor::luaplugins;
+        lp::Create(lp::ProjectDir(*this), "Расстановка деревьев", "SAGE", lp::Template::Both, err);
+        lp::Rescan(*this);
+        sage::editor::pluginswindow::Open();
+        sage::editor::pluginswindow::Select("rasstanovka_derevev");
+    }
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_headlessProject = true; m_panels[EditorPanel::Settings] = true; }
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_headlessProject = true; m_panels[EditorPanel::Profiler] = true; }
@@ -974,6 +990,7 @@ void EditorLayer::OnDetach() {
     m_assets.Shutdown();
     m_launcher.Shutdown();   // обложки проектов — тоже текстуры
     m_plugins.UnloadAll(); // ДО разрушения ImGui-контекста — плагины рисуют через тот же ImGui
+    sage::editor::luaplugins::Shutdown();
     if (m_imguiReady) {
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplGlfw_Shutdown();
@@ -1110,6 +1127,7 @@ void EditorLayer::OnUpdate(float dt) {
         m_systems.Run(*m_scene, step);
     }
     m_plugins.UpdateAll(dt);
+    sage::editor::luaplugins::Tick(*this, dt);
     TickLuaTests();
 
     // Чего игра попросила за кадр. Здесь — после того, как все скрипты
@@ -1420,6 +1438,8 @@ void EditorLayer::OnRender() {
     panel(assetsId.c_str(), m_panels[EditorPanel::Assets],
           [&] { m_assets.Draw(*this, &m_panels[EditorPanel::Assets], assetsId); });
     m_plugins.ImGuiAll();
+    sage::editor::luaplugins::DrawPanels(*this);
+    sage::editor::pluginswindow::Draw(*this, {&m_plugins, &m_pluginCtx, m_nativePluginsDir});
 
     // Полосы долгой работы — ПОВЕРХ панелей и до стартового окна: карточка в
     // углу и модальное окно обязаны лежать выше всего, что рисует редактор

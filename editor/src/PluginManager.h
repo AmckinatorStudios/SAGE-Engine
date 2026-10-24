@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -21,7 +22,18 @@ public:
     // Сканирует directory на .so (Linux) / .dll (Windows), грузит каждый,
     // резолвит CreateSageEditorPlugin/DestroySageEditorPlugin, вызывает OnLoad.
     // Ошибки загрузки отдельного файла логируются и не прерывают сканирование.
-    void LoadAll(const std::filesystem::path& directory, EditorPluginContext& ctx);
+    // wanted — грузить ли этот файл (окно «Плагины»: нативный плагин включают
+    // по одному, потому что код C++ работает без всякой песочницы). Пусто — все.
+    void LoadAll(const std::filesystem::path& directory, EditorPluginContext& ctx,
+                 const std::function<bool(const std::filesystem::path&)>& wanted = {});
+    bool LoadOne(const std::filesystem::path& file, EditorPluginContext& ctx);
+    void UnloadOne(const std::filesystem::path& file);
+    bool IsLoaded(const std::filesystem::path& file) const;
+    // Имя загруженного плагина (Name()), пусто — не загружен.
+    std::string NameOf(const std::filesystem::path& file) const;
+    // Файлы нативных плагинов в каталоге (.so/.dll/.dylib), загруженные и нет.
+    static std::vector<std::filesystem::path> Find(const std::filesystem::path& directory);
+    static const char* Extension();
 
     // ОБЯЗАТЕЛЬНО вызывать до разрушения ImGui-контекста — плагины рисуют
     // через тот же ImGui, что и хост.

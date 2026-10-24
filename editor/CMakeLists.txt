@@ -40,6 +40,9 @@ add_executable(SageEditor WIN32
     src/EditorIcons.cpp
     src/AssetSlot.cpp
     src/CreateAssetDialog.cpp
+    src/LuaPlugins.cpp
+    src/PluginsWindow.cpp
+    src/EditorSelfTest_Plugins.cpp
     src/ObjectSlot.cpp
     src/GameBuilder.cpp
     src/ScreenColor.cpp
@@ -179,6 +182,14 @@ add_custom_command(TARGET SageEditor POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/themes $<TARGET_FILE_DIR:SageEditor>/themes
     COMMENT "Копирование тем оформления рядом с бинарником")
+
+# ВСТРОЕННЫЕ ПЛАГИНЫ НА LUA — папками в plugins/ рядом с бинарником (там же,
+# где нативные .so/.dll). Сборка их не трогает: это текст, редактор читает его
+# при запуске (src/LuaPlugins.h).
+add_custom_command(TARGET SageEditor POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/plugins/lua $<TARGET_FILE_DIR:SageEditor>/plugins
+    COMMENT "Копирование встроенных плагинов на Lua рядом с бинарником")
 
 # ШАБЛОНЫ РЯДОМ С БИНАРНИКОМ БОЛЬШЕ НЕ КОПИРУЮТСЯ.
 #
