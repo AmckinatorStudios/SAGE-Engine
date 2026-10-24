@@ -305,6 +305,12 @@ function SageObject:HasComponent(name) end
 ---@param name string
 ---@return boolean снят ли
 function SageObject:RemoveComponent(name) end
+---Перенести компонент целиком на другой объект (сейчас — "Camera", вместе с
+---её пост-обработкой). Персонажу от первого лица: камеру с тела — на «взгляд».
+---@param name string
+---@param target SageObject
+---@return boolean перенесён ли
+function SageObject:MoveComponent(name, target) end
 ---@param name string
 ---@return any компонент или nil
 function SageObject:GetComponent(name) end

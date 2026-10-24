@@ -35,13 +35,43 @@ Player.public = {
     -- простого наведения мыши на кнопку.
     LookOnlyWhenLocked = field.boolean(true),
 
+    -- Камера взгляда. Пусто — берётся дочерняя камера, а если камера висит на
+    -- САМОМ персонаже, для неё заводится дочерний «взгляд» (см. FindEye).
     Camera   = field.entity(),
+    -- Высота глаз над точкой объекта — для «взгляда», созданного автоматически.
+    EyeHeight = field.number(0.7, -2.0, 3.0),
     Animator = field.component("Animation"),
     Character = field.component("CharacterController"),
 }
 
+-- НАКЛОНЯЕТСЯ НЕ ТЕЛО, А ВЗГЛЯД. Тело крутится только вокруг Y (рыскание),
+-- вверх-вниз смотрит дочерний объект с камерой. Камера на самом теле означала
+-- две беды разом: при взгляде вниз заваливалась вся капсула, а наклон, выданный
+-- тому же объекту, что и рыскание, стирал рыскание (SetLocalRotation(pitch, 0,
+-- 0)) — голова «крутилась только по X». Такую камеру переносим на дочерний
+-- объект «взгляд» вместе со всеми её настройками.
+function Player:FindEye()
+    local me = self.gameObject
+    if self.Camera and self.Camera.id ~= me.id then return self.Camera end
+    for _, child in ipairs(me.children) do
+        if child:HasComponent("Camera") then return child end
+    end
+    if me:HasComponent("Camera") then
+        local eye = Scene:Create(me.name .. " (взгляд)")
+        eye:SetParent(me)
+        eye.transform.localPosition = Vector3(0, self.EyeHeight, 0)
+        me:MoveComponent("Camera", eye)
+        return eye
+    end
+    return nil
+end
+
 function Player:Start()
     self.pitch = 0
+    -- Рыскание считаем сами и ставим телу целиком: (0, yaw, 0). Наклон X/Z,
+    -- оставшийся от гизмо, иначе копился бы в теле и давал крен взгляду.
+    self.yaw = self.transform.localRotation.y
+    self.Eye = self:FindEye()
 
     -- Свои умолчания раскладки. Без них игра не управляется ничем сразу после
     -- создания объекта — а это первое, что делают, проверяя персонажа.
@@ -97,14 +127,15 @@ function Player:Update(dt)
         local look = Input:GetMouseDelta()
         local lookY = self.InvertLookY and -look.y or look.y
 
-        self.transform:Rotate(0, -look.x * self.LookSensitivity, 0)
+        self.yaw = self.yaw - look.x * self.LookSensitivity
 
         self.pitch = self.pitch + lookY * self.LookSensitivity
         self.pitch = math.max(-89, math.min(89, self.pitch))
     end
 
-    if self.Camera then
-        self.Camera.transform:SetLocalRotation(self.pitch, 0, 0)
+    self.transform:SetLocalRotation(0, self.yaw, 0)
+    if self.Eye then
+        self.Eye.transform:SetLocalRotation(self.pitch, 0, 0)
     end
 
     -- --- Анимация ------------------------------------------------------

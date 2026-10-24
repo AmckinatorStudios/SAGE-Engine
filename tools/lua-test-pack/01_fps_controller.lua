@@ -50,9 +50,23 @@ function Start()
     -- списке компонентов, но настройки (радиус/рост/ступенька) видны и
     -- правятся в инспекторе как обычно.
     self.character = self.gameObject:AddComponent("CharacterController")
+    -- В поле перетащили САМОГО игрока: наклон взгляда наклонял бы всё тело и
+    -- стирал рыскание. Заводим дочерний «взгляд» и переносим камеру на него.
+    if CameraObject.id == self.gameObject.id then
+        local eye = Scene:Create(self.gameObject.name .. " (взгляд)")
+        eye:SetParent(self.gameObject)
+        eye.transform.localPosition = Vector3(0, 0.7, 0)
+        if self.gameObject:HasComponent("Camera") then self.gameObject:MoveComponent("Camera", eye) end
+        CameraObject = eye
+    end
     -- Камера, добавленная кодом, не главная по умолчанию — делаем её главной,
     -- иначе кадр рисует не она, а любая случайная камера сцены.
-    CameraObject:AddComponent("Camera", {primary = true})
+    if CameraObject:HasComponent("Camera") then
+        CameraObject:GetCamera():SetPrimary(true)
+    else
+        CameraObject:AddComponent("Camera", {primary = true})
+    end
+    yaw = self.transform.rotation.y
 
     Input.SetCursorCaptured(true)
     Debug.Log("01_fps_controller: старт. WASD — ходьба, Shift — бег, Space — прыжок, " ..
@@ -83,8 +97,10 @@ function Update(dt)
         -- у камеры. Если наклонять тело целиком, направление ходьбы вверх-вниз
         -- «подныривало» бы при взгляде вниз — известная ошибка самодельных
         -- контроллеров.
-        self.transform.rotation.y = yaw
-        CameraObject.transform.rotation.x = pitch
+        -- Тело — только рыскание, целиком (0, yaw, 0): наклон от гизмо иначе
+        -- давал бы крен взгляду.
+        self.transform:SetLocalRotation(0, yaw, 0)
+        CameraObject.transform:SetLocalRotation(pitch, 0, 0)
     end
 
     -- Желаемое направление — из ТЕКУЩЕГО поворота тела (уже только рыскание,

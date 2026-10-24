@@ -1056,10 +1056,13 @@ void EditorLayer::OnUpdate(float dt) {
 
             // ESC отпускает захваченный курсор, не выходя из Play: иначе из
             // игры от первого лица в редакторе было бы не выбраться мышью.
-            if (m_play.Cursor().CursorCaptured() &&
-                m_play.Input().State().Keys().Down(sage::input::Key::Escape)) {
-                m_play.Cursor().SetCursorCaptured(false);
-            }
+            //
+            // По НАЖАТИЮ, и нажатие забирается у игры. Раньше курсор
+            // отпускался всё время, пока ESC зажат, а скрипт («ESC —
+            // переключить курсор») на том же нажатии захватывал его снова:
+            // следующий ESC игра захватывала, редактор тут же отпускал, и
+            // вернуть мышь в игру было нельзя — захват срабатывал один раз.
+            m_play.Cursor().HandleEscape(m_play.Input());
         } else {
             m_play.Input().ReleaseAll();
             UpdatePlayUiInput(dt);
