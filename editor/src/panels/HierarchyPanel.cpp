@@ -24,18 +24,25 @@
 #include "../ObjectCatalog.h"
 #include "../ModelImportDialog.h"
 #include "../FolderColors.h"
+#include "../DragSet.h"
 
 namespace {
 
 // Ассет в сцену из списка — с окном настроек импорта для новой модели
 // (ModelImportDialog.h): модель встаёт уже по ним, а не «как экспортировали».
-void AddAssetAskingSettings(EditorHost& host, const std::string& dropped) {
+// Несколько файлов — по порядку перетаскивания, с одним окном настроек на
+// всю группу.
+void AddAssetsAskingSettings(EditorHost& host, const std::vector<std::string>& dropped) {
+    std::vector<std::filesystem::path> ask;
+    for (const std::string& f : dropped)
+        if (sage::editor::modelimport::NeedsSettings(f)) ask.emplace_back(f);
     auto add = [&host, dropped]() {
-        if (!host.AddAssetToScene(dropped))
-            host.SetStatusMessage(T("Only a model or a prefab can be added to the scene"));
+        for (const std::string& f : dropped)
+            if (!host.AddAssetToScene(f))
+                host.SetStatusMessage(T("Only a model or a prefab can be added to the scene"));
     };
-    if (sage::editor::modelimport::NeedsSettings(dropped))
-        sage::editor::modelimport::Ask({std::filesystem::path(dropped)}, add);
+    if (!ask.empty())
+        sage::editor::modelimport::Ask(ask, add);
     else
         add();
 }
@@ -257,19 +264,51 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         }
     }
 
-    // Перетаскиваем эту сущность как источник.
+    // Перетаскиваем эту сущность как источник — ВМЕСТЕ С ВЫДЕЛЕННЫМИ, если
+    // взялись за одну из них (см. DragSet.h). Порядок группы — порядок строк.
     if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_None)) {
+        const std::vector<int> group = dragset::Ordered(id, host.Selection().All(), m_prevVisibleRows);
+        dragset::BeginEntities(id, group);
         ImGui::SetDragDropPayload("SAGE_ENTITY", &id, sizeof(int));
-        ImGui::Text("%s", name.c_str());
+        EditorIcons::Inline(group.size() > 1 ? "hierarchy" : EntityIcon(reg, e));
+        ImGui::SameLine(0.0f, 0.0f);
+        ImGui::TextUnformatted(dragset::Caption(name, group.size()).c_str());
         ImGui::EndDragDropSource();
     }
-    // Бросили другую сущность на эту — делаем эту родителем.
+    // Бросок объектов на строку. ТРИ МЕСТА, а не одно: верхняя четверть строки —
+    // встать ПЕРЕД ней, нижняя — ПОСЛЕ, середина — ВНУТРЬ (сделать её
+    // родителем). Раньше бросок на строку всегда означал «внутрь», и
+    // переставить объекты по порядку было нечем вовсе.
     if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ENTITY")) {
-            int childId = *(const int*)p->Data;
-            if (childId != id) {
+        const ImGuiDragDropFlags peek =
+            ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ENTITY", peek)) {
+            const std::vector<int> group = dragset::Entities(p);
+            const ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
+            const dragset::Place place = dragset::PlaceAt(ImGui::GetMousePos().y, r0.y, r1.y);
+            const bool self = std::find(group.begin(), group.end(), id) != group.end();
+            ImDrawList* dl = ImGui::GetForegroundDrawList();
+            const ImU32 col = IM_COL32(120, 190, 255, 255);
+            if (self) {
+                // На себя положить нельзя — и подсказка говорит это заранее.
+                ImGui::SetTooltip("%s", T("An object cannot be placed inside itself"));
+            } else if (place == dragset::Place::Inside) {
+                dl->AddRect(r0, r1, col, 3.0f, 0, 1.5f);
+            } else {
+                const float y = place == dragset::Place::Before ? r0.y : r1.y;
+                const float x0 = r0.x + ImGui::GetTreeNodeToLabelSpacing();
+                dl->AddLine(ImVec2(x0, y), ImVec2(r1.x, y), col, 2.0f);
+                dl->AddCircleFilled(ImVec2(x0, y), 3.0f, col);
+            }
+            if (p->IsDelivery() && !self) {
                 host.PushUndoSnapshot();
-                scene.SetParentById(childId, id);
+                if (place == dragset::Place::Inside) {
+                    scene.MoveObjects(group, id);
+                } else {
+                    const entt::entity parentE = scene.ParentOf(e);
+                    const int parentId = parentE == entt::null ? -1 : reg.get<IdComponent>(parentE).Id;
+                    scene.MoveObjects(group, parentId, id, place == dragset::Place::After);
+                }
             }
         }
         // Ассет, брошенный НА СУЩНОСТЬ, относится к ней: материал красит её,
@@ -280,8 +319,6 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         // произойдёт с этим файлом на этой сущности. Раньше бросок был
         // «наугад»: материал красил, модель заменяла меш, а .txt не делал
         // ничего — и все три случая выглядели одинаково, пока не отпустишь.
-        const ImGuiDragDropFlags peek =
-            ImGuiDragDropFlags_AcceptBeforeDelivery | ImGuiDragDropFlags_AcceptNoDrawDefaultRect;
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH", peek)) {
             std::string dropped((const char*)p->Data, (size_t)p->DataSize);
             if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
@@ -302,7 +339,10 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
                 ImGui::GetWindowDrawList()->AddRect(r0, r1, IM_COL32(120, 210, 130, 255), 3.0f, 0,
                                                     1.5f);
             }
-            if (p->IsDelivery() && what) host.ApplyAssetToEntity(id, dropped);
+            // Брошено несколько файлов — применяются все по порядку (скрипты
+            // повесятся все, из материалов останется последний).
+            if (p->IsDelivery() && what)
+                for (const std::string& file : dragset::AssetsFor(dropped)) host.ApplyAssetToEntity(id, file);
         }
         ImGui::EndDragDropTarget();
     }
@@ -384,11 +424,9 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     }
 
     if (open && hasChildren) {
-        // Копия детей: SetParent во время обхода мог бы менять список.
-        std::vector<entt::entity> kids = h->Children;
-        std::sort(kids.begin(), kids.end(), [&](entt::entity a, entt::entity b) {
-            return reg.get<IdComponent>(a).Id < reg.get<IdComponent>(b).Id;
-        });
+        // Копия детей в порядке списка (см. Scene::ChildrenOf): перенос во
+        // время обхода мог бы менять сам список.
+        const std::vector<entt::entity> kids = scene.ChildrenOf(e);
         const int myDepth = m_depth;
         ++m_depth;
         for (auto k : kids)
@@ -446,18 +484,12 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     namespace rectselect = sage::editor::rectselect;
     m_rectActive = rectselect::Begin(m_rect);
     m_rectHits.clear();
+    m_prevVisibleRows = m_visibleRows;
     m_visibleRows.clear();
     m_rowCenters.clear();
 
-    // Корни (без родителя) в стабильном порядке по id.
-    std::vector<std::pair<int, entt::entity>> roots;
-    auto view = reg.view<IdComponent, NameComponent>();
-    for (auto e : view) {
-        const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e);
-        bool hasParent = h && h->Parent != entt::null && reg.valid(h->Parent);
-        if (!hasParent) roots.push_back({view.get<IdComponent>(e).Id, e});
-    }
-    std::sort(roots.begin(), roots.end());
+    // Корни (без родителя) — в порядке, который разложил человек.
+    const std::vector<entt::entity> roots = scene.Roots();
 
     // --- САМА СЦЕНА — КОРЕНЬ СПИСКА, а не подпись над ним --------------------
     //
@@ -485,15 +517,11 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     // по видимой цели. Ассет, брошенный сюда, добавляется в сцену.
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ENTITY")) {
-            int childId = *(const int*)p->Data;
             host.PushUndoSnapshot();
-            scene.SetParentById(childId, -1);
+            scene.MoveObjects(dragset::Entities(p), -1);   // в конец корня
         }
-        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
-            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
-            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
-            AddAssetAskingSettings(host, dropped);
-        }
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH"))
+            AddAssetsAskingSettings(host, dragset::Assets(p));
         ImGui::EndDragDropTarget();
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("The scene itself: everything lives here"));
@@ -501,7 +529,8 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     if (sceneOpen) {
         m_lines.Clear();
         m_depth = 0;
-        for (auto& [id, e] : roots) DrawNode(host, scene, e);
+        for (entt::entity e : roots)
+            if (reg.all_of<NameComponent>(e)) DrawNode(host, scene, e);
         m_lines.Draw(rootPos, ImGui::GetTreeNodeToLabelSpacing(), 0);
         ImGui::TreePop();
     }
@@ -511,18 +540,14 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
     ImGui::Dummy(ImVec2(-1.0f, 24.0f));
     if (ImGui::BeginDragDropTarget()) {
         if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ENTITY")) {
-            int childId = *(const int*)p->Data;
             host.PushUndoSnapshot();
-            scene.SetParentById(childId, -1); // -1 -> entt::null (в корень)
+            scene.MoveObjects(dragset::Entities(p), -1);   // в конец корня
         }
-        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
-            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
-            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
-            // Точки под курсором тут нет — список это не трёхмерный вид,
-            // — поэтому объект встаёт в начало координат, как при создании
-            // через меню Entity.
-            AddAssetAskingSettings(host, dropped);
-        }
+        // Точки под курсором тут нет — список это не трёхмерный вид, —
+        // поэтому объекты встают в начало координат, как при создании через
+        // меню Entity. Несколько файлов — по порядку, в котором их тащили.
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH"))
+            AddAssetsAskingSettings(host, dragset::Assets(p));
         ImGui::EndDragDropTarget();
     }
 

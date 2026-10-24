@@ -276,22 +276,95 @@ public:
 
     size_t Count() const { return m_idToEntity.size(); }
 
-    // Объекты верхнего уровня (без родителя), по возрастанию номера — в том
-    // же порядке, в каком их видит человек и пишет файл. Порядок обхода entt
-    // для этого не годится: он зависит от истории создания и удаления.
+    // Объекты верхнего уровня (без родителя) — в том порядке, в каком их видит
+    // человек и пишет файл: по месту среди братьев, затем по номеру. Порядок
+    // обхода entt для этого не годится: он зависит от истории создания и
+    // удаления.
     std::vector<entt::entity> Roots() const {
-        std::vector<std::pair<int, entt::entity>> found;
+        std::vector<entt::entity> out;
         for (const auto& [id, e] : m_idToEntity) {
             if (!m_registry.valid(e)) continue;
             const auto* h = m_registry.try_get<HierarchyComponent>(e);
             if (h && h->Parent != entt::null && m_registry.valid(h->Parent)) continue;
-            found.emplace_back(id, e);
+            out.push_back(e);
         }
-        std::sort(found.begin(), found.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
-        std::vector<entt::entity> out;
-        out.reserve(found.size());
-        for (const auto& f : found) out.push_back(f.second);
+        SortSiblings(out);
         return out;
+    }
+
+    // Место объекта среди братьев (см. HierarchyComponent::Order).
+    int SiblingOrder(entt::entity e) const {
+        const auto* h = m_registry.try_get<HierarchyComponent>(e);
+        return h ? h->Order : 0;
+    }
+
+    // Дети в порядке списка; parent == entt::null — корни сцены.
+    std::vector<entt::entity> ChildrenOf(entt::entity parent) const {
+        if (parent == entt::null) return Roots();
+        std::vector<entt::entity> out;
+        if (const auto* h = m_registry.try_get<HierarchyComponent>(parent))
+            for (entt::entity c : h->Children)
+                if (m_registry.valid(c)) out.push_back(c);
+        SortSiblings(out);
+        return out;
+    }
+
+    // ПЕРЕНОС ГРУППЫ ОБЪЕКТОВ НА МЕСТО — то, что делает перетаскивание в
+    // списке сцены. ids — в том порядке, в каком они должны встать (порядок
+    // строк на экране, а не порядок щелчков): группа «лампа, стол, стул»
+    // приезжает именно так, а не вперемешку.
+    //
+    // parentId — новый родитель (-1 — корень). anchorId — сосед, рядом с
+    // которым встать (-1 — в конец), after — после него, иначе перед.
+    //
+    // Объект, чей предок тоже в группе, едет вместе с предком и сам не
+    // переставляется: иначе перетаскивание папки с выделенным содержимым
+    // вытряхивало бы содержимое из папки. Нельзя положить объект в самого
+    // себя или в своего потомка — такие пропускаются, остальные едут.
+    // Возвращает, сколько объектов переехало.
+    int MoveObjects(const std::vector<int>& ids, int parentId, int anchorId = -1, bool after = false) {
+        const entt::entity parent = parentId < 0 ? entt::null : Resolve(parentId);
+        if (parentId >= 0 && parent == entt::null) return 0;
+        std::vector<entt::entity> group;
+        for (int id : ids) {
+            const entt::entity e = Resolve(id);
+            if (e == entt::null || std::find(group.begin(), group.end(), e) != group.end()) continue;
+            if (parent != entt::null && (e == parent || IsDescendant(parent, e))) continue;
+            group.push_back(e);
+        }
+        // Едет вместе с предком — сам не переставляется.
+        std::vector<entt::entity> top;
+        for (entt::entity e : group) {
+            bool carried = false;
+            for (entt::entity other : group)
+                if (other != e && IsDescendant(e, other)) carried = true;
+            if (!carried) top.push_back(e);
+        }
+        if (top.empty()) return 0;
+
+        // Братья на новом месте без переезжающих, затем группа на своё место.
+        std::vector<entt::entity> siblings = ChildrenOf(parent);
+        siblings.erase(std::remove_if(siblings.begin(), siblings.end(),
+                                      [&](entt::entity s) {
+                                          return std::find(top.begin(), top.end(), s) != top.end();
+                                      }),
+                       siblings.end());
+        size_t at = siblings.size();
+        const entt::entity anchor = anchorId < 0 ? entt::null : Resolve(anchorId);
+        if (anchor != entt::null) {
+            const auto it = std::find(siblings.begin(), siblings.end(), anchor);
+            if (it != siblings.end()) at = (size_t)(it - siblings.begin()) + (after ? 1 : 0);
+        }
+        siblings.insert(siblings.begin() + (std::ptrdiff_t)at, top.begin(), top.end());
+
+        for (entt::entity e : top) SetParent(e, parent);
+        // Порядок родителя — тоже по списку: Children хранит его в том же
+        // виде, в каком его обходят системы (UI, скрипты).
+        for (size_t i = 0; i < siblings.size(); ++i)
+            m_registry.get_or_emplace<HierarchyComponent>(siblings[i]).Order = (int)i;
+        if (parent != entt::null)
+            m_registry.get_or_emplace<HierarchyComponent>(parent).Children = siblings;
+        return (int)top.size();
     }
 
     int NextId() const { return m_nextId; }
@@ -361,6 +434,16 @@ private:
             node = h->Parent;
         }
         return false;
+    }
+    // По месту среди братьев, при равенстве — по номеру (старые сцены).
+    void SortSiblings(std::vector<entt::entity>& list) const {
+        std::stable_sort(list.begin(), list.end(), [this](entt::entity a, entt::entity b) {
+            const int oa = SiblingOrder(a), ob = SiblingOrder(b);
+            if (oa != ob) return oa < ob;
+            const auto* ia = m_registry.try_get<IdComponent>(a);
+            const auto* ib = m_registry.try_get<IdComponent>(b);
+            return (ia ? ia->Id : 0) < (ib ? ib->Id : 0);
+        });
     }
     void DetachFromParent(entt::entity e) {
         auto* h = m_registry.try_get<HierarchyComponent>(e);

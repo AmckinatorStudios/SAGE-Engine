@@ -2640,6 +2640,25 @@
     "New Scene (.sage)": "Новая сцена (.sage)",
     "Tag": "Тег",
     "When a script loads another scene (scene:Load), this object moves there with its children: the player, music, a game manager.": "Когда скрипт загружает другую сцену (scene:Load), объект переезжает туда вместе с потомками: игрок, музыка, менеджер игры.",
-    "none": "нет"
+    "none": "нет",
+    "%s and %d more": "%s и ещё %d",
+    "A folder cannot be moved into itself": "Папку нельзя перенести в саму себя",
+    "All lines are hidden by the level buttons above": "Все строки скрыты кнопками уровней вверху",
+    "An object cannot be placed inside itself": "Объект нельзя положить в самого себя",
+    "Collapse repeated lines": "Сворачивать повторы",
+    "Copy message": "Копировать сообщение",
+    "Copy visible lines": "Копировать видимые строки",
+    "Copy with time and source": "Копировать со временем и источником",
+    "Drop to save each object as a prefab here": "Отпустите — каждый объект станет префабом в этой папке",
+    "Errors: show or hide. Ctrl+click shows only them.": "Ошибки: показать или скрыть. Ctrl+щелчок — только они.",
+    "Follow new messages": "Прокручивать к новым",
+    "Messages: show or hide. Ctrl+click shows only them.": "Сообщения: показать или скрыть. Ctrl+щелчок — только они.",
+    "More console options": "Ещё: настройки консоли",
+    "Moved %d items into %s": "Перенесено объектов: %d, в папку %s",
+    "Show debug messages": "Показывать отладочные",
+    "Show time": "Показывать время",
+    "The console is empty": "Консоль пуста",
+    "The search matched nothing": "Поиск ничего не нашёл",
+    "Warnings: show or hide. Ctrl+click shows only them.": "Предупреждения: показать или скрыть. Ctrl+щелчок — только они."
   }
 }

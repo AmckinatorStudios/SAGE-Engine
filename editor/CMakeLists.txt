@@ -20,6 +20,8 @@ add_executable(SageEditor WIN32
     src/EditorRecovery.cpp
     src/EditorLayer_Edit.cpp
     src/EditorSelection.cpp
+    src/DragSet.cpp
+    src/ConsoleLog.cpp
     src/EditorHistory.cpp
     src/EditorTools.cpp
     src/EditorLayer_Assets.cpp
