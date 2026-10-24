@@ -262,6 +262,18 @@ fs::path ConfigDir() {
     return base / "sage";
 }
 
+fs::path EnsureWritableWorkDir(const char* appFolder) {
+    std::error_code ec;
+    const fs::path cwd = fs::current_path(ec);
+    if (ec || cwd.empty() || cwd == cwd.root_path()) {
+        const fs::path dir = ConfigDir() / (appFolder ? appFolder : "app");
+        fs::create_directories(dir, ec);
+        fs::current_path(dir, ec);
+        if (!ec) return dir;
+    }
+    return cwd;
+}
+
 std::vector<UserFolder> UserFolders() {
     const fs::path home = HomeDir();
     std::vector<UserFolder> out;

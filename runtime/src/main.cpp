@@ -29,6 +29,7 @@
 namespace fs = std::filesystem;
 
 sage::Application* sage::CreateApplication(int argc, char** argv) {
+    sage::EnsureWritableWorkDir("player");
     Log::Init("sage_player.log");
     LOG_INFO("Player") << "SAGE Player v" << kSageEngineVersion << " запускается...";
 
@@ -56,6 +57,11 @@ sage::Application* sage::CreateApplication(int argc, char** argv) {
     if (!projectDir.empty()) { /* путь взят из аргументов */ }
     else if (const fs::path env = sage::EnvPath("SAGE_PROJECT"); !env.empty()) projectDir = env;
     else if (fs::exists("project/project.sageproj", ec)) projectDir = "project";
+    // Рядом с САМИМ плеером — собранная игра, запущенная двойным щелчком:
+    // текущая папка тогда не её (на macOS — вообще «/»), а project/ лежит
+    // рядом с исполняемым файлом.
+    else if (fs::exists(sage::ExecutableDir() / "project" / "project.sageproj", ec))
+        projectDir = sage::ExecutableDir() / "project";
     else projectDir = ".";
     projectDir = fs::absolute(projectDir, ec);
     // Указали САМ файл проекта, а не папку — берём папку, в которой он лежит.

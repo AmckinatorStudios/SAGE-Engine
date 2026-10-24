@@ -50,7 +50,7 @@ void ScriptEngine::RegisterPhysicsApi() {
         if (!m_physics) throw std::runtime_error("Raycast: физика не привязана (BindPhysics не вызван)");
         const PhysicsScene::EntityHit hit = m_physics->Raycast(
             origin, dir, maxDistance, mask.value_or(sage::physics::kAllLayers));
-        if (!hit.Hit) return sol::nil;
+        if (!hit.Hit) return sol::lua_nil;
         sol::table t = m_lua.create_table();
         t["object"] = GameObject(&m_scene->Registry(), hit.Entity);
         t["point"] = hit.Point;
@@ -150,7 +150,7 @@ void ScriptEngine::RegisterPhysicsApi() {
                                                                      sol::object fn) {
         if (!obj.Valid()) return;
         auto& cc = obj.Registry()->get_or_emplace<CharacterControllerComponent>(obj.Entity());
-        if (!fn.valid() || fn == sol::nil) {
+        if (!fn.valid() || fn == sol::lua_nil) {
             cc.Solid = nullptr;
             cc.Motor.reset();
             return;
@@ -227,9 +227,9 @@ void ScriptEngine::RegisterPhysicsApi() {
     // кадрами и теряет их на длинном кадре, ровно тогда, когда просадка и
     // без того портит впечатление.
     Bind("physics", "CharacterState", "CharacterState", [this](GameObject& obj) -> sol::object {
-        if (!obj.Valid()) return sol::nil;
+        if (!obj.Valid()) return sol::lua_nil;
         auto* cc = obj.Registry()->try_get<CharacterControllerComponent>(obj.Entity());
-        if (!cc) return sol::nil;
+        if (!cc) return sol::lua_nil;
         sage::physics::CharacterState st;
         if (cc->Motor) st = cc->Motor->State();
         else if (m_physics && cc->Runtime != sage::physics::kInvalidCharacter)

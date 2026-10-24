@@ -9,6 +9,7 @@
 
 #include "sage/app/GameModule.h"
 #include "sage/core/Log.h"
+#include "sage/core/Paths.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -16,6 +17,9 @@
 #include "Localization.h"
 
 sage::Application* sage::CreateApplication(int /*argc*/, char** /*argv*/) {
+    // Из Finder программа стартует с текущей папкой «/» — лог и
+    // восстановление сцены писать туда нельзя (см. EnsureWritableWorkDir).
+    sage::EnsureWritableWorkDir("editor");
     Log::Init("sage_editor.log");
     LOG_INFO("Editor") << "SAGE Editor запускается...";
 

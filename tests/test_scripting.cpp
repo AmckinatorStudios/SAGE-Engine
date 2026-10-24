@@ -96,6 +96,24 @@ TEST(Scripting_emissive_comes_from_the_material) {
     CHECK_TRUE(EffectiveEmissive(mr).x > 1.0f);
 }
 
+// Собранный скриптом материал назначается ПО ТОМУ ЖЕ ИМЕНИ, как бы оно ни было
+// записано. Кэш хранил его под именем как есть, а SetMaterial искал по
+// нормализованному пути: «./x» и «a/../x» (а на macOS — любое имя) давали
+// объекту пустой материал вместо собранного.
+TEST(Scripting_new_material_is_found_by_its_name_in_any_spelling) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject o = scene.CreateObject("Lamp");
+    se.Lua()["e"] = o;
+    se.Lua().script("local m = sage.render.NewMaterial('demo/../spelled_lamp')\n"
+                    "m.EmissiveStrength = 3.5\n"
+                    "sage.render.SetMaterial(e, 'demo/../spelled_lamp')");
+    const MeshRendererComponent& mr = scene.Registry().get<MeshRendererComponent>(o.Entity());
+    CHECK_TRUE(mr.MaterialPtr != nullptr);
+    if (mr.MaterialPtr) CHECK_NEAR(mr.MaterialPtr->EmissiveStrength, 3.5f, 1e-4);
+}
+
 // Полная поддержка материалов из скрипта: собственный шейдер, юниформы
 // (запись/чтение/удаление) и сохранение/перезагрузка с диска — то, чего не
 // было ни у Material-usertype (только поля поверхности), ни у sage.render

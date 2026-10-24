@@ -99,12 +99,12 @@ void ScriptEngine::RegisterSaveApi() {
          [this](const std::string& slot) -> sol::object {
              std::string payload;
              int version = 1;
-             if (!sage::save::Read(slot, payload, &version)) return sol::nil;
+             if (!sage::save::Read(slot, payload, &version)) return sol::lua_nil;
              try {
                  return JsonToLua(nlohmann::json::parse(payload), m_lua);
              } catch (const std::exception& e) {
                  LOG_ERROR("Save") << "Сохранение не разобралось (" << slot << "): " << e.what();
-                 return sol::nil;
+                 return sol::lua_nil;
              }
          });
 
@@ -123,7 +123,7 @@ void ScriptEngine::RegisterSaveApi() {
     // Ради карточки в меню «Продолжить» грузить мегабайты инвентаря незачем.
     Bind("save", "Info", "SaveInfo", [this](const std::string& slot) -> sol::object {
         sage::save::SlotInfo info;
-        if (!sage::save::ReadInfo(slot, info)) return sol::nil;
+        if (!sage::save::ReadInfo(slot, info)) return sol::lua_nil;
         return SlotInfoToLua(info, m_lua);
     });
 

@@ -290,6 +290,14 @@ if (WIN32)
     # dbghelp — символы в стеке вызовов отчёта о падении (CrashHandler).
     # ws2_32 — Winsock: UDP-сокеты сетевого модуля (sage/net/UdpSocket).
     target_link_libraries(sage_engine PUBLIC opengl32 dbghelp ws2_32)
+elseif (APPLE)
+    # macOS: OpenGL — системный фреймворк (3.3 core есть на любом Mac с
+    # 10.9); Cocoa/IOKit/CoreVideo — окно GLFW; CoreAudio/AudioToolbox —
+    # miniaudio. X11 на Mac нет вовсе.
+    target_link_libraries(sage_engine PUBLIC
+        "-framework OpenGL" "-framework Cocoa" "-framework IOKit" "-framework CoreVideo"
+        "-framework CoreAudio" "-framework AudioToolbox" "-framework CoreFoundation"
+        ${CMAKE_DL_LIBS} pthread m)
 elseif (UNIX)
     # m — miniaudio (математика микшера); dl/pthread — GLFW и miniaudio
     # (последняя грузит ALSA/PulseAudio через dlopen в рантайме).

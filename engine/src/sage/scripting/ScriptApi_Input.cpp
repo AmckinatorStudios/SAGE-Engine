@@ -322,7 +322,7 @@ void ScriptEngine::RegisterInputApi() {
                 default: break;
             }
         }
-        return sol::nil;
+        return sol::lua_nil;
     });
 
     // Кто уже занял этот источник — экран настроек обязан спросить ДО
@@ -331,9 +331,9 @@ void ScriptEngine::RegisterInputApi() {
     Bind("input", "FindConflict", nullptr, [this](const std::string& source) -> sol::object {
         if (!m_input) throw std::runtime_error("FindConflict: ввод не привязан (BindInput не вызван)");
         auto b = sage::input::Binding::Parse(source);
-        if (!b) return sol::nil;
+        if (!b) return sol::lua_nil;
         sage::input::Action* a = m_input->FindByBinding(*b);
-        return a ? sol::make_object(m_lua, a->Name()) : sol::nil;
+        return a ? sol::make_object(m_lua, a->Name()) : sol::lua_nil;
     });
     // Добавить привязку, НЕ снимая прежние — в отличие от Rebind (полная
     // замена). «Прыжок» на пробеле и вдобавок на кнопке A геймпада — это
@@ -484,10 +484,10 @@ void ScriptEngine::RegisterCameraApi() {
          [this](const glm::vec3& worldPos) -> sol::object {
         if (!m_camera) throw std::runtime_error("WorldToScreen: камера не привязана (BindCamera не вызван)");
         const glm::vec2 size = m_scene ? m_scene->UiFrame.Size : glm::vec2(0.0f);
-        if (size.x <= 0.0f || size.y <= 0.0f) return sol::nil;
+        if (size.x <= 0.0f || size.y <= 0.0f) return sol::lua_nil;
         const glm::vec3 toPoint = worldPos - m_camera->Position;
         const float depth = glm::dot(toPoint, m_camera->Front);
-        if (depth <= m_camera->NearClip) return sol::nil;
+        if (depth <= m_camera->NearClip) return sol::lua_nil;
         const float aspect = size.x / size.y;
         const float tanHalfFov = std::tan(glm::radians(m_camera->Fov) * 0.5f);
         const float ndcX = glm::dot(toPoint, m_camera->Right) / (depth * aspect * tanHalfFov);

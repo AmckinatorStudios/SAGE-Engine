@@ -233,9 +233,9 @@ void RegisterObject(Backend& backend) {
     ot["parent"] = sol::property([self](ObjectRef& r) -> sol::object {
         Alive(r.Obj, "parent");
         Scene* scene = self->ScenePtr();
-        if (!scene) return sol::nil;
+        if (!scene) return sol::lua_nil;
         const entt::entity p = scene->ParentOf(r.Obj.Entity());
-        if (p == entt::null) return sol::nil;
+        if (p == entt::null) return sol::lua_nil;
         return self->Wrap(GameObject(&scene->Registry(), p));
     });
     ot["children"] = sol::property([self](ObjectRef& r) {

@@ -82,22 +82,22 @@ sol::object ScriptEngine::ValueToLua(const sage::vars::Value& v) {
         case K::Asset: return sol::make_object(m_lua, v.AsAsset().Path);
         case K::Entity: {
             const int id = v.AsEntity().Id;
-            if (!m_scene || id <= 0) return sol::nil;
+            if (!m_scene || id <= 0) return sol::lua_nil;
             GameObject obj = m_scene->Get(id);
             // Ссылка на удалённый объект — nil, а не «объект, у которого всё
             // падает»: скрипт обязан уметь проверить её обычным `if`.
-            if (!obj.Valid()) return sol::nil;
+            if (!obj.Valid()) return sol::lua_nil;
             return sol::make_object(m_lua, obj);
         }
     }
-    return sol::nil;
+    return sol::lua_nil;
 }
 
 // Значение Lua -> значение движка. Вид берётся у СУЩЕСТВУЮЩЕЙ переменной, если
 // она есть: скрипт, присвоивший «5» переменной-цвету, ошибся, и менять из-за
 // этого тип переменной в инспекторе — значит спрятать ошибку.
 sage::vars::Value ScriptEngine::ValueFromLua(const sol::object& o) {
-    if (!o.valid() || o == sol::nil) return sage::vars::Value();
+    if (!o.valid() || o == sol::lua_nil) return sage::vars::Value();
     if (o.is<bool>()) return sage::vars::Value(o.as<bool>());
     if (o.is<GameObject>()) {
         GameObject obj = o.as<GameObject>();
@@ -123,9 +123,9 @@ void ScriptEngine::RegisterVarsApi() {
         sol::meta_function::index,
         [this](VarsProxy& p, const std::string& name) -> sol::object {
             const sage::vars::Table* t = p.For(name, false);
-            if (!t) return sol::nil;
+            if (!t) return sol::lua_nil;
             const sage::vars::Var* v = t->Find(name);
-            return v ? ValueToLua(v->Data) : sol::nil;
+            return v ? ValueToLua(v->Data) : sol::lua_nil;
         },
         sol::meta_function::new_index,
         [this](VarsProxy& p, const std::string& name, sol::object value) {

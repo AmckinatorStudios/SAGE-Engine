@@ -118,6 +118,20 @@ cmake --build build --config Release
 ```
 Или открой папку в Visual Studio через "Open Folder" — она сама подхватит CMake.
 
+### macOS (Apple Silicon)
+```bash
+brew install cmake ninja
+cmake -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DSAGE_VULKAN=OFF
+cmake --build build-macos -j$(sysctl -n hw.ncpu)
+./build-macos/editor/SageEditor
+```
+Рендер — OpenGL 3.3 core: его macOS даёт на любом Mac. Vulkan выключен, на
+Mac его нет без MoltenVK. Готовый `SageEditor.app` с плеером, темами и
+подписью ad hoc собирает `.github/workflows/macos.yml`, он же выкладывает
+релиз `macos-latest`. Собрать macOS из Linux нельзя, поэтому эта сборка
+проверяется только в CI.
+
 ### Кросс-компиляция в .exe из Linux
 ```bash
 sudo apt install g++-mingw-w64-x86-64

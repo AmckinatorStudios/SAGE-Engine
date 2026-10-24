@@ -658,7 +658,7 @@ TEST(Input_raw_subscriber_can_consume_an_event) {
 
 TEST(Input_typed_text_arrives_as_symbols_not_key_codes) {
     InputSystem in;
-    in.Push(InputEvent::Text((unsigned int)'ё'));
+    in.Push(InputEvent::Text(0x0451)); // ё (литералом нельзя: clang не вмещает его в char)
     in.Push(InputEvent::Text(0x0416)); // Ж
     in.Update(kFrame);
     CHECK_EQ((int)in.TypedText().size(), 2);

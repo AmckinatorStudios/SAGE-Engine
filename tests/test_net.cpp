@@ -7,6 +7,8 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <chrono>
+#include <thread>
 #include <vector>
 
 #include "sage/net/NetHost.h"
@@ -26,10 +28,18 @@ using namespace sage::net;
 
 namespace {
 
+// ДАТЬ ПАКЕТУ ДОЙТИ. Тесты крутят кадры с ВЫДУМАННЫМ временем, без единой
+// паузы, — а пакет через loopback идёт по-настоящему. На Linux он успевает
+// между sendto и следующим recvfrom, на macOS — нет: десять «кадров» подряд
+// проходили за микросекунды, сервер не видел ни одного пакета, и тест читал
+// это как сломанную сеть. Полмиллисекунды на кадр с запасом хватает.
+void Settle() { std::this_thread::sleep_for(std::chrono::microseconds(500)); }
+
+
 // Прокачивает пару сервер/клиент count шагов по step секунд.
 void Pump(NetServer& server, NetClient& client, double& now, int count, double step = 0.02) {
     for (int i = 0; i < count; ++i) {
-        now += step;
+        now += step; Settle();
         client.Update(now);
         server.Update(now);
     }
@@ -123,7 +133,7 @@ TEST(Net_reliable_ordered_under_loss) {
     // Прокачиваем достаточно долго, чтобы переотправки пробились сквозь потери.
     std::vector<std::string> received;
     for (int step = 0; step < 400 && (int)received.size() < kCount; ++step) {
-        now += 0.03;
+        now += 0.03; Settle();
         client.Update(now);
         server.Update(now);
         for (auto& ev : server.DrainEvents())
@@ -155,7 +165,7 @@ TEST(Net_fragmentation_large_message) {
 
     std::vector<uint8_t> got;
     for (int step = 0; step < 100 && got.empty(); ++step) {
-        now += 0.02;
+        now += 0.02; Settle();
         client.Update(now);
         server.Update(now);
         for (auto& ev : server.DrainEvents())
@@ -185,7 +195,7 @@ TEST(Net_replication_ghost_lifecycle) {
     double now = 0.0;
     auto pump = [&](int steps) {
         for (int i = 0; i < steps; ++i) {
-            now += 0.05;
+            now += 0.05; Settle();
             server.UpdateAt(serverScene, now);
             client.UpdateAt(clientScene, now);
         }
@@ -264,7 +274,7 @@ TEST(Net_lua_messages_end_to_end) {
 
     double now = 0.0;
     for (int i = 0; i < 40; ++i) {
-        now += 0.05;
+        now += 0.05; Settle();
         serverNet.UpdateAt(serverScene, now);
         clientNet.UpdateAt(clientScene, now);
         serverScripts.UpdateAll(0.05f);
@@ -287,11 +297,11 @@ TEST(Net_server_full_denies_connection) {
     NetClient a, b;
     CHECK_TRUE(a.Connect(NetAddress::Loopback(server.Port())));
     double now = 0.0;
-    for (int i = 0; i < 10; ++i) { now += 0.02; a.Update(now); server.Update(now); }
+    for (int i = 0; i < 10; ++i) { now += 0.02; Settle(); a.Update(now); server.Update(now); }
     CHECK_TRUE(a.Connected());
 
     CHECK_TRUE(b.Connect(NetAddress::Loopback(server.Port())));
-    for (int i = 0; i < 10; ++i) { now += 0.02; b.Update(now); server.Update(now); }
+    for (int i = 0; i < 10; ++i) { now += 0.02; Settle(); b.Update(now); server.Update(now); }
     CHECK_FALSE(b.Connected()); // сервер заполнен -> ConnectDeny
     CHECK_EQ(server.ClientCount(), 1);
 }
@@ -338,7 +348,7 @@ TEST(Net_replicates_more_entities_than_fit_in_one_packet) {
 
     double now = 0.0;
     for (int i = 0; i < 30; ++i) {
-        now += 0.05;
+        now += 0.05; Settle();
         server.UpdateAt(serverScene, now);
         client.UpdateAt(clientScene, now);
     }
@@ -362,7 +372,7 @@ TEST(Net_replication_survives_packet_loss) {
 
     double now = 0.0;
     for (int i = 0; i < 20; ++i) {   // сперва подключаемся по чистой сети
-        now += 0.05;
+        now += 0.05; Settle();
         server.UpdateAt(serverScene, now);
         client.UpdateAt(clientScene, now);
     }
@@ -370,13 +380,13 @@ TEST(Net_replication_survives_packet_loss) {
 
     client.Client().Socket().SetSimulatedLoss(0.34f, 7);
     for (int i = 0; i < 120; ++i) {
-        now += 0.05;
+        now += 0.05; Settle();
         server.UpdateAt(serverScene, now);
         client.UpdateAt(clientScene, now);
     }
     client.Client().Socket().SetSimulatedLoss(0.0f);
     for (int i = 0; i < 20; ++i) {
-        now += 0.05;
+        now += 0.05; Settle();
         server.UpdateAt(serverScene, now);
         client.UpdateAt(clientScene, now);
     }
@@ -412,7 +422,7 @@ TEST(Net_stale_snapshot_does_not_rewind_entities) {
     double now = 0.0;
     auto pump = [&](int steps) {
         for (int i = 0; i < steps; ++i) {
-            now += 0.05;
+            now += 0.05; Settle();
             server.UpdateAt(serverScene, now);
             client.UpdateAt(clientScene, now);
         }
@@ -450,7 +460,7 @@ TEST(Net_disconnect_removes_ghosts_from_scene) {
 
     double now = 0.0;
     for (int i = 0; i < 20; ++i) {
-        now += 0.05;
+        now += 0.05; Settle();
         server.UpdateAt(serverScene, now);
         client.UpdateAt(clientScene, now);
     }
@@ -460,12 +470,12 @@ TEST(Net_disconnect_removes_ghosts_from_scene) {
     // смены уровня, из деструктора). Призраки помечаются и снимаются ближайшим
     // Update: тем же кадром, в котором игра увидела бы разрыв.
     client.Stop();
-    now += 0.05;
+    now += 0.05; Settle();
     client.UpdateAt(clientScene, now);
     CHECK_EQ(CountGhosts(clientScene, 5), 0);
 
     // И повторный Update не должен ничего ломать (список уже пуст).
-    now += 0.05;
+    now += 0.05; Settle();
     client.UpdateAt(clientScene, now);
     CHECK_EQ(CountGhosts(clientScene, 5), 0);
     server.Stop();
@@ -489,7 +499,7 @@ TEST(Net_interpolation_takes_the_short_way_around) {
     double now = 0.0;
     auto pump = [&](int steps, double dt = 0.05) {
         for (int i = 0; i < steps; ++i) {
-            now += dt;
+            now += dt; Settle();
             server.UpdateAt(serverScene, now);
             client.UpdateAt(clientScene, now);
         }
@@ -538,7 +548,7 @@ TEST(Net_interpolation_actually_smooths_motion) {
     double now = 0.0;
     const double dt = 1.0 / 80.0;   // кадр 80 Гц против снапшота 20 Гц
     auto step = [&]() {
-        now += dt;
+        now += dt; Settle();
         cube.GetTransform().Position.x = (float)(now * 4.0);  // ровное движение
         server.UpdateAt(serverScene, now);
         client.UpdateAt(clientScene, now);
@@ -624,7 +634,7 @@ TEST(Net_server_caps_max_clients_at_one_byte) {
 
     double now = 0.0;
     for (int i = 0; i < 20; ++i) {
-        now += 0.02;
+        now += 0.02; Settle();
         for (auto& c : clients) c->Update(now);
         server.Update(now);
     }

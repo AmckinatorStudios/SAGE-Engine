@@ -463,6 +463,9 @@ void EditorLayer::OnAttach() {
     // переменной SAGE_EDITOR_PLUGINS=1. Без неё plugins/ игнорируется.
     if (std::getenv("SAGE_EDITOR_PLUGINS")) {
         fs::path pluginsDir = fs::current_path() / "plugins";
+        // Плагины, положенные рядом с самим редактором (архив, .app на macOS),
+        // — когда текущая папка не его.
+        if (std::error_code pec; !fs::is_directory(pluginsDir, pec)) pluginsDir = sage::ExecutableDir() / "plugins";
         if (const fs::path dir = sage::EnvPath("SAGE_PLUGINS_DIR"); !dir.empty())
             pluginsDir = dir;
         m_plugins.LoadAll(pluginsDir, m_pluginCtx);

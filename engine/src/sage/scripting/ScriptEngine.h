@@ -213,7 +213,7 @@ public:
 
     // Разослать событие из C++ — тем же путём, каким это делает игра из
     // sage.events.Emit. Хозяин кадра шлёт так "pause" и "quit".
-    void DispatchEvent(const std::string& name, sol::object payload = sol::nil);
+    void DispatchEvent(const std::string& name, sol::object payload = sol::lua_nil);
     void DispatchEvent(const std::string& name, bool flag);
 
     // Шина, в которую говорит sage.events: шина привязанной сцены, а без

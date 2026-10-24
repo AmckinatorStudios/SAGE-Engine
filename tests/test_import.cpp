@@ -340,6 +340,7 @@ TEST(imported_scene_flatten_bakes_transforms) {
 #define TINYGLTF_NO_STB_IMAGE_WRITE
 #include <tiny_gltf.h>
 
+#include <cctype>
 #include <filesystem>
 
 TEST(gltf_sparse_accessor_is_expanded_not_read_out_of_bounds) {
@@ -851,7 +852,13 @@ TEST(texture_resolve_finds_a_sibling_folder_named_in_another_case) {
     fx.Put("OBJ/tree.obj");
     const std::string found = ResolveTexturePath(fx.Dir / "OBJ", "C:/Leaves.png");
     CHECK_TRUE(!found.empty());
-    CHECK_TRUE(found.find("Textures") != std::string::npos);
+    // Проверяется, что найден НАСТОЯЩИЙ файл. Буквы пути не сравниваем: на
+    // macOS файловая система регистр не различает, и «textures/» там тоже
+    // правильный ответ.
+    CHECK_TRUE(std::filesystem::exists(found));
+    std::string lower = found;
+    for (char& c : lower) c = (char)std::tolower((unsigned char)c);
+    CHECK_TRUE(lower.find("textures") != std::string::npos);
 }
 
 #include "sage/assets/import/PolygonTriangulate.h"

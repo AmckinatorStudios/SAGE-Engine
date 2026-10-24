@@ -26,6 +26,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #include "sage/core/Paths.h"
@@ -135,4 +136,36 @@ TEST(Paths_home_dir_never_throws) {
         threw = true;
     }
     CHECK_FALSE(threw);
+}
+
+// Программа, запущенная из Finder или меню рабочего стола, получает текущей
+// папкой корень диска — писать лог туда нельзя. EnsureWritableWorkDir уводит
+// её в папку настроек; запуск из обычной папки (терминал, IDE) не трогает.
+TEST(Paths_root_working_dir_moves_to_a_writable_one) {
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    const fs::path before = fs::current_path(ec);
+    const fs::path cfg = fs::temp_directory_path() / "sage_workdir_cfg";
+#if !defined(_WIN32)
+    const char* oldXdg = std::getenv("XDG_CONFIG_HOME");
+    const std::string keep = oldXdg ? oldXdg : "";
+    setenv("XDG_CONFIG_HOME", cfg.string().c_str(), 1);
+#endif
+    // Обычная папка — как была.
+    CHECK_TRUE(sage::EnsureWritableWorkDir("probe") == fs::current_path(ec));
+    CHECK_TRUE(fs::current_path(ec) == before);
+    // Корень — в папку настроек, и туда можно писать.
+    fs::current_path(before.root_path(), ec);
+    const fs::path moved = sage::EnsureWritableWorkDir("probe");
+    CHECK_TRUE(moved != moved.root_path());
+    // equivalent, а не ==: на macOS /var — ссылка на /private/var, и одна и
+    // та же папка пишется двумя путями.
+    CHECK_TRUE(fs::equivalent(fs::current_path(ec), moved, ec));
+    { std::ofstream f("probe.log"); f << "ok"; CHECK_TRUE(f.good()); }
+    fs::current_path(before, ec);
+#if !defined(_WIN32)
+    if (oldXdg) setenv("XDG_CONFIG_HOME", keep.c_str(), 1);
+    else unsetenv("XDG_CONFIG_HOME");
+#endif
+    fs::remove_all(cfg, ec);
 }
