@@ -200,7 +200,9 @@ private:
     std::vector<TreeRow> m_treeRows;
     void DrawFolderNode(EditorHost& host, const std::filesystem::path& dir, int depth);
     void DrawTile(EditorHost& host, const std::filesystem::path& path, bool isDir);
-    void DrawModals(EditorHost& host); // Create/Rename/Delete — в ID-скоупе окна панели
+    void DrawModals(EditorHost& host);
+    // Открыть файл или папку (двойной щелчок, пункт меню «Открыть»).
+    void OpenItem(EditorHost& host, const std::filesystem::path& path, bool isDir); // Create/Rename/Delete — в ID-скоупе окна панели
 
     // Перенос файла в папку броском (вместе с сайдкарами .meta/.sageimport).
     // rescan=false — без пересчёта базы ассетов (его делает вызывающий, один
@@ -238,7 +240,5 @@ private:
     std::filesystem::path m_renameTarget;  // пусто — модалка Rename не активна
     char m_renameBuf[256] = "";
     std::vector<std::filesystem::path> m_deleteTargets; // ждут подтверждения в модалке Delete
-    CreateKind m_createKind = CreateKind::None;
-    char m_createName[128] = "";
     std::string m_error; // ошибка текущей модалки
 };

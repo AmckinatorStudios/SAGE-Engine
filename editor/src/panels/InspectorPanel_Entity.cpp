@@ -9,6 +9,7 @@
 // только тела. Разбит потому, что дорос до двух тысяч строк, в которых рядом
 // лежали редактор материала, якоря интерфейса и список компонентов.
 // ---------------------------------------------------------------------------
+#include <cctype>
 #include <cstdarg>
 #include "sage/scene/CharacterFit.h"
 #include "sage/scene/ScaleLock.h"
@@ -562,9 +563,14 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             // обложка, приём перетаскивания с проверкой типа, «показать в
             // Assets». Раньше здесь было поле ввода пути, и .lua приходилось
             // печатать наизусть, хотя он тут же в дереве проекта.
+            // «+» в слоте создаёт скрипт (язык — в окне «Создать…») с именем
+            // объекта и сразу вешает его; «править» открывает в редакторе кода.
+            assetslot::Actions actions;
+            for (char c : obj.Name())
+                actions.SuggestedName += (std::isalnum((unsigned char)c) || c == '_') ? c : '_';
             const assetslot::Result r =
                 assetslot::Draw(host, "script", assetslot::Kind::Script, sc->Path, &m_preview,
-                                T("No script attached"));
+                                T("No script attached"), &actions);
             if (r.Changed) {
                 host.PushUndoSnapshot();
                 sc->Path = r.Path;
@@ -585,13 +591,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 m_browseIsShader = false;
                 m_browseIsMesh = false;
                 m_browseIsMaterial = false;
-            }
-            if (!sc->Path.empty() && EditorIcons::Button("code", T("Open in the system editor"))) {
-                // Скрипт открывается тем, чем его открывает система: своего
-                // редактора кода у SAGE нет (см. EditorHost::OpenFileInSystemEditor).
-                if (!host.OpenFileInSystemEditor(sc->Path)) {
-                    host.SetStatusMessage(T("The system has no program for this file: ") + sc->Path);
-                }
             }
 
             // --- ПЕРЕМЕННЫЕ, ОБЪЯВЛЕННЫЕ САМИМ СКРИПТОМ --------------------

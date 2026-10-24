@@ -2698,6 +2698,24 @@
     "What happened": "Что случилось",
     "Where": "Где",
     "root cause · %d more": "первопричина · ещё %d",
-    "· repeated %d times": "· повторилась %d раз"
+    "· repeated %d times": "· повторилась %d раз",
+    "Add to the scene": "Добавить в сцену",
+    "Create a new %s here": "Создать: %s",
+    "Created: ": "Создано: ",
+    "Edit here": "Править здесь",
+    "Folder...": "Папка…",
+    "Hide the settings": "Скрыть настройки",
+    "Lua with types and classes: mistakes are caught before the script runs": "Lua с типами и классами: ошибки видны до запуска скрипта",
+    "Material...": "Материал…",
+    "New material": "Новый материал",
+    "New script": "Новый скрипт",
+    "New text file": "Новый текстовый файл",
+    "Open in the animation tool": "Открыть в инструменте анимации",
+    "Open in the code editor": "Открыть в редакторе кода",
+    "Plain Lua: quick to write, errors show up while the game runs": "Обычный Lua: писать быстро, ошибки видны во время игры",
+    "Scene...": "Сцена…",
+    "Script...": "Скрипт…",
+    "Text file...": "Текстовый файл…",
+    "Will be created: %s/%s": "Будет создано: %s/%s"
   }
 }

@@ -60,6 +60,10 @@ private:
         std::vector<std::string> Paths;
         ImVec2 Pos{0.0f, 0.0f};
     };
+    // Вращение вокруг точки средней кнопкой (см. ViewportPanel.cpp).
+    bool m_cameraOrbiting = false;
+    bool m_wasOrbiting = false;
+    glm::vec3 m_orbitPivot{0.0f};
     PendingDrop m_pendingDrop;
     // Почему у выбранного нет ручек масштаба (None — есть); подсказка у вида.
     sage::scene::ScaleLock m_scaleLockHint = sage::scene::ScaleLock::None;

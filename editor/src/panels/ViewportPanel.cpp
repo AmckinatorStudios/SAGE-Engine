@@ -404,6 +404,40 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         m_cameraDriving = false;
     }
 
+    // --- Средняя кнопка: ВРАЩЕНИЕ ВОКРУГ ТОЧКИ, Shift — сдвиг вида ----------
+    //
+    // Правая кнопка крутит взгляд на месте — предмет, который хотели осмотреть,
+    // уходит из кадра. Средняя ведёт камеру по сфере вокруг точки: выделенного
+    // объекта (на его глубине — кадр не прыгает) или точки перед камерой.
+    // Shift+средняя — сдвиг вида вбок и вверх, как в любом 3D-редакторе.
+    const bool mmb = ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+    if (perspective && !m_cameraDriving && mmb && (hovered || m_cameraOrbiting)) {
+        if (!m_cameraOrbiting) {
+            float depth = 8.0f;
+            GameObject sel = host.CurrentScene().Get(host.Selection().Primary());
+            if (sel.Valid()) {
+                const glm::vec3 at = glm::vec3(host.CurrentScene().WorldMatrix(sel.Entity())[3]);
+                const float d = glm::dot(at - camera.Position, camera.Front);
+                if (d > 0.5f) depth = d;
+            }
+            m_orbitPivot = camera.Position + camera.Front * depth;
+        }
+        m_cameraOrbiting = true;
+        if (io.KeyShift) {
+            const float perPixel = glm::length(camera.Position - m_orbitPivot) * 0.0015f;
+            const glm::vec3 shift = (-camera.Right * io.MouseDelta.x + camera.Up * io.MouseDelta.y) * perPixel;
+            camera.Position += shift;
+            m_orbitPivot += shift;
+        } else {
+            camera.Orbit(m_orbitPivot, io.MouseDelta.x, -io.MouseDelta.y);
+        }
+    } else {
+        m_cameraOrbiting = false;
+    }
+    const bool cameraHeld = m_cameraDriving || m_cameraOrbiting;
+    const bool wasHeld = wasDriving || m_wasOrbiting;
+    m_wasOrbiting = m_cameraOrbiting;
+
     // Курсор ЗАХВАТЫВАЕТСЯ на время осмотра правой кнопкой.
     //
     // Без захвата обзор упирается в край экрана: мышь доезжает до границы
@@ -414,11 +448,11 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     //
     // Переключаем ТОЛЬКО на фронте, а не каждый кадр: SetCursorCaptured сам
     // отсекает повтор, но и лишний вызов в кадре тут ни к чему.
-    if (m_cameraDriving != wasDriving) {
-        sage::Application::Get().GetWindow().SetCursorCaptured(m_cameraDriving);
+    if (cameraHeld != wasHeld) {
+        sage::Application::Get().GetWindow().SetCursorCaptured(cameraHeld);
         // Курсор возвращается ТУДА, ОТКУДА начали смотреть: иначе он всплывает
         // в центре экрана, и следующий клик уходит не по тому объекту.
-        if (m_cameraDriving) m_captureReturnPos = ImGui::GetMousePos();
+        if (cameraHeld) m_captureReturnPos = ImGui::GetMousePos();
         else ImGui::GetIO().MousePos = m_captureReturnPos;
     }
 
@@ -438,7 +472,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     SyncPilotCamera(host);
 
     // --- Хоткеи гизмо (не во время полёта камеры и не в полях ввода) ---
-    if (hovered && !m_cameraDriving && !io.WantTextInput) {
+    if (hovered && !m_cameraDriving && !m_cameraOrbiting && !io.WantTextInput) {
         // Q — «просто выбирать»: гизмо убрано с глаз и не ловит клики.
         if (ImGui::IsKeyPressed(ImGuiKey_Q)) host.Tools().GizmoOp = EditorHost::kGizmoSelectOnly;
         if (ImGui::IsKeyPressed(ImGuiKey_W)) host.Tools().GizmoOp = (int)ImGuizmo::TRANSLATE;
@@ -975,7 +1009,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         const ImVec2 uv = toUv(mp);
         const bool insideImage = uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f;
         rectselect::End(m_rect, hovered && insideImage && !ImGuizmo::IsOver() &&
-                                    !ImGuizmo::IsUsing() && !m_cameraDriving && !gizmoBusy);
+                                    !ImGuizmo::IsUsing() && !m_cameraDriving && !m_cameraOrbiting && !gizmoBusy);
         rectselect::Draw(m_rect);
     }
 
