@@ -17,7 +17,13 @@ public:
     bool Loaded() const { return m_loaded; }
     const std::string& Name() const { return m_name; }
     const std::filesystem::path& Dir() const { return m_dir; }
-    std::filesystem::path ScenesDir() const { return m_dir / "scenes"; }
+    // СЦЕНЫ — В ASSETS, в своей папке: их видно в панели Assets рядом с
+    // остальным, они переносятся и переименовываются тем же способом, а
+    // сцена, созданная из панели, — та же сцена, что и в списке «Файл».
+    // Раньше они жили в <проект>/scenes, мимо панели. Старые проекты при
+    // открытии переносятся сами (см. MigrateLegacyScenes).
+    std::filesystem::path ScenesDir() const { return m_dir / "assets" / "Scenes"; }
+    std::filesystem::path LegacyScenesDir() const { return m_dir / "scenes"; }
     std::filesystem::path AssetsDir() const { return m_dir / "assets"; }
     std::filesystem::path ProjectFile() const { return m_dir / "project.sageproj"; }
 
@@ -81,6 +87,10 @@ public:
     // файлы появляются в папке ПОСЛЕ CreateNew (копированием), и база ассетов
     // обязана увидеть их, а не пустой каркас.
     void Adopt();
+
+    // Перенос сцен из <проект>/scenes в assets/Scenes (проекты до этого
+    // правила). Зовётся при открытии; безопасен повторно.
+    void MigrateLegacyScenes();
 
 private:
     // Кладёт рядом с проектом описание скриптового API для редактора кода

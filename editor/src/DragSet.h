@@ -54,6 +54,17 @@ inline Place PlaceAt(float y, float top, float bottom) {
     return Place::Inside;
 }
 
+// ЩЕЛЧОК ПО ВЫДЕЛЕННОМУ В ГРУППЕ — ОДИНОЧНЫЙ ВЫБОР ПОСЛЕ ОТПУСКАНИЯ.
+//
+// Выбор делался на НАЖАТИИ: взялись за одну из пяти выделенных строк, чтобы
+// утащить все пять, — и в тот же миг набор схлопывался до этой одной, а
+// перетаскивание начиналось уже с ней. Поэтому щелчок без Ctrl/Shift по
+// элементу, который уже в наборе из нескольких, откладывается: потянули —
+// едет группа; отпустили, не потянув, — остаётся один (как в проводнике).
+inline bool DeferSinglePick(bool alreadySelected, size_t selectionSize, bool withModifiers) {
+    return alreadySelected && selectionSize > 1 && !withModifiers;
+}
+
 // Начало перетаскивания: что взяли и вся группа (взятое в ней обязано быть).
 void BeginEntities(int dragged, const std::vector<int>& group);
 void BeginAssets(const std::string& dragged, const std::vector<std::string>& group);

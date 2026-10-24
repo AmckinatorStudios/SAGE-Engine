@@ -68,7 +68,7 @@ std::string NormalizePath(const fs::path& p) {
 long long ProjectModifiedTime(const fs::path& dir) {
     std::error_code ec;
     long long newest = 0;
-    for (const fs::path& probe : {dir / kDescriptor, dir / "scenes", dir}) {
+    for (const fs::path& probe : {dir / kDescriptor, dir / "assets" / "Scenes", dir / "scenes", dir}) {
         const auto stamp = fs::last_write_time(probe, ec);
         if (ec) { ec.clear(); continue; }
         newest = std::max(newest, ToUnix(stamp));

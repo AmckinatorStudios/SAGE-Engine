@@ -693,3 +693,41 @@ TEST(Physics_teleport_moves_the_body_and_not_just_the_transform) {
     CHECK_TRUE(fallAfterTeleport < 0.05f);
     (void)rb;
 }
+
+// ПЕРСОНАЖ-КАПСУЛА НЕ СТОИТ НАПОЛОВИНУ В ПОЛУ.
+//
+// Контроллер считает точку объекта подошвами, а встроенная капсула нарисована
+// вокруг центра. С настройками по умолчанию контроллер вставал подошвами на
+// пол, и нижняя половина видимой капсулы уходила под пол. Контроллер,
+// добавленный на объект с мешем, подгоняется под меш (FitCharacterToMesh) —
+// так делают и AddComponent("CharacterController") скрипта, и инспектор, и
+// объект «Персонаж» каталога.
+#include "sage/scene/CharacterFit.h"
+
+TEST(PhysicsScene_capsule_character_stands_on_the_floor_not_inside_it) {
+    if (!PhysicsWorld::HasJolt()) return;
+    Scene scene("CapsuleScene");
+    GameObject floor = scene.CreateObject("Floor");
+    floor.GetTransform().Position = {0.0f, -0.5f, 0.0f};   // верх пола — y = 0
+    floor.GetTransform().Scale = {40.0f, 1.0f, 40.0f};
+    scene.Registry().emplace<RigidBodyComponent>(floor.Entity(), RigidBodyComponent{BodyType::Static});
+    scene.Registry().emplace<ColliderComponent>(floor.Entity());
+
+    GameObject hero = scene.CreateObject("Hero");
+    hero.Renderer().Ref = MeshRef{MeshRef::Type::Capsule, ""};   // капсула: y от -1 до 1
+    hero.GetTransform().Position = {0.0f, 3.0f, 0.0f};
+    scene.Registry().emplace<CharacterControllerComponent>(hero.Entity());
+    CHECK_TRUE(sage::scene::FitCharacterToMesh(scene.Registry(), hero.Entity()));
+    const auto& cc = scene.Registry().get<CharacterControllerComponent>(hero.Entity());
+    CHECK_NEAR(cc.Height, 2.0f, 0.05f);
+    CHECK_NEAR(cc.Center.y, -1.0f, 0.05f);
+
+    PhysicsScene physics(PhysicsWorld::DefaultBackend(), scene);
+    if (!physics.SupportsCharacters()) return;
+    for (int i = 0; i < 180; ++i) physics.Step(scene, 1.0f / 60.0f);
+    // Низ видимой капсулы — точка объекта минус 1 (масштаб 1).
+    const float bottom = hero.GetTransform().Position.y - 1.0f;
+    std::printf("       низ капсулы y=%.3f (пол на 0), опора=%d\n", bottom, (int)cc.Grounded);
+    CHECK_TRUE(cc.Grounded);
+    CHECK_NEAR(bottom, 0.0f, 0.06f);
+}

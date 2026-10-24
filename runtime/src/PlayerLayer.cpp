@@ -52,6 +52,28 @@ PlayerLayer::PlayerLayer(fs::path projectDir, std::string launchArgs)
       m_launchArgs(std::move(launchArgs)) {}
 PlayerLayer::~PlayerLayer() = default;
 
+namespace {
+// ГДЕ ЛЕЖАТ СЦЕНЫ. Нынешнее место — assets/Scenes (там их создаёт редактор);
+// прежнее — scenes/ в корне проекта: собранные раньше игры и проекты, которые
+// не открывали в новом редакторе, обязаны запускаться как прежде.
+const char* const kSceneDirs[] = {"assets/Scenes", "scenes"};
+
+std::string SceneFile(const std::string& name) {
+    for (const char* dir : kSceneDirs) {
+        const std::string path = (fs::path(dir) / (name + ".sage")).generic_string();
+        if (sage::assets::vfs::Exists(path)) return path;
+    }
+    return {};
+}
+
+std::vector<std::string> SceneFiles() {
+    std::vector<std::string> out;
+    for (const char* dir : kSceneDirs)
+        for (const std::string& f : sage::assets::vfs::ListFiles(dir, ".sage")) out.push_back(f);
+    return out;
+}
+} // namespace
+
 // С КАКОЙ СЦЕНЫ НАЧИНАЕТСЯ ИГРА.
 //
 // Порядок ответов — от «автор сказал» к «движок угадал», и угадывание идёт
@@ -75,19 +97,19 @@ fs::path PlayerLayer::FindMainScene() const {
             // сцена восстановимы догадкой, а игра нужна сейчас.
         }
         if (!startScene.empty()) {
-            fs::path path = fs::path("scenes") / (startScene + ".sage");
-            if (sage::assets::vfs::Exists(path.generic_string())) return path;
+            const std::string found = SceneFile(startScene);
+            if (!found.empty()) return fs::path(found);
+            const fs::path path = fs::path("assets/Scenes") / (startScene + ".sage");
             // Сказано прямо: сцену, названную в проекте, не нашли. Молча уйти на
             // запасной путь значит запустить НЕ ТУ игру и не объяснить почему.
             LOG_WARN("Player") << "Стартовая сцена проекта не найдена: " << path.generic_string()
                                << " — беру запасную";
         }
     }
-    // 2. Соглашение: scenes/main.sage.
-    if (sage::assets::vfs::Exists("scenes/main.sage")) return fs::path("scenes/main.sage");
+    // 2. Соглашение: main.sage.
+    if (const std::string main = SceneFile("main"); !main.empty()) return fs::path(main);
     // 3. Догадка: первая по алфавиту. Это уже не выбор, а «хоть что-нибудь».
-    const std::vector<std::string> scenes =
-        sage::assets::vfs::ListFiles("scenes", ".sage");
+    const std::vector<std::string> scenes = SceneFiles();
     if (!scenes.empty())
         LOG_WARN("Player") << "Стартовая сцена не задана в проекте — играю первую по алфавиту ("
                            << scenes.front() << ")";
@@ -229,8 +251,7 @@ void PlayerLayer::OnAttach() {
     // жаловался на отсутствие scenes/ — то есть отвечал на второй вопрос, не
     // задав первого. «Нет сцен» и «это не папка игры» — разные беды с разными
     // решениями, и путать их значит посылать человека искать не там.
-    const bool packed = sage::assets::vfs::Exists("scenes/main.sage") ||
-                        !sage::assets::vfs::ListFiles("scenes", ".sage").empty();
+    const bool packed = !SceneFile("main").empty() || !SceneFiles().empty();
     if (!fs::exists(projectFile, ec) && !packed) {
         Fail("Здесь нет игры",
              {"SagePlayer — рантайм: он запускает ГОТОВЫЙ проект, а в этой папке его нет.",
@@ -268,12 +289,13 @@ void PlayerLayer::OnAttach() {
     fs::path scenePath = FindMainScene();
     if (scenePath.empty()) {
         Fail("В проекте нет ни одной сцены",
-             {"Проект найден, но играть нечего: в scenes/ нет ни одного файла .sage.",
-              "Искал в: " + (m_projectDir / "scenes").lexically_normal().string(),
+             {"Проект найден, но играть нечего: в assets/Scenes нет ни одного файла .sage.",
+              "Искал в: " + (m_projectDir / "assets" / "Scenes").lexically_normal().string() + " и " +
+                  (m_projectDir / "scenes").lexically_normal().string(),
               "",
               "Сохраните сцену в редакторе (File > Save Scene) и назначьте её",
               "стартовой: ПКМ по сцене в панели Assets > «Сделать стартовой сценой».",
-              "Без этого плеер берёт scenes/main.sage, а если её нет — первую по алфавиту."});
+              "Без этого плеер берёт main.sage, а если её нет — первую по алфавиту."});
         return;
     }
     try {
@@ -290,14 +312,10 @@ void PlayerLayer::OnAttach() {
     // Через vfs: в собранной игре сцены лежат в пакете, а не на диске.
     {
         sage::scene::SceneLocator where;
-        where.Resolve = [](const std::string& name) {
-            const std::string path = (fs::path("scenes") / (name + ".sage")).generic_string();
-            return sage::assets::vfs::Exists(path) ? path : std::string();
-        };
+        where.Resolve = [](const std::string& name) { return SceneFile(name); };
         where.List = [] {
             std::vector<std::string> names;
-            for (const std::string& f : sage::assets::vfs::ListFiles("scenes", ".sage"))
-                names.push_back(fs::path(f).stem().string());
+            for (const std::string& f : SceneFiles()) names.push_back(fs::path(f).stem().string());
             return names;
         };
         sage::scene::SetSceneLocator(std::move(where));

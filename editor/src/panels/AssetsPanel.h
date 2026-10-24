@@ -227,6 +227,7 @@ private:
     // потом файлы, с учётом поиска), а не по порядку файлов на диске: выделяя
     // от одного до другого, смотрят на сетку.
     std::filesystem::path m_anchor;
+    std::filesystem::path m_pendingPick;   // щелчок по выделенному в группе: решится на отпускании
     std::vector<std::filesystem::path> m_visibleOrder;
     std::vector<ImVec2> m_tileCenters;   // где карточки на экране (для самопроверки)
     bool m_deleteAsked = false;          // вопрос об удалении уже показывали

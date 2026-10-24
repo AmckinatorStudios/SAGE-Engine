@@ -56,6 +56,7 @@ private:
     // отрисовки, когда нижние строки этого кадра ещё не нарисованы, а группе
     // нужен порядок всех.
     std::vector<int> m_prevVisibleRows;
+    int m_pendingPick = -1;   // щелчок по выделенному в группе: решится на отпускании
     std::vector<ImVec2> m_rowCenters;   // где эти строки на экране (для самопроверки)
     int m_anchorId = -1;
     int m_shiftClickId = -1;

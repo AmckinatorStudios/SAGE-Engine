@@ -258,6 +258,8 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         } else if (io.KeyCtrl) {
             host.Selection().Toggle(id);
             m_anchorId = id;
+        } else if (dragset::DeferSinglePick(host.Selection().Contains(id), host.Selection().All().size(), false)) {
+            m_pendingPick = id;   // решится на отпускании (см. DragSet.h)
         } else {
             host.Selection().SetPrimary(id);
             m_anchorId = id;
@@ -355,11 +357,22 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
         // ПКМ по невыбранному — переключаемся на него; по выбранному в наборе —
         // сохраняем набор (Duplicate/Delete применятся ко всем выбранным).
         if (!host.Selection().Contains(id)) host.Selection().SetPrimary(id);
-        if (EditorIcons::MenuItem("plus", T("Create Child"))) {
-            host.PushUndoSnapshot();
-            GameObject child = scene.CreateObject("Child");
-            scene.SetParent(child.Entity(), e);
-            host.Selection().SetPrimary(child.Id());
+        // ПОТОМОК — ИЗ ТОГО ЖЕ КАТАЛОГА, что и «Объект»: камера игроку, свет
+        // фонарю, звук двери. Был один пункт, создававший безымянный куб, и
+        // нужный тип приходилось собирать из него компонентами.
+        if (EditorIcons::BeginMenu("plus", T("Create Child"))) {
+            if (const char* pick = sage::editor::objectcatalog::DrawMenu()) {
+                const int made = host.CreateCatalogObject(pick);   // снимок для отмены — внутри
+                GameObject child = scene.Get(made);
+                if (child.Valid()) {
+                    scene.SetParent(child.Entity(), e);
+                    // На месте родителя: каталог ставит новое по виду камеры
+                    // редактора, а потомка ждут там, где родитель.
+                    child.GetTransform().Position = glm::vec3(0.0f);
+                    host.Selection().SetPrimary(child.Id());
+                }
+            }
+            ImGui::EndMenu();
         }
         if (EditorIcons::MenuItem("folder-plus", T("Create Folder Inside"))) {
             host.PushUndoSnapshot();
@@ -587,6 +600,18 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open) {
             m_anchorId = m_shiftClickId;
         }
         m_shiftClickId = -1;
+    }
+
+    // Отложенный одиночный выбор: потянули — группа уехала целиком, и набор
+    // остаётся; отпустили на месте — выбран один.
+    if (m_pendingPick != -1) {
+        if (ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+            m_pendingPick = -1;
+        } else if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+            host.Selection().SetPrimary(m_pendingPick);
+            m_anchorId = m_pendingPick;
+            m_pendingPick = -1;
+        }
     }
 
     if (m_rectActive && m_rect.Finished) {

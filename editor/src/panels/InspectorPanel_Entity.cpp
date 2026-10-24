@@ -10,6 +10,7 @@
 // лежали редактор материала, якоря интерфейса и список компонентов.
 // ---------------------------------------------------------------------------
 #include <cstdarg>
+#include "sage/scene/CharacterFit.h"
 #include "sage/scene/ScaleLock.h"
 #include "EditorTheme.h"
 #include "ui/UI.h"
@@ -1730,6 +1731,14 @@ void AddComp(entt::registry& reg, entt::entity e) {
     reg.emplace<T>(e);
 }
 
+// Контроллер персонажа — сразу по мешу объекта: подошвы на низ меша, рост и
+// радиус по габаритам (sage/scene/CharacterFit.h). С размерами по умолчанию
+// капсула стояла наполовину в полу.
+void AddCharacter(entt::registry& reg, entt::entity e) {
+    reg.emplace<CharacterControllerComponent>(e);
+    sage::scene::FitCharacterToMesh(reg, e);
+}
+
 // Твин добавляется сразу с первым (пустым) твином: пустой список твинов —
 // лишний щелчок «Добавить твин» на пути к результату.
 void AddTween(entt::registry& reg, entt::entity e) {
@@ -1790,7 +1799,7 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
          "Ties this body to another one", HasComp<JointComponent>, AddComp<JointComponent>},
         {"Character Controller", "Physics", "physics",
          "Walking, jumping, stairs", HasComp<CharacterControllerComponent>,
-         AddComp<CharacterControllerComponent>},
+         AddCharacter},
 
         // АНИМАЦИЯ, А НЕ «АНИМИРОВАННАЯ МОДЕЛЬ». Второе делило объекты сцены
         // на два сорта — «модель» и «анимированная модель», — хотя анимация

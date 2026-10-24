@@ -490,6 +490,8 @@ private:
     void FocusPlayTarget();
     int m_probeStep = -1;     // -1 — не запущена
     int m_probeWait = 0;      // кадров подождать перед следующим шагом
+    int m_groupProbe = 0;            // подшаг проверки перетаскивания группы
+    std::vector<int> m_groupIds;     // порядок строк группы до броска
     int m_probeVictimId = -1; // объект, на котором проверяется, что Delete не утёк из панели
     int m_probeObjectsBefore = 0; // сколько было объектов до Ctrl+D
     float m_probeYaw = 0.0f;  // угол камеры до щелчка по гизмо
