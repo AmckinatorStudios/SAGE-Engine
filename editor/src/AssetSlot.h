@@ -1,5 +1,6 @@
 #pragma once
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -113,12 +114,31 @@ struct Result {
 // где оно записано, тоже должно быть одно. Сторожит scripts/check_asset_slots.py.
 std::filesystem::path ProjectRoot(EditorHost& host);
 
+// ДЕЙСТВИЯ В САМОМ СЛОТЕ: «создать» у пустого и «править» у заполненного.
+//
+// Кнопка «Создать материал» и «Править материал» жили строкой ПОД слотом и
+// были только у материала. У скрипта, сцены не было вовсе: новый скрипт
+// объекту делали так — в Assets создать файл, вернуться, перетащить в слот.
+// Теперь у каждого слота, чей вид можно создать (материал, скрипт, сцена),
+// есть «+»: открывается окно «Создать…» (CreateAssetDialog.h), и созданный
+// файл сам встаёт в этот слот. У заполненного — «править»: скрипт и шейдер
+// открываются в редакторе кода, материал — на месте (своим Edit).
+struct Actions {
+    std::function<void()> Create;  // своё «создать»; пусто — окно «Создать…» по виду слота
+    std::function<void()> Edit;    // своё «править»; пусто — по виду (скрипт, шейдер)
+    bool EditActive = false;       // правка уже открыта — кнопка нажата
+    std::string SuggestedName;     // имя нового ассета по умолчанию
+};
+
+// Можно ли создать ассет такого вида прямо из слота.
+bool CanCreate(Kind kind);
+
 // Слот: превью, имя, приём броска, «показать в Assets», очистка, «Обзор…».
 //
 // path передаётся ЗНАЧЕНИЕМ и не меняется на месте: вызывающий сам решает,
 // когда записать новое значение, и делает это ПОСЛЕ PushUndoSnapshot —
 // иначе отмена возвращала бы уже изменённое состояние.
 Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path,
-            AssetPreview* preview, const char* emptyHint = nullptr);
+            AssetPreview* preview, const char* emptyHint = nullptr, const Actions* actions = nullptr);
 
 } // namespace assetslot

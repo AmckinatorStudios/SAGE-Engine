@@ -11,6 +11,7 @@
 // строк, в которых рядом лежали сборка игры, отмена правки и раскладка окон —
 // три области, у которых нет ничего общего, кроме имени класса.
 // ---------------------------------------------------------------------------
+#include "CreateAssetDialog.h"
 #include "EditorLayer.h"
 #include "FileBrowser.h"
 #include "ModelImportDialog.h"
@@ -956,6 +957,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // Окно настроек импорта модели (ModelImportDialog.h): его заказывают
     // панели, когда модель впервые попадает в проект или в сцену.
     sage::editor::modelimport::Draw();
+    sage::editor::createasset::Draw(*this);
     DrawAboutWindow();
 
     ImGui::End();

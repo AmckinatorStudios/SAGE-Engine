@@ -1,3 +1,5 @@
+#include "../AssetOpen.h"
+#include "../CreateAssetDialog.h"
 #include "../DragSet.h"
 #include "../PanelWindowId.h"
 #include "../PanelWindows.h"
@@ -46,14 +48,6 @@
 
 namespace fs = std::filesystem;
 
-// Куда ложится новый ассет: в открытую папку панели, а СЦЕНА — всегда в папку
-// сцен проекта (assets/Scenes): туда смотрят список сцен, стартовая сцена и
-// собранная игра.
-static fs::path CreateTargetFor(EditorHost& host, AssetsPanel::CreateKind kind) {
-    if (kind == AssetsPanel::CreateKind::Scene && host.CurrentProject().Loaded())
-        return host.CurrentProject().ScenesDir();
-    return host.AssetsCwd();
-}
 
 
 static void AcceptObjectAsPrefab(EditorHost& host, const fs::path& folder);
@@ -751,32 +745,7 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
             m_anchor = path;
         }
     }
-    if (doubleClicked) {
-        if (isDir) host.AssetsCwd() = path;
-        else if (path.extension() == ".sage") host.LoadSceneFromFile(path);
-        else if (path.extension() == ".sageprefab") host.InstantiatePrefab(path); // инстанс в сцену
-        // Клип открывается инструментом анимации — и свой, и вынутый из модели:
-        // второй тоже надо уметь посмотреть и проиграть, просто править его
-        // нельзя (см. panels/AnimationPanel.h).
-        else if (path.extension() == ".sageclip" || path.extension() == ".sageanim")
-            host.OpenAnimationClip(path.string());
-        else {
-            // Текст открывается ТЕМ, ЧЕМ ЕГО ОТКРЫВАЕТ СИСТЕМА. Своего редактора
-            // кода у SAGE больше нет: он всегда проигрывал бы тому, что у
-            // человека уже стоит, а горячая перезагрузка от этого не страдает —
-            // движок следит за файлом, а не за тем, кто его сохранил.
-            const std::string ext = path.extension().string();
-            if (ext == ".lua" || ext == ".slua" || ext == ".vert" || ext == ".frag" || ext == ".glsl" ||
-                ext == ".txt" || ext == ".md" || ext == ".json") {
-                // Отказ системы виден: молчащий двойной клик неотличим от
-                // сломанного редактора.
-                if (!host.OpenFileInSystemEditor(path)) {
-                    host.SetStatusMessage(T("The system has no program for this file: ") +
-                                          path.filename().string());
-                }
-            }
-        }
-    }
+    if (doubleClicked) OpenItem(host, path, isDir);
     // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
     // момент открытия (см. Sage::UI::MenuScope). Время жизни MenuScope
     // держится в границах if — иначе деструктор снялся бы позже, после
@@ -790,6 +759,24 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
             m_multi = {path};
         } else {
             m_selected = path;
+        }
+        // «ОТКРЫТЬ» — первым и только у того, что открывается (AssetOpen.h).
+        {
+            using sage::editor::assetopen::OpenAs;
+            const char* openLabel = nullptr;
+            const char* openIcon = "open";
+            switch (sage::editor::assetopen::Of(path, isDir)) {
+                case OpenAs::Folder: openLabel = T("Open folder"); openIcon = "folder"; break;
+                case OpenAs::Scene: openLabel = T("Open scene"); openIcon = "scene"; break;
+                case OpenAs::Prefab: openLabel = T("Add to the scene"); openIcon = "prefab"; break;
+                case OpenAs::Clip: openLabel = T("Open in the animation tool"); openIcon = "anim"; break;
+                case OpenAs::Text: openLabel = T("Open in the code editor"); openIcon = "code"; break;
+                case OpenAs::None: break;
+            }
+            if (openLabel) {
+                if (EditorIcons::MenuItem(openIcon, openLabel)) OpenItem(host, path, isDir);
+                ImGui::Separator();
+            }
         }
         // Переименование — всегда про ОДИН файл: у двадцати файлов общего имени
         // нет, и придумывать правило вроде «имя + номер» здесь не за чем.
@@ -842,6 +829,29 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     if (hovered && !filename.empty() && label != filename) ImGui::SetTooltip("%s", filename.c_str());
 
     ImGui::PopID();
+}
+
+// Открыть файл — по одному правилу для двойного щелчка и пункта меню
+// (AssetOpen.h).
+void AssetsPanel::OpenItem(EditorHost& host, const fs::path& path, bool isDir) {
+    using sage::editor::assetopen::OpenAs;
+    switch (sage::editor::assetopen::Of(path, isDir)) {
+        case OpenAs::Folder: host.AssetsCwd() = path; break;
+        case OpenAs::Scene: host.LoadSceneFromFile(path); break;
+        case OpenAs::Prefab: host.InstantiatePrefab(path); break;   // инстанс в сцену
+        // Клип открывается инструментом анимации — и свой, и вынутый из модели:
+        // второй тоже надо уметь посмотреть и проиграть, просто править его
+        // нельзя (см. panels/AnimationPanel.h).
+        case OpenAs::Clip: host.OpenAnimationClip(path.string()); break;
+        case OpenAs::Text:
+            // Текст открывается ТЕМ, ЧЕМ ЕГО ОТКРЫВАЕТ СИСТЕМА (или выбранным
+            // редактором кода). Отказ виден: молчащий щелчок неотличим от
+            // сломанного редактора.
+            if (!host.OpenFileInSystemEditor(path))
+                host.SetStatusMessage(T("The system has no program for this file: ") + path.filename().string());
+            break;
+        case OpenAs::None: break;
+    }
 }
 
 // Конвертация одного файла. Отчёт уходит в статусную строку: человек нажал
@@ -1532,59 +1542,11 @@ bool AssetsPanel::CreateAsset(CreateKind kind, const std::string& rawName, const
 }
 
 // Модалки панели. Деферред-паттерн: контекстные меню только выставляют
-// m_createKind/m_renameTarget/m_deleteTarget, OpenPopup зовётся здесь, на
+// m_renameTarget/m_deleteTarget, OpenPopup зовётся здесь, на
 // уровне окна панели (OpenPopup изнутри BeginMenu не находит модалку —
 // другой ID-стек, документированная ловушка ImGui).
 void AssetsPanel::DrawModals(EditorHost& host) {
     ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-
-    if (m_createKind != CreateKind::None && !ImGui::IsPopupOpen("Create Asset")) {
-        ImGui::OpenPopup("Create Asset");
-    }
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    if (ImGui::BeginPopupModal(T("Create Asset" "###Create Asset"), nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        const char* kindLabel = "";
-        switch (m_createKind) {
-            case CreateKind::Folder:   kindLabel = "Folder"; break;
-            case CreateKind::Script:   kindLabel = "Lua script"; break;
-            case CreateKind::SageScript: kindLabel = "SAGE Lua script"; break;
-            case CreateKind::Scene:    kindLabel = "Scene"; break;
-            case CreateKind::TextFile: kindLabel = "Text file"; break;
-            case CreateKind::Material: kindLabel = "Material"; break;
-            default: break;
-        }
-        ImGui::TextDisabled("%s in %s", kindLabel, CreateTargetFor(host, m_createKind).filename().string().c_str());
-        bool enterPressed = ImGui::InputText(T("Name"), m_createName, sizeof(m_createName),
-                                              ImGuiInputTextFlags_EnterReturnsTrue);
-        if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
-        if (enterPressed || ImGui::Button(T("Create"), ImVec2(120, 0))) {
-            fs::path created;
-            // Сцена — всегда в папку сцен проекта (assets/Scenes), откуда бы её
-            // ни создавали: туда смотрят список сцен, «стартовая сцена» и
-            // собранная игра. Панель переходит туда же — новая сцена на виду.
-            const fs::path createIn = CreateTargetFor(host, m_createKind);
-            const bool scene = createIn != host.AssetsCwd();
-            if (scene) {
-                std::error_code mk;
-                fs::create_directories(createIn, mk);
-            }
-            if (CreateAsset(m_createKind, m_createName, createIn, created, m_error)) {
-                if (scene) host.AssetsCwd() = createIn;
-                m_selected = created;
-                m_multi = {created};
-                m_createKind = CreateKind::None;
-                m_error.clear();
-                ImGui::CloseCurrentPopup();
-            }
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(T("Cancel"), ImVec2(120, 0))) {
-            m_createKind = CreateKind::None;
-            m_error.clear();
-            ImGui::CloseCurrentPopup();
-        }
-        ImGui::EndPopup();
-    }
 
     if (!m_renameTarget.empty() && !ImGui::IsPopupOpen("Rename Asset")) {
         ImGui::OpenPopup("Rename Asset");
@@ -1854,18 +1816,29 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
     // End() этого окна, и ImGui решил бы, что стиль не сняли вовсе.
     if (Sage::UI::MenuScope createCtxMenu; ImGui::BeginPopupContextWindow("##assets_create_ctx",
                                        ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
-        auto startCreate = [this](CreateKind kind, const char* defaultName) {
-            m_createKind = kind;
-            std::snprintf(m_createName, sizeof(m_createName), "%s", defaultName);
-            m_error.clear();
+        // ОДИН ПУНКТ НА ВИД, настройки — в окне (CreateAssetDialog.h): язык
+        // скрипта, цвет папки. Пункта «скрипт» было два («.lua» и «.slua»), и
+        // язык выбирали по расширению в меню, не видя, чем они различаются.
+        // Создаётся в открытой папке; сцена — всегда в assets/Scenes.
+        namespace ca = sage::editor::createasset;
+        auto startCreate = [this, &host](ca::What kind, const char* defaultName) {
+            ca::Request req;
+            req.Kind = kind;
+            req.Name = defaultName;
+            req.Dir = kind == ca::What::Scene && host.CurrentProject().Loaded() ? host.CurrentProject().ScenesDir()
+                                                                                : host.AssetsCwd();
+            req.Done = [this, &host, kind](const fs::path& made) {
+                if (kind == ca::What::Scene) host.AssetsCwd() = made.parent_path();
+                m_selected = made;
+                m_multi = {made};
+            };
+            ca::Open(req);
         };
-        if (EditorIcons::MenuItem("folder-plus", T("New Folder"))) startCreate(CreateKind::Folder, "NewFolder");
-        if (EditorIcons::MenuItem("scene", T("New Scene (.sage)"))) startCreate(CreateKind::Scene, "NewScene");
-        if (EditorIcons::MenuItem("script", T("New Script (.lua)"))) startCreate(CreateKind::Script, "new_script");
-        if (EditorIcons::MenuItem("script", T("New SAGE Lua Script (.slua)")))
-            startCreate(CreateKind::SageScript, "NewBehaviour");
-        if (EditorIcons::MenuItem("file", T("New Text File (.txt)"))) startCreate(CreateKind::TextFile, "notes");
-        if (EditorIcons::MenuItem("material", T("New Material (.sagemat)"))) startCreate(CreateKind::Material, "NewMaterial");
+        if (EditorIcons::MenuItem("folder-plus", T("Folder..."))) startCreate(ca::What::Folder, "NewFolder");
+        if (EditorIcons::MenuItem("scene", T("Scene..."))) startCreate(ca::What::Scene, "NewScene");
+        if (EditorIcons::MenuItem("script", T("Script..."))) startCreate(ca::What::Script, "NewScript");
+        if (EditorIcons::MenuItem("material", T("Material..."))) startCreate(ca::What::Material, "NewMaterial");
+        if (EditorIcons::MenuItem("file", T("Text file..."))) startCreate(ca::What::TextFile, "notes");
         ImGui::Separator();
         if (EditorIcons::MenuItem("refresh", T("Convert the whole folder to engine formats"))) ConvertFolderHere(host);
         if (ImGui::IsItemHovered()) {
@@ -1898,7 +1871,7 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
     }
     if (!m_multi.empty() && ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
         !ImGui::GetIO().WantTextInput && m_renameTarget.empty() &&
-        m_createKind == CreateKind::None && m_deleteTargets.empty() &&
+        !sage::editor::createasset::IsOpen() && m_deleteTargets.empty() &&
         !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_Delete)) {
         m_deleteTargets = m_multi;   // дальше — обычная модалка подтверждения
     }

@@ -39,6 +39,7 @@ add_executable(SageEditor WIN32
     src/ui/CommandPalette.cpp
     src/EditorIcons.cpp
     src/AssetSlot.cpp
+    src/CreateAssetDialog.cpp
     src/ObjectSlot.cpp
     src/GameBuilder.cpp
     src/ScreenColor.cpp

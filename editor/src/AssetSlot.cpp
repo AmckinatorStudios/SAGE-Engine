@@ -4,12 +4,14 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <cstdio>
 #include <unordered_map>
 
 #include "imgui.h"
 #include "imgui_internal.h" // BeginDragDropTargetCustom: цель броска на весь слот
 
 #include "AssetPreview.h"
+#include "CreateAssetDialog.h"
 #include "EditorHost.h"
 #include "EditorIcons.h"
 #include "Localization.h"
@@ -239,10 +241,41 @@ void BeginDrag(const fs::path& path, AssetPreview* preview) {
     ImGui::TextUnformatted(path.filename().string().c_str());
 }
 
+bool CanCreate(Kind kind) { return kind == Kind::Material || kind == Kind::Script || kind == Kind::Scene; }
+
+namespace {
+// Создано окном «Создать…» по просьбе слота: путь ждёт, пока слот нарисуется
+// снова, и отдаётся ему как назначение. Ключ — идентификатор слота в ImGui:
+// окно закрывается в другом месте кадра, и вернуть результат напрямую некуда.
+std::unordered_map<ImGuiID, std::string>& CreatedForSlot() {
+    static std::unordered_map<ImGuiID, std::string> m;
+    return m;
+}
+
+sage::editor::createasset::What CreateWhat(Kind kind) {
+    using W = sage::editor::createasset::What;
+    switch (kind) {
+        case Kind::Material: return W::Material;
+        case Kind::Scene: return W::Scene;
+        default: return W::Script;
+    }
+}
+} // namespace
+
 Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path,
-            AssetPreview* preview, const char* emptyHint) {
+            AssetPreview* preview, const char* emptyHint, const Actions* actions) {
     Result result;
     ImGui::PushID(id);
+    const ImGuiID slotKey = ImGui::GetID("##slot_key");
+    {
+        auto& created = CreatedForSlot();
+        auto it = created.find(slotKey);
+        if (it != created.end()) {
+            result.Changed = true;
+            result.Path = host.CurrentProject().AssetRef(it->second);
+            created.erase(it);
+        }
+    }
 
     const ImGuiStyle& style = ImGui::GetStyle();
     const float thumb = 56.0f;
@@ -400,8 +433,48 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
     // Кнопки прижаты к правому краю слота: их место не должно зависеть от длины
     // имени файла, иначе «убрать» каждый раз оказывается в новом месте.
     const float btnH = ImGui::GetFrameHeight();
-    ImGui::SetCursorScreenPos(ImVec2(rightEdge - btnH * 2.0f - style.ItemSpacing.x,
+    // Третья кнопка — действие слота: «+» у пустого, «править» у заполненного.
+    const bool canCreate = path.empty() && (CanCreate(kind) || (actions && actions->Create));
+    const bool canEdit = !path.empty() && ((actions && actions->Edit) || kind == Kind::Script || kind == Kind::Shader);
+    const int buttons = (canCreate || canEdit) ? 3 : 2;
+    ImGui::SetCursorScreenPos(ImVec2(rightEdge - btnH * (float)buttons - style.ItemSpacing.x * (float)(buttons - 1),
                                      p0.y + height - btnH - 5.0f));
+    if (canCreate) {
+        char tip[96];
+        std::snprintf(tip, sizeof(tip), T("Create a new %s here"), KindName(kind));
+        if (EditorIcons::IconOnlyButton("plus", tip)) {
+            if (actions && actions->Create) {
+                actions->Create();
+            } else {
+                sage::editor::createasset::Request req;
+                req.Kind = CreateWhat(kind);
+                req.Name = actions && !actions->SuggestedName.empty() ? actions->SuggestedName
+                           : kind == Kind::Material ? "NewMaterial"
+                           : kind == Kind::Scene    ? "NewScene"
+                                                    : "NewScript";
+                req.Done = [slotKey](const fs::path& made) { CreatedForSlot()[slotKey] = made.string(); };
+                sage::editor::createasset::Open(req);
+            }
+        }
+        ImGui::SameLine();
+    } else if (canEdit) {
+        const bool active = actions && actions->EditActive;
+        const char* tip = actions && actions->Edit ? (active ? T("Hide the settings") : T("Edit here"))
+                                                   : T("Open in the code editor");
+        if (EditorIcons::IconOnlyButton("pencil", tip, active)) {
+            if (actions && actions->Edit) {
+                actions->Edit();
+            } else {
+                fs::path file = path;
+                std::error_code ec;
+                if (file.is_relative() && host.CurrentProject().Loaded() &&
+                    fs::exists(host.CurrentProject().Dir() / file, ec))
+                    file = host.CurrentProject().Dir() / file;
+                host.OpenFileInSystemEditor(file);
+            }
+        }
+        ImGui::SameLine();
+    }
     if (EditorIcons::IconOnlyButton("folder", T("Browse..."))) result.BrowseRequested = true;
     ImGui::SameLine();
     ImGui::BeginDisabled(path.empty());

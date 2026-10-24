@@ -680,9 +680,23 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
     // цвета не отличить металл от диэлектрика и гладкое от матового, то есть
     // ровно то, ради чего материал и назначают), приём перетаскивания с
     // проверкой типа, «показать в Assets», очистка.
+    // «Создать» и «Править» — В САМОМ СЛОТЕ (см. assetslot::Actions), а не
+    // строкой под ним. Новый материал забирает СЕБЕ текущие поправки объекта
+    // (цвет, свечение, прозрачность), а сами поправки возвращаются в
+    // нейтраль: иначе объект побелел бы или покрасился дважды. «Править»
+    // открывает поля материала прямо здесь — правится тот же общий экземпляр,
+    // что рисует сцена, и изменения видны во вьюпорте сразу.
+    assetslot::Actions actions;
+    actions.Create = [this, &host, &mr]() { CreateMaterialForObject(host, mr); };
+    actions.EditActive = !mr.MaterialPath.empty() && m_inlineMaterial == mr.MaterialPath;
+    if (mr.MaterialPtr) {
+        actions.Edit = [this, &mr, open = actions.EditActive]() {
+            m_inlineMaterial = open ? std::string() : mr.MaterialPath;
+        };
+    }
     const assetslot::Result r =
         assetslot::Draw(host, "material", assetslot::Kind::Material, mr.MaterialPath, &m_preview,
-                        T("The look of an object is defined by its material."));
+                        T("The look of an object is defined by its material."), &actions);
     if (r.Changed) {
         host.PushUndoSnapshot();
         // Через AssignMaterial: назначение материала возвращает поправки
@@ -716,36 +730,14 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
     // теряй выделение объекта, возвращайся. Правится тот же общий экземпляр
     // из кэша, что рисует сцена, поэтому изменения видны во вьюпорте сразу.
     if (mr.MaterialPtr && !mr.MaterialPath.empty()) {
-        const bool open = m_inlineMaterial == mr.MaterialPath;
-        const char* label = open ? T("Hide material settings") : T("Edit material");
-        if (EditorIcons::Button("material", label)) m_inlineMaterial = open ? std::string() : mr.MaterialPath;
-        if (mr.MaterialPtr->HasUnsavedChanges()) {
-            ImGui::SameLine();
+        if (mr.MaterialPtr->HasUnsavedChanges())
             ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", T("unsaved changes"));
-        }
         if (m_inlineMaterial == mr.MaterialPath) {
             ImGui::PushID("inlineMaterial");
             ImGui::Indent();
             DrawMaterialFields(host, mr.MaterialPtr, mr.MaterialPath, /*preview=*/false);
             ImGui::Unindent();
             ImGui::PopID();
-        }
-    }
-
-    // СОЗДАТЬ материал — отдельной строкой, а не ещё одной кнопкой в слоте.
-    // Это другое действие: слот НАЗНАЧАЕТ существующий материал, эта кнопка
-    // ДЕЛАЕТ новый.
-    //
-    // Без неё требование «вид задаёт материал» означало бы: иди в панель
-    // ассетов, создай файл, вернись, назначь — четыре шага там, где раньше был
-    // один щелчок по цвету. Новый материал забирает СЕБЕ текущие поправки
-    // объекта (цвет, свечение, прозрачность), а сами поправки возвращаются в
-    // нейтраль: иначе объект либо побелел бы, либо покрасился дважды.
-    if (mr.MaterialPath.empty()) {
-        if (EditorIcons::Button("material", T("Create material"))) CreateMaterialForObject(host, mr);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", T("Creates a .sagemat next to the project assets and moves "
-                                      "the current colour of this object into it."));
         }
     }
 

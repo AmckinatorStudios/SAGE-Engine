@@ -34,6 +34,7 @@ add_executable(sage_tests
     test_console_log.cpp
     test_scale_lock.cpp
     test_problems.cpp
+    test_asset_ux.cpp
     test_scene_flow.cpp
     test_component_registry.cpp
     test_format_version.cpp
