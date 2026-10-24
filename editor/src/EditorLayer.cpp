@@ -1,3 +1,4 @@
+#include "sage/core/Problems.h"
 #include "sage/app/CoreSystems.h"
 #include "EditorLayer.h"
 #include "sage/scene/Signals.h"
@@ -319,6 +320,10 @@ void EditorLayer::OnAttach() {
             ctx += std::string("Mode:   ") +
                    (!m_play.Active() ? "Editing" : "Play") + "\n";
             if (m_scene) ctx += std::string("Entities: ") + std::to_string(m_scene->Count()) + "\n";
+            // Что шло не так ДО падения: часто это и есть ответ (скрипт
+            // зависал, шейдер не собрался, модель была битой).
+            const std::string problems = sage::Problems::CrashSummary();
+            if (!problems.empty()) ctx += "Problems before the crash:\n" + problems;
             return ctx;
         };
         cfg.EmergencySave = [this]() -> std::string {

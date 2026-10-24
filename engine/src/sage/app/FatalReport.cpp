@@ -6,6 +6,7 @@
 
 #include "sage/core/CrashHandler.h"
 #include "sage/core/Log.h"
+#include "sage/core/Problems.h"
 #include "sage/core/Version.h"
 
 #ifdef _WIN32
@@ -56,7 +57,24 @@ void ReportFatal(const char* what) {
     // выходило, что движок просто исчез.
     // Лог пишет каждую строку с flush (см. Log.cpp), поэтому она уже на диске
     // к моменту, когда процесс закончится.
-    LOG_ERROR("Engine") << "ФАТАЛЬНАЯ ОШИБКА ПРИ ЗАПУСКЕ: " << text;
+    {
+        // Авария — проблема высшего уровня (Problems.h): в журнал она
+        // попадает подробно, с советом, что делать.
+        sage::Problem p;
+        p.Level = sage::Severity::Fatal;
+        p.Category = "Engine";
+        p.Code = "engine.fatal";
+        p.Title = "ФАТАЛЬНАЯ ОШИБКА ПРИ ЗАПУСКЕ: " + text;
+        p.Detail = "Движок не может продолжать работу.";
+        if (text.find("OpenGL") != std::string::npos || text.find("окно") != std::string::npos) {
+            p.Hints = {"Обновите драйвер видеокарты: нужен OpenGL 3.3.",
+                       "Удалённый рабочий стол и виртуальные машины часто не дают 3D-ускорения — "
+                       "запустите программу на самой машине."};
+        }
+        p.Hints.push_back("Пришлите разработчику файл журнала (sage_editor.log или sage_player.log) — "
+                          "в нём записано, что произошло перед аварией.");
+        sage::Problems::Report(std::move(p));
+    }
 
     // 2. В КОНСОЛЬ — для запуска из терминала и для CI.
     std::fprintf(stderr, "Фатальная ошибка: %s\n", text.c_str());

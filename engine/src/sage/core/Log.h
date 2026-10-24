@@ -40,6 +40,11 @@ public:
     // LogMessageBuilder'ом, обычно напрямую вызывать не нужно.
     static void WriteLine(LogLevel level, const std::string& category, const std::string& message);
 
+    // Только в файл журнала — подробный многострочный разбор проблемы
+    // (см. Problems.h). В консоль он не идёт: там хватает одной строки, а
+    // журнал, который пришлют для помощи, обязан объяснять сам.
+    static void WriteFileOnly(LogLevel level, const std::string& category, const std::string& text);
+
     // Дополнительный приёмник сообщений (помимо консоли/файла) — например,
     // панель Console в редакторе. Вызывается под внутренним мьютексом логгера,
     // поэтому сам приёмник НЕ должен логировать (иначе дедлок). nullptr — снять.
@@ -47,6 +52,7 @@ public:
     static void SetSink(Sink sink);
 
 private:
+    static void WriteLocked(LogLevel level, const std::string& category, const std::string& message);
     static std::mutex s_mutex;
     static std::ofstream s_file;
     static LogLevel s_minLevel;

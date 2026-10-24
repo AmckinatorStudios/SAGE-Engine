@@ -56,13 +56,27 @@ const char* HookName(Hook hook);
 // обязана открыть файл на нужной строке, а не показать человеку текст, из
 // которого он сам выковыривает номер глазами.
 struct ScriptError {
+    // Что за ошибка — от этого зависят и подсказка, и то, когда она снимается
+    // (ошибка сборки уходит, как только файл собрался; ошибка выполнения
+    // остаётся — она случилась).
+    enum class Kind { Runtime, Compile, Missing, Timeout };
+    Kind What = Kind::Runtime;
     std::string File;       // путь к файлу скрипта, как его видит проект
     int Line = 0;           // строка; 0 — неизвестна
+    int Col = 0;            // столбец; 0 — неизвестен (Lua его не сообщает)
     std::string Message;    // «attempt to call nil value 'Move'»
     std::string Traceback;  // стек вызовов языка, если рантайм его дал
+    // Диагностика SAGE Lua приходит уже разобранной: заголовок («Ошибка
+    // типа») и подробности по строке. У ошибок Lua — пусто.
+    std::string Title;
+    std::vector<std::string> Details;
 
     bool Empty() const { return Message.empty(); }
-    void Clear() { File.clear(); Line = 0; Message.clear(); Traceback.clear(); }
+    void Clear() {
+        What = Kind::Runtime;
+        File.clear(); Line = 0; Col = 0; Message.clear(); Traceback.clear();
+        Title.clear(); Details.clear();
+    }
 
     // Человеческий вид: "player.lua:42: attempt to call nil value 'Move'".
     std::string Format() const;

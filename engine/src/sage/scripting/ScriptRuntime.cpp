@@ -1,3 +1,5 @@
+#include "sage/core/Problems.h"
+#include "sage/scripting/ScriptAdvice.h"
 #include "sage/scripting/ScriptRuntime.h"
 
 #include <algorithm>
@@ -164,9 +166,16 @@ InstanceId ScriptRuntime::Build(LanguageBackend& backend, const ScriptSource& sr
     ScriptError err;
     const InstanceId id = backend.Create(src, owner, err);
     if (id == kInvalidInstance) {
+        // Первопричина — без объекта (она одна на файл, сколько бы объектов
+        // его ни держали), а каждый объект без скрипта — её последствие.
         Report(err);
+        if (owner.Valid() && err.What == ScriptError::Kind::Compile)
+            ReportConsequence("script.not-started", sage::Severity::Error, src.Path, owner.Name(),
+                              "Объект «" + owner.Name() + "» остался без скрипта " + src.Path,
+                              "Скрипт с ошибкой не запускается: объект работает без него.");
         return kInvalidInstance;
     }
+    Resolved(src.Path);
     backend.ApplyFields(id, fields);
     return id;
 }
@@ -196,9 +205,13 @@ bool ScriptRuntime::Attach(GameObject owner, const std::string& path,
     ScriptSource src;
     if (!ReadSource(path, src)) {
         ScriptError err;
+        err.What = ScriptError::Kind::Missing;
         err.File = path;
         err.Message = "файл скрипта не найден";
         Report(err);
+        ReportConsequence("script.not-started", sage::Severity::Error, path, owner.Name(),
+                          "Объект «" + owner.Name() + "» остался без скрипта " + path,
+                          "Файла скрипта нет — объект работает без него.");
         return false;
     }
 
@@ -289,13 +302,38 @@ void ScriptRuntime::DetachAll() {
     m_dirtyIndex = false;
 }
 
-void ScriptRuntime::Report(const ScriptError& err) {
-    if (m_sink) {
-        m_sink(err);
-        return;
-    }
-    LOG_ERROR("Script") << err.Format();
-    if (!err.Traceback.empty()) LOG_ERROR("Script") << err.Traceback;
+void ScriptRuntime::Report(const ScriptError& err, const std::string& subject) {
+    if (m_sink) m_sink(err);
+    // В реестр проблем — с объяснением, подсказками и строками кода вокруг
+    // (ScriptAdvice.h). Исходник читается здесь, на ошибке: ради пары строк
+    // контекста держать тексты всех скриптов в памяти незачем.
+    ScriptSource src;
+    if (!err.File.empty()) ReadSource(err.File, src);
+    sage::Problem p = ToProblem(err, src.Text);
+    p.Subject = subject;
+    sage::Problems::Report(std::move(p));
+}
+
+void ScriptRuntime::ReportConsequence(const std::string& code, sage::Severity level, const std::string& file,
+                                      const std::string& subject, const std::string& title,
+                                      const std::string& detail) {
+    sage::Problem p;
+    p.Category = "Script";
+    p.Code = code;
+    p.Level = level;
+    p.Title = title;
+    p.Detail = detail;
+    p.Subject = subject;
+    // О том же файле — значит, в группе его первопричины (Problems.h).
+    p.Resource = file;
+    sage::Problems::Report(std::move(p));
+}
+
+void ScriptRuntime::Resolved(const std::string& file) {
+    // Файл собрался — ошибки сборки и «объект без скрипта» больше не правда.
+    // Ошибки выполнения остаются: они случились, и код мог их не исправить.
+    for (const char* code : {"script.compile", "script.missing", "script.not-started"})
+        sage::Problems::Resolve(file, code);
 }
 
 void ScriptRuntime::Guard(LiveScript& s, bool ok, ScriptError& err, Hook hook) {
@@ -303,11 +341,19 @@ void ScriptRuntime::Guard(LiveScript& s, bool ok, ScriptError& err, Hook hook) {
     if (s.Muted) return;
     if (err.File.empty()) err.File = s.Path;
     if (err.Message.empty()) err.Message = std::string("ошибка в ") + HookName(hook);
-    Report(err);
-    if (++s.Errors >= kMaxErrors) {
+    Report(err, s.Owner.Valid() ? s.Owner.Name() : std::string());
+    // Зависание — сразу в тишину: каждый следующий вызов стоил бы ещё
+    // несколько секунд замёрзшего кадра.
+    if (++s.Errors >= kMaxErrors || err.What == ScriptError::Kind::Timeout) {
         s.Muted = true;
-        LOG_WARN("Script") << s.Path << ": " << HookName(hook)
-                           << " падает каждый кадр — дальнейшие сообщения подавлены";
+        // ОСТАЛЬНЫЕ скрипты работают: остановлен только этот, на этом объекте.
+        ReportConsequence("script.muted", sage::Severity::Warning, err.File.empty() ? s.Path : err.File,
+                          s.Owner.Valid() ? s.Owner.Name() : std::string(),
+                          s.Path + ": скрипт остановлен на этом объекте (" + HookName(hook) +
+                              (err.What == ScriptError::Kind::Timeout ? " завис)" : " падает раз за разом)"),
+                          "Чтобы ошибка не повторялась каждый кадр и не мешала остальному, скрипт этого "
+                          "объекта больше не вызывается до перезапуска игры или исправления файла. "
+                          "Остальные скрипты сцены работают.");
     }
 }
 

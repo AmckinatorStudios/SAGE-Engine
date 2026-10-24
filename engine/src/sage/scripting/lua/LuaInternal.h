@@ -1,4 +1,5 @@
 #pragma once
+#include <chrono>
 #include <deque>
 #include <memory>
 #include <string>
@@ -140,6 +141,14 @@ public:
 
     // --- Для файлов LuaApi_*.cpp ---------------------------------------------
     sol::state& Lua() { return *m_lua; }
+
+    // Сколько секунд может длиться ОДИН вызов скрипта (Update, Start,
+    // обработчик), прежде чем сторож его прервёт. С запасом: загрузка уровня
+    // в Start законно бывает долгой, а зависание — это навсегда.
+    static constexpr double kDefaultCallBudget = 8.0;
+    void SetCallBudget(double seconds) override { m_budget = seconds > 0.0 ? seconds : kDefaultCallBudget; }
+    static constexpr int kWatchEvery = 20000;
+    static constexpr const char* kTimeoutText = "вызов скрипта длится дольше";
     const ScriptServices& Services() const { return m_services; }
     Scene* ScenePtr() const { return m_services.ScenePtr; }
     ScriptClock* Clock() const { return m_services.Clock; }
@@ -290,12 +299,35 @@ private:
     // Экземпляр, чей код сейчас исполняется: ему принадлежат подписки,
     // сделанные в этот момент (см. ConnectLua).
     InstanceId m_current = kInvalidInstance;
+    // Каждый вход в код скрипта идёт через эту область — она же заводит часы
+    // сторожа (см. InstallWatchdog): отсчёт от ВНЕШНЕГО входа, вложенные
+    // вызовы (скрипт зовёт метод соседа) время не сбрасывают.
     struct CurrentScope {
         Backend& B;
         InstanceId Saved;
-        CurrentScope(Backend& b, InstanceId id) : B(b), Saved(b.m_current) { b.m_current = id; }
-        ~CurrentScope() { B.m_current = Saved; }
+        CurrentScope(Backend& b, InstanceId id) : B(b), Saved(b.m_current) {
+            b.m_current = id;
+            if (b.m_depth++ == 0) b.m_callStart = std::chrono::steady_clock::now();
+        }
+        ~CurrentScope() {
+            B.m_current = Saved;
+            --B.m_depth;
+        }
     };
+    // --- Сторож зависаний ---------------------------------------------------
+    // Бесконечный цикл в Update вешал ВЕСЬ движок: редактор переставал
+    // отвечать, несохранённая сцена пропадала вместе с процессом. Теперь Lua
+    // раз в kWatchEvery инструкций спрашивает часы, и вызов дольше бюджета
+    // прерывается ошибкой — с файлом и строкой цикла. Цена — одно сравнение
+    // времени на десятки тысяч инструкций.
+    void InstallWatchdog();
+    static void WatchdogHook(lua_State* L, lua_Debug* ar);
+    int m_depth = 0;
+    std::chrono::steady_clock::time_point m_callStart{};
+    double m_budget = kDefaultCallBudget;
+    // Обработчик ошибок хуков: дописывает к сообщению стек вызовов Lua
+    // (библиотеки debug у скриптов нет — она открыла бы песочницу).
+    sol::reference m_traceback;
     ScriptEngine* m_interop = nullptr;
     ScriptServices m_services;
 

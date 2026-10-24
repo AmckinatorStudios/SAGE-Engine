@@ -1,5 +1,6 @@
 #include "Log.h"
 #include "sage/core/CrashHandler.h"
+#include "sage/core/Problems.h"
 #include <iostream>
 #include <iomanip>
 #include <ctime>
@@ -78,8 +79,34 @@ LogLevel Log::MinLevel() {
 }
 
 void Log::WriteLine(LogLevel level, const std::string& category, const std::string& message) {
+    {
+        std::lock_guard<std::mutex> lock(s_mutex);
+        if (level < s_minLevel) return;
+        WriteLocked(level, category, message);
+    }
+    // КАЖДОЕ предупреждение и ошибка — проблема (Problems.h), даже от кода,
+    // который о проблемах не знает: так ничего не теряется и не прячется.
+    // Вне блокировки лога: реестр сам пишет в лог.
+    if (level >= LogLevel::Warn) sage::Problems::FromLog((int)level, category, message);
+}
+
+void Log::WriteFileOnly(LogLevel level, const std::string& category, const std::string& text) {
     std::lock_guard<std::mutex> lock(s_mutex);
-    if (level < s_minLevel) return;
+    if (!s_fileEnabled || level < s_minLevel) return;
+    s_file << "[" << Timestamp() << "] [" << LevelName(level) << "] [" << category << "] подробно:\n";
+    // Каждая строка разбора — с отступом: файл журнала читают и программы
+    // (grep по «[ERROR]»), и разбор не должен выглядеть для них новыми записями.
+    size_t start = 0;
+    while (start < text.size()) {
+        size_t end = text.find('\n', start);
+        if (end == std::string::npos) end = text.size();
+        s_file << "    " << text.substr(start, end - start) << "\n";
+        start = end + 1;
+    }
+    s_file.flush();
+}
+
+void Log::WriteLocked(LogLevel level, const std::string& category, const std::string& message) {
 
     std::string prefix = "[" + Timestamp() + "] [" + LevelName(level) + "] [" + category + "] ";
 

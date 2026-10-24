@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "sage/core/Problems.h"
 #include "sage/scripting/LanguageBackend.h"
 #include "sage/scene/Scene.h"
 
@@ -147,11 +148,22 @@ public:
     using ErrorSink = std::function<void(const ScriptError&)>;
     void SetErrorSink(ErrorSink sink) { m_sink = std::move(sink); }
 
+    // Предел одного вызова скрипта (сторож зависаний), секунды.
+    void SetCallBudget(double seconds) {
+        for (auto& b : m_backends) b->SetCallBudget(seconds);
+    }
+
 private:
     void StartScript(LiveScript& live);
     // Один вызов хука с разбором ошибки и гашением повторов.
     void Guard(LiveScript& s, bool ok, ScriptError& err, Hook hook);
-    void Report(const ScriptError& err);
+    // В реестр проблем (Problems.h) с объяснением; subject — объект.
+    void Report(const ScriptError& err, const std::string& subject = {});
+    // Последствие ошибки в файле file: объект без скрипта, скрипт остановлен.
+    void ReportConsequence(const std::string& code, sage::Severity level, const std::string& file,
+                           const std::string& subject, const std::string& title, const std::string& detail);
+    // Файл собрался — снять его ошибки сборки и их последствия.
+    void Resolved(const std::string& file);
     // Создаёт экземпляр по уже прочитанному исходнику.
     InstanceId Build(LanguageBackend& backend, const ScriptSource& src, GameObject owner,
                      const sage::vars::Table& fields);

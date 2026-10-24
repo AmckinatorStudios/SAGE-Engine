@@ -1,5 +1,6 @@
 #include "sage/scripting/lua/LuaInternal.h"
 
+#include <cstdio>
 #include <cctype>
 
 #include "sage/assets/Pack.h"
@@ -75,10 +76,15 @@ bool IsSagePath(const std::string& path) {
 // Диагностика SAGE -> ошибка скрипта: файл и строка отдельно (консоль
 // открывает файл на месте), текст — без заголовка «файл:строка:столбец».
 void FillFromDiagnostic(const sage::lang::Diagnostic& d, const std::string& path, ScriptError& err) {
+    err.What = ScriptError::Kind::Compile;
     err.File = d.File.empty() ? path : d.File;
     err.Line = d.P.Line;
+    err.Col = d.P.Col;
     err.Message = d.Title + ":";
     for (const std::string& l : d.Lines) err.Message += "\n" + l;
+    // Разобранным — для объяснения (ScriptAdvice.h): заголовок и подробности.
+    err.Title = d.Title;
+    err.Details = d.Lines;
 }
 
 bool IsLegacySource(const std::string& text) {
@@ -122,6 +128,8 @@ Backend::Backend(const LuaBackendConfig& config) : m_interop(config.Interop) {
         [this](const sol::protected_function& fn, const sage::events::Event& e, int owner) {
             CallHandler(fn, e, owner);
         });
+
+    InstallWatchdog();
 
     m_base = m_lua->create_table();
     RegisterMath(*this);
@@ -220,6 +228,55 @@ Backend::~Backend() {
 
 void Backend::Bind(const ScriptServices& services) { m_services = services; }
 
+namespace {
+int g_watchKey = 0;   // адрес — ключ указателя на бэкенд в реестре Lua
+
+// Ошибка + стек вызовов (luaL_traceback). Первым — само сообщение: его
+// разбирает Explain, а стек идёт отдельным полем.
+int TracebackHandler(lua_State* L) {
+    const char* msg = luaL_tolstring(L, 1, nullptr);
+    luaL_traceback(L, L, msg, 1);
+    return 1;
+}
+} // namespace
+
+void Backend::InstallWatchdog() {
+    lua_State* L = m_lua->lua_state();
+    lua_pushlightuserdata(L, this);
+    lua_rawsetp(L, LUA_REGISTRYINDEX, &g_watchKey);
+    // Хук наследуют и корутины: они создаются из того же состояния.
+    lua_sethook(L, &Backend::WatchdogHook, LUA_MASKCOUNT, kWatchEvery);
+    lua_pushcfunction(L, &TracebackHandler);
+    m_traceback = sol::reference(L, -1);
+    lua_pop(L, 1);
+}
+
+void Backend::WatchdogHook(lua_State* L, lua_Debug* ar) {
+    (void)ar;
+    lua_rawgetp(L, LUA_REGISTRYINDEX, &g_watchKey);
+    Backend* self = static_cast<Backend*>(lua_touserdata(L, -1));
+    lua_pop(L, 1);
+    if (!self || self->m_depth <= 0) return;
+    const double spent =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - self->m_callStart).count();
+    if (spent < self->m_budget) return;
+    // Ошибка, а не выход из процесса: её ловит тот же protected-вызов, что и
+    // любую ошибку скрипта, и дальше она идёт обычной дорогой — в проблемы, с
+    // файлом и строкой. Перехваченная скриптом через pcall, она вернётся на
+    // следующем же такте хука: время-то уже вышло.
+    // Текст — заранее: lua_pushfstring не понимает «%.1f», и вместо
+    // сообщения о зависании вышла бы ошибка формата.
+    char text[160];
+    std::snprintf(text, sizeof(text), "%s %.1f с и прерван (похоже на бесконечный цикл)", kTimeoutText,
+                  self->m_budget);
+    // Место — уровень 0: внутри хука это сама зависшая функция (уровень 1,
+    // как у luaL_error, — уже тот, кто её позвал, то есть движок без строки).
+    luaL_where(L, 0);
+    lua_pushstring(L, text);
+    lua_concat(L, 2);
+    lua_error(L);
+}
+
 sage::vars::Table Backend::ParseFields(const std::string& path, const std::string& source) const {
     return sage::scripting::ParseFields(path, source);
 }
@@ -240,6 +297,14 @@ void Backend::Explain(const sol::protected_function_result& result, const std::s
     err.Line = 0;
     sol::error e = result;
     std::string text = e.what();
+    // Стек вызовов (TracebackHandler) — отдельным полем: в сообщении он
+    // мешал бы разобрать «файл:строка:» и выглядел бы для человека шумом.
+    const size_t stack = text.find("\nstack traceback:");
+    if (stack != std::string::npos) {
+        err.Traceback = text.substr(stack + 1);
+        text = text.substr(0, stack);
+    }
+    if (text.find(kTimeoutText) != std::string::npos) err.What = ScriptError::Kind::Timeout;
 
     // Сообщение Lua начинается с "путь:строка: ". Разбираем его на части, чтобы
     // консоль редактора могла открыть файл на нужной строке.
@@ -288,6 +353,7 @@ bool Backend::Compile(const ScriptSource& source, sol::protected_function& out, 
             if (const sage::lang::Diagnostic* d = compiled->FirstError()) {
                 FillFromDiagnostic(*d, source.Path, err);
             } else {
+                err.What = ScriptError::Kind::Compile;
                 err.File = source.Path;
                 err.Message = "SAGE Lua: файл не скомпилировался";
             }
@@ -300,6 +366,7 @@ bool Backend::Compile(const ScriptSource& source, sol::protected_function& out, 
     sol::load_result chunk = m_lua->load(*text, "@" + source.Path);
     if (!chunk.valid()) {
         sol::error e = chunk;
+        err.What = ScriptError::Kind::Compile;
         err.File = source.Path;
         err.Message = e.what();
         // Синтаксическая ошибка тоже несёт "файл:строка:" — разбираем так же.
@@ -344,7 +411,12 @@ void Backend::FillHooks(Instance& inst) {
             if (const char* legacy = LegacyHookName(hook)) fn = inst.Class[legacy];
         }
         if (fn.get_type() == sol::type::function)
+        {
             inst.Hooks[i] = fn.as<sol::protected_function>();
+            // Со стеком вызовов: «ошибка в строке 12» мало что говорит, если
+            // строку 12 зовут из пяти мест.
+            if (m_traceback.valid()) inst.Hooks[i].set_error_handler(m_traceback);
+        }
         else
             inst.Hooks[i] = sol::protected_function();
     }

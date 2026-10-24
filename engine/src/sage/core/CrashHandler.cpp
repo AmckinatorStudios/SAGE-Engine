@@ -314,21 +314,30 @@ std::string CrashHandler::BuildReport(const std::string& reason) {
     out += "\n--- Стек вызовов ---\n";
     out += Backtrace();
 
-    const int filled = s.NoteFilled.load();
-    if (filled > 0 && !s.Notes.empty()) {
-        out += "\n--- Последние " + std::to_string(filled) + " сообщений лога ---\n";
-        const int head = s.NoteHead.load();
-        for (int i = 0; i < filled; ++i) {
-            const int slot = (head - filled + i + kNoteCount * 2) % kNoteCount;
-            const char* line = s.Notes.data() + (size_t)slot * kNoteLength;
-            if (line[0]) {
-                out += "  ";
-                out += line;
-                out += "\n";
-            }
-        }
+    const std::string notes = RecentNotes();
+    if (!notes.empty()) {
+        out += "\n--- Последние " + std::to_string(s.NoteFilled.load()) + " сообщений лога ---\n";
+        out += notes;
     }
     out += "\n=== конец отчёта ===\n";
+    return out;
+}
+
+std::string CrashHandler::RecentNotes() {
+    State& s = S();
+    std::string out;
+    const int filled = s.NoteFilled.load();
+    if (filled <= 0 || s.Notes.empty()) return out;
+    const int head = s.NoteHead.load();
+    for (int i = 0; i < filled; ++i) {
+        const int slot = (head - filled + i + kNoteCount * 2) % kNoteCount;
+        const char* line = s.Notes.data() + (size_t)slot * kNoteLength;
+        if (line[0]) {
+            out += "  ";
+            out += line;
+            out += "\n";
+        }
+    }
     return out;
 }
 
