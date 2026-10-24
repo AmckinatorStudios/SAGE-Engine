@@ -2659,6 +2659,13 @@
     "Show time": "Показывать время",
     "The console is empty": "Консоль пуста",
     "The search matched nothing": "Поиск ничего не нашёл",
-    "Warnings: show or hide. Ctrl+click shows only them.": "Предупреждения: показать или скрыть. Ctrl+щелчок — только они."
+    "Warnings: show or hide. Ctrl+click shows only them.": "Предупреждения: показать или скрыть. Ctrl+щелчок — только они.",
+    "A camera has no size: it cannot be scaled": "У камеры нет размера: её нельзя масштабировать",
+    "A folder only sorts the list: it cannot be scaled": "Папка только упорядочивает список: её нельзя масштабировать",
+    "A light has no size: it cannot be scaled": "У света нет размера: его нельзя масштабировать",
+    "A reflection probe is sized by its box in the inspector, not by scale": "Размер зонда отражений задаёт его коробка в инспекторе, а не масштаб",
+    "A sound source has no size: it cannot be scaled": "У источника звука нет размера: его нельзя масштабировать",
+    "Reset the scale to 1: it means nothing for this object": "Сбросить масштаб на 1: у этого объекта он ничего не значит",
+    "This object has no size, so it cannot be scaled": "У этого объекта нет размера — масштабировать его нельзя"
   }
 }

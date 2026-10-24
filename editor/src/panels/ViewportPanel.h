@@ -4,6 +4,8 @@
 #include <utility>
 #include <vector>
 
+#include "sage/scene/ScaleLock.h"
+
 #include <glm/glm.hpp>
 
 #include "imgui.h"
@@ -59,6 +61,8 @@ private:
         ImVec2 Pos{0.0f, 0.0f};
     };
     PendingDrop m_pendingDrop;
+    // Почему у выбранного нет ручек масштаба (None — есть); подсказка у вида.
+    sage::scene::ScaleLock m_scaleLockHint = sage::scene::ScaleLock::None;
 
     // Инструменты — ВИДЖЕТОМ ПОВЕРХ вьюпорта (ViewportTools.cpp): чем работаем,
     // в каких осях, привязка с сеткой, чем показывать сцену. origin — левый

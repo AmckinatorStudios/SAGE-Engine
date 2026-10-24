@@ -147,6 +147,7 @@ set(SAGE_ENGINE_SOURCES
     src/physics/builtin/BuiltinWorld.cpp
     src/physics/builtin/Collide.cpp
     src/sage/scene/CopyName.cpp
+    src/sage/scene/ScaleLock.cpp
     src/sage/scene/Prefab.cpp
     src/sage/scene/SceneFlow.cpp
     src/sage/scene/ComponentRegistry.cpp
