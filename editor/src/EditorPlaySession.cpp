@@ -77,6 +77,10 @@ int EditorPlaySession::BuildRuntime(const PlayContext& ctx, Scene& scene) {
     // тот же контракт, что в собранной игре, где CWD и есть корень проекта.
     m_scripts->AddScriptSearchPath((ctx.ProjectDir / "assets" / "scripts").string());
     m_scripts->AddScriptSearchPath("assets/scripts"); // скрипты рядом с редактором
+    // Плагины проекта — так же, как в собранной игре (PlayerLayer).
+    m_plugins = sage::plugins::Scan(ctx.ProjectDir / "plugins");
+    for (const sage::plugins::Manifest& m : m_plugins)
+        if (m.Enabled && m.Error.empty()) m_scripts->AddScriptSearchPath(sage::PathToUtf8(m.Dir));
 
     // Параметры запуска игры (LaunchArg в Lua) — до AttachScript, потому что
     // OnStart скриптов читает их сразу. В редакторе источник один: окружение
@@ -116,6 +120,7 @@ int EditorPlaySession::BuildRuntime(const PlayContext& ctx, Scene& scene) {
 
     // Ошибка в одном скрипте (нет файла, синтаксис) не срывает Play —
     // логируется, остальные продолжают работать.
+    m_scripting->SetPlugins(m_plugins);
     const int attached = m_scripting->AttachScene(scene);
 
     // Раскладка управления проекта — ПОСЛЕ скриптов, и это не мелочь порядка.

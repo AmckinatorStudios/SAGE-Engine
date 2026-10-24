@@ -161,6 +161,10 @@ bool Exists(const std::string& path);
 // на диске нет вовсе, и directory_iterator по нему вернёт пустоту — то есть
 // игра честно не найдёт ни одной сцены и не запустится.
 std::vector<std::string> ListFiles(const std::string& directory, const std::string& extension);
+// Подпапки каталога (только имена) — в пакете или на диске. Нужно поиску
+// плагинов: plugins/<имя>/plugin.json лежит на уровень глубже, и ListFiles,
+// который смотрит только в сам каталог, их не видит.
+std::vector<std::string> ListDirs(const std::string& directory);
 
 // Читает файл целиком. Сначала пакет, потом диск.
 bool ReadFile(const std::string& path, std::vector<uint8_t>& out);

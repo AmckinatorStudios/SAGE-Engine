@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 
+#include "sage/scripting/Plugins.h"
 #include "EditorTypes.h"    // EditorPlayState
 #include "EditorPlayInput.h"
 
@@ -149,6 +150,7 @@ private:
     // прежнего движка, и пережить его он не имеет права — члены разрушаются в
     // обратном порядке объявления.
     std::unique_ptr<sage::scripting::ScriptingSystem> m_scripting;
+    std::vector<sage::plugins::Manifest> m_plugins;   // плагины проекта (plugins/)
     int BuildRuntime(const PlayContext& ctx, Scene& scene);
     void TeardownRuntime(const PlayContext& ctx, Scene* scene);
     std::unique_ptr<PhysicsScene> m_physics;

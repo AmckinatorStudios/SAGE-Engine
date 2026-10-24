@@ -7,6 +7,7 @@
 #include "sage/input/Keys.h"
 
 #include "sage/core/Log.h"
+#include "sage/core/Paths.h"
 #include "sage/scene/SceneFlow.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/scene/Components.h"
@@ -42,12 +43,31 @@ int ScriptingSystem::AttachScene(Scene& scene) {
               [&order](const GameObject& a, const GameObject& b) { return order(a) < order(b); });
     // Start всех — после подключения всех (см. ScriptRuntime::BeginBatch).
     m_runtime.BeginBatch();
+    m_attachedPlugins = AttachPlugins(scene);
     for (GameObject& o : owners) {
         const ScriptComponent& sc = o.Registry()->get<ScriptComponent>(o.Entity());
         if (m_runtime.Attach(o, sc.Path, sc.Fields)) ++attached;
     }
     m_runtime.EndBatch();
     InstallLinks(scene);
+    return attached;
+}
+
+// Служебный объект на каждый включённый плагин с частью движка. Без IdComponent:
+// у объекта нет номера сцены, поэтому его нет ни в списке редактора, ни в файле
+// сцены, ни в поиске по номеру — он существует только пока идёт игра.
+int ScriptingSystem::AttachPlugins(Scene& scene) {
+    int attached = 0;
+    entt::registry& reg = scene.Registry();
+    for (const sage::plugins::Manifest& m : m_plugins) {
+        if (!m.Enabled || !m.HasRuntime() || !m.Error.empty()) continue;
+        const entt::entity e = reg.create();
+        reg.emplace<NameComponent>(e, NameComponent{"plugin:" + m.Id});
+        reg.emplace<Transform>(e);
+        reg.emplace<sage::plugins::PluginHostComponent>(e, sage::plugins::PluginHostComponent{m.Id});
+        if (m_runtime.Attach(GameObject(&reg, e), sage::PathToUtf8(m.RuntimePath()), m.Settings)) ++attached;
+        else reg.destroy(e);
+    }
     return attached;
 }
 

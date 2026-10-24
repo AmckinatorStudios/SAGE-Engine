@@ -665,6 +665,36 @@ std::vector<std::string> ListFiles(const std::string& directory, const std::stri
     return found;
 }
 
+std::vector<std::string> ListDirs(const std::string& directory) {
+    std::vector<std::string> found;
+    if (g_pack) {
+        // Абсолютный каталог внутри папки игры — тот же относительный (как в ListFiles).
+        std::string dir = Slashes(directory);
+        std::error_code rc;
+        for (const std::string& root : {g_packDir, Slashes(sage::PathToUtf8(fs::current_path(rc)))}) {
+            if (root.empty() || dir.compare(0, root.size(), root) != 0) continue;
+            if (dir.size() == root.size()) { dir.clear(); break; }
+            if (dir[root.size()] == '/') { dir = dir.substr(root.size() + 1); break; }
+        }
+        const std::string prefix = Normalize(dir).empty() ? "" : Normalize(dir) + "/";
+        for (const std::string& path : g_pack->Paths()) {
+            if (path.rfind(prefix, 0) != 0) continue;
+            const size_t slash = path.find('/', prefix.size());
+            if (slash == std::string::npos) continue;   // файл в самом каталоге
+            std::string name = path.substr(prefix.size(), slash - prefix.size());
+            if (std::find(found.begin(), found.end(), name) == found.end()) found.push_back(std::move(name));
+        }
+    }
+    std::error_code ec;
+    for (const fs::directory_entry& e : fs::directory_iterator(sage::PathFromUtf8(directory), ec)) {
+        if (!e.is_directory(ec)) continue;
+        std::string name = sage::PathToUtf8(e.path().filename());
+        if (std::find(found.begin(), found.end(), name) == found.end()) found.push_back(std::move(name));
+    }
+    std::sort(found.begin(), found.end());
+    return found;
+}
+
 bool ReadFile(const std::string& path, std::vector<uint8_t>& out) {
     // Пакет ПЕРВЫМ. Рядом с собранной игрой могут остаться файлы от прошлой
     // сборки, и прочитать их вместо упакованных значило бы запустить вчерашнюю

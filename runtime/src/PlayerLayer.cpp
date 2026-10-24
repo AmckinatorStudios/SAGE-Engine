@@ -507,6 +507,11 @@ void PlayerLayer::BuildSceneRuntime() {
     // CWD уже внутри проекта, поэтому путь относительный — как и у скриптов
     // сущностей в .sage.
     m_scripts->AddScriptSearchPath("assets/scripts");
+    // Плагины проекта (plugins/<id>/) уехали в пакет вместе с проектом; их
+    // папки — в путях require, чтобы плагин мог разложить код по модулям.
+    m_plugins = sage::plugins::Scan("plugins");
+    for (const sage::plugins::Manifest& m : m_plugins)
+        if (m.Enabled && m.Error.empty()) m_scripts->AddScriptSearchPath(sage::PathToUtf8(m.Dir));
 
     // Параметры запуска (--autopilot=1, SAGE_GAME_ARGS) — до AttachScript:
     // скрипт читает их уже в OnStart, выбирая режим (автопрогон, зерно мира).
@@ -557,8 +562,11 @@ void PlayerLayer::BuildSceneRuntime() {
     services.Physics = m_physics.get();
     services.Audio = m_audio.get();
     m_scripting->Bind(services);
+    m_scripting->SetPlugins(m_plugins);
     const int attached = m_scripting->AttachScene(*m_scene);
     if (attached > 0) LOG_INFO("Player") << "Скриптов привязано: " << attached;
+    if (m_scripting->AttachedPlugins() > 0)
+        LOG_INFO("Player") << "Плагинов запущено: " << m_scripting->AttachedPlugins();
 
     // Состав кадра. Регистрируется здесь, когда все подсистемы уже созданы:
     // порядок при этом не задаётся — он определён стадиями внутри
