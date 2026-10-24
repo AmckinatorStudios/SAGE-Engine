@@ -1,3 +1,4 @@
+#include "../DragSet.h"
 #include "../PanelWindows.h"
 #include "ViewportPanel.h"
 #include "ModelImportDialog.h"
@@ -283,11 +284,9 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         // заодно делает его активным, и считать по чужой камере нельзя.
         if (ImGui::BeginDragDropTarget()) {
             if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
-                std::string dropped((const char*)p->Data, (size_t)p->DataSize);
-                if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
                 m_activeSlot = i;
                 m_pendingDrop.Active = true;
-                m_pendingDrop.Path = dropped;
+                m_pendingDrop.Paths = dragset::Assets(p);   // несколько файлов — все в эту точку
                 m_pendingDrop.Pos = ImGui::GetMousePos();
             }
             ImGui::EndDragDropTarget();
@@ -760,15 +759,22 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
             // Модель, у которой ещё нет настроек импорта, сперва спрашивает их
             // (ModelImportDialog.h) и встаёт в сцену уже по ним — в ту же
             // точку, куда её уронили.
-            const std::filesystem::path dropped = m_pendingDrop.Path;
-            auto place = [&host, activeView, activeProj, du, dv, dropped]() {
-                if (!host.DropAssetAtViewport(activeView, activeProj, du, dv, dropped)) {
-                    host.SetStatusMessage(
-                        T("You can drop a model, a prefab or a material into the scene"));
+            // Несколько файлов — все в эту точку, и окно настроек ОДНО на всю
+            // группу: два окна подряд перекрыли бы друг друга.
+            const std::vector<std::string> files = m_pendingDrop.Paths;
+            std::vector<std::filesystem::path> ask;
+            for (const std::string& f : files)
+                if (sage::editor::modelimport::NeedsSettings(f)) ask.emplace_back(f);
+            auto place = [&host, activeView, activeProj, du, dv, files]() {
+                for (const std::string& f : files) {
+                    if (!host.DropAssetAtViewport(activeView, activeProj, du, dv, f)) {
+                        host.SetStatusMessage(
+                            T("You can drop a model, a prefab or a material into the scene"));
+                    }
                 }
             };
-            if (sage::editor::modelimport::NeedsSettings(dropped))
-                sage::editor::modelimport::Ask({dropped}, place);
+            if (!ask.empty())
+                sage::editor::modelimport::Ask(ask, place);
             else
                 place();
         }

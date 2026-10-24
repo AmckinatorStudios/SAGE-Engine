@@ -349,10 +349,13 @@ void EditorLayer::DrawStatusBar(float height) {
     // Консоль легко держать свёрнутой, и тогда единственное предупреждение о
     // непрочитанном шейдере остаётся незамеченным, а сцена «просто выглядит
     // не так». Клик открывает консоль уже с нужным фильтром.
-    if (m_console.ErrorCount() > 0 || m_console.WarnCount() > 0) {
+    // Считается то, что ЛЕЖИТ В КОНСОЛИ: очистил её — и статусная строка
+    // перестала говорить об ошибках, которых больше нет.
+    const int errorsShown = m_console.ErrorsShown(), warningsShown = m_console.WarningsShown();
+    if (errorsShown > 0 || warningsShown > 0) {
         ImGui::SameLine(); ImGui::TextDisabled("|");
         ImGui::SameLine();
-        const bool hasErrors = m_console.ErrorCount() > 0;
+        const bool hasErrors = errorsShown > 0;
         const ImVec4 col = hasErrors ? ImVec4(0.95f, 0.40f, 0.40f, 1.0f)
                                      : ImVec4(0.95f, 0.80f, 0.30f, 1.0f);
         EditorIcons::Inline(hasErrors ? "error" : "warn", glm::vec3(col.x, col.y, col.z));
@@ -366,10 +369,10 @@ void EditorLayer::DrawStatusBar(float height) {
             if (n10 >= 2 && n10 <= 4) return few;
             return many;
         };
-        ImGui::TextColored(col, "%d %s, %d %s", m_console.ErrorCount(),
-                           plural(m_console.ErrorCount(), T("error"), T("errors"), T("errors (many)")),
-                           m_console.WarnCount(),
-                           plural(m_console.WarnCount(), T("warning"), T("warnings"),
+        ImGui::TextColored(col, "%d %s, %d %s", errorsShown,
+                           plural(errorsShown, T("error"), T("errors"), T("errors (many)")),
+                           warningsShown,
+                           plural(warningsShown, T("warning"), T("warnings"),
                                   T("warnings (many)")));
         if (ImGui::IsItemClicked()) ImGui::SetWindowFocus("Console");
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Open console"));

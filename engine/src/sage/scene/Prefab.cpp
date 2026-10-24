@@ -205,11 +205,17 @@ GameObject CopySubtreeCollecting(Scene& src, entt::entity srcRoot, Scene& dst,
     GameObject d = dst.CreateObject(s.Name());
     CopyAllComponents(s, d);
     if (dstParent != entt::null) dst.SetParent(d.Entity(), dstParent);
+    // Место среди братьев едет с копией: дети заготовки встают в том порядке,
+    // в каком их разложили, а дубликат — сразу за оригиналом (номер у него
+    // больше, место то же).
+    dst.Registry().get_or_emplace<HierarchyComponent>(d.Entity()).Order = src.SiblingOrder(srcRoot);
     if (const IdComponent* srcId = src.Registry().try_get<IdComponent>(srcRoot))
         idMap[srcId->Id] = d.Id();
     made.push_back(d.Entity());
     if (const HierarchyComponent* h = src.Registry().try_get<HierarchyComponent>(srcRoot)) {
-        std::vector<entt::entity> kids = h->Children; // копия: SetParent мутирует список
+        // В порядке списка: Children у копии собирается в той же
+        // последовательности, в какой его обходят системы.
+        const std::vector<entt::entity> kids = src.ChildrenOf(srcRoot);
         for (entt::entity k : kids)
             if (src.Registry().valid(k))
                 CopySubtreeCollecting(src, k, dst, d.Entity(), idMap, made);

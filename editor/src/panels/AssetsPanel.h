@@ -203,8 +203,13 @@ private:
     void DrawModals(EditorHost& host); // Create/Rename/Delete — в ID-скоупе окна панели
 
     // Перенос файла в папку броском (вместе с сайдкарами .meta/.sageimport).
-    void MoveIntoFolder(EditorHost& host, const std::filesystem::path& source,
-                        const std::filesystem::path& folder);
+    // rescan=false — без пересчёта базы ассетов (его делает вызывающий, один
+    // раз на группу). false — не перенесён (причина — в статусной строке).
+    bool MoveIntoFolder(EditorHost& host, const std::filesystem::path& source,
+                        const std::filesystem::path& folder, bool rescan = true);
+    // Перенос группы (перетаскивание нескольких выделенных карточек).
+    void MoveGroupIntoFolder(EditorHost& host, const std::vector<std::string>& sources,
+                             const std::filesystem::path& folder);
 
     // Внесение чужих файлов в проект: диалог + отчёт в статусную строку.
     void DrawImportButton(EditorHost& host);

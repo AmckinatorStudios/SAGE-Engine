@@ -1272,6 +1272,9 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
             if (h->Parent != entt::null && reg.valid(h->Parent))
                 if (const IdComponent* pid = reg.try_get<IdComponent>(h->Parent))
                     j["parent"] = pid->Id;
+            // Место в списке — только если его меняли: у сцен, где порядок «по
+            // номеру», файл не меняется ни на байт.
+            if (h->Order != 0) j["order"] = h->Order;
         }
         j["position"] = Vec3ToJson(tr.Position);
         j["rotation"] = Vec3ToJson(tr.Rotation);
@@ -1437,6 +1440,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         id = obj.Id();
         maxId = std::max(maxId, id);
         if (j.contains("parent")) parentLinks.push_back({id, j.value("parent", -1)});
+        if (j.contains("order"))
+            scene->Registry().get_or_emplace<HierarchyComponent>(obj.Entity()).Order = j.value("order", 0);
 
         Transform& tr = obj.GetTransform();
         MeshRendererComponent& mr = obj.Renderer();

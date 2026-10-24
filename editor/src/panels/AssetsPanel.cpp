@@ -1,3 +1,4 @@
+#include "../DragSet.h"
 #include "../PanelWindowId.h"
 #include "../PanelWindows.h"
 #include "AssetsPanel.h"
@@ -432,11 +433,8 @@ void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int dept
     // Бросок файла на папку дерева — перенос в неё: то же, что и в сетке.
     // Бросок ОБЪЕКТА из иерархии — новый префаб в этой папке.
     if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
-            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
-            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
-            MoveIntoFolder(host, dropped, dir);
-        }
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH"))
+            MoveGroupIntoFolder(host, dragset::Assets(p), dir);
         AcceptObjectAsPrefab(host, dir);
         ImGui::EndDragDropTarget();
     }
@@ -673,7 +671,14 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         // Полезная нагрузка и карточка под курсором — общие для всего
         // редактора (см. AssetSlot.h): и панель, и слоты компонентов начинают
         // перетаскивание одинаково, поэтому и принимающая сторона у них одна.
+        // Взялись за выделенный файл — едет весь набор, в порядке сетки.
+        std::vector<std::string> group;
+        for (const fs::path& g : dragset::Ordered(path, m_multi, m_visibleOrder)) group.push_back(g.string());
+        dragset::BeginAssets(path.string(), group);
         assetslot::BeginDrag(path, &m_preview);
+        if (group.size() > 1) {
+            ImGui::TextDisabled("%s", dragset::Caption(path.filename().string(), group.size()).c_str());
+        }
         ImGui::EndDragDropSource();
     }
 
@@ -682,11 +687,8 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
     // в сценах переживают переезд: они держатся за GUID из сайдкара .meta,
     // который едет вместе с файлом (см. sage/assets/AssetDatabase.h).
     if (isDir && ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH")) {
-            std::string dropped((const char*)p->Data, (size_t)p->DataSize);
-            if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
-            MoveIntoFolder(host, dropped, path);
-        }
+        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH"))
+            MoveGroupIntoFolder(host, dragset::Assets(p), path);
         AcceptObjectAsPrefab(host, path);
         ImGui::EndDragDropTarget();
     }
@@ -1014,21 +1016,36 @@ const char* AssetsPanel::FolderIcon(const fs::path& dir) {
     return l.Dirs.empty() && l.Files.empty() ? "folder" : "folder-full";
 }
 
-void AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const fs::path& folder) {
+bool AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const fs::path& folder,
+                                 bool rescan) {
     std::error_code ec;
-    if (!fs::exists(source, ec) || fs::is_directory(source, ec)) return;
+    if (!fs::exists(source, ec)) return false;
+    // ПАПКА ПЕРЕЕЗЖАЕТ ТОЖЕ — кроме как в саму себя или в свою же вложенную:
+    // такой перенос ОС либо запретит, либо (на части систем) унесёт папку в
+    // никуда. Раньше папки не переносились вовсе, и разложить проект по
+    // местам можно было только в проводнике, мимо редактора.
+    if (fs::is_directory(source, ec)) {
+        const fs::path src = fs::weakly_canonical(source, ec);
+        for (fs::path up = fs::weakly_canonical(folder, ec); !up.empty(); up = up.parent_path()) {
+            if (up == src) {
+                host.SetStatusMessage(T("A folder cannot be moved into itself"));
+                return false;
+            }
+            if (up == up.parent_path()) break;
+        }
+    }
     const fs::path target = folder / source.filename();
-    if (fs::weakly_canonical(source, ec) == fs::weakly_canonical(target, ec)) return;
+    if (fs::weakly_canonical(source, ec) == fs::weakly_canonical(target, ec)) return false;
     if (fs::exists(target, ec)) {
         host.SetStatusMessage(T("The folder already contains ") + source.filename().string());
-        return;
+        return false;
     }
 
     fs::rename(source, target, ec);
     if (ec) {
         host.SetStatusMessage(T("Moving failed: ") + ec.message());
         LOG_ERROR("Editor") << "Перенос ассета не удался: " << ec.message();
-        return;
+        return false;
     }
     for (const char* sidecar : {".meta", ".sageimport"}) {
         const fs::path from = source.string() + sidecar;
@@ -1042,9 +1059,29 @@ void AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const
     sage::editor::foldercolors::Rename(source, target);
     // Пересканировать проект: база ассетов помнит пути, и после переезда её
     // ответ на «где этот файл» обязан измениться.
+    if (!rescan) return true;
     sage::AssetDatabase::Instance().ScanProject(host.CurrentProject().Dir().string());
     host.SetStatusMessage(T("Moved into ") + folder.filename().string() + ": " +
                           source.filename().string());
+    return true;
+}
+
+void AssetsPanel::MoveGroupIntoFolder(EditorHost& host, const std::vector<std::string>& sources,
+                                      const fs::path& folder) {
+    if (sources.size() == 1) {
+        MoveIntoFolder(host, sources.front(), folder);
+        return;
+    }
+    // Один пересчёт базы на всю группу, а не на каждый файл: пересканировать
+    // проект сорок раз подряд значит заморозить редактор на сорок сканов.
+    int moved = 0;
+    for (const std::string& src : sources)
+        if (fs::path(src) != folder && MoveIntoFolder(host, src, folder, false)) ++moved;
+    if (moved == 0) return;
+    sage::AssetDatabase::Instance().ScanProject(host.CurrentProject().Dir().string());
+    char text[256];
+    std::snprintf(text, sizeof(text), T("Moved %d items into %s"), moved, folder.filename().string().c_str());
+    host.SetStatusMessage(text);
 }
 
 // Переименование ассета вместе с сайдкарами. Сайдкар .meta — это личность
@@ -1617,11 +1654,17 @@ void AssetsPanel::DrawModals(EditorHost& host) {
 static void AcceptObjectAsPrefab(EditorHost& host, const fs::path& folder) {
     const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ENTITY", ImGuiDragDropFlags_AcceptBeforeDelivery);
     if (!p || p->DataSize != (int)sizeof(int)) return;
-    ImGui::SetTooltip("%s", T("Drop to save the object as a prefab here"));
+    // Группа объектов — по префабу на каждый: так раскладывают набор
+    // заготовок (двери, лампы, враги) одним броском.
+    const std::vector<int> group = dragset::Entities(p);
+    ImGui::SetTooltip("%s", group.size() > 1 ? T("Drop to save each object as a prefab here")
+                                             : T("Drop to save the object as a prefab here"));
     if (!p->IsDelivery()) return;
-    std::string err;
-    const fs::path made = host.SaveObjectAsPrefab(*(const int*)p->Data, folder, err);
-    if (made.empty()) host.SetStatusMessage(T("The prefab was not saved: ") + err);
+    for (int id : group) {
+        std::string err;
+        const fs::path made = host.SaveObjectAsPrefab(id, folder, err);
+        if (made.empty()) host.SetStatusMessage(T("The prefab was not saved: ") + err);
+    }
 }
 
 void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId) {

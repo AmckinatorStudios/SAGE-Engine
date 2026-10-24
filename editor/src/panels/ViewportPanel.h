@@ -55,7 +55,7 @@ private:
     // происходит ниже по кадру, где уже посчитаны матрицы активного вида.
     struct PendingDrop {
         bool Active = false;
-        std::string Path;
+        std::vector<std::string> Paths;
         ImVec2 Pos{0.0f, 0.0f};
     };
     PendingDrop m_pendingDrop;
