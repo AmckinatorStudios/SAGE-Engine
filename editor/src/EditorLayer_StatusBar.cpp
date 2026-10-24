@@ -318,7 +318,7 @@ void EditorLayer::DrawEmptyDockHint(float minX, float minY, float maxX, float ma
     ImGui::Spacing();
     centered(buttonWidth);
     if (ImGui::Button(action, ImVec2(buttonWidth, buttonHeight))) {
-        m_panels.Restore();
+        m_panelRegistry.Restore();
         m_rebuildDockLayout = true; // панель могла быть закрыта вместе со своим узлом
     }
     ImGui::End();

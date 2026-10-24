@@ -41,6 +41,8 @@ struct Command {
 class CommandRegistry {
 public:
     void Add(Command cmd);
+    // Убрать команду (её панель сняли, плагин выключили). false — такой не было.
+    bool Remove(const std::string& id);
     const std::vector<Command>& All() const { return m_commands; }
     const Command* Find(const std::string& id) const;
 

@@ -50,6 +50,15 @@ std::string Fold(const std::string& s) {
 
 } // namespace
 
+bool CommandRegistry::Remove(const std::string& id) {
+    for (size_t i = 0; i < m_commands.size(); ++i) {
+        if (m_commands[i].Id != id) continue;
+        m_commands.erase(m_commands.begin() + (long)i);
+        return true;
+    }
+    return false;
+}
+
 void CommandRegistry::Add(Command cmd) {
     if (cmd.Id.empty()) return;
     // Повтор — ошибка сборки списка, а не повод завести вторую такую же

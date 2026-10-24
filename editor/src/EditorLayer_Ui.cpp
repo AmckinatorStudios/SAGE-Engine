@@ -182,6 +182,21 @@ sage::ui::UIScope EditorLayer::UiScope() const {
     return sage::ui::UIScope::Only(obj.Entity());
 }
 
+// Панель, живущая своим окном системы, в док не заводится: DockBuilder втянул
+// бы её обратно вкладкой, отменив то, о чём человека не спрашивали.
+void EditorLayer::DockRegisteredPanels(EditorWorkspace workspace, unsigned int left, unsigned int right,
+                                       unsigned int bottom, unsigned int center) {
+    using sage::editor::PanelDock;
+    m_panelRegistry.ForEachDocked(workspace, [&](const std::string& id, PanelDock slot) {
+        if (panelwindows::Detached(id.c_str())) return;
+        const ImGuiID node = slot == PanelDock::Left ? left
+                           : slot == PanelDock::Right ? right
+                           : slot == PanelDock::Bottom ? bottom
+                                                       : center;
+        ImGui::DockBuilderDockWindow(id.c_str(), node);
+    });
+}
+
 void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
     // У вёрстки другой главный: ХОЛСТ, а не вьюпорт сцены. Всё остальное
     // стоит вокруг него так же, как в пространстве сцены, — привычка к
@@ -195,23 +210,11 @@ void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
     ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20f, nullptr, &center);
     ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.26f, nullptr, &center);
 
-    auto dock = [](const char* id, ImGuiID node) {
-        if (!panelwindows::Detached(id)) ImGui::DockBuilderDockWindow(id, node);
-    };
-    dock("InterfaceHierarchy", left);
-    dock("InterfaceInspector", right);
-    // СВОИ ОКНА ЭТОГО ПРОСТРАНСТВА, а не общие с пространством сцены: пока
-    // окно было одно на оба, эта строка ЗАБИРАЛА его у раскладки сцены, и
-    // вернуть его туда было уже некуда (см. PanelWindowId.h).
-    dock("AssetsUI", bottom);
-    dock("ConsoleUI", bottom);
-    dock("AnimationUI", bottom);
-    dock("TweenUI", bottom);
-    // Холст докается ПЕРВЫМ — он и есть вкладка по умолчанию. Предпросмотр
-    // рядом с ним: переключаться между «верстаю» и «смотрю» надо одним щелчком,
-    // а не раскладкой заново.
-    dock("InterfaceViewport", center);
-    dock("InterfacePreview", center);
+    // Кто куда — из реестра (PanelSpec::InterfaceDock). Общие панели
+    // докаются СВОИМИ окнами этого пространства («AssetsUI»): пока окно было
+    // одно на оба, раскладка вёрстки забирала его у раскладки сцены (см.
+    // PanelWindowId.h). Холст в центре — первым, он вкладка по умолчанию.
+    DockRegisteredPanels(EditorWorkspace::Interface, left, right, bottom, center);
     ImGui::DockBuilderFinish(dockspaceId);
 
     // ПО ИДЕНТИФИКАТОРУ, а не по имени: имя панели переводится («Canvas» /
@@ -239,24 +242,11 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     panelwindows::ResetToDefaults();
     // Панель, живущая своим окном системы, в док не заводится: DockBuilder
     // втянул бы её обратно вкладкой, отменив то, о чём человека не спрашивали.
-    auto dock = [](const char* id, ImGuiID node) {
-        if (!panelwindows::Detached(id)) ImGui::DockBuilderDockWindow(id, node);
-    };
-
-    dock("Hierarchy", left);
-    dock("Lighting", right);
-    dock("Inspector", right);
-    dock("Console", bottom);
-    dock("Assets", bottom);
-    dock("Animation", bottom);
-    dock("Tween", bottom);
-    // Viewport докается ПЕРВЫМ в центральный узел — так он и есть таб по
-    // умолчанию (первый добавленный к узлу становится выбранным). Раньше первым
-    // шёл Game, из-за чего редактор открывался на «игровом окне» без пикинга/
-    // гизмо/аутлайна — выглядело как «выделение не работает». Game выходит
-    // вперёд при входе в Play (GamePanel::RequestFocus).
-    dock("Viewport", center);
-    dock("Game", center);
+    // Кто куда — из реестра (PanelSpec::SceneDock). Viewport в центре —
+    // ПЕРВЫМ: первая добавленная к узлу вкладка становится выбранной, и при
+    // Game первым редактор открывался на игровом окне без пикинга и гизмо
+    // («выделение не работает»). Game выходит вперёд при входе в Play.
+    DockRegisteredPanels(EditorWorkspace::Scene, left, right, bottom, center);
     // Редактора интерфейса здесь больше нет вовсе: вёрстка — ОТДЕЛЬНОЕ рабочее
     // пространство со своими панелями и своей раскладкой (см. EditorTypes.h).
     ImGui::DockBuilderFinish(dockspaceId);
@@ -439,35 +429,32 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // общие панели, инструменты. Человек ищет окно в том разделе, в
             // котором он сейчас работает, и читает четыре строки вместо
             // пятнадцати.
+            // Пункты — из реестра панелей (PanelRegistry.h): панель, которую
+            // зарегистрировали, появляется здесь сама, в своём разделе.
+            namespace pe = sage::editor;
             Sage::UI::MenuSection(T("Scene"), true);
-            EditorIcons::MenuItemToggle("world", T("Viewport"), &PanelVisible(EditorPanel::Viewport));
-            EditorIcons::MenuItemToggle("game", T("Game"), &PanelVisible(EditorPanel::Game));
-            EditorIcons::MenuItemToggle("hierarchy", T("Hierarchy"), &PanelVisible(EditorPanel::Hierarchy));
-            EditorIcons::MenuItemToggle("inspector", T("Inspector"), &PanelVisible(EditorPanel::Inspector));
-            // «Освещение» стало «Средой»: в окне остались небо, воздух и
-            // окружающий свет, а сами источники света — на объектах сцены.
-            EditorIcons::MenuItemToggle("sun", T("Environment"), &PanelVisible(EditorPanel::Environment));
-
+            m_panelRegistry.DrawMenuSection(pe::PanelSection::Scene);
             Sage::UI::MenuSection(T("Interface"));
-            EditorIcons::MenuItemToggle("layout", T("Canvas"), &PanelVisible(EditorPanel::InterfaceViewport));
-            EditorIcons::MenuItemToggle("list", T("Elements"), &PanelVisible(EditorPanel::InterfaceHierarchy));
-            EditorIcons::MenuItemToggle("inspector", T("Element"), &PanelVisible(EditorPanel::InterfaceInspector));
-            EditorIcons::MenuItemToggle("eye", T("Preview"), &PanelVisible(EditorPanel::InterfacePreview));
-
-            // Эти трое стоят в ОБОИХ рабочих местах — потому и отдельным
-            // разделом, а не в одном из двух выше.
+            m_panelRegistry.DrawMenuSection(pe::PanelSection::Interface);
+            // Общие стоят в ОБОИХ рабочих местах — потому и отдельным разделом.
             Sage::UI::MenuSection(T("Shared"));
-            EditorIcons::MenuItemToggle("folder-full", T("Assets"), &PanelVisible(EditorPanel::Assets));
-            EditorIcons::MenuItemToggle("console", T("Console"), &PanelVisible(EditorPanel::Console));
-            EditorIcons::MenuItemToggle("anim", T("Animation"), &PanelVisible(EditorPanel::Animation));
-            EditorIcons::MenuItemToggle("clock", T("Tween"), &PanelVisible(EditorPanel::Tween));
-
+            m_panelRegistry.DrawMenuSection(pe::PanelSection::Shared);
             // Инструменты открывают ПОД ЗАДАЧУ и закрывают: они не участвуют в
             // раскладке по умолчанию и не живут на экране постоянно.
             Sage::UI::MenuSection(T("Tools"));
-            EditorIcons::MenuItemToggle("chart", T("Profiler"), &PanelVisible(EditorPanel::Profiler));
+            m_panelRegistry.DrawMenuSection(pe::PanelSection::Tools);
             EditorIcons::MenuItemToggle("nineslice", T("9-slice editor"), &m_showNineSlice);
             EditorIcons::MenuItemToggle("grid", T("Icon sheet"), &m_showIconSheet);
+            // Окна плагинов — своим разделом, только если они есть.
+            {
+                bool any = false;
+                for (const pe::PanelSpec* spec : m_panelRegistry.All())
+                    any = any || spec->Section == pe::PanelSection::Plugins;
+                if (any) {
+                    Sage::UI::MenuSection(T("Plugins"));
+                    m_panelRegistry.DrawMenuSection(pe::PanelSection::Plugins);
+                }
+            }
             // --- РАСКЛАДКА: то, что относится к самому окну редактора -------
             //
             // Внизу, а не первой строкой, как было: «сбросить раскладку»
@@ -477,7 +464,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // Сброс раскладки возвращает и сами панели: закрытая вкладка иначе
             // не восстанавливалась «сбросом», хотя именно этого от него ждут.
             if (EditorIcons::MenuItem("refresh", T("Reset Layout"))) {
-                m_panels.Restore();
+                m_panelRegistry.Restore();
                 m_rebuildDockLayout = true;
             }
             EditorIcons::MenuItemToggle("grid", T("Show Grid"), &m_tools.ShowGrid);
@@ -492,38 +479,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             if (EditorIcons::BeginMenu("window", T("Separate window"))) {
                 ImGui::TextDisabled("%s", T("Panel becomes a window of the system"));
                 ImGui::Separator();
-                struct DetachRow { const char* Id; const char* Label; EditorPanel Panel; };
-                static const DetachRow kRows[] = {
-                    {"InterfaceViewport",  "Canvas",   EditorPanel::InterfaceViewport},
-                    {"InterfaceHierarchy", "Elements", EditorPanel::InterfaceHierarchy},
-                    {"InterfaceInspector", "Element",  EditorPanel::InterfaceInspector},
-                    {"Viewport",  "Viewport",    EditorPanel::Viewport},
-                    {"Game",      "Game",        EditorPanel::Game},
-                    {"Hierarchy", "Hierarchy",   EditorPanel::Hierarchy},
-                    {"Inspector", "Inspector",   EditorPanel::Inspector},
-                    {"Lighting",  "Environment", EditorPanel::Environment},
-                    {"Assets",    "Assets",      EditorPanel::Assets},
-                    {"Console",   "Console",     EditorPanel::Console},
-                    {"Animation", "Animation",   EditorPanel::Animation},
-                    {"Tween",     "Tween",       EditorPanel::Tween},
-                    // Окно у панели своё в каждом пространстве, а галочка
-                    // «отдельным окном» — одна: это свойство ПАНЕЛИ, а не
-                    // места, где она сейчас стоит (см. PanelWindowId.h).
-                };
-                for (const DetachRow& row : kRows) {
-                    // Имя окна — ТЕКУЩЕГО пространства: у общих панелей их два,
-                    // и галочка обязана относиться к тому окну, которое человек
-                    // сейчас видит.
-                    const std::string id = sage::editor::panelid::For(row.Id, m_workspace);
-                    const bool detached = panelwindows::Detached(id.c_str());
-                    if (EditorIcons::MenuItemSelected("window", T(row.Label), detached)) {
-                        panelwindows::SetDetached(id.c_str(), !detached);
-                        // Отдельное окно ЗАКРЫТОЙ панели — это окно, которого
-                        // не видно: галочка стоит, а на экране ничего не
-                        // изменилось. Поэтому отрыв открывает панель заодно.
-                        if (!detached) PanelVisible(row.Panel) = true;
-                    }
-                }
+                m_panelRegistry.DrawDetachMenu(m_workspace);
                 ImGui::Separator();
                 // Путь назад для случая «окно уехало на второй монитор, а
                 // монитора больше нет»: оттуда его не достать ни мышью, ни
@@ -702,23 +658,8 @@ void EditorLayer::DrawDockspaceAndMenu() {
     m_inputPanel.Draw(*this, m_panels[EditorPanel::Input]);
     m_assets.Tick(*this);           // пакетная конвертация идёт по кадрам, а не одним куском
     m_nineSlice.Draw(*this, m_showNineSlice);
-    {
-        // Инструмент анимации — тоже в обоих пространствах, тоже своим окном.
-        const std::string id = sage::editor::panelid::For("Animation", m_workspace);
-        m_animation.Draw(*this, &m_panels[EditorPanel::Animation], id);
-    }
-    {
-        const std::string id = sage::editor::panelid::For("Tween", m_workspace);
-        m_tween.Draw(*this, &m_panels[EditorPanel::Tween], id);
-    }
-    // Профилировщик — через ту же обёртку, что и остальные панели: он тоже
-    // имеет право жить своим окном системы, и панель, которую забыли обернуть,
-    // молча теряет это право (см. PanelWindows.h).
-    if (m_panels[EditorPanel::Profiler]) {
-        panelwindows::Before("Profiler");
-        m_profiler.Draw(&m_panels[EditorPanel::Profiler]);
-        panelwindows::After("Profiler");
-    }
+    // Анимация, Tween и профилировщик рисуются вместе с остальными панелями —
+    // из реестра (EditorLayer_Panels.cpp).
     if (m_showIconSheet) EditorIcons::DrawSheet(&m_showIconSheet);
     m_confirm.Draw();
     // Окно настроек импорта модели (ModelImportDialog.h): его заказывают
@@ -734,7 +675,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // результат его же крестиков, а не поломка. Подсказка рисуется ПОСЛЕ
     // окна-хоста и отдельным окном: внутри хоста её накрывает фон пустого
     // док-узла, который ImGui кладёт в фоновый канал списка отрисовки.
-    if (!m_panels.AnyVisible()) DrawEmptyDockHint(dockMin.x, dockMin.y, dockMax.x, dockMax.y);
+    if (!m_panelRegistry.AnyVisible()) DrawEmptyDockHint(dockMin.x, dockMin.y, dockMax.x, dockMax.y);
 
     // Глобальные хоткеи (когда не печатаем в поле ввода).
     ImGuiIO& io = ImGui::GetIO();

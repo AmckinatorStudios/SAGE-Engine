@@ -11,10 +11,9 @@
 // перезапуска. Закрыв вкладки одну за другой, человек оставался с пустым серым
 // прямоугольником и делал вывод, что «свернул весь редактор» и сломал его.
 //
-// Отсюда всё устройство класса: флаг на панель (закрытие обратимо), пункт в
-// меню Window на тот же флаг, Restore() для «Reset Layout» и подсказки на
-// пустом доке, и AnyVisible() — чтобы было чем заметить, что на экране не
-// осталось ничего.
+// Отсюда флаг на панель (закрытие обратимо) и пункт в меню Window на тот же
+// флаг. Меню, «Reset Layout» и «пусто ли на экране» строит реестр панелей
+// (PanelRegistry.h) — по этим же флагам для встроенных панелей.
 //
 // МАССИВОМ ПО ПЕРЕЧИСЛЕНИЮ, а не одиннадцатью полями bool. Полей было
 // одиннадцать, и каждая новая панель требовала правки в трёх местах сразу:
@@ -34,42 +33,9 @@ public:
         return const_cast<EditorPanelVisibility*>(this)->operator[](panel);
     }
 
-    // Вернуть панели раскладки на экран («Reset Layout», подсказка на пустом
-    // доке). Открывает ровно рабочие панели и НИЧЕГО не закрывает: «вернуть
-    // панели» не должно означать «закрыть то, что человек открыл сам».
-    //
-    // Редактор интерфейса и профилировщик сюда не входят: это инструменты под
-    // задачу, а не часть постоянной раскладки, и открывать их вместе со всем
-    // остальным значит отдать место тому, кто сейчас собирает сцену.
-    void Restore() {
-        for (EditorPanel p : {EditorPanel::Hierarchy, EditorPanel::Inspector,
-                              EditorPanel::Environment, EditorPanel::Viewport,
-                              EditorPanel::Game, EditorPanel::Console, EditorPanel::Assets,
-                              EditorPanel::InterfaceHierarchy, EditorPanel::InterfaceViewport,
-                              EditorPanel::InterfaceInspector, EditorPanel::InterfacePreview})
-            (*this)[p] = true;
-    }
-
-    // Закрыть всё. Нужно ровно одному — проверке «закрыли всё, выход есть»:
-    // перечислять панели в ней руками значит забыть новую и проверять не то,
-    // что проверяли (ровно это и случилось при добавлении вёрстки отдельным
-    // пространством).
-    void CloseAll() {
-        for (bool& v : m_visible) v = false;
-    }
-
-    // Осталась ли на экране хоть одна панель. Если нет — на месте редактора
-    // пустой серый прямоугольник, и молчать про это нельзя.
-    bool AnyVisible() const {
-        for (EditorPanel p : {EditorPanel::Hierarchy, EditorPanel::Inspector,
-                              EditorPanel::Environment, EditorPanel::Viewport,
-                              EditorPanel::Game, EditorPanel::Console, EditorPanel::Assets,
-                              EditorPanel::Profiler, EditorPanel::InterfaceHierarchy,
-                              EditorPanel::InterfaceViewport, EditorPanel::InterfaceInspector,
-                              EditorPanel::InterfacePreview})
-            if ((*this)[p]) return true;
-        return false;
-    }
+    // «Сбросить раскладку», «есть ли что на экране» и «закрыть всё» — у
+    // реестра панелей (PanelRegistry.h): он знает и встроенные панели, и
+    // зарегистрированные потом, и списков здесь больше нет.
 
 private:
     // Раскладка по умолчанию: инструменты закрыты, рабочие панели открыты.

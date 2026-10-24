@@ -36,6 +36,7 @@ add_executable(sage_tests
     test_problems.cpp
     test_asset_ux.cpp
     test_plugins.cpp
+    test_panel_registry.cpp
     test_scene_flow.cpp
     test_component_registry.cpp
     test_format_version.cpp
@@ -103,7 +104,12 @@ add_executable(sage_tests
     ../editor/src/Localization.cpp
     # Плагины редактора на Lua: шаблоны и сторож проверяются без окна.
     ../editor/src/LuaPlugins.cpp
+    ../editor/src/LuaPluginsFiles.cpp
     ../editor/src/ObjectCatalog.cpp
+    # Реестр панелей: регистрация, порядок меню, раскладка, сброс.
+    ../editor/src/PanelRegistry.cpp
+    ../editor/src/PanelWindows.cpp
+    ../editor/src/ui/Commands.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
