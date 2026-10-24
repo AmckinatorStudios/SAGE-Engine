@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2659.
+// Язык: Русский. Строк: 2666.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -152,6 +152,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сборка уже идёт"},
     {"A button answers yes/no, an axis gives -1..1, a vector gives two axes at once — movement and look.",
      "Кнопка отвечает «да/нет», ось даёт −1..1, вектор — сразу две оси: движение и обзор."},
+    {"A camera has no size: it cannot be scaled",
+     "У камеры нет размера: её нельзя масштабировать"},
     {"A caption: size, colour, alignment, wrapping",
      "Надпись: размер, цвет, выравнивание, перенос"},
     {"A character taller than 50 m was exported in centimetres:\nit is scaled down 100 times. Static models are not touched.",
@@ -182,6 +184,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Папка для порядка в списке. В игре она ничего не меняет."},
     {"A folder for sorting the list. It changes nothing in the game:",
      "Папка для порядка в списке. В игре она ничего не меняет:"},
+    {"A folder only sorts the list: it cannot be scaled",
+     "Папка только упорядочивает список: её нельзя масштабировать"},
     {"A folder with six faces px/nx/py/ny/pz/nz",
      "Папка с шестью гранями px/nx/py/ny/pz/nz"},
     {"A full-screen backing: a menu, a pause, a dimmer",
@@ -190,6 +194,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Градиент с солнцем, луной, звёздами и облаками — без файлов"},
     {"A group of actions that work at the same time: the game, the inventory, a dialogue.",
      "Набор действий, работающих одновременно: игра, инвентарь, диалог."},
+    {"A light has no size: it cannot be scaled",
+     "У света нет размера: его нельзя масштабировать"},
     {"A line or a paragraph of text",
      "Строка или абзац текста"},
     {"A link from an older scene: it sends a global event by name.\nSubscribe to it in a script with Events.on(name, fn).",
@@ -216,6 +222,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Картинка без элемента"},
     {"A point light at the object's position. Its shadow costs six passes of geometry (one per cube face), so it is best left only to the lamps that have something to occlude.",
      "Точечный свет в позиции объекта. Тень стоит шести проходов геометрии (по грани куба), поэтому её лучше оставлять только тем лампам, у которых есть что затенять."},
+    {"A reflection probe is sized by its box in the inspector, not by scale",
+     "Размер зонда отражений задаёт его коробка в инспекторе, а не масштаб"},
     {"A row that continues on the next line when it runs out of room",
      "Ряд, который переносится на следующую строку, когда кончается место"},
     {"A screen of its own: its elements live inside it and are edited apart",
@@ -226,6 +234,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Клип скелета: его играет компонент «Анимация»."},
     {"A slider or a checkbox",
      "Ползунок или галка"},
+    {"A sound source has no size: it cannot be scaled",
+     "У источника звука нет размера: его нельзя масштабировать"},
     {"A stick, trigger or the mouse as an axis",
      "Стик, курок или мышь как ось"},
     {"A subtree template: double-clicking in Assets places a copy into the scene.",
@@ -3716,6 +3726,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Обычный масштаб"},
     {"Reset the preview view",
      "Вернуть вид превью"},
+    {"Reset the scale to 1: it means nothing for this object",
+     "Сбросить масштаб на 1: у этого объекта он ничего не значит"},
     {"Reset to Defaults",
      "Вернуть значения по умолчанию"},
     {"Reset: put the object back as it was",
@@ -4734,6 +4746,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Этот объект"},
     {"This object does not fit here",
      "Этот объект сюда не подходит"},
+    {"This object has no size, so it cannot be scaled",
+     "У этого объекта нет размера — масштабировать его нельзя"},
     {"This object has no such property — it is skipped",
      "У объекта нет такого свойства — оно пропускается"},
     {"This object has no such property — the row is skipped",

@@ -10,6 +10,7 @@
 // лежали редактор материала, якоря интерфейса и список компонентов.
 // ---------------------------------------------------------------------------
 #include <cstdarg>
+#include "sage/scene/ScaleLock.h"
 #include "EditorTheme.h"
 #include "ui/UI.h"
 #include "InspectorPanel.h"
@@ -373,9 +374,16 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         Sage::UI::PropertyLabel(T("Scale"));
         const float lockW = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x;
         const glm::vec3 before = tr.Scale;
+        // У камеры, света, звука масштаба нет (sage/scene/ScaleLock.h): поле
+        // видно — чтобы было понятно, ГДЕ оно и почему серое, — но не правится.
+        const bool canScale = sage::scene::CanScale(*obj.Registry(), obj.Entity());
+        ImGui::BeginDisabled(!canScale);
         const bool scaleChanged =
             Sage::UI::PropertyVec3("scl", &tr.Scale.x, 0.05f, "%.3f", lockW);
         host.TrackLastImGuiItem();
+        ImGui::EndDisabled();
+        if (!canScale && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s", T("This object has no size, so it cannot be scaled"));
         if (scaleChanged && m_uniformScale) tr.Scale = LinkScaleAxes(before, tr.Scale);
         ImGui::SameLine();
         if (EditorIcons::IconOnlyButton(
@@ -385,6 +393,18 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 m_uniformScale)) {
             m_uniformScale = !m_uniformScale;
             sage::editor::prefs::SetBool("inspector.uniform_scale", m_uniformScale);
+        }
+        // Масштаб, оставшийся от старых сцен (тогда камеру можно было
+        // растянуть), — сбросить одной кнопкой: он искажает вид камеры и всё,
+        // что положено внутрь объекта.
+        if (!canScale && tr.Scale != glm::vec3(1.0f)) {
+            ImGui::SameLine();
+            ImGui::PushID("scale_reset");
+            if (EditorIcons::IconOnlyButton("refresh", T("Reset the scale to 1: it means nothing for this object"))) {
+                host.PushUndoSnapshot();
+                tr.Scale = glm::vec3(1.0f);
+            }
+            ImGui::PopID();
         }
         Sage::UI::EndProperties();
     }
