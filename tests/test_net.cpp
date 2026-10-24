@@ -499,7 +499,7 @@ TEST(Net_interpolation_takes_the_short_way_around) {
     double now = 0.0;
     auto pump = [&](int steps, double dt = 0.05) {
         for (int i = 0; i < steps; ++i) {
-            now += dt;
+            now += dt; Settle();
             server.UpdateAt(serverScene, now);
             client.UpdateAt(clientScene, now);
         }
