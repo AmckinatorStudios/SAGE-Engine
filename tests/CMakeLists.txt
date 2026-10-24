@@ -31,6 +31,7 @@ add_executable(sage_tests
     test_sagelua_engine.cpp
     test_scene_lossless.cpp
     test_drag_order.cpp
+    test_console_log.cpp
     test_scene_flow.cpp
     test_component_registry.cpp
     test_format_version.cpp
@@ -82,6 +83,7 @@ add_executable(sage_tests
     ../editor/src/HotkeyScope.cpp
     ../editor/src/EditorSelection.cpp
     ../editor/src/DragSet.cpp
+    ../editor/src/ConsoleLog.cpp
     ../editor/src/EditorHistory.cpp
     ../editor/src/Project.cpp
     # Выбор цвета и то, на чём он стоит (подписи, отступы меню, тема).

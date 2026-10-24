@@ -1,19 +1,17 @@
 #pragma once
 #include <mutex>
 #include <string>
-#include <vector>
 
-#include "sage/core/Log.h"
+#include "../ConsoleLog.h"
 
 // Панель Console — живой сток лога движка. Полностью самодостаточна: сама
 // регистрирует Log-sink в Attach() и снимает его в Detach() (сток ссылается
 // на this — снять обязательно ДО разрушения панели).
 //
-// Раньше панель была списком строк без фильтров, и в этом была практическая
-// беда: единственное предупреждение о непрочитанном шейдере тонуло среди
-// нескольких тысяч сообщений загрузки, а именно оно и объясняло, почему сцена
-// выглядит не так. Поэтому здесь фильтры по уровню, поиск, счётчики и
-// сворачивание повторов — всё ради одного: чтобы ошибку было видно.
+// Всё в ней — ради одного: чтобы ошибку было видно. Единственное
+// предупреждение о непрочитанном шейдере тонуло среди тысяч строк загрузки, а
+// именно оно и объясняло, почему сцена выглядит не так. Отсюда уровни со
+// счётчиками, поиск и сворачивание повторов (правила — в ConsoleLog.h).
 class ConsolePanel {
 public:
     void Attach();
@@ -21,44 +19,34 @@ public:
     // Имя окна — от пространства (см. PanelWindowId.h).
     void Draw(bool* open, const std::string& windowId);
 
-    // Сколько было предупреждений и ошибок за сессию — редактор показывает это
-    // в статусной строке, чтобы не приходилось открывать панель ради проверки,
-    // всё ли в порядке.
-    int WarnCount() const { return m_warnCount; }
-    int ErrorCount() const { return m_errorCount; }
+    // Сколько пришло за СЕССИЮ (не уменьшается при очистке): самопроверка
+    // сравнивает «до» и «после» действия.
+    int WarnCount() const { return m_warnTotal; }
+    int ErrorCount() const { return m_errorTotal; }
+    // Сколько их СЕЙЧАС в журнале — то, что видит человек (статусная строка):
+    // очистил консоль — и счётчик в статусной строке тоже обнулился.
+    int WarningsShown();
+    int ErrorsShown();
     // Есть ли новые ошибки с прошлого взгляда (для подсветки вкладки).
-    bool HasUnseenErrors() const { return m_errorCount > m_seenErrors; }
-    void MarkSeen() { m_seenErrors = m_errorCount; }
+    bool HasUnseenErrors() const { return m_errorTotal > m_seenErrors; }
+    void MarkSeen() { m_seenErrors = m_errorTotal; }
 
 private:
-    struct Entry {
-        LogLevel Level;
-        std::string Category;
-        std::string Message;
-        int Repeats = 1;   // сколько раз подряд повторилось одно и то же
-        // ВРЕМЯ СОБЫТИЯ. Лог читают, отвечая на вопрос «что было перед тем, как
-        // сломалось»: без времени порядок строк говорит «раньше/позже», но не
-        // говорит, случилось ли это только что или полчаса назад — а между
-        // «ошибка при запуске» и «ошибка от моего последнего действия» разница
-        // и есть ответ.
-        std::string Stamp;  // «15:42:17»
-    };
+    void DrawToolbar();
+    void DrawRows();
+    void Clear();
 
-    bool Passes(const Entry& e) const;
-
-    std::vector<Entry> m_entries;
+    ConsoleLog m_log;
+    ConsoleLog::Filter m_filter;
     std::mutex m_mutex;
-    bool m_autoScroll = true;
-    // Фильтры по уровню. Debug выключен по умолчанию: он полезен точечно, а
-    // включённым всегда просто вытесняет из окна всё остальное.
-    bool m_showDebug = false;
-    bool m_showInfo = true;
-    bool m_showWarn = true;
-    bool m_showError = true;
-    bool m_collapse = true;    // сворачивать одинаковые подряд идущие строки
-    char m_filter[128] = {0};
+    char m_search[128] = {0};
 
-    int m_warnCount = 0;
-    int m_errorCount = 0;
+    bool m_autoScroll = true;
+    bool m_collapse = true;   // сворачивать одинаковые подряд идущие строки
+    bool m_showTime = true;
+    int m_selected = -1;      // выделенная строка (номер в журнале)
+
+    int m_warnTotal = 0;
+    int m_errorTotal = 0;
     int m_seenErrors = 0;
 };
