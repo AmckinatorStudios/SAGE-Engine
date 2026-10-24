@@ -86,3 +86,33 @@ TEST(Project_start_scene_keeps_unknown_manifest_fields) {
 
     fs::remove_all(base, ec);
 }
+
+// СЦЕНЫ — В assets/Scenes. Новый проект кладёт их туда, а старый (сцены в
+// <проект>/scenes) при открытии переносится сам: сцены вместе с .meta (GUID —
+// ссылки на сцену не рвутся) и вложенными папками.
+TEST(Project_scenes_live_in_assets_and_old_projects_move_there) {
+    const fs::path base = TempDir("scenes_dir");
+    std::error_code ec;
+    fs::create_directories(base, ec);
+    Project fresh;
+    std::string err;
+    CHECK_TRUE(fresh.CreateNew(base, "New", err));
+    CHECK_TRUE(fresh.ScenesDir() == base / "New" / "assets" / "Scenes");
+    CHECK_TRUE(fs::is_directory(fresh.ScenesDir(), ec));
+    CHECK_FALSE(fs::exists(base / "New" / "scenes", ec));
+
+    // Старый проект: сцены лежат в scenes/.
+    const fs::path old = base / "Old";
+    fs::create_directories(old / "scenes" / "levels", ec);
+    std::ofstream(old / "project.sageproj") << R"({"sage_project_version":1,"name":"Old","startScene":"main"})";
+    std::ofstream(old / "scenes" / "main.sage") << "{}";
+    std::ofstream(old / "scenes" / "main.sage.meta") << R"({"guid":"abc"})";
+    std::ofstream(old / "scenes" / "levels" / "cave.sage") << "{}";
+    Project project;
+    CHECK_TRUE(project.Open(old, err));
+    CHECK_TRUE(fs::exists(old / "assets" / "Scenes" / "main.sage", ec));
+    CHECK_TRUE(fs::exists(old / "assets" / "Scenes" / "main.sage.meta", ec));
+    CHECK_TRUE(fs::exists(old / "assets" / "Scenes" / "levels" / "cave.sage", ec));
+    CHECK_FALSE(fs::exists(old / "scenes", ec));   // пустая старая папка убрана
+    fs::remove_all(base, ec);
+}

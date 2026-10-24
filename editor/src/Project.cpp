@@ -21,8 +21,7 @@ bool Project::CreateNew(const fs::path& baseDir, const std::string& name, std::s
         error = "Directory already exists and is not empty: " + dir.string();
         return false;
     }
-    fs::create_directories(dir / "scenes", ec);
-    fs::create_directories(dir / "assets", ec);
+    fs::create_directories(dir / "assets" / "Scenes", ec);
     if (ec) { error = "Failed to create project directories: " + ec.message(); return false; }
 
     json j;
@@ -53,10 +52,44 @@ bool Project::CreateNew(const fs::path& baseDir, const std::string& name, std::s
     return true;
 }
 
+void Project::MigrateLegacyScenes() {
+    std::error_code ec;
+    const fs::path legacy = LegacyScenesDir();
+    if (!fs::is_directory(legacy, ec)) return;
+    // Переносим ВСЁ содержимое старой папки — сцены вместе с их .meta (в нём
+    // GUID: ссылки на сцену не рвутся) и вложенными папками уровней. Файл с
+    // тем же именем на новом месте не трогаем: затереть чужую сцену хуже, чем
+    // оставить старую папку, — она останется, и об этом скажет лог.
+    int moved = 0, kept = 0;
+    for (const fs::directory_entry& e : fs::directory_iterator(legacy, ec)) {
+        const fs::path target = ScenesDir() / e.path().filename();
+        std::error_code mv;
+        if (fs::exists(target, mv)) { ++kept; continue; }
+        fs::rename(e.path(), target, mv);
+        if (mv) {
+            // Другой диск или занятый файл — копия, а исходник остаётся.
+            fs::copy(e.path(), target, fs::copy_options::recursive, mv);
+            if (mv) { ++kept; continue; }
+            fs::remove_all(e.path(), mv);
+        }
+        ++moved;
+    }
+    if (fs::is_empty(legacy, ec)) fs::remove(legacy, ec);
+    if (moved)
+        LOG_INFO("Editor") << "Сцены проекта перенесены в assets/Scenes: " << moved
+                           << (kept ? " (часть осталась в scenes/: имена совпали)" : "");
+    if (kept)
+        LOG_WARN("Editor") << "В " << legacy.string() << " остались файлы (" << kept
+                           << "): в assets/Scenes уже есть файлы с теми же именами. Перенесите их вручную.";
+}
+
 void Project::Adopt() {
     std::error_code ec;
     fs::create_directories(ScenesDir(), ec);
     fs::create_directories(AssetsDir(), ec);
+    // До сканирования базы: .meta сцен должны оказаться на новом месте раньше,
+    // чем база запомнит пути.
+    MigrateLegacyScenes();
 
     // База ассетов: сканируется ДО загрузки сцены, иначе сцена спрашивала бы
     // про GUID'ы у пустой базы и каждая ссылка выглядела бы сломанной.

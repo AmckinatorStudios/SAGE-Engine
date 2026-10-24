@@ -248,7 +248,8 @@ import sagepak
 _, entries = sagepak.read_pack(pack)
 scene = None
 for name in sorted(entries):
-    if name.startswith("scenes/") and name.endswith(".sage"):
+    # Сцены лежат в assets/Scenes; scenes/ — прежнее место (старые проекты).
+    if name.startswith(("assets/Scenes/", "scenes/")) and name.endswith(".sage"):
         scene = json.loads(entries[name])
         break
 assert scene is not None, "в пакете нет ни одной сцены"

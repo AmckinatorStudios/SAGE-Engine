@@ -46,6 +46,16 @@
 
 namespace fs = std::filesystem;
 
+// Куда ложится новый ассет: в открытую папку панели, а СЦЕНА — всегда в папку
+// сцен проекта (assets/Scenes): туда смотрят список сцен, стартовая сцена и
+// собранная игра.
+static fs::path CreateTargetFor(EditorHost& host, AssetsPanel::CreateKind kind) {
+    if (kind == AssetsPanel::CreateKind::Scene && host.CurrentProject().Loaded())
+        return host.CurrentProject().ScenesDir();
+    return host.AssetsCwd();
+}
+
+
 static void AcceptObjectAsPrefab(EditorHost& host, const fs::path& folder);
 namespace covers = sage::editor::covers;
 
@@ -732,6 +742,9 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
                 m_selected = path;
             }
             m_anchor = path;
+        } else if (dragset::DeferSinglePick(
+                       std::find(m_multi.begin(), m_multi.end(), path) != m_multi.end(), m_multi.size(), false)) {
+            m_pendingPick = path;   // решится на отпускании (см. DragSet.h)
         } else {
             m_selected = path;
             m_multi = {path};
@@ -1540,13 +1553,23 @@ void AssetsPanel::DrawModals(EditorHost& host) {
             case CreateKind::Material: kindLabel = "Material"; break;
             default: break;
         }
-        ImGui::TextDisabled("%s in %s", kindLabel, host.AssetsCwd().filename().string().c_str());
+        ImGui::TextDisabled("%s in %s", kindLabel, CreateTargetFor(host, m_createKind).filename().string().c_str());
         bool enterPressed = ImGui::InputText(T("Name"), m_createName, sizeof(m_createName),
                                               ImGuiInputTextFlags_EnterReturnsTrue);
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
         if (enterPressed || ImGui::Button(T("Create"), ImVec2(120, 0))) {
             fs::path created;
-            if (CreateAsset(m_createKind, m_createName, host.AssetsCwd(), created, m_error)) {
+            // Сцена — всегда в папку сцен проекта (assets/Scenes), откуда бы её
+            // ни создавали: туда смотрят список сцен, «стартовая сцена» и
+            // собранная игра. Панель переходит туда же — новая сцена на виду.
+            const fs::path createIn = CreateTargetFor(host, m_createKind);
+            const bool scene = createIn != host.AssetsCwd();
+            if (scene) {
+                std::error_code mk;
+                fs::create_directories(createIn, mk);
+            }
+            if (CreateAsset(m_createKind, m_createName, createIn, created, m_error)) {
+                if (scene) host.AssetsCwd() = createIn;
                 m_selected = created;
                 m_multi = {created};
                 m_createKind = CreateKind::None;
@@ -1882,6 +1905,19 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
 
     // Рамка выделения. Начинается только в пустом месте сетки: над карточкой
     // живёт перетаскивание файла, и рамка отняла бы его.
+    // Отложенный одиночный выбор: потянули — набор уехал целиком; отпустили
+    // на месте — выбран один файл.
+    if (!m_pendingPick.empty()) {
+        if (ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+            m_pendingPick.clear();
+        } else if (ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+            m_selected = m_pendingPick;
+            m_multi = {m_pendingPick};
+            m_anchor = m_pendingPick;
+            m_pendingPick.clear();
+        }
+    }
+
     if (m_rectActive && m_rect.Finished) {
         if (rectselect::Meaningful(m_rect)) {
             if (!m_rect.Additive) m_multi.clear();

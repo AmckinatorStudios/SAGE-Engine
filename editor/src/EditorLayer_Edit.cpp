@@ -11,6 +11,7 @@
 // строк, в которых рядом лежали сборка игры, отмена правки и раскладка окон —
 // три области, у которых нет ничего общего, кроме имени класса.
 // ---------------------------------------------------------------------------
+#include "sage/scene/CharacterFit.h"
 #include "EditorLayer.h"
 
 #include "sage/scripting/ScriptFields.h"
@@ -424,6 +425,9 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
         obj.GetTransform().Scale = {shape.Radius * 2.0f, shape.Height * 0.5f, shape.Radius * 2.0f};
         obj.GetTransform().Position = {0.0f, shape.Height * 0.5f, 0.0f};
         reg.emplace<CharacterControllerComponent>(obj.Entity());
+        // Подошвы — на низ капсулы: точка объекта у неё в центре, и без этого
+        // персонаж из каталога стоял наполовину в полу.
+        sage::scene::FitCharacterToMesh(reg, obj.Entity());
         return done(obj);
     }
 

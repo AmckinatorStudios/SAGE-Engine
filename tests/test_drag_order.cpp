@@ -160,3 +160,12 @@ TEST(DragSet_row_zones_before_inside_after) {
     CHECK_TRUE(dragset::PlaceAt(110.0f, 100.0f, 120.0f) == dragset::Place::Inside);
     CHECK_TRUE(dragset::PlaceAt(119.0f, 100.0f, 120.0f) == dragset::Place::After);
 }
+
+TEST(DragSet_click_on_a_selected_item_of_a_group_waits_for_release) {
+    // Взялись за одну из пяти выделенных — набор не схлопывается на нажатии.
+    CHECK_TRUE(dragset::DeferSinglePick(true, 5, false));
+    // Один выделенный, невыделенный, Ctrl/Shift — выбор сразу, как раньше.
+    CHECK_FALSE(dragset::DeferSinglePick(true, 1, false));
+    CHECK_FALSE(dragset::DeferSinglePick(false, 5, false));
+    CHECK_FALSE(dragset::DeferSinglePick(true, 5, true));
+}

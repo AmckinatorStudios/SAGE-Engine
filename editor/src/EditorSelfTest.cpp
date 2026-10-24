@@ -1269,11 +1269,84 @@ void EditorLayer::TickInputProbe() {
             io.AddKeyEvent(ImGuiMod_Shift, false);
             m_probeWait = 2;   // диапазон применяется в конце кадра отрисовки списка
             break;
-        case 20:
-            if (m_selection.All().size() != 4) {
-                fail("Shift-щелчок не выбрал диапазон строк");
+        case 20: {
+            // ПЕРЕТАСКИВАНИЕ ВЫДЕЛЕННОЙ ГРУППЫ — настоящей мышью. Взялись за
+            // одну из четырёх выделенных строк и потащили: набор обязан
+            // остаться целым и уехать весь. Раньше выбор делался на нажатии,
+            // набор схлопывался до одной строки, и уезжала только она.
+            // Подшаги — внутри этого шага (m_groupProbe), номер шага не
+            // двигается, пока они не кончились.
+            const ImGuiWindow* list = ImGui::FindWindowByName("Hierarchy");
+            const int sub = m_groupProbe++;
+            bool done = false;
+            switch (sub) {
+                case 0:
+                    if (m_selection.All().size() != 4) {
+                        fail("Shift-щелчок не выбрал диапазон строк");
+                        done = true;
+                        break;
+                    }
+                    // Порядок строк ДО броска: группа обязана приехать в нём же.
+                    m_groupIds.clear();
+                    for (int i = 0; i < 4; ++i) m_groupIds.push_back(m_hierarchy.RowId(i));
+                    press(m_hierarchy.RowCenter(1));
+                    break;
+                case 1:
+                    if (m_selection.All().size() != 4) {
+                        fail("нажатие на выделенную строку схлопнуло набор до одной — тащится одна");
+                        done = true;
+                        break;
+                    }
+                    m_probePos = ImVec2(m_probePos.x, m_probePos.y + 30.0f);
+                    break;
+                case 2: {
+                    // Цель — нижняя четверть ПОСЛЕДНЕЙ строки: «встать после
+                    // неё». Она корневая и свёрнута, так что группа обязана
+                    // оказаться последней в корне.
+                    const ImVec2 last = m_hierarchy.RowCenter((int)m_hierarchy.RowCount() - 1);
+                    m_probePos = ImVec2(last.x, last.y + ImGui::GetTextLineHeight() * 0.38f);
+                    (void)list;
+                    break;
+                }
+                case 3:
+                    break;   // кадр наведения — цель броска узнаёт курсор
+                case 4:
+                    release();
+                    m_probeWait = 2;
+                    break;
+                case 5: {
+                    if (m_selection.All().size() != 4) {
+                        fail("после перетаскивания группы выделение потерялось");
+                        done = true;
+                        break;
+                    }
+                    // Все четыре — в конце корня, в прежнем порядке.
+                    const std::vector<entt::entity> roots = m_scene->Roots();
+                    bool tail = roots.size() >= 4;
+                    for (size_t i = 0; tail && i < 4; ++i)
+                        tail = m_scene->Registry().get<IdComponent>(roots[roots.size() - 4 + i]).Id == m_groupIds[i];
+                    if (!tail) {
+                        fail("перетащенная группа не встала в конец списка целиком");
+                        done = true;
+                        break;
+                    }
+                    // Обычный щелчок по выделенной (без перетаскивания) — как
+                    // и прежде, выбирает одну.
+                    press(m_hierarchy.RowCenter((int)m_hierarchy.RowCount() - 1));
+                    break;
+                }
+                case 6:
+                    release();
+                    m_probeWait = 2;
+                    break;
+                default:
+                    if (m_selection.All().size() != 1) fail("щелчок по выделенной строке не выбрал одну");
+                    done = true;
+                    break;
             }
+            if (!done) --m_probeStep;   // остаёмся на этом шаге
             break;
+        }
         case 21: {
             // Панель ассетов делит место с консолью — выводим её вперёд и ждём
             // кадр, иначе щёлкать не по чему. Заодно кладём в папку проекта
@@ -1554,7 +1627,7 @@ bool EditorLayer::SelfTestProjectAndAssets() {
             // Ровно та поломка, с которой пришли: сцену показывает, а файла
             // нет. Дальше по цепочке ломается всё: в scenes/ пусто, Ctrl+S
             // спрашивает куда, собранная игра не находит, с чего начать.
-            const fs::path made = fs::path(std::string("selftest_tpl_") + c.Id) / "scenes" /
+            const fs::path made = fs::path(std::string("selftest_tpl_") + c.Id) / "assets" / "Scenes" /
                                   "main.sage";
             if (!fs::exists(made, ec)) {
                 LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id << " не создал файл сцены "
@@ -1683,7 +1756,7 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                     }
                     int scenes = 0;
                     for (const auto& e : fs::directory_iterator(
-                             fs::path("selftest_tpl_copy") / "scenes", ec))
+                             fs::path("selftest_tpl_copy") / "assets" / "Scenes", ec))
                         if (e.path().extension() == ".sage") ++scenes;
                     if (scenes == 0) {
                         LOG_ERROR("Editor") << "SELFTEST: в копии шаблона нет ни одной сцены";

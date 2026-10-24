@@ -1,3 +1,4 @@
+#include "sage/scene/CharacterFit.h"
 #include "sage/scripting/lua/LuaInternal.h"
 
 #include <cctype>
@@ -355,7 +356,14 @@ void RegisterObject(Backend& backend) {
             return sol::make_object(self->Lua(), true);
         }
         if (name == "CharacterController") {
-            CharacterControllerComponent& c = reg.get_or_emplace<CharacterControllerComponent>(e);
+            // Новый — сразу по мешу объекта (sage/scene/CharacterFit.h): иначе
+            // видимая капсула стояла наполовину в полу. Явные параметры
+            // скрипта (radius, center…) ниже всё равно главнее.
+            const bool fresh = !reg.all_of<CharacterControllerComponent>(e);
+            CharacterControllerComponent& added = reg.get_or_emplace<CharacterControllerComponent>(e);
+            (void)added;
+            if (fresh) sage::scene::FitCharacterToMesh(reg, e);
+            CharacterControllerComponent& c = reg.get<CharacterControllerComponent>(e);
             c.Radius = num("radius", c.Radius);
             c.Height = num("height", c.Height);
             c.SlopeLimit = num("slopeLimit", c.SlopeLimit);
