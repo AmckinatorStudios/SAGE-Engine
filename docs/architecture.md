@@ -218,8 +218,50 @@ SAGE-Engine/
 | Окна | `TweenPanel` (+ `_Cards`, `_Menus`), `InputPanel` (+ `_Modals`, `_Properties`), `AnimationPanel` (+ `_Timeline`), `ViewportPanel` (+ `_Pilot`), `ProjectLauncher` (+ `_Panes`), `UIElementProperties` (+ `_Layout`) |
 | Самопроверка | `selftest/SelfTest*.cpp` — по файлу на область; `SelfTestCommon.h` — общие заголовки и генераторы эталонных файлов |
 
+### Панели — через реестр
+
+Панель описывается ОДИН раз — записью `PanelSpec` в реестре панелей
+(`editor/src/PanelRegistry.h`): id окна, подпись, значок, раздел меню
+«Окно», в каких пространствах живёт (сцена, интерфейс, оба), место в доке по
+умолчанию для каждого пространства, входит ли в постоянную раскладку и функция
+отрисовки. Из реестра берутся:
+
+- меню «Окно» (по разделам; раздел «Плагины» появляется, когда в нём есть окна);
+- команда палитры (Ctrl+K) «показать/скрыть» — `panel.<id>` или своя;
+- меню «Отдельным окном»;
+- раскладка доков по умолчанию в обоих пространствах;
+- «Сбросить раскладку» и подсказка на пустом доке;
+- сама отрисовка каждый кадр (только панели текущего пространства).
+
+Встроенные панели регистрирует `EditorLayer_Panels.cpp` — это единственное
+место, где они перечислены. Новая панель — одна регистрация, без правки
+`EditorLayer`, меню и раскладки:
+
+```cpp
+sage::editor::PanelSpec notes;
+notes.Id = "Notes";               // имя окна ImGui (после «###»)
+notes.Title = "Notes";            // переводится T()
+notes.Icon = "list";
+notes.Section = sage::editor::PanelSection::Tools;
+notes.SceneDock = {sage::editor::PanelDock::Right, 5};
+notes.Draw = [](EditorHost& host, bool* open, const std::string& id) {
+    if (ImGui::Begin(("Notes###" + id).c_str(), open)) { /* ... */ }
+    ImGui::End();
+};
+host.Panels().Register(std::move(notes));
+```
+
+Регистрировать можно и на ходу: окна плагинов на Lua (`editor.panel`) —
+такие же записи в разделе «Плагины», снимаются вместе с плагином. Флаг
+видимости встроенной панели остаётся в `EditorPanelVisibility` (к нему по
+`EditorPanel` обращаются верхняя панель и самопроверка), реестр показывает
+тот же флаг; у новых панелей флаг хранит сам реестр, и перечисление
+`EditorPanel` им не нужно.
+
 **Правила.**
 
+- Новая панель — запись в реестре (`EditorHost::Panels()`), а не новая
+  ветка в меню, раскладке и отрисовке.
 - Внутренние помощники модуля, нужные нескольким его файлам, лежат в
   `<Модуль>Detail.h` рядом (`InspectorPanelDetail.h`, `AssetsPanelDetail.h`,
   `TweenPanelDetail.h`, `InputPanelDetail.h`…) в своём пространстве имён.

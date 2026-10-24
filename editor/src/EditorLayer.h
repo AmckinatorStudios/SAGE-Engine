@@ -43,6 +43,7 @@
 namespace sage { class Application; }
 #include "EditorPlaySession.h"
 #include "EditorPanelVisibility.h"
+#include "PanelRegistry.h"
 #include "EditorRecovery.h"
 #include "EditorSceneRenderer.h"
 #include "Project.h"
@@ -327,6 +328,7 @@ public:
         return m_play.Input().FrameEvents();
     }
     bool& PanelVisible(EditorPanel panel) override { return m_panels[panel]; }
+    sage::editor::PanelRegistry& Panels() override { return m_panelRegistry; }
     std::string CurrentSceneName() const override {
         return m_scenePath.empty() ? m_scene->Name() : m_scenePath.filename().string();
     }
@@ -437,7 +439,8 @@ private:
     bool SelfTestTools(); // SAGE_EDITOR_SELFTEST=1 (для CI)
     bool SelfTestRenderStability(); // кадр вьюпорта не «уплывает» от повторов
     bool SelfTestPickerAndPrefabs(); // пипетка слота объекта, префабы броском
-    bool SelfTestPlugins();          // плагины на Lua: шаблон, меню, отмена, ошибки, Play
+    bool SelfTestPlugins();
+    bool SelfTestPanelRegistry();    // реестр панелей: встроенные, на ходу, окна плагинов          // плагины на Lua: шаблон, меню, отмена, ошибки, Play
     // Многооконность — проверка В ЖИВОМ КАДРЕ: окно системы заводит платформа,
     // а не флаг, и этот последний шаг ломается молча (см. EditorSelfTest.cpp).
     void CheckMultiWindowFrame();
@@ -625,6 +628,11 @@ private:
     // требует правки в трёх местах сразу, и забытая строка в «показать все»
     // означает панель, которую нельзя вернуть.
     EditorPanelVisibility m_panels;
+    // Все панели — меню, команды, раскладка, отрисовка (EditorLayer_Panels.cpp).
+    sage::editor::PanelRegistry m_panelRegistry;
+    void RegisterPanels();
+    void DockRegisteredPanels(EditorWorkspace workspace, unsigned int left, unsigned int right,
+                              unsigned int bottom, unsigned int center);
     // Подсказка на пустом доке. Прямоугольник передаётся числами, а не ImVec2:
     // imgui.h в этот заголовок не входит, и тянуть его сюда ради двух точек —
     // значит навязать его всем, кто включает EditorLayer.h.

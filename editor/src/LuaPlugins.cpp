@@ -16,8 +16,8 @@
 #include "EditorSelection.h"
 #include "Localization.h"
 #include "ObjectCatalog.h"
+#include "PanelRegistry.h"
 #include "Project.h"
-#include "sage/assets/Zip.h"
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
 #include "sage/scene/Components.h"
@@ -37,11 +37,22 @@ struct Entry {
     std::unique_ptr<sol::state> Lua;
     long long Stamp = 0;                 // время правки editor.lua при загрузке
     struct Menu { std::string Label; sol::protected_function Fn; };
-    struct Panel { std::string Title; sol::protected_function Fn; bool Open = true; };
+    struct Panel {
+        std::string Title;
+        sol::protected_function Fn;
+        bool Open = true;
+        bool Saved = true;   // что записано в настройках (запоминать только перемену)
+    };
     std::vector<Menu> Menus;
     std::vector<Panel> Panels;
     std::unordered_map<std::string, std::vector<sol::protected_function>> Handlers;
     bool Muted = false;                  // упал обработчик — молчит до перезагрузки
+    // Окна плагина живут в реестре панелей редактора (PanelRegistry.h): так они
+    // попадают в меню «Окно», в палитру команд и в док, как встроенные.
+    EditorHost* Registered = nullptr;
+    // «Перезапустить» из окна самого плагина: перезагрузка посреди отрисовки
+    // этого окна уничтожила бы его под ногами — откладывается до Tick.
+    bool RestartRequested = false;
 };
 
 namespace {
@@ -269,7 +280,8 @@ void BindApi(sol::state& lua, Entry* entry) {
     ed.set_function("panel", [entry](const std::string& title, sol::protected_function fn) {
         if (!entry) return;
         const std::string key = "plugins.panel." + entry->Info.Manifest.Id + "." + std::to_string(entry->Panels.size());
-        entry->Panels.push_back({title, fn, sage::editor::prefs::GetBool(key, false)});
+        const bool open = sage::editor::prefs::GetBool(key, false);
+        entry->Panels.push_back({title, fn, open, open});
     });
     ed.set_function("on", [entry](const std::string& event, sol::protected_function fn) {
         static const char* kEvents[] = {"update", "selection", "play", "stop", "project"};
@@ -510,7 +522,40 @@ Entry* FindEntry(const std::string& id) {
     return nullptr;
 }
 
+std::string PanelKey(const Entry& e, size_t i) { return "plugin." + e.Info.Manifest.Id + "." + std::to_string(i); }
+
+void DrawPanel(EditorHost& host, Entry& e, size_t i);
+
+void UnregisterPanels(Entry& e) {
+    if (!e.Registered) return;
+    for (size_t i = 0; i < e.Panels.size(); ++i) e.Registered->Panels().Unregister(PanelKey(e, i));
+    e.Registered = nullptr;
+}
+
+void RegisterPanels(EditorHost& host, Entry& e) {
+    for (size_t i = 0; i < e.Panels.size(); ++i) {
+        sage::editor::PanelSpec s;
+        s.Id = PanelKey(e, i);
+        s.Command = s.Id;
+        s.Title = e.Panels[i].Title;
+        s.Icon = "gear";
+        s.Section = sage::editor::PanelSection::Plugins;
+        s.Visible = &e.Panels[i].Open;
+        // Окно плагин открывает сам, со своим «###»: обёртка своего окна
+        // системы и меню «Отдельным окном» ему не нужны.
+        s.WrapWindow = false;
+        s.Detachable = false;
+        // Зовётся и у закрытого: закрытие из меню «Окно» надо запомнить.
+        s.DrawWhenHidden = true;
+        Entry* ep = &e;
+        s.Draw = [ep, i](EditorHost& h, bool*, const std::string&) { DrawPanel(h, *ep, i); };
+        host.Panels().Register(std::move(s));
+    }
+    e.Registered = &host;
+}
+
 void Unload(Entry& e) {
+    UnregisterPanels(e);
     e.Menus.clear();
     e.Panels.clear();
     e.Handlers.clear();
@@ -559,6 +604,7 @@ void Load(EditorHost* host, Entry& e) {
     }
     s.Host = prev;
     e.Info.Running = true;
+    if (host) RegisterPanels(*host, e);
     e.Info.Menus = (int)e.Menus.size();
     e.Info.Panels = (int)e.Panels.size();
     LOG_INFO("Plugin") << "Плагин «" << e.Info.Manifest.Title() << "» загружен";
@@ -591,6 +637,7 @@ fs::path ProjectDir(EditorHost& host) {
 
 void Rescan(EditorHost& host) {
     State& s = S();
+    for (auto& e : s.Entries) UnregisterPanels(*e);
     s.Entries.clear();
     auto add = [&](const fs::path& dir, Source from) {
         if (dir.empty()) return;
@@ -619,6 +666,11 @@ void Rescan(EditorHost& host) {
 
 void Tick(EditorHost& host, float dt) {
     State& s = S();
+    for (auto& e : s.Entries)
+        if (e->RestartRequested) {
+            e->RestartRequested = false;
+            Load(&host, *e);
+        }
     const std::string project =
         host.CurrentProject().Loaded() ? sage::PathToUtf8(host.CurrentProject().Dir()) : "";
     if (project != s.LastProject) {
@@ -682,46 +734,47 @@ void DrawMenuItems(EditorHost& host) {
     }
 }
 
-void DrawPanels(EditorHost& host) {
-    State& s = S();
-    s.Host = &host;
-    for (auto& e : s.Entries) {
-        if (!e->Info.Running) continue;
-        for (size_t i = 0; i < e->Panels.size(); ++i) {
-            Entry::Panel& p = e->Panels[i];
-            if (!p.Open) continue;
-            // ### — id окна не зависит от подписи: плагин вправе её менять.
-            const std::string title = p.Title + "###plugin." + e->Info.Manifest.Id + "." + std::to_string(i);
-            // Первое появление — у правого края вьюпорта, лесенкой: в углу (0,0)
-            // окна плагинов ложились друг на друга и под окно «Плагины».
-            const ImGuiViewport* vp = ImGui::GetMainViewport();
-            const float step = ImGui::GetFontSize() * 2.0f * (float)(i + 1);
-            ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.62f + step, vp->WorkPos.y + step * 2.0f),
-                                    ImGuiCond_FirstUseEver);
-            ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 20.0f, ImGui::GetFontSize() * 15.0f),
-                                     ImGuiCond_FirstUseEver);
-            if (ImGui::Begin(title.c_str(), &p.Open)) {
-                ImGui::PushID(title.c_str());
-                if (e->Muted) {
-                    ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", T("The plugin stopped with an error:"));
-                    ImGui::TextWrapped("%s", e->Info.Error.c_str());
-                    if (ImGui::Button(T("Restart plugin"))) Load(&host, *e);
-                } else {
-                    // Неснятые со стека виджеты (забытый same_line) не должны
-                    // разламывать соседние окна: стек ImGui выравнивается здесь.
-                    Call(*e, p.Fn);
-                }
-                ImGui::PopID();
-            }
-            ImGui::End();
-            if (!e->Info.Running) break;   // «Перезапустить» пересобрал список окон
-            if (!p.Open)   // закрыли крестиком — запомнить
-                sage::editor::prefs::SetBool("plugins.panel." + e->Info.Manifest.Id + "." + std::to_string(i), false);
-        }
+namespace {
+// Одно окно плагина — его рисует реестр панелей (RegisterPanels выше).
+void DrawPanel(EditorHost& host, Entry& e, size_t i) {
+    if (!e.Info.Running || i >= e.Panels.size()) return;
+    Entry::Panel& p = e.Panels[i];
+    // Открыли или закрыли (меню «Окно», палитра, крестик) — запомнить.
+    if (p.Open != p.Saved) {
+        sage::editor::prefs::SetBool("plugins.panel." + e.Info.Manifest.Id + "." + std::to_string(i), p.Open);
+        p.Saved = p.Open;
     }
+    if (!p.Open) return;
+    S().Host = &host;
+    // ### — id окна не зависит от подписи: плагин вправе её менять.
+    const std::string title = p.Title + "###" + PanelKey(e, i);
+    // Первое появление — у правого края вьюпорта, лесенкой: в углу (0,0)
+    // окна плагинов ложились друг на друга и под окно «Плагины».
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float step = ImGui::GetFontSize() * 2.0f * (float)(i + 1);
+    ImGui::SetNextWindowPos(ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.62f + step, vp->WorkPos.y + step * 2.0f),
+                            ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 20.0f, ImGui::GetFontSize() * 15.0f),
+                             ImGuiCond_FirstUseEver);
+    if (ImGui::Begin(title.c_str(), &p.Open)) {
+        ImGui::PushID(title.c_str());
+        if (e.Muted) {
+            ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", T("The plugin stopped with an error:"));
+            ImGui::TextWrapped("%s", e.Info.Error.c_str());
+            if (ImGui::Button(T("Restart plugin"))) e.RestartRequested = true;
+        } else {
+            Call(e, p.Fn);
+        }
+        ImGui::PopID();
+    }
+    ImGui::End();
 }
+} // namespace
 
-void Shutdown() { S().Entries.clear(); }
+void Shutdown() {
+    for (auto& e : S().Entries) UnregisterPanels(*e);
+    S().Entries.clear();
+}
 
 bool RunMenu(EditorHost& host, const std::string& id, int index) {
     Entry* e = FindEntry(id);
@@ -779,154 +832,6 @@ bool SaveSettings(EditorHost& host, const std::string& id, const sage::vars::Tab
     }
     e->Info.Manifest.Settings = settings;
     return pl::WriteManifest(e->Info.Manifest, error);
-}
-
-std::string TemplateEditorLua(const std::string& name) {
-    return "-- " + name + " — часть РЕДАКТОРА (выполняется в редакторе SAGE).\n"
-           "-- Сохраните файл — плагин перезапустится сам. Справка: docs/plugins.md\n"
-           "\n"
-           "-- Пункт в меню «Плагины»: всё, что он сделает со сценой, отменяется одним Ctrl+Z.\n"
-           "editor.menu(\"Поставить куб над выделенным\", function()\n"
-           "    local target = editor.selected()\n"
-           "    local cube = editor.create(\"shape.cube\", \"Куб от плагина\")\n"
-           "    if target and cube then\n"
-           "        local p = target.position\n"
-           "        cube.position = { x = p.x, y = p.y + 2, z = p.z }\n"
-           "    end\n"
-           "    editor.status(\"Куб создан\")\n"
-           "end)\n"
-           "\n"
-           "-- Своё окно: открывается из меню «Плагины».\n"
-           "local count = 5\n"
-           "local spacing = 2.0\n"
-           "editor.panel(\"" + name + "\", function()\n"
-           "    ui.heading(\"Ряд объектов\")\n"
-           "    count = ui.int(\"Сколько\", count, 1, 50)\n"
-           "    spacing = ui.slider(\"Шаг\", spacing, 0.5, 10)\n"
-           "    if ui.button(\"Создать ряд\") then\n"
-           "        for i = 1, count do\n"
-           "            local o = editor.create(\"shape.cube\", \"Ряд \" .. i)\n"
-           "            o.position = { x = (i - 1) * spacing, y = 0.5, z = 0 }\n"
-           "        end\n"
-           "    end\n"
-           "    local sel = editor.selected()\n"
-           "    ui.hint(sel and (\"Выделен: \" .. sel.name) or \"Ничего не выделено\")\n"
-           "end)\n"
-           "\n"
-           "-- События: update(dt), selection(obj), play, stop, project.\n"
-           "editor.on(\"play\", function() editor.log(\"Игра запущена\") end)\n";
-}
-
-std::string TemplateRuntimeLua(const std::string& id, const std::string& name) {
-    return "-- " + name + " — часть ДВИЖКА: работает в Play и в собранной игре.\n"
-           "-- Это обычный скрипт (тот же API, что у скриптов объектов), только объект\n"
-           "-- у него служебный — его создаёт движок в каждой сцене.\n"
-           "\n"
-           "-- Переменные верхнего уровня — настройки плагина (окно «Плагины»).\n"
-           "message = \"Привет из плагина!\"\n"
-           "\n"
-           "-- То, что получат скрипты игры: plugins.Get(\"" + id + "\").hello()\n"
-           "local api = {}\n"
-           "function api.hello()\n"
-           "    Debug.Log(message)\n"
-           "end\n"
-           "plugins.Register(\"" + id + "\", api)\n"
-           "\n"
-           "function Start()\n"
-           "    Debug.Log(\"" + name + ": сцена запущена\")\n"
-           "end\n"
-           "\n"
-           "function Update(dt)\n"
-           "end\n";
-}
-
-fs::path Create(const fs::path& where, const std::string& name, const std::string& author, Template kind,
-                std::string& error) {
-    if (where.empty()) {
-        error = T("Open a project first: project plugins live in its plugins folder");
-        return {};
-    }
-    const std::string title = name.empty() ? std::string("My plugin") : name;
-    std::string id = pl::MakeId(title);
-    fs::path dir = where / id;
-    std::error_code ec;
-    for (int n = 2; fs::exists(dir, ec); ++n) dir = where / (id + "_" + std::to_string(n));
-    id = sage::PathToUtf8(dir.filename());
-    fs::create_directories(dir, ec);
-    if (ec) {
-        error = T("Could not create the folder: ") + sage::PathToUtf8(dir);
-        return {};
-    }
-    pl::Manifest m;
-    m.Id = id;
-    m.Name = title;
-    m.Author = author;
-    m.Description = T("Describe what the plugin does");
-    m.Dir = dir;
-    if (kind != Template::Runtime) m.Editor = "editor.lua";
-    if (kind != Template::Editor) m.Runtime = "runtime.lua";
-    if (!pl::WriteManifest(m, error)) return {};
-    if (m.HasEditor()) std::ofstream(dir / "editor.lua", std::ios::binary) << TemplateEditorLua(title);
-    if (m.HasRuntime()) std::ofstream(dir / "runtime.lua", std::ios::binary) << TemplateRuntimeLua(id, title);
-    return dir;
-}
-
-std::string Install(const fs::path& from, const fs::path& where, std::string& error) {
-    std::error_code ec;
-    if (where.empty()) {
-        error = T("Open a project first: project plugins live in its plugins folder");
-        return {};
-    }
-    fs::path source = from;
-    fs::path temp;
-    if (fs::is_regular_file(from, ec) && sage::assets::IsZip(from)) {
-        temp = fs::temp_directory_path(ec) / ("sage_plugin_" + std::to_string(Stamp(from)));
-        fs::remove_all(temp, ec);
-        if (sage::assets::ExtractZip(from, temp, error) < 0) return {};
-        source = temp;
-    } else if (fs::is_regular_file(from, ec) && from.filename() == pl::kManifestFile) {
-        source = from.parent_path();
-    }
-    // plugin.json — в корне или в единственной папке внутри (так пакуют архивы).
-    if (!fs::exists(source / pl::kManifestFile, ec)) {
-        fs::path inner;
-        int dirs = 0;
-        for (const auto& d : fs::directory_iterator(source, ec))
-            if (d.is_directory(ec) && fs::exists(d.path() / pl::kManifestFile, ec)) {
-                inner = d.path();
-                ++dirs;
-            }
-        if (dirs != 1) {
-            error = T("No plugin.json found: a plugin is a folder with plugin.json inside");
-            if (!temp.empty()) fs::remove_all(temp, ec);
-            return {};
-        }
-        source = inner;
-    }
-    pl::Manifest m;
-    pl::ReadManifest(source, m);
-    if (!m.Error.empty()) {
-        error = m.Error;
-        if (!temp.empty()) fs::remove_all(temp, ec);
-        return {};
-    }
-    const std::string id = pl::MakeId(m.Id);
-    const fs::path dest = where / id;
-    // Плагин уже там, куда его ставят (выбрали его же папку): удалять «старую
-    // версию» значило бы стереть единственную.
-    if (fs::exists(dest, ec) && fs::equivalent(source, dest, ec)) {
-        if (!temp.empty()) fs::remove_all(temp, ec);
-        return id;
-    }
-    fs::create_directories(where, ec);
-    fs::remove_all(dest, ec);   // переустановка: новая версия заменяет старую
-    fs::copy(source, dest, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
-    if (!temp.empty()) fs::remove_all(temp, ec);
-    if (ec) {
-        error = T("Could not copy the plugin: ") + ec.message();
-        return {};
-    }
-    return id;
 }
 
 bool Remove(EditorHost& host, const std::string& id, std::string& error) {

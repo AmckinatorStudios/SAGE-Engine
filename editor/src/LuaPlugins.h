@@ -57,7 +57,8 @@ void Rescan(EditorHost& host);
 void Tick(EditorHost& host, float dt);
 // Пункты плагинов в меню «Плагины» и их окна.
 void DrawMenuItems(EditorHost& host);
-void DrawPanels(EditorHost& host);
+// Окна плагинов рисует реестр панелей редактора (PanelRegistry.h): они живут
+// в меню «Окно» → «Плагины», в палитре команд и в доке, как встроенные.
 // Перед выходом из редактора (до разрушения ImGui).
 void Shutdown();
 

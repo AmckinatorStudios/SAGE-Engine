@@ -146,28 +146,13 @@ void EditorLayer::RegisterCommands() {
                     hasSelection, [this] { DeleteSelected(); }});
 
     // Панели — по одной команде на панель: «где включается консоль» перестаёт
-    // быть поиском по меню.
-    struct PanelCmd { const char* Id; const char* Title; EditorPanel Panel; const char* Icon; };
-    static const PanelCmd kPanels[] = {
-        {"panel.hierarchy", "Hierarchy", EditorPanel::Hierarchy, "scene"},
-        {"panel.inspector", "Inspector", EditorPanel::Inspector, "cube"},
-        {"panel.viewport", "Viewport", EditorPanel::Viewport, "camera"},
-        {"panel.game", "Game", EditorPanel::Game, "play"},
-        {"panel.assets", "Assets", EditorPanel::Assets, "folder"},
-        {"panel.console", "Console", EditorPanel::Console, "code"},
-        {"panel.environment", "Environment", EditorPanel::Environment, "sun"},
-        {"panel.tween", "Tween", EditorPanel::Tween, "clock"},
-        {"panel.profiler", "Profiler", EditorPanel::Profiler, "grid"},
-    };
-    for (const PanelCmd& p : kPanels) {
-        const EditorPanel panel = p.Panel;
-        m_commands.Add({p.Id, T(p.Title), window, "", p.Icon, {},
-                        [this, panel] { PanelVisible(panel) = !PanelVisible(panel); }});
-    }
+    // быть поиском по меню. Команды даёт реестр — и для панелей, которые
+    // зарегистрируют позже (модуль, плагин).
+    m_panelRegistry.AttachCommands(m_commands, window);
     m_commands.Add({"window.settings", T("Game Settings..."), window, "", "project", {},
                     [this] { m_panels[EditorPanel::Settings] = true; }});
     m_commands.Add({"window.reset", T("Reset Layout"), window, "", "grid", {},
-                    [this] { m_panels.Restore(); m_rebuildDockLayout = true; }});
+                    [this] { m_panelRegistry.Restore(); m_rebuildDockLayout = true; }});
 
     // Оформление — командами тоже: тема меняется без похода в меню, и это тот
     // случай, когда её меняют часто (свет в комнате не постоянен).
@@ -631,49 +616,11 @@ void EditorLayer::OnRender() {
     // сверяет своё состояние с тем, что человек сделал мышью. Обёртка общая и
     // одна на все панели намеренно: панель, которую забыли обернуть, молча
     // теряет право на своё окно, и объяснить это человеку будет нечем.
-    auto panel = [](const char* id, bool shown, auto&& draw) {
-        if (!shown) return;
-        panelwindows::Before(id);
-        draw();
-        panelwindows::After(id);
-    };
-    // ПАНЕЛИ ТЕКУЩЕГО ПРОСТРАНСТВА, а не все сразу. Сцену расставляют и
-    // интерфейс верстают по-разному, и панели им нужны разные; панель чужого
-    // пространства, оставленная на экране, отбирает место и путает, какой
-    // вьюпорт сейчас главный.
-    //
-    // Консоль и ассеты общие: они отвечают на одни и те же вопросы в обоих
-    // случаях, и прятать их при переключении значило бы заводить им по второй
-    // копии с тем же содержимым.
-    if (m_workspace == EditorWorkspace::Scene) {
-        panel("Hierarchy", m_panels[EditorPanel::Hierarchy], [&] { m_hierarchy.Draw(*this, &m_panels[EditorPanel::Hierarchy]); });
-        panel("Inspector", m_panels[EditorPanel::Inspector], [&] { m_inspector.Draw(*this, &m_panels[EditorPanel::Inspector]); });
-        panel("Lighting", m_panels[EditorPanel::Environment], [&] { m_environment.Draw(*this, &m_panels[EditorPanel::Environment]); });
-        panel("Viewport", m_panels[EditorPanel::Viewport], [&] { m_viewport.Draw(*this, &m_panels[EditorPanel::Viewport]); });
-        panel("Game", m_panels[EditorPanel::Game], [&] { m_game.Draw(*this, &m_panels[EditorPanel::Game]); });
-    } else {
-        panel("InterfaceHierarchy", m_panels[EditorPanel::InterfaceHierarchy],
-              [&] { m_uiHierarchy.Draw(*this, m_panels[EditorPanel::InterfaceHierarchy]); });
-        panel("InterfaceViewport", m_panels[EditorPanel::InterfaceViewport],
-              [&] { m_uiViewport.Draw(*this, m_panels[EditorPanel::InterfaceViewport]); });
-        panel("InterfaceInspector", m_panels[EditorPanel::InterfaceInspector],
-              [&] { m_uiInspector.Draw(*this, m_panels[EditorPanel::InterfaceInspector]); });
-        panel("InterfacePreview", m_panels[EditorPanel::InterfacePreview],
-              [&] { m_uiPreview.Draw(*this, m_panels[EditorPanel::InterfacePreview]); });
-    }
-    // ОБЩИЕ ПАНЕЛИ — СВОИМ ОКНОМ В КАЖДОМ ПРОСТРАНСТВЕ. Пока окно было одно на
-    // оба, раскладки спорили за него: построившаяся последней забирала окно
-    // себе, узел соседа пустел и удалялся, и панель в том пространстве либо
-    // всплывала отдельным окном, либо пропадала совсем (см. PanelWindowId.h).
-    namespace panelid = sage::editor::panelid;
-    const std::string consoleId = panelid::For("Console", m_workspace);
-    const std::string assetsId = panelid::For("Assets", m_workspace);
-    panel(consoleId.c_str(), m_panels[EditorPanel::Console],
-          [&] { m_console.Draw(&m_panels[EditorPanel::Console], consoleId, this); });
-    panel(assetsId.c_str(), m_panels[EditorPanel::Assets],
-          [&] { m_assets.Draw(*this, &m_panels[EditorPanel::Assets], assetsId); });
+    // Какие панели в каком пространстве — решает реестр (PanelSpec::Spaces):
+    // сцену расставляют и интерфейс верстают разными панелями, а общие
+    // (консоль, ассеты) рисуются в обоих своим окном каждая.
+    m_panelRegistry.DrawPanels(*this, m_workspace);
     m_plugins.ImGuiAll();
-    sage::editor::luaplugins::DrawPanels(*this);
     sage::editor::pluginswindow::Draw(*this, {&m_plugins, &m_pluginCtx, m_nativePluginsDir});
 
     // Полосы долгой работы — ПОВЕРХ панелей и до стартового окна: карточка в

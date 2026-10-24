@@ -424,17 +424,17 @@ bool EditorLayer::SelfTestToolsAssetsAndPanels() {
     // перезапуска. Закрыв вкладки одну за другой, человек получал пустой
     // прямоугольник и решал, что «свернул весь редактор». Проверяем ровно это:
     // после закрытия ВСЕХ панелей редактор знает, что показывать нечего, а
-    // m_panels.Restore() — то, что делают и «Сбросить раскладку», и кнопка на
+    // m_panelRegistry.Restore() — то, что делают и «Сбросить раскладку», и кнопка на
     // пустом доке, — возвращает каждую панель.
     if (ok) {
-        const bool visibleBefore = m_panels.AnyVisible();
+        const bool visibleBefore = m_panelRegistry.AnyVisible();
         // Закрываем ВСЁ одним вызовом, а не перечислением: список панелей
         // растёт, и забытая в нём новая означает, что проверка проверяет не то,
         // что проверяла. Ровно это и случилось, когда вёрстка стала отдельным
         // пространством с четырьмя своими панелями.
-        m_panels.CloseAll();
-        const bool visibleAfterClose = m_panels.AnyVisible();
-        m_panels.Restore();
+        m_panelRegistry.CloseAll();
+        const bool visibleAfterClose = m_panelRegistry.AnyVisible();
+        m_panelRegistry.Restore();
         const bool restored = m_panels[EditorPanel::Hierarchy] && m_panels[EditorPanel::Inspector] && m_panels[EditorPanel::Environment] &&
                               m_panels[EditorPanel::Viewport] && m_panels[EditorPanel::Game] && m_panels[EditorPanel::Console] && m_panels[EditorPanel::Assets];
         if (!visibleBefore || visibleAfterClose || !restored) {

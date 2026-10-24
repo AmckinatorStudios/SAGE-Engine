@@ -32,12 +32,15 @@ add_executable(SageEditor WIN32
     src/EditorTools.cpp
     src/EditorLayer_Assets.cpp
     src/EditorLayer_Ui.cpp
+    src/EditorLayer_Panels.cpp
+    src/PanelRegistry.cpp
     src/EditorLayer_StatusBar.cpp
     src/selftest/SelfTestE2E.cpp
     src/selftest/SelfTestFixtures.cpp
     src/selftest/SelfTestFrames.cpp
     src/selftest/SelfTestInputProbe.cpp
     src/selftest/SelfTestPlugins.cpp
+    src/selftest/SelfTestPanels.cpp
     src/selftest/SelfTestProjectAndAssets.cpp
     src/selftest/SelfTestRenderStability.cpp
     src/selftest/SelfTestRun.cpp
@@ -67,6 +70,7 @@ add_executable(SageEditor WIN32
     src/AssetSlot.cpp
     src/CreateAssetDialog.cpp
     src/LuaPlugins.cpp
+    src/LuaPluginsFiles.cpp
     src/PluginsWindow.cpp
     src/ObjectSlot.cpp
     src/GameBuilder.cpp
