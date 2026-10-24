@@ -619,7 +619,10 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // ни перехвата кликов. У управляемой камеры — тоже: её положение задаёт
     // полёт вида, и ручки, тянущие то же самое, спорили бы с ним каждый кадр.
     m_scaleLockHint = sage::scene::ScaleLock::None;
+    // И у папки: она только сортирует список и содержимое не двигает (см.
+    // Scene::WorldMatrix) — ручки, которые тянут ничего, обманывают.
     if (selected.Valid() && !colliderGizmo && selected.Id() != m_pilotId &&
+        !host.CurrentScene().IsFolder(selected.Entity()) &&
         host.Tools().GizmoOp != EditorHost::kGizmoSelectOnly) {
         Transform& tr = selected.GetTransform();
         // Гизмо работает в МИРОВОМ пространстве (учёт родителей): манипулируем
@@ -774,7 +777,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                 for (auto& [id, startWorld] : m_dragStartWorlds) {
                     if (id == selected.Id()) continue;
                     GameObject o = scene.Get(id);
-                    if (!o.Valid()) continue;
+                    if (!o.Valid() || scene.IsFolder(o.Entity())) continue;
                     // Пропускаем потомков других выбранных: их несёт двигающийся
                     // родитель, иначе смещение применилось бы дважды.
                     bool ancestorSelected = false;

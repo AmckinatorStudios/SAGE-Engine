@@ -219,6 +219,15 @@ public:
         const auto* h = m_registry.try_get<HierarchyComponent>(e);
         return (h && m_registry.valid(h->Parent)) ? h->Parent : entt::null;
     }
+    // Родитель, КАКИМ ЕГО ВИДИТ ИГРА: ближайший предок, который не папка.
+    // Папка — порядок в списке редактора, а не часть игры: скрипт, спросивший
+    // obj.parent у фонаря, разложенного по папке «Свет», должен получить того
+    // же родителя (или nil), что и до раскладки.
+    entt::entity GameParentOf(entt::entity e) const {
+        entt::entity p = ParentOf(e);
+        for (int guard = 0; guard < 64 && p != entt::null && IsFolder(p); ++guard) p = ParentOf(p);
+        return (p != entt::null && IsFolder(p)) ? entt::null : p;
+    }
 
     // Мировая матрица: композиция локальных матриц по цепочке родителей.
     glm::mat4 WorldMatrix(entt::entity e) const {
@@ -418,7 +427,11 @@ private:
     glm::mat4 WorldMatrixMemo(entt::entity e, sage::WorldMatrices& memo) const {
         if (const glm::mat4* done = memo.Find(e)) return *done;
         const Transform* tr = m_registry.try_get<Transform>(e);
-        glm::mat4 world = tr ? tr->GetMatrix() : glm::mat4(1.0f);
+        // Папка не двигает содержимое и здесь — как в WorldMatrix. Этот путь
+        // рисует кадр, WorldMatrix — физика и гизмо: расходились они только у
+        // папок, и сдвинутая папка уносила картинку вложенных объектов, а
+        // коллайдеры оставляла на месте.
+        glm::mat4 world = (tr && !m_registry.all_of<FolderComponent>(e)) ? tr->GetMatrix() : glm::mat4(1.0f);
         const auto* h = m_registry.try_get<HierarchyComponent>(e);
         if (h && h->Parent != entt::null && m_registry.valid(h->Parent))
             world = WorldMatrixMemo(h->Parent, memo) * world;

@@ -94,7 +94,7 @@ void ScriptEngine::RegisterGameObject() {
     goType["Parent"] = [this, requireAlive](GameObject& o) -> sol::optional<GameObject> {
         if (!m_scene) throw std::runtime_error("Parent: сцена не привязана (BindScene не вызван)");
         requireAlive(o, "Parent");
-        entt::entity p = m_scene->ParentOf(o.Entity());
+        entt::entity p = m_scene->GameParentOf(o.Entity()); // папки скрипту не видны
         if (p == entt::null) return sol::nullopt; // нет родителя — законный ответ
         return GameObject(&m_scene->Registry(), p);
     };

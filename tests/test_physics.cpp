@@ -731,3 +731,39 @@ TEST(PhysicsScene_capsule_character_stands_on_the_floor_not_inside_it) {
     CHECK_TRUE(cc.Grounded);
     CHECK_NEAR(bottom, 0.0f, 0.06f);
 }
+
+// --- Персонаж с телом не опрокидывается ---------------------------------------
+//
+// Капсула с RigidBody (Dynamic) + Collider, на которую повесили FPS-скрипт с
+// контроллером персонажа: у объекта два хозяина положения. Тело падало набок и
+// писало свой поворот в Transform — капсула заваливалась, дочерняя камера
+// получала крен. Положение персонажа ведёт контроллер: тела у него нет, а
+// наклон, оставшийся от гизмо, снимается.
+TEST(PhysicsScene_character_with_a_rigidbody_stays_upright) {
+    if (!PhysicsWorld::HasJolt()) return;
+    Scene scene("UprightScene");
+    GameObject floor = scene.CreateObject("Floor");
+    floor.GetTransform().Position = {0.0f, -0.5f, 0.0f};
+    floor.GetTransform().Scale = {40.0f, 1.0f, 40.0f};
+    scene.Registry().emplace<RigidBodyComponent>(floor.Entity(), RigidBodyComponent{BodyType::Static});
+    scene.Registry().emplace<ColliderComponent>(floor.Entity());
+
+    GameObject hero = scene.CreateObject("Hero");
+    hero.GetTransform().Position = {0.0f, 1.5f, 0.0f};
+    hero.GetTransform().Rotation = {0.0f, 30.0f, 12.0f};   // наклон от гизмо
+    scene.Registry().emplace<RigidBodyComponent>(hero.Entity(), RigidBodyComponent{BodyType::Dynamic});
+    scene.Registry().emplace<ColliderComponent>(hero.Entity());
+
+    PhysicsScene physics(PhysicsWorld::DefaultBackend(), scene);
+    if (!physics.SupportsCharacters()) return;
+    physics.Step(scene, 1.0f / 60.0f);   // тело заведено раньше контроллера (как Start() скрипта)
+    scene.Registry().emplace<CharacterControllerComponent>(hero.Entity());
+    for (int i = 0; i < 120; ++i) physics.Step(scene, 1.0f / 60.0f);
+
+    const glm::vec3 rot = hero.GetTransform().Rotation;
+    std::printf("       поворот персонажа (%.1f, %.1f, %.1f)\n", rot.x, rot.y, rot.z);
+    CHECK_NEAR(rot.x, 0.0f, 1e-3f);
+    CHECK_NEAR(rot.z, 0.0f, 1e-3f);
+    CHECK_NEAR(rot.y, 30.0f, 1e-3f);   // рыскание — остаётся
+    CHECK_TRUE(scene.Registry().get<RigidBodyComponent>(hero.Entity()).RuntimeBody == kInvalidBody);
+}

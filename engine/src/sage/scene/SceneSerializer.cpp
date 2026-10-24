@@ -1497,6 +1497,9 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             FolderComponent fc;
             if (j["folder"].contains("color")) fc.Color = Vec3FromJson(j["folder"]["color"]);
             obj.Registry()->emplace<FolderComponent>(obj.Entity(), fc);
+            // У папки нет положения: сдвиг, оставшийся в старом файле, ни на
+            // что не влиял, а в инспекторе и гизмо выглядел бы рабочим.
+            if (Transform* ft = obj.Registry()->try_get<Transform>(obj.Entity())) *ft = Transform{};
         }
         if (j.contains("tag") && j["tag"].is_string()) {
             const std::string tag = j["tag"].get<std::string>();

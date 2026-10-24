@@ -298,13 +298,20 @@ void DebugDraw::WireCone(glm::vec3 apex, glm::vec3 dir, float length, float half
     }
 }
 
+void DebugDraw::FrustumBasis(glm::vec3 dir, glm::vec3 upAxis, glm::vec3& right, glm::vec3& up) {
+    dir = glm::normalize(dir);
+    glm::vec3 upHint = (glm::abs(dir.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    if (glm::length(upAxis) > 1e-4f && glm::length(glm::cross(dir, upAxis)) > 1e-4f) upHint = upAxis;
+    right = glm::normalize(glm::cross(dir, upHint));
+    up = glm::normalize(glm::cross(right, dir));
+}
+
 void DebugDraw::WireFrustum(glm::vec3 apex, glm::vec3 dir, float fovDeg, float aspect,
-                            float nearDist, float farDist, glm::vec3 color) {
+                            float nearDist, float farDist, glm::vec3 color, glm::vec3 upAxis) {
     dir = glm::normalize(dir);
     if (glm::length(dir) < 0.0001f) dir = glm::vec3(0.0f, 0.0f, -1.0f);
-    glm::vec3 upHint = (glm::abs(dir.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
-    glm::vec3 right = glm::normalize(glm::cross(dir, upHint));
-    glm::vec3 up = glm::normalize(glm::cross(right, dir));
+    glm::vec3 right, up;
+    FrustumBasis(dir, upAxis, right, up);
 
     auto rect = [&](float dist, glm::vec3 out[4]) {
         float h = std::tan(glm::radians(fovDeg) * 0.5f) * dist;
