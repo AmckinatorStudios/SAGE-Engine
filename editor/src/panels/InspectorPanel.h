@@ -28,6 +28,32 @@ enum class UIAnchor;
 // что область действия у них разная (файл материала общий для всех, кто им
 // покрашен, а Transform принадлежит одной сущности), и человек не понимал, что
 // именно он сейчас меняет.
+// Какие компоненты человек снял крестиком в шапке секции за этот кадр. Снимаются
+// они ПОСЛЕ всех секций: снять компонент посреди отрисовки значило бы, что
+// следующая секция читает уже удалённое.
+struct EntityRemovals {
+    bool Mesh = false;
+    bool Camera = false;
+    bool Light = false;
+    bool PostProcess = false;
+    bool Interface = false;
+    bool Decal = false;
+    bool GiStatic = false;
+    bool Net = false;
+    bool Script = false;
+    bool Body = false;
+    bool Collider = false;
+    bool Character = false;
+    bool Joint = false;
+    bool Animation = false;
+    bool PropertyAnim = false;
+    bool Tween = false;
+    bool Probe = false;
+    bool Ik = false;
+    bool Emitter = false;
+    bool Audio = false;
+};
+
 class InspectorPanel {
 public:
     void Draw(EditorHost& host, bool* open);
@@ -196,6 +222,11 @@ private:
     static void HintWrapped(const char* fmt, ...);
     // Солнце сцены: азимут/высота и диск в небе — на самом объекте (см. .cpp).
     static void DrawSunSection(EditorHost& host, GameObject obj);
+    // Группы секций объекта — по файлу на группу (InspectorPanel_Physics.cpp,
+    // _Animation.cpp, _Effects.cpp): DrawEntityProperties зовёт их по порядку.
+    void DrawPhysicsSections(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm);
+    void DrawAnimationSections(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm);
+    void DrawEffectSections(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm);
     void DrawAddComponentMenu(EditorHost& host, GameObject obj);
     char m_addComponentFilter[64] = ""; // поиск в списке компонентов
     bool m_addComponentFocus = false;   // поставить курсор в поиск при открытии
