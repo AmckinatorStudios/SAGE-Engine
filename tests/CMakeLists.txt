@@ -35,6 +35,7 @@ add_executable(sage_tests
     test_scale_lock.cpp
     test_problems.cpp
     test_asset_ux.cpp
+    test_plugins.cpp
     test_scene_flow.cpp
     test_component_registry.cpp
     test_format_version.cpp
@@ -100,6 +101,9 @@ add_executable(sage_tests
     ../editor/src/EditorIcons.cpp
     ../editor/src/EditorPrefs.cpp
     ../editor/src/Localization.cpp
+    # Плагины редактора на Lua: шаблоны и сторож проверяются без окна.
+    ../editor/src/LuaPlugins.cpp
+    ../editor/src/ObjectCatalog.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}

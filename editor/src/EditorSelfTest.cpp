@@ -322,6 +322,7 @@ void EditorLayer::RunSelfTest() {
         ok = SelfTestTools() && ok;
         ok = SelfTestRenderStability() && ok;
         ok = SelfTestPickerAndPrefabs() && ok;
+        ok = SelfTestPlugins() && ok;
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
@@ -333,7 +334,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + cover-aspect + preview-for-every-asset + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw + model-import + object-picker + prefab-drop, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + cover-aspect + preview-for-every-asset + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw + model-import + object-picker + prefab-drop + plugins, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

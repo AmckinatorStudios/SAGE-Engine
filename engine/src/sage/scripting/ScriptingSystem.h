@@ -4,6 +4,7 @@
 
 #include "sage/render/DebugLines.h"
 #include "sage/scene/Signals.h"
+#include "sage/scripting/Plugins.h"
 #include "sage/scripting/ScriptRuntime.h"
 
 class Scene;
@@ -65,6 +66,15 @@ public:
     // скрипте (нет файла, синтаксис) не срывает запуск: остальные работают,
     // причина уходит в консоль. Возвращает, сколько привязано.
     int AttachScene(Scene& scene);
+
+    // Плагины проекта (часть движка, runtime.lua — см. sage/scripting/Plugins.h).
+    // Задаются ДО AttachScene: каждая сцена получает по служебному объекту на
+    // включённый плагин, и Start плагинов идёт раньше Start объектов сцены —
+    // скрипт игры вправе спросить plugins.Get(...) уже в своём Start.
+    void SetPlugins(std::vector<sage::plugins::Manifest> plugins) { m_plugins = std::move(plugins); }
+    const std::vector<sage::plugins::Manifest>& Plugins() const { return m_plugins; }
+    // Сколько плагинов запущено в текущей сцене.
+    int AttachedPlugins() const { return m_attachedPlugins; }
 
     // Один объект — например, только что созданный из префаба.
     bool Attach(GameObject object);
@@ -154,7 +164,11 @@ private:
     // OnKeyDown/OnKeyUp всем скриптам по клавишам этого кадра.
     void DispatchKeys();
 
+    int AttachPlugins(Scene& scene);
+
     ScriptRuntime m_runtime;
+    std::vector<sage::plugins::Manifest> m_plugins;
+    int m_attachedPlugins = 0;
     std::vector<TestResult> m_testResults;
     // Группа шины для связей инспектора: Shutdown снимает их разом.
     int m_linkGroup = sage::events::Bus::NewGroup();

@@ -24,6 +24,10 @@ bool EditorHistory::CommitPending() {
     return true;
 }
 
+void EditorHistory::CollapseSince(size_t depth) {
+    if (m_undo.size() > depth + 1) m_undo.erase(m_undo.begin() + (long)depth + 1, m_undo.end());
+}
+
 bool EditorHistory::Undo() {
     if (!m_enabled || m_undo.empty()) return false;
     m_redo.push_back(m_capture());

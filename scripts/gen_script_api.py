@@ -801,6 +801,22 @@ function Debug:DrawSphere(center, radius, color, duration) end
 ---@param duration? number
 function Debug:DrawBox(center, halfExtents, color, duration) end
 
+---Плагины: обмен API между плагином (plugins/<id>/runtime.lua) и скриптами
+---игры. Плагин регистрирует таблицу в теле файла, игра берёт её по id.
+plugins = {}
+Plugins = plugins
+---@param id string имя плагина
+---@param api table то, что получат скрипты игры
+function plugins.Register(id, api) end
+---@param id string
+---@return table|nil
+function plugins.Get(id) end
+---@param id string
+---@return boolean
+function plugins.Has(id) end
+---@return string[]
+function plugins.List() end
+
 ---Сцена. Прежний раздел sage.scene (Load и прочее) доступен через этот же
 ---объект.
 Scene = {}

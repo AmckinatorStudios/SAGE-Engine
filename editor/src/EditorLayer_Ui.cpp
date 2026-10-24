@@ -13,6 +13,8 @@
 // ---------------------------------------------------------------------------
 #include "CreateAssetDialog.h"
 #include "EditorLayer.h"
+#include "LuaPlugins.h"
+#include "PluginsWindow.h"
 #include "FileBrowser.h"
 #include "ModelImportDialog.h"
 #include "sage/assets/Pack.h"
@@ -870,6 +872,15 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 }
                 ImGui::EndMenu();
             }
+            ImGui::EndMenu();
+        }
+        // ПЛАГИНЫ — своим меню: пункты плагинов появляются здесь же, под
+        // управлением, и искать «куда плагин добавил кнопку» не приходится.
+        if (EditorIcons::BeginMenu("gear", T("Plugins"))) {
+            if (EditorIcons::MenuItem("gear", T("Manage plugins..."))) sage::editor::pluginswindow::Open();
+            if (EditorIcons::MenuItem("plus", T("Create plugin..."))) sage::editor::pluginswindow::OpenCreate();
+            ImGui::Separator();
+            sage::editor::luaplugins::DrawMenuItems(*this);
             ImGui::EndMenu();
         }
         if (EditorIcons::BeginMenu("question", T("Help"))) {

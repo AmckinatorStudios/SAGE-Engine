@@ -264,6 +264,57 @@ void RegisterGlobals(Backend& backend) {
     lua["Debug"] = debug;
 
     // =======================================================================
+    //  plugins — API плагинов для скриптов игры (sage/scripting/Plugins.h)
+    // =======================================================================
+    //
+    // Плагин работает на своём служебном объекте, и его переменные скрипту
+    // игры не видны — у каждого скрипта своё окружение. Чтобы дать игре
+    // «счётчик монет» или «диалоги», плагин регистрирует таблицу:
+    //
+    //   -- plugins/coins/runtime.lua
+    //   local Coins = { total = 0 }
+    //   function Coins.add(n) Coins.total = Coins.total + n end
+    //   plugins.Register("coins", Coins)
+    //
+    //   -- скрипт монеты
+    //   plugins.Get("coins").add(1)
+    //
+    // Регистрация — в теле файла, а не в Start: тело плагина выполняется
+    // раньше Start любого объекта сцены (ScriptingSystem::AttachPlugins), и
+    // скрипт игры находит плагин уже в своём Start.
+    sol::table registered = lua.create_table();
+    sol::table plugins = lua.create_table();
+    plugins.set_function("Register", [registered](sol::variadic_args va) mutable {
+        const size_t b = Skip(va);
+        if (b >= va.size() || !va[b].is<std::string>())
+            throw std::runtime_error("plugins.Register(id, api): id — строка, имя плагина");
+        registered[va[b].as<std::string>()] = b + 1 < va.size() ? sol::object(va[b + 1]) : sol::object();
+    });
+    // Нет такого — nil, а не ошибка: игра вправе работать и без
+    // необязательного плагина (его выключили в окне «Плагины»).
+    plugins.set_function("Get", [registered](sol::variadic_args va) -> sol::object {
+        const size_t b = Skip(va);
+        if (b >= va.size() || !va[b].is<std::string>()) return sol::lua_nil;
+        return registered[va[b].as<std::string>()];
+    });
+    plugins.set_function("Has", [registered](sol::variadic_args va) -> bool {
+        const size_t b = Skip(va);
+        if (b >= va.size() || !va[b].is<std::string>()) return false;
+        const sol::object api = registered[va[b].as<std::string>()];
+        return api.valid() && api.get_type() != sol::type::lua_nil && api.get_type() != sol::type::none;
+    });
+    plugins.set_function("List", [registered, &lua]() {
+        sol::table out = lua.create_table();
+        int i = 1;
+        for (const auto& kv : registered)
+            if (kv.first.get_type() == sol::type::string) out[i++] = kv.first;
+        return out;
+    });
+    lua["plugins"] = plugins;
+    lua["Plugins"] = plugins;
+    if (lua["sage"].get_type() == sol::type::table) lua["sage"]["plugins"] = plugins;
+
+    // =======================================================================
     //  Scene
     // =======================================================================
     sol::table scene = lua.create_table();

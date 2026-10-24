@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "sage/core/Layer.h"
+#include "sage/scripting/Plugins.h"
 #include "sage/input/GlfwBridge.h"
 #include "sage/input/InputSystem.h"
 #include "sage/audio/AudioEngine.h"
@@ -114,6 +115,7 @@ private:
     // прежнего движка и пережить его не имеет права — члены разрушаются в
     // обратном порядке объявления.
     std::unique_ptr<sage::scripting::ScriptingSystem> m_scripting;
+    std::vector<sage::plugins::Manifest> m_plugins;   // плагины проекта (plugins/)
     // Сеть игры (Lua: Net.*). По значению, а не по указателю: она ничего не
     // стоит в офлайне — ни сокета, ни потока, — пока скрипт не позвал Net.Host
     // или Net.Connect.

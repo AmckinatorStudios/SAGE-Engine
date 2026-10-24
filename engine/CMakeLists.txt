@@ -171,6 +171,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptFields.cpp
     src/sage/scripting/ScriptAdvice.cpp
     src/sage/scripting/ScriptingSystem.cpp
+    src/sage/scripting/Plugins.cpp
     src/sage/scripting/lua/LuaBackend.cpp
     src/sage/scripting/lua/LuaFields.cpp
     src/sage/scripting/lua/LuaApi_Math.cpp

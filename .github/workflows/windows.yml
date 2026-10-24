@@ -226,6 +226,13 @@ jobs:
           # шаг проверки выше) — кладём рядом с SageEditor.exe: без явного
           # SetDllDirectory загрузчик Windows ищет зависимости плагина в
           # каталоге ГЛАВНОГО процесса, а не в plugins/.
+          # Встроенные плагины на Lua — папки с plugin.json (рядом в plugins/
+          # лежит и папка сборки example_stats, её не берём).
+          for d in build-windows/editor/plugins/*/; do
+            [ -f "$d/plugin.json" ] || continue
+            mkdir -p "$PKG/plugins"
+            cp -r "${d%/}" "$PKG/plugins/"
+          done
           if [ -f build-windows/editor/plugins/example_stats.dll ]; then
             mkdir -p "$PKG/plugins"
             cp build-windows/editor/plugins/example_stats.dll "$PKG/plugins/"
