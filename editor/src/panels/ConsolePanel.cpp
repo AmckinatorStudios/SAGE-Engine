@@ -121,6 +121,10 @@ void ConsolePanel::Clear() {
 }
 
 void ConsolePanel::Draw(bool* open, const std::string& windowId) {
+    if (m_focusFrames > 0) {
+        ImGui::SetNextWindowFocus();
+        --m_focusFrames;
+    }
     ImGui::Begin(sage::editor::panelid::Title("console", T("Console"), windowId).c_str(), open,
                  panelwindows::WindowFlags("Console"));
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) MarkSeen();

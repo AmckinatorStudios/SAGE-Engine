@@ -30,6 +30,9 @@ public:
     // Есть ли новые ошибки с прошлого взгляда (для подсветки вкладки).
     bool HasUnseenErrors() const { return m_errorTotal > m_seenErrors; }
     void MarkSeen() { m_seenErrors = m_errorTotal; }
+    // Вывести вкладку вперёд (она делит место с Assets) — на несколько кадров:
+    // в первый кадр окна дока ещё не собраны.
+    void RequestFocus() { m_focusFrames = 30; }
 
 private:
     void DrawToolbar();
@@ -49,4 +52,5 @@ private:
     int m_warnTotal = 0;
     int m_errorTotal = 0;
     int m_seenErrors = 0;
+    int m_focusFrames = 0;
 };

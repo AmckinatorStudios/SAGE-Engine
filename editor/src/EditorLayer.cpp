@@ -555,6 +555,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TWEEN",
             "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
+            "SAGE_EDITOR_SHOW_CONSOLE",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -572,6 +573,8 @@ void EditorLayer::OnAttach() {
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
     if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_headlessProject = true; m_panels[EditorPanel::Settings] = true; }
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_headlessProject = true; m_panels[EditorPanel::Profiler] = true; }
+    // Консоль впереди вкладки Assets — для скриншот-проверки её панели.
+    if (std::getenv("SAGE_EDITOR_SHOW_CONSOLE")) m_console.RequestFocus();
     // Инструмент анимации при старте — для скриншот-проверок: линейка времени и
     // кривая проверяются глазами, и открыть панель в прогоне больше нечем.
     if (std::getenv("SAGE_EDITOR_SHOW_ANIMATION")) {
