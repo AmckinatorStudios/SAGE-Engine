@@ -80,6 +80,12 @@ glm::mat4 ParentWorldMatrix(const Scene& scene, entt::entity e) {
     return scene.WorldMatrix(h->Parent);
 }
 
+// Ведёт ли объект контроллер персонажа (тогда его тело — не хозяин положения).
+bool OwnedByCharacter(const entt::registry& reg, entt::entity e) {
+    const CharacterControllerComponent* cc = reg.try_get<CharacterControllerComponent>(e);
+    return cc && cc->Managed && !cc->Solid;
+}
+
 bool IsMeshShape(ShapeType s) { return s == ShapeType::ConvexHull || s == ShapeType::Mesh; }
 
 BodyDesc DescFromEntity(const RigidBodyComponent& rb, const ColliderComponent* col,
@@ -401,7 +407,11 @@ void PhysicsScene::SyncBodies(Scene& scene) {
     for (size_t i = 0; i < m_tracked.size(); ++i) {
         Tracked& t = m_tracked[i];
         RigidBodyComponent* rb = reg.valid(t.Entity) ? reg.try_get<RigidBodyComponent>(t.Entity) : nullptr;
-        if (!rb || rb->RuntimeBody != t.Body) {
+        // Контроллер персонажа, добавленный скриптом в Start(), приходит
+        // ПОСЛЕ тела — тело снимается тут же (см. OwnedByCharacter ниже).
+        const bool character = rb && OwnedByCharacter(reg, t.Entity);
+        if (character) rb->RuntimeBody = kInvalidBody;
+        if (!rb || character || rb->RuntimeBody != t.Body) {
             m_world->RemoveBody(t.Body);
             m_bodyToEntity.erase(t.Body);
             --m_bodyCount;
@@ -437,6 +447,12 @@ void PhysicsScene::SyncBodies(Scene& scene) {
     for (auto e : view) {
         RigidBodyComponent& rb = view.get<RigidBodyComponent>(e);
         if (rb.RuntimeBody != kInvalidBody) continue;
+        // У ПЕРСОНАЖА ПОЛОЖЕНИЕ ВЕДЁТ КОНТРОЛЛЕР, и тело ему не нужно — у
+        // контроллера своя капсула в мире. Динамическое тело на том же объекте
+        // было вторым хозяином: падало набок и писало свой поворот в
+        // Transform — капсула заваливалась, дочерняя камера получала крен, а
+        // контроллер упирался в собственное тело.
+        if (OwnedByCharacter(reg, e)) continue;
         rb.RuntimeBody = build(e, rb, glm::vec3(0.0f), glm::vec3(0.0f));
         if (rb.RuntimeBody == kInvalidBody) continue; // Null-бэкенд: тел не бывает
         m_tracked.push_back(Tracked{e, rb.RuntimeBody, settingsOf(e, rb)});
@@ -670,7 +686,12 @@ void PhysicsScene::SyncCharacters(Scene& scene) {
         // принадлежит, и заводить ему тело в бэкенде значило бы столкнуть два
         // разных представления мира в одном теле.
         if (cc.Solid) continue;
-        const Transform& tr = view.get<Transform>(e);
+        Transform& tr = view.get<Transform>(e);
+        // Персонаж стоит прямо: капсула контроллера всегда вертикальна, а
+        // наклон, оставшийся от гизмо, давал бы картинку и дочерней камере
+        // крен, которого у самого персонажа нет. Скрипт крутит только рыскание.
+        tr.Rotation.x = 0.0f;
+        tr.Rotation.z = 0.0f;
         CharacterDesc d;
         d.Radius = cc.Radius;
         d.Height = cc.Height;

@@ -409,8 +409,12 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
         glm::mat4 world = scene.WorldMatrix(e); // мировая (иерархия)
         glm::vec3 wpos = glm::vec3(world[3]);
         glm::vec3 fwd = glm::normalize(glm::vec3(world * glm::vec4(0, 0, -1, 0)));
+        // Верх — тоже из матрицы, как у самой камеры (CameraFrameFor): иначе
+        // каркас не показывал крен, и камера в игре смотрела не так, как на
+        // гизмо.
+        const glm::vec3 up = glm::vec3(world * glm::vec4(0, 1, 0, 0));
         const CameraComponent& cam = camView.get<CameraComponent>(e);
-        m_debugDraw->WireFrustum(wpos, fwd, cam.Fov, gameAspect, 0.3f, 2.2f, color);
+        m_debugDraw->WireFrustum(wpos, fwd, cam.Fov, gameAspect, 0.3f, 2.2f, color, up);
     }
     // Свет-сущности: маркер-сфера в позиции (у выбранного — ярче; крупная зона
     // выбранного примитива рисуется в RenderViewport поверх).

@@ -237,3 +237,55 @@ TEST(Hierarchy_a_duplicated_folder_keeps_its_colour_and_gets_its_own_id) {
         CHECK_NEAR(fc->Color.b, 0.3f, 0.001f);
     }
 }
+
+// --- Папка только сортирует список ------------------------------------------
+//
+// Кадр рисуется по ComputeWorldMatrices, физика и гизмо — по WorldMatrix.
+// Первый путь Transform папки НЕ пропускал: сдвинутая папка уносила картинку
+// вложенных объектов, а их коллайдеры оставались на месте.
+TEST(Hierarchy_folder_moves_nothing_in_the_render_path) {
+    Scene scene("folders");
+    GameObject folder = scene.CreateFolder("Свет");
+    GameObject lamp = scene.CreateObject("Lamp");
+    lamp.GetTransform().Position = {1.0f, 2.0f, 3.0f};
+    scene.SetParent(lamp.Entity(), folder.Entity());
+    folder.GetTransform().Position = {50.0f, 0.0f, 0.0f};
+    folder.GetTransform().Rotation = {0.0f, 0.0f, 90.0f};
+
+    sage::WorldMatrices all;
+    scene.ComputeWorldMatrices(all);
+    const glm::mat4* drawn = all.Find(lamp.Entity());
+    CHECK_TRUE(drawn != nullptr);
+    if (drawn) {
+        CHECK_NEAR((*drawn)[3].x, 1.0f, 1e-4f);
+        CHECK_NEAR((*drawn)[3].y, 2.0f, 1e-4f);
+    }
+    CHECK_NEAR(scene.WorldMatrix(lamp.Entity())[3].x, 1.0f, 1e-4f);
+}
+
+// Скрипт видит родителя без папок: раскладка по папкам не меняет obj.parent.
+TEST(Hierarchy_game_parent_skips_folders) {
+    Scene scene("folders");
+    GameObject player = scene.CreateObject("Player");
+    GameObject folder = scene.CreateFolder("Оружие");
+    GameObject gun = scene.CreateObject("Gun");
+    scene.SetParent(folder.Entity(), player.Entity());
+    scene.SetParent(gun.Entity(), folder.Entity());
+    CHECK_TRUE(scene.ParentOf(gun.Entity()) == folder.Entity());
+    CHECK_TRUE(scene.GameParentOf(gun.Entity()) == player.Entity());
+
+    GameObject rootFolder = scene.CreateFolder("Декор");
+    GameObject vase = scene.CreateObject("Vase");
+    scene.SetParent(vase.Entity(), rootFolder.Entity());
+    CHECK_TRUE(scene.GameParentOf(vase.Entity()) == entt::null);
+}
+
+// Каркас камеры показывает крен: верх рамки — верх камеры, а не мира.
+#include "sage/render/DebugDraw.h"
+TEST(Camera_gizmo_frustum_follows_camera_roll) {
+    glm::vec3 right, up;
+    DebugDraw::FrustumBasis({0.0f, 0.0f, -1.0f}, {1.0f, 0.0f, 0.0f}, right, up);
+    CHECK_NEAR(up.x, 1.0f, 1e-4f);
+    DebugDraw::FrustumBasis({0.0f, 0.0f, -1.0f}, glm::vec3(0.0f), right, up);
+    CHECK_NEAR(up.y, 1.0f, 1e-4f);
+}

@@ -235,7 +235,7 @@ void RegisterObject(Backend& backend) {
         Alive(r.Obj, "parent");
         Scene* scene = self->ScenePtr();
         if (!scene) return sol::lua_nil;
-        const entt::entity p = scene->ParentOf(r.Obj.Entity());
+        const entt::entity p = scene->GameParentOf(r.Obj.Entity());
         if (p == entt::null) return sol::lua_nil;
         return self->Wrap(GameObject(&scene->Registry(), p));
     });

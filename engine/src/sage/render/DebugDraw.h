@@ -67,8 +67,13 @@ public:
     // Каркас усечённой пирамиды камеры (frustum): из apex вдоль dir, с
     // вертикальным углом fovDeg и соотношением сторон aspect, от near до far.
     // Готовая иконка-гизмо для сущности-камеры.
+    // upAxis — верх камеры; без него (нулевой) верх берётся мировой, и крен
+    // камеры (поворот вокруг Z) на каркасе не виден.
     void WireFrustum(glm::vec3 apex, glm::vec3 dir, float fovDeg, float aspect,
-                     float nearDist, float farDist, glm::vec3 color);
+                     float nearDist, float farDist, glm::vec3 color, glm::vec3 upAxis = glm::vec3(0.0f));
+    // Оси рамки каркаса камеры: right и up перпендикулярны dir; up следует
+    // upAxis, если тот задан и не параллелен dir.
+    static void FrustumBasis(glm::vec3 dir, glm::vec3 upAxis, glm::vec3& right, glm::vec3& up);
 
     // Оси объекта: X — красная, Y — зелёная, Z — синяя.
     void Axes(const glm::mat4& transform, float size = 1.0f);
