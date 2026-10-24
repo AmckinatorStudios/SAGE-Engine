@@ -15,6 +15,7 @@ add_executable(sage_template
     ${SAGE_ENGINE_ROOT}/engine/src/sage/assets/format/Blob.cpp
     ${SAGE_ENGINE_ROOT}/engine/src/sage/core/Log.cpp
     ${SAGE_ENGINE_ROOT}/engine/src/sage/core/CrashHandler.cpp
+    ${SAGE_ENGINE_ROOT}/engine/src/sage/core/Problems.cpp
     ${SAGE_ENGINE_ROOT}/engine/src/sage/core/Paths.cpp
 )
 target_include_directories(sage_template PRIVATE

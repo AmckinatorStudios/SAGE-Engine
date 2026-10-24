@@ -22,6 +22,7 @@ add_executable(SageEditor WIN32
     src/EditorSelection.cpp
     src/DragSet.cpp
     src/ConsoleLog.cpp
+    src/ProblemGroups.cpp
     src/EditorHistory.cpp
     src/EditorTools.cpp
     src/EditorLayer_Assets.cpp
@@ -53,6 +54,7 @@ add_executable(SageEditor WIN32
     src/ProjectLauncher/ProjectThumbnail.cpp
     src/Localization.cpp
     src/panels/ConsolePanel.cpp
+    src/panels/ProblemsView.cpp
     src/panels/HierarchyPanel.cpp
     src/panels/InspectorPanel.cpp
     src/panels/InspectorPanel_Material.cpp

@@ -3,6 +3,9 @@
 #include <string>
 
 #include "../ConsoleLog.h"
+#include "ProblemsView.h"
+
+class EditorHost;
 
 // Панель Console — живой сток лога движка. Полностью самодостаточна: сама
 // регистрирует Log-sink в Attach() и снимает его в Detach() (сток ссылается
@@ -17,7 +20,9 @@ public:
     void Attach();
     void Detach();
     // Имя окна — от пространства (см. PanelWindowId.h).
-    void Draw(bool* open, const std::string& windowId);
+    void Draw(bool* open, const std::string& windowId, EditorHost* host = nullptr);
+    // Открыть вкладку «Проблемы» (щелчок по счётчику в статусной строке).
+    void ShowProblems() { m_showProblems = true; RequestFocus(); }
 
     // Сколько пришло за СЕССИЮ (не уменьшается при очистке): самопроверка
     // сравнивает «до» и «после» действия.
@@ -53,4 +58,6 @@ private:
     int m_errorTotal = 0;
     int m_seenErrors = 0;
     int m_focusFrames = 0;
+    ProblemsView m_problems;
+    bool m_showProblems = false;
 };

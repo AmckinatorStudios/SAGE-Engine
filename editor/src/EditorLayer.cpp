@@ -1,3 +1,4 @@
+#include "sage/core/Problems.h"
 #include "sage/app/CoreSystems.h"
 #include "EditorLayer.h"
 #include "sage/scene/Signals.h"
@@ -319,6 +320,10 @@ void EditorLayer::OnAttach() {
             ctx += std::string("Mode:   ") +
                    (!m_play.Active() ? "Editing" : "Play") + "\n";
             if (m_scene) ctx += std::string("Entities: ") + std::to_string(m_scene->Count()) + "\n";
+            // Что шло не так ДО падения: часто это и есть ответ (скрипт
+            // зависал, шейдер не собрался, модель была битой).
+            const std::string problems = sage::Problems::CrashSummary();
+            if (!problems.empty()) ctx += "Problems before the crash:\n" + problems;
             return ctx;
         };
         cfg.EmergencySave = [this]() -> std::string {
@@ -558,7 +563,7 @@ void EditorLayer::OnAttach() {
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TWEEN",
             "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
-            "SAGE_EDITOR_SHOW_CONSOLE",
+            "SAGE_EDITOR_SHOW_CONSOLE",  "SAGE_EDITOR_SHOW_PROBLEMS",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -578,6 +583,7 @@ void EditorLayer::OnAttach() {
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_headlessProject = true; m_panels[EditorPanel::Profiler] = true; }
     // Консоль впереди вкладки Assets — для скриншот-проверки её панели.
     if (std::getenv("SAGE_EDITOR_SHOW_CONSOLE")) m_console.RequestFocus();
+    if (std::getenv("SAGE_EDITOR_SHOW_PROBLEMS")) m_console.ShowProblems();
     // Инструмент анимации при старте — для скриншот-проверок: линейка времени и
     // кривая проверяются глазами, и открыть панель в прогоне больше нечем.
     if (std::getenv("SAGE_EDITOR_SHOW_ANIMATION")) {
@@ -1410,7 +1416,7 @@ void EditorLayer::OnRender() {
     const std::string consoleId = panelid::For("Console", m_workspace);
     const std::string assetsId = panelid::For("Assets", m_workspace);
     panel(consoleId.c_str(), m_panels[EditorPanel::Console],
-          [&] { m_console.Draw(&m_panels[EditorPanel::Console], consoleId); });
+          [&] { m_console.Draw(&m_panels[EditorPanel::Console], consoleId, this); });
     panel(assetsId.c_str(), m_panels[EditorPanel::Assets],
           [&] { m_assets.Draw(*this, &m_panels[EditorPanel::Assets], assetsId); });
     m_plugins.ImGuiAll();

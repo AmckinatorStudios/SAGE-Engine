@@ -85,6 +85,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/SkyPresets.cpp
     src/sage/render/SkyDraw.cpp
     src/sage/core/CrashHandler.cpp
+    src/sage/core/Problems.cpp
     src/sage/core/SystemScheduler.cpp
     src/sage/app/CoreSystems.cpp
     src/sage/render/MeshData.cpp
@@ -167,6 +168,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptRuntime.cpp
     src/sage/scripting/LuaHandlerStore.cpp
     src/sage/scripting/ScriptFields.cpp
+    src/sage/scripting/ScriptAdvice.cpp
     src/sage/scripting/ScriptingSystem.cpp
     src/sage/scripting/lua/LuaBackend.cpp
     src/sage/scripting/lua/LuaFields.cpp
