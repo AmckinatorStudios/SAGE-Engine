@@ -936,6 +936,29 @@ static ModelData ParseGltf(const std::string& path) {
             }
         }
     }
+    // ПРЕДКИ КОСТЕЙ — ТОЖЕ КОСТИ. Узел, не названный ни в одном скине, но
+    // стоящий над костью, двигает её своим трансформом. Скелет же знал только
+    // кости и один общий «трансформ над скелетом» (Skeleton::Root), взятый у
+    // ПЕРВОГО корня. У модели Blockbench три скина с тремя корнями: пояс и две
+    // ноги, у каждой ноги свой родитель-узел со своим сдвигом. Общий Root
+    // отдавал обеим ногам сдвиг пояса — ноги сходились в одну точку под телом.
+    // Предок, ставший костью, несёт свой трансформ сам (и его можно
+    // анимировать, если клип на него ссылается), а Root остаётся только у
+    // настоящего корня сцены.
+    {
+        std::vector<int> up(g.nodes.size(), -1);
+        for (int ni = 0; ni < (int)g.nodes.size(); ++ni)
+            for (int child : g.nodes[(size_t)ni].children)
+                if (child >= 0 && child < (int)g.nodes.size()) up[(size_t)child] = ni;
+        for (size_t k = 0; k < jointNodes.size(); ++k) {   // список растёт по ходу — это и нужно
+            const int p = up[(size_t)jointNodes[k]];
+            if (p < 0 || nodeToJoint.count(p)) continue;
+            nodeToJoint[p] = (int)jointNodes.size();
+            jointNodes.push_back(p);
+            invBind.emplace_back(1.0f);
+            invBindKnown.push_back(0);
+        }
+    }
     const int jointCount = (int)jointNodes.size();
     if (jointCount > kMaxBones) {
         LOG_WARN("Anim") << "SkinnedModel: костей " << jointCount << " > " << kMaxBones

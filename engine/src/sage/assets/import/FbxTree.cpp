@@ -1,4 +1,5 @@
 #include "sage/assets/import/FbxTree.h"
+#include "sage/assets/import/FbxAscii.h"
 #include "sage/assets/Pack.h"
 
 #include <algorithm>
@@ -317,11 +318,10 @@ bool ReadTree(const std::string& path, Node& root, std::string& err) {
 
     static const char kMagic[] = "Kaydara FBX Binary";
     if (bytes.size() < 27 || std::memcmp(bytes.data(), kMagic, sizeof(kMagic) - 1) != 0) {
-        // Текстовый FBX начинается с комментария «; FBX 6.1.0 project file».
-        // Ответ «формат не поддерживается» здесь бесполезен: человек видит .fbx
-        // и в списке поддерживаемых .fbx тоже видит.
-        err = "это ТЕКСТОВЫЙ FBX (старый формат). Пересохраните его двоичным: в "
-              "экспорте снимите галочку ASCII, либо переэкспортируйте в .glb";
+        // Текстовый FBX (Blockbench пишет только его) — тем же деревом записей.
+        const std::string text(bytes.begin(), bytes.end());
+        if (LooksLikeAsciiFbx(text.substr(0, 4096))) return ReadAsciiTree(text, root, err);
+        err = "файл не похож на FBX: нет ни двоичной подписи, ни текстового заголовка";
         return false;
     }
 

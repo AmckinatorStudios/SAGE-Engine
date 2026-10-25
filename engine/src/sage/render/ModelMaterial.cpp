@@ -131,6 +131,20 @@ void DetectCutoutFromAlbedo(ExtractedMaterial& m) {
     m.DoubleSided = true;
 }
 
+// РИСУНОК ПО ПИКСЕЛЯМ — ближайшим соседом. Сглаживание размывает текстуру
+// 64 x 64 (скин Blockbench, палитра low-poly) в мыло, и модель выглядит
+// «развёртка поехала». Правило то же, что у скелетных моделей
+// (SkinnedModel.cpp, makeTexture): мелкая картинка — рисунок по пикселям.
+// Явное слово файла (сэмплер glTF) сильнее догадки — см. ExtractGltfMaterial.
+bool IsPixelArtImage(int w, int h) { return w > 0 && h > 0 && w <= 128 && h <= 128; }
+
+void DetectPixelArt(ExtractedMaterial& m) {
+    if (m.NearestFilter || m.AlbedoMap.empty()) return;
+    int w = 0, h = 0, comp = 0;
+    if (sage::assets::vfs::ImageInfo(m.AlbedoMap, &w, &h, &comp) && IsPixelArtImage(w, h))
+        m.NearestFilter = true;
+}
+
 // Шероховатость из блеска Phong (Ns в .mtl). Формула — обратная той, по
 // которой её пишет 3D-редактор: Ns = (30·(1 − roughness))², то есть 0..900. Прежде
 // Ns не читался вовсе, и любой материал .obj получал шероховатость 0.5 — у
@@ -337,6 +351,19 @@ void ExtractGltfMaterial(const tinygltf::Model& model, const std::string& path,
     };
 
     out.AlbedoMap = wholeMap(pbr.baseColorTexture.index, "albedo");
+    // Сэмплер — часть материала: Blockbench и любой экспорт пиксельной графики
+    // пишут NEAREST, и сглаживать такую карту значит размыть рисунок. Сэмплер
+    // не задан — решает размер картинки, как у остальных форматов.
+    {
+        const int ti = pbr.baseColorTexture.index;
+        const int si = ti >= 0 && ti < (int)model.textures.size() ? model.textures[(size_t)ti].sampler : -1;
+        const int mag = si >= 0 && si < (int)model.samplers.size() ? model.samplers[(size_t)si].magFilter : -1;
+        if (mag == TINYGLTF_TEXTURE_FILTER_NEAREST) out.NearestFilter = true;
+        else if (mag < 0 && images.ImageOf(ti) >= 0) {
+            const tinygltf::Image& img = model.images[(size_t)images.ImageOf(ti)];
+            out.NearestFilter = IsPixelArtImage(img.width, img.height);
+        }
+    }
     out.NormalMap = wholeMap(m.normalTexture.index, "normal");
     out.EmissiveMap = wholeMap(m.emissiveTexture.index, "emissive");
     // glTF: metallic в B, roughness в G одной текстуры; occlusion — R своей
@@ -490,6 +517,7 @@ void ExtractObjMaterial(const fs::path& dir, const tinyobj::material_t& m, bool 
     // map_d не записан, а альбедо всё равно режет (кусты и цветы из того же
     // набора) — узнаём по самой картинке.
     DetectCutoutFromAlbedo(out);
+    DetectPixelArt(out);
 }
 
 void ExtractObj(const std::string& path, ExtractedMaterialSet& out) {
@@ -570,7 +598,9 @@ void ExtractFbx(const std::string& modelPath, ExtractedMaterialSet& set) {
         out.AlphaMode = m.AlphaMode;
         out.AlphaCutoff = m.AlphaCutoff;
         out.DoubleSided = m.DoubleSided;
+        out.NearestFilter = m.NearestFilter;
         DetectCutoutFromAlbedo(out);
+        DetectPixelArt(out);
         set.Materials.push_back(std::move(out));
     }
 }

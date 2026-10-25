@@ -74,6 +74,10 @@ struct ExtractedMaterial {
     // 0 — непрозрачный, 1 — отсечение по порогу (MASK), 2 — смешивание (BLEND).
     int AlphaMode = 0;
     float AlphaCutoff = 0.5f;
+    // Карты — ближайшим пикселем (чёткие квадраты), а не сглаживанием. Файл
+    // говорит это сэмплером (glTF magFilter = NEAREST); у форматов без
+    // сэмплера (.obj, FBX) — по размеру альбедо (см. DetectPixelArt).
+    bool NearestFilter = false;
     // Масштаб развёртки из KHR_texture_transform. Смещение и поворот движок
     // пока не выражает — о них говорится предупреждением, а не молчанием.
     glm::vec2 UVScale{1.0f, 1.0f};

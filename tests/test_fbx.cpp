@@ -157,11 +157,11 @@ TEST(Fbx_z_up_files_are_turned_into_engine_orientation) {
     CHECK_NEAR(diff, 0.0f, 1e-4);
 }
 
-TEST(Fbx_ascii_file_says_what_to_do_instead_of_just_failing) {
-    // Текстовый FBX (до 2013) здесь не разбирается — и ответ «формат не
-    // поддерживается» был бы издевательством: человек видит .fbx и в списке
-    // поддерживаемых .fbx тоже видит. Сообщение обязано называть ПРИЧИНУ и
-    // ДЕЙСТВИЕ.
+TEST(Fbx_empty_ascii_file_says_what_is_wrong) {
+    // Текстовый FBX теперь разбирается (Blockbench пишет только его, см.
+    // test_blockbench_formats.cpp). Но текст БЕЗ единой записи — это не
+    // модель, и ответ обязан сказать, что файл текстовый и в нём пусто, а не
+    // «формат не поддерживается».
     const std::string path = MakeFbx("sage_test_old.fbx", "--ascii");
     if (path.empty()) return;
     bool ok = false;
@@ -170,8 +170,7 @@ TEST(Fbx_ascii_file_says_what_to_do_instead_of_just_failing) {
     std::remove(path.c_str());
 
     CHECK_FALSE(ok);
-    CHECK_TRUE(err.find("ТЕКСТОВЫЙ") != std::string::npos);
-    CHECK_TRUE(err.find("glb") != std::string::npos || err.find("ASCII") != std::string::npos);
+    CHECK_TRUE(err.find("текстовый FBX") != std::string::npos);
 }
 
 TEST(Fbx_goes_through_the_same_door_as_every_other_model) {

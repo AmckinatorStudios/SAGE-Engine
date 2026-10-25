@@ -60,6 +60,8 @@ struct ImportedMaterial {
     int AlphaMode = 0;
     float AlphaCutoff = 0.5f;
     bool DoubleSided = false;
+    // Карты — ближайшим пикселем (сэмплер исходного файла, если он его несёт).
+    bool NearestFilter = false;
 };
 
 // Один объект сцены: геометрия + куда её поставить.

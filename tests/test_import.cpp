@@ -770,8 +770,10 @@ TEST(gltf_joint_numbers_are_local_to_their_own_skin) {
     CHECK_TRUE(fx.Ok);
     if (!fx.Ok) return;
 
-    // Скелет общий: кости обоих скинов на месте, по одной записи на узел.
-    CHECK_EQ((int)fx.Data.Skeleton.Joints.size(), 5);
+    // Скелет общий: кости обоих скинов на месте, по одной записи на узел, и
+    // ещё «armature» — предок костей, ставший костью (он двигает их своим
+    // трансформом, см. SkinnedModel.cpp, «предки костей — тоже кости»).
+    CHECK_EQ((int)fx.Data.Skeleton.Joints.size(), 6);
     const int a = fx.JointNamed("boneA");
     const int c = fx.JointNamed("boneC");
     CHECK_TRUE(a >= 0 && c >= 0);
