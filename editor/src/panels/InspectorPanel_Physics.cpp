@@ -273,11 +273,11 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
                 const RigidBodyComponent* body = reg.try_get<RigidBodyComponent>(obj.Entity());
                 if (col->Shape == sage::physics::ShapeType::Mesh && body &&
                     body->Type == sage::physics::BodyType::Dynamic)
-                    ImGui::TextDisabled("%s", T("A falling body uses the convex hull of the mesh"));
+                    EditorTheme::Hint(T("A falling body uses the convex hull of the mesh"));
                 else if (col->Shape == sage::physics::ShapeType::Mesh)
-                    ImGui::TextDisabled("%s", T("Exact triangles: for floors, walls and terrain"));
+                    EditorTheme::Hint(T("Exact triangles: for floors, walls and terrain"));
                 else
-                    ImGui::TextDisabled("%s", T("Convex wrap of the mesh: works for falling bodies"));
+                    EditorTheme::Hint(T("Convex wrap of the mesh: works for falling bodies"));
             } else if (col->Shape == sage::physics::ShapeType::Box) {
                 ImGui::DragFloat3(T("Half Extents"), &col->HalfExtents.x, 0.02f, 0.001f, 100.0f);
                 host.TrackLastImGuiItem();

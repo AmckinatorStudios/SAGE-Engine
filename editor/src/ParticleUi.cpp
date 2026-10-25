@@ -6,6 +6,7 @@
 #include <cstdio>
 
 #include "imgui.h"
+#include "EditorTheme.h"
 
 #include "Localization.h"
 #include "ui/ColorPicker.h"
@@ -446,7 +447,7 @@ bool DrawParticleEffect(ParticleEffect& fx, const ParticleUiHooks& h) {
         changed |= RangeF(T("Start rotation"), fx.StartRotation, 1.0f, -360.0f, 360.0f, "%.0f°", h);
         changed |= Color4(T("Start colour A"), fx.StartColorA, h);
         changed |= Color4(T("Start colour B"), fx.StartColorB, h);
-        ImGui::TextDisabled("%s", T("Each particle picks a colour between A and B."));
+        EditorTheme::Hint(T("Each particle picks a colour between A and B."));
         changed |= DragF(T("Gravity"), &fx.GravityScale, 0.01f, -10.0f, 10.0f, "%.2f g", h);
         changed |= DragF(T("Inherit emitter velocity"), &fx.InheritVelocity, 0.01f, -2.0f, 2.0f, "%.2f", h);
         const char* spaces[] = {T("World"), T("Local (moves with the object)")};
@@ -523,7 +524,7 @@ bool DrawParticleEffect(ParticleEffect& fx, const ParticleUiHooks& h) {
     // --- Силы ---
     if (Section(T("Forces"), &fx.UseForces, changed, h)) {
         changed |= Drag3(T("Constant force"), fx.Force, 0.02f, h);
-        ImGui::TextDisabled("%s", T("Up for buoyant smoke, sideways for a draft."));
+        EditorTheme::Hint(T("Up for buoyant smoke, sideways for a draft."));
         changed |= Drag3(T("Wind"), fx.Wind, 0.02f, h);
         changed |= DragF(T("Wind grip"), &fx.WindInfluence, 0.01f, 0.0f, 20.0f, "%.2f", h);
         changed |= DragF(T("Gusts"), &fx.Gustiness, 0.01f, 0.0f, 1.0f, "%.2f", h);
@@ -669,7 +670,7 @@ bool DrawParticleEffect(ParticleEffect& fx, const ParticleUiHooks& h) {
 
     // --- Дочерние эффекты ---
     if (Section(T("Sub-emitters"), nullptr, changed, h)) {
-        ImGui::TextDisabled("%s", T("Another effect file born where a particle is born, dies or hits."));
+        EditorTheme::Hint(T("Another effect file born where a particle is born, dies or hits."));
         int remove = -1;
         for (size_t i = 0; i < fx.SubEmitters.size(); ++i) {
             SubEmitter& s = fx.SubEmitters[i];

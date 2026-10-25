@@ -82,7 +82,7 @@ void DialogsPanel::Draw(EditorHost& host) {
             c.Mode = FileBrowser::PickMode::PickFolder;
             BrowseButton("newproj", c, m_projectDir, sizeof(m_projectDir));
         }
-        ImGui::TextDisabled("%s", T("Creates <Location>/<Name>/project.sageproj + scenes/ + assets/"));
+        EditorTheme::Hint(T("Creates <Location>/<Name>/project.sageproj + scenes/ + assets/"));
 
         // Шаблон — С ЧЕГО начинается проект. Пока выбора не было, каждый новый
         // проект начинался с девяти демо-объектов, которые первым делом
@@ -147,7 +147,7 @@ void DialogsPanel::Draw(EditorHost& host) {
             c.Mode = FileBrowser::PickMode::PickFolder;
             BrowseButton("openprojdir", c, m_openPath, sizeof(m_openPath));
         }
-        ImGui::TextDisabled("%s", T("Path to project.sageproj or to a project folder"));
+        EditorTheme::Hint(T("Path to project.sageproj or to a project folder"));
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
         if (ImGui::Button(T("Open"), ImVec2(120, 0))) {
             std::string err;
@@ -206,7 +206,7 @@ void DialogsPanel::Draw(EditorHost& host) {
 
         ImGui::TextUnformatted(project.Name().c_str());
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
-        ImGui::TextDisabled("%s", T("Player and project are packed into a folder ready to run. "
+        EditorTheme::Hint(T("Player and project are packed into a folder ready to run. "
                                     "All game files go into one encrypted game.sagepak."));
         ImGui::PopTextWrapPos();
 
@@ -237,11 +237,11 @@ void DialogsPanel::Draw(EditorHost& host) {
         }
 
         ImGui::SeparatorText(T("What goes in"));
+        // Состав сборки одинаков у любого проекта — в подсказку, а не списком в окне.
+        EditorTheme::Hint(T("Scenes, scripts, models, textures, sounds, materials, interfaces; engine shaders and fonts"));
         ImGui::BulletText("%s %s", T("Start scene:"),
                           project.StartScene().empty() ? T("main.sage, else the first by name")
                                                        : (project.StartScene() + ".sage").c_str());
-        ImGui::BulletText("%s", T("Scenes, scripts, models, textures, sounds, materials, interfaces"));
-        ImGui::BulletText("%s", T("Engine shaders and fonts"));
 
         // ПРЕДУПРЕЖДЕНИЕ ДО НАЖАТИЯ, А НЕ ОШИБКА ПОСЛЕ. Игры без сцены не
         // бывает: плеер открыл бы пустой экран, и человек, получивший такую
@@ -320,7 +320,7 @@ void DialogsPanel::Draw(EditorHost& host) {
             c.StartDir = host.CurrentProject().ScenesDir();
             BrowseButton("openscene", c, m_openPath, sizeof(m_openPath));
         }
-        ImGui::TextDisabled("%s", T("Path to a .sage file (or double-click in the Assets panel)"));
+        EditorTheme::Hint(T("Path to a .sage file (or double-click in the Assets panel)"));
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
         if (ImGui::Button(T("Open"), ImVec2(120, 0))) {
             if (host.LoadSceneFromFile(m_openPath)) ImGui::CloseCurrentPopup();

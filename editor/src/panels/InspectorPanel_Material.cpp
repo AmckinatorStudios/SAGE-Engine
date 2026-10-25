@@ -144,9 +144,26 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     DrawMaterialFields(host, material, pathStr, /*preview=*/true);
 }
 
+namespace {
+// Поле занимает всё, кроме места под самую длинную подпись редактора материала.
+struct MaterialFieldWidth {
+    MaterialFieldWidth() {
+        float label = 0.0f;
+        for (const char* s : {T("Emissive Strength"), T("Roughness"), T("Metallic"), T("Opacity")})
+            label = std::max(label, ImGui::CalcTextSize(s).x);
+        ImGui::PushItemWidth(-(label + ImGui::GetStyle().ItemInnerSpacing.x * 2.0f));
+    }
+    ~MaterialFieldWidth() { ImGui::PopItemWidth(); }
+};
+} // namespace
+
 void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<Material>& material,
                                         const std::string& pathStr, bool preview) {
     if (!material) return;
+    // ШИРИНА ПОЛЕЙ — ОТ САМОЙ ДЛИННОЙ ПОДПИСИ. По умолчанию ImGui отдаёт полю
+    // долю окна, а подпись справа получает остаток: в узком инспекторе
+    // «Сила свечения» обрезалась, и редактор материала выглядел сжатым.
+    MaterialFieldWidth widthScope;
     // Пути карт могли смениться выбором в диалоге «Обзор…» — пересборка карт
     // по слепку путей (шесть сравнений строк, если ничего не менялось).
     ResourceManager::Instance().RefreshMaterialTextures(*material);
@@ -212,12 +229,19 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     // в редакторе зажат в 0..1. Без множителя «свечение» оставалось бы просто
     // светлым цветом без ореола.
     ImGui::DragFloat(T("Emissive Strength"), &material->EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
+    // Рамка элемента включает подпись: вышла за край — подпись обрезана.
+    m_materialLabelsFit = ImGui::GetItemRectMax().x <=
+                          ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x + 0.5f;
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("%s", T("Emissive multiplier. Values above 1 produce a bloom halo."));
     }
 
     // PBR (metallic-roughness) — основной путь освещения (Cook-Torrance).
     ImGui::SeparatorText(T("PBR"));
+    // Справка по картам — при наведении на заголовок, а не двумя строками под ними.
+    EditorTheme::Hint(T("Normal: tangent-space (OpenGL). Metallic/Rough/AO use R channel."));
+    EditorTheme::Hint(T("Map value multiplies the factor above; Enter applies the path."));
+    EditorTheme::Hint(T("Edits apply live to every entity using this material."));
     ImGui::SliderFloat(T("Metallic"), &material->Metallic, 0.0f, 1.0f);
     ImGui::SliderFloat(T("Roughness"), &material->Roughness, 0.0f, 1.0f);
 
@@ -306,8 +330,6 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
                                       "of a wall is cheaper to move than to re-model."));
     }
 
-    ImGui::TextDisabled("%s", T("Normal: tangent-space (OpenGL). Metallic/Rough/AO use R channel."));
-    ImGui::TextDisabled("%s", T("Map value multiplies the factor above; Enter applies the path."));
 
     ImGui::SeparatorText(T("Transparency"));
     ImGui::SliderFloat(T("Opacity"), &material->Opacity, 0.0f, 1.0f);
@@ -350,7 +372,6 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
         if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
     }
 
-    ImGui::TextDisabled("%s", T("Edits apply live to every entity using this material."));
 
     // Правка видна сразу, а на диск попадает по «Сохранить»: о том, что в
     // файле ещё старое, говорит метка, иначе это узнают, только перезапустив
@@ -442,7 +463,7 @@ void InspectorPanel::DrawModelImportEditor(EditorHost& host) {
                                   std::to_string(updated) + ")");
         }
     }
-    ImGui::TextDisabled("%s", T("Baked into the mesh on load — affects editor and built game"));
+    EditorTheme::Hint(T("Baked into the mesh on load — affects editor and built game"));
 }
 
 // Материал модели — вместе с моделью.
@@ -733,10 +754,9 @@ void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& m
         if (mr.MaterialPtr->HasUnsavedChanges())
             ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", T("unsaved changes"));
         if (m_inlineMaterial == mr.MaterialPath) {
+            // Без отступа: он отнимал ширину у и без того узких полей.
             ImGui::PushID("inlineMaterial");
-            ImGui::Indent();
             DrawMaterialFields(host, mr.MaterialPtr, mr.MaterialPath, /*preview=*/false);
-            ImGui::Unindent();
             ImGui::PopID();
         }
     }
@@ -760,7 +780,7 @@ void InspectorPanel::DrawSubmeshMaterials(EditorHost& host, MeshRendererComponen
     const std::vector<sage::render::Submesh>& subs = mr.MeshPtr->Submeshes();
 
     ImGui::SeparatorText(T("Model parts"));
-    ImGui::TextDisabled("%s", T("Each part of the model has its own material. Empty means "
+    EditorTheme::Hint(T("Each part of the model has its own material. Empty means "
                                 "the object material above."));
 
     // --- «ИМПОРТИРОВАТЬ МАТЕРИАЛЫ МОДЕЛИ» -----------------------------------

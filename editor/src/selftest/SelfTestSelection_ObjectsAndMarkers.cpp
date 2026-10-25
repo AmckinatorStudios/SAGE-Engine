@@ -1,3 +1,4 @@
+#include "ObjectCatalog.h"
 #include "SelfTestCommon.h"
 
 bool EditorLayer::SelfTestObjectsAndMarkers() {
@@ -350,6 +351,24 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
                         LOG_ERROR("Editor") << "SELFTEST: новая камера смотрит не туда, куда вид редактора";
                         ok = false;
                     }
+                }
+            }
+            // «Создать потомка» под повёрнутым родителем: камера стоит в точке
+            // родителя, а смотрит всё так же по виду редактора — поворот
+            // каталога мировой, а не прибавка к повороту родителя.
+            if (ok) {
+                GameObject parent = m_scene->Get(CreateCatalogObject("shape.cube"));
+                parent.GetTransform().Position = {3.0f, 1.0f, -2.0f};
+                parent.GetTransform().Rotation = {20.0f, 90.0f, 10.0f};
+                GameObject cam = m_scene->Get(CreateCatalogObject("camera.game"));
+                sage::editor::objectcatalog::AttachAsChild(*m_scene, cam.Entity(), parent.Entity());
+                const glm::mat4 w = m_scene->WorldMatrix(cam.Entity());
+                const glm::vec3 fwd = glm::normalize(-glm::vec3(w[2]));
+                const glm::vec3 up = glm::normalize(glm::vec3(w[1]));
+                if (glm::dot(fwd, glm::normalize(m_camera.Front)) < 0.999f || std::abs(up.y) < 0.2f ||
+                    glm::length(glm::vec3(w[3]) - glm::vec3(3.0f, 1.0f, -2.0f)) > 1e-3f) {
+                    LOG_ERROR("Editor") << "SELFTEST: камера-потомок смотрит не по виду редактора";
+                    ok = false;
                 }
             }
         }

@@ -116,6 +116,11 @@ private:
                             const std::string& path, bool preview);
     // Какие материалы раскрыты для правки прямо в секции Mesh (по пути).
     std::string m_inlineMaterial;
+    bool m_materialLabelsFit = true;   // подписи полей материала видны целиком (самопроверка)
+public:
+    bool MaterialLabelsFit() const { return m_materialLabelsFit; }
+    void ForgetMaterialLabelsFit() { m_materialLabelsFit = false; }   // до следующей отрисовки полей
+private:
     // --- ПРОИГРЫВАТЕЛЬ ЗВУКОВОГО ФАЙЛА --------------------------------------
     //
     // Выбрал .wav в Assets — слышишь его. До этого послушать файл можно было

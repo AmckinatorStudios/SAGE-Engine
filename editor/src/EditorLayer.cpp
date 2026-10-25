@@ -680,6 +680,7 @@ void EditorLayer::OnRender() {
     CheckUiInspectorFrame();
     CheckEnvironmentFrame();
     CheckTweenFrame();
+    CheckCreateDialogFrame();
     CheckLuaTestsFrame();
 
     TakeAutoScreenshot(app);

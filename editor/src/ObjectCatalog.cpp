@@ -6,6 +6,9 @@
 
 #include "EditorIcons.h"
 #include "Localization.h"
+#include "sage/scene/Components.h"
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace sage::editor::objectcatalog {
 
@@ -196,6 +199,26 @@ const char* DrawMenu() {
         ImGui::EndMenu();
     }
     return picked;
+}
+
+void AttachAsChild(Scene& scene, entt::entity child, entt::entity parent) {
+    if (!scene.Registry().valid(child) || !scene.Registry().all_of<Transform>(child)) return;
+    Transform& tr = scene.Registry().get<Transform>(child);
+    const bool oriented = tr.Rotation != glm::vec3(0.0f);
+    const glm::mat4 worldRot = sage::RotationMatrixFromEulerDegrees(tr.Rotation);
+    scene.SetParent(child, parent);
+    tr.Position = glm::vec3(0.0f);
+    if (!oriented || parent == entt::null) return;
+    // Нужная мировая матрица: точка родителя, поворот — каталога, масштаб 1.
+    const glm::mat4 parentWorld = scene.WorldMatrix(parent);
+    glm::mat4 want = worldRot;
+    want[3] = parentWorld[3];
+    const glm::vec3 keepScale = tr.Scale;
+    tr.SetFromMatrix(glm::inverse(parentWorld) * want);
+    // Масштаб объекта — его собственный (у камеры его нет вовсе): разложение
+    // отдало бы обратный масштабу родителя.
+    tr.Scale = keepScale;
+    tr.Position = glm::vec3(0.0f);
 }
 
 } // namespace sage::editor::objectcatalog

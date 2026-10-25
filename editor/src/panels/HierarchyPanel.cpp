@@ -366,10 +366,9 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
                 const int made = host.CreateCatalogObject(pick);   // снимок для отмены — внутри
                 GameObject child = scene.Get(made);
                 if (child.Valid()) {
-                    scene.SetParent(child.Entity(), e);
                     // На месте родителя: каталог ставит новое по виду камеры
                     // редактора, а потомка ждут там, где родитель.
-                    child.GetTransform().Position = glm::vec3(0.0f);
+                    sage::editor::objectcatalog::AttachAsChild(scene, child.Entity(), e);
                     host.Selection().SetPrimary(child.Id());
                 }
             }

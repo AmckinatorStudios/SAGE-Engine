@@ -1,6 +1,7 @@
 #include <cstdarg>
 #include "../PanelWindows.h"
 #include "InspectorPanel.h"
+#include "../EditorTheme.h"
 #include "sage/render/ParticleEffectIO.h"
 #include "sage/core/Paths.h"
 
@@ -257,11 +258,10 @@ void InspectorPanel::DrawSectionHeader(EditorHost& host, const char* icon, const
     ImGui::TextUnformatted(name.c_str());
     ImGui::SameLine();
     ImGui::TextDisabled("(%s)", kind);
+    // Что это за вещь — при наведении на её тип: строкой под заголовком она
+    // не помещалась в узкий инспектор и обрезалась на полуслове.
+    if (!subtitle.empty()) EditorTheme::Hint(subtitle.c_str());
     DrawLockButton(host);
-    if (!subtitle.empty()) {
-        ImGui::TextDisabled("%s", subtitle.c_str());
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", subtitle.c_str());
-    }
     ImGui::Separator();
     ImGui::Spacing();
 }

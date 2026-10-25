@@ -2832,6 +2832,8 @@
     "Half": "Половина",
     "Half is about four times cheaper; edges stay clean, the haze gets a little softer": "Половина примерно вчетверо дешевле; края остаются чистыми, дымка чуть мягче",
     "Background Frame Cap (0=off)": "Лимит кадров в фоне (0 — выкл.)",
-    "Frames per second while the game window is not in focus: frames nobody sees still load the GPU": "Кадров в секунду, пока окно игры не в фокусе: кадры, которых никто не видит, тоже нагружают видеокарту"
+    "Frames per second while the game window is not in focus: frames nobody sees still load the GPU": "Кадров в секунду, пока окно игры не в фокусе: кадры, которых никто не видит, тоже нагружают видеокарту",
+    "Scenes, scripts, models, textures, sounds, materials, interfaces; engine shaders and fonts": "Сцены, скрипты, модели, текстуры, звуки, материалы, интерфейсы; шейдеры и шрифты движка",
+    "Post processing is a component": "Обработка кадра — это компонент"
   }
 }

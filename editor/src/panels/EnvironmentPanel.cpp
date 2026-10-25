@@ -89,12 +89,16 @@ void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvir
     ImGui::TextDisabled(T("Now: %s (sun %.0f° above the horizon)"), phase, elevationDeg);
     const NameComponent* name = scene.Registry().try_get<NameComponent>(sunEntity);
     const IdComponent* id = scene.Registry().try_get<IdComponent>(sunEntity);
-    if (envData.Cycle.Enabled)
-        ImGui::TextDisabled(T("The cycle turns the object \"%s\""), name ? name->Name.c_str() : "?");
-    else
-        ImGui::TextDisabled(T("Time of day = rotation of the object \"%s\""), name ? name->Name.c_str() : "?");
+    // Какой объект — солнце, говорит подсказка кнопки: второй строкой рядом с
+    // кнопкой она выталкивала «Выбрать» за край узкой панели.
     ImGui::SameLine();
     if (ImGui::Button(T("Select"))) host.Selection().SetPrimary(id ? id->Id : 0);
+    char tip[256];
+    std::snprintf(tip, sizeof(tip),
+                  envData.Cycle.Enabled ? T("The cycle turns the object \"%s\"")
+                                        : T("Time of day = rotation of the object \"%s\""),
+                  name ? name->Name.c_str() : "?");
+    EditorTheme::Hint(tip);
 }
 
 // --- Особые виджеты, отмеченные в схеме как Custom ------------------------------

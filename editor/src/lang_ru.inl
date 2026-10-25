@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2832.
+// Язык: Русский. Строк: 2834.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -3588,6 +3588,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Пост-обработка"},
     {"Post processing is a camera component: select the camera and add \"Post Processing\" in the Inspector.",
      "Пост-обработка — компонент камеры: выберите камеру и добавьте «Пост-обработка» в инспекторе."},
+    {"Post processing is a component",
+     "Обработка кадра — это компонент"},
     {"Post processing is a component: on a camera it processes that camera, on any other object — every camera of the scene. Add \"Post Processing\" in the Inspector.",
      "Пост-обработка — это компонент: на камере он обрабатывает её кадр, на любом другом объекте — все камеры сцены. Добавьте «Пост-обработка» в Инспекторе."},
     {"Post-Process",
@@ -4176,6 +4178,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сцены (*.sage)"},
     {"Scenes, scripts, models, textures, sounds, materials, interfaces",
      "Сцены, скрипты, модели, текстуры, звуки, материалы, интерфейсы"},
+    {"Scenes, scripts, models, textures, sounds, materials, interfaces; engine shaders and fonts",
+     "Сцены, скрипты, модели, текстуры, звуки, материалы, интерфейсы; шейдеры и шрифты движка"},
     {"Screen",
      "Экран"},
     {"Screen Flares",
