@@ -579,7 +579,7 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, entt::entity entity,
             // Анимированному объекту статическая копия модели не нужна: его
             // рисует скелетный проход, а вторая копия геометрии просто заняла
             // бы видеопамять. Материал модели при этом всё равно подбираем.
-            mr.MeshPtr = animated ? nullptr : ResourceManager::Instance().GetModel(mr.Ref.path);
+            mr.MeshPtr = animated ? nullptr : ResourceManager::Instance().GetModel(mr.Ref.path, mr.Ref.part);
             // GetModel сам логирует причину и отдаёт nullptr — сообщаем об
             // этом ЗДЕСЬ, в панели: строчку в консоли легко не заметить, а
             // «модель не появилась» без объяснения выглядит как поломка

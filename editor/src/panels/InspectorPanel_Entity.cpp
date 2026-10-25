@@ -724,7 +724,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         if (MeshRendererComponent* mesh = reg.try_get<MeshRendererComponent>(obj.Entity())) {
             if (mesh->Ref.type == MeshRef::Type::Model && !mesh->Ref.path.empty() &&
                 !mesh->MeshPtr) {
-                mesh->MeshPtr = ResourceManager::Instance().GetModel(mesh->Ref.path);
+                mesh->MeshPtr = ResourceManager::Instance().GetModel(mesh->Ref.path, mesh->Ref.part);
             }
         }
     }

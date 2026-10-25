@@ -731,14 +731,24 @@ bool EntityWorldBounds(Scene& scene, entt::entity e, glm::vec3& lo, glm::vec3& h
 
 bool EditorLayer::SelectionBounds(glm::vec3& outMin, glm::vec3& outMax) {
     bool any = false;
+    // ВМЕСТЕ С ПОТОМКАМИ: модель, поставленная иерархией, — это пустой корень
+    // и части под ним. По одному корню «показать выделенное» подводило камеру
+    // вплотную к его точке, и в кадр попадал кусок ноги.
     for (int id : m_selection.All()) {
         GameObject o = m_scene->Get(id);
         if (!o.Valid()) continue;
-        glm::vec3 lo, hi;
-        if (!EntityWorldBounds(*m_scene, o.Entity(), lo, hi)) continue;
-        outMin = any ? glm::min(outMin, lo) : lo;
-        outMax = any ? glm::max(outMax, hi) : hi;
-        any = true;
+        std::vector<entt::entity> stack{o.Entity()};
+        while (!stack.empty()) {
+            const entt::entity e = stack.back();
+            stack.pop_back();
+            glm::vec3 lo, hi;
+            if (EntityWorldBounds(*m_scene, e, lo, hi)) {
+                outMin = any ? glm::min(outMin, lo) : lo;
+                outMax = any ? glm::max(outMax, hi) : hi;
+                any = true;
+            }
+            for (entt::entity child : m_scene->ChildrenOf(e)) stack.push_back(child);
+        }
     }
     return any;
 }

@@ -308,7 +308,8 @@ void CollectPrimitive(const tinygltf::Model& gltf, const tinygltf::Primitive& pr
 }
 
 void CollectNode(const tinygltf::Model& gltf, int nodeIndex, const glm::mat4& parent,
-                 std::vector<bool>& visited, ImportedScene& out, const std::vector<glm::mat4>& worlds) {
+                 std::vector<bool>& visited, ImportedScene& out, const std::vector<glm::mat4>& worlds,
+                 int parentGroup = -1) {
     if (nodeIndex < 0 || nodeIndex >= (int)gltf.nodes.size()) return;
     // Узел, встреченный дважды, — это либо кривой файл, либо цикл в дереве.
     // Без этой отметки цикл означал бы бесконечную рекурсию на загрузке модели.
@@ -317,6 +318,13 @@ void CollectNode(const tinygltf::Model& gltf, int nodeIndex, const glm::mat4& pa
 
     const tinygltf::Node& node = gltf.nodes[(size_t)nodeIndex];
     const glm::mat4 world = parent * NodeLocalMatrix(node);
+
+    // Узел — в дерево, даже пустой: пустышка «Пояс» держит руки и голову, и
+    // без неё иерархия в сцене потеряла бы точку, вокруг которой они вращаются.
+    const int group = (int)out.Groups.size();
+    out.Groups.push_back(ImportedGroup{node.name.empty() ? "Node " + std::to_string(nodeIndex) : node.name,
+                                       parentGroup, world});
+    const size_t firstNode = out.Nodes.size();
 
     if (node.mesh >= 0 && node.mesh < (int)gltf.meshes.size()) {
         // У СКИНОВОГО МЕША ТРАНСФОРМ УЗЛА НЕ ПРИМЕНЯЕТСЯ — так требует glTF, и
@@ -341,7 +349,8 @@ void CollectNode(const tinygltf::Model& gltf, int nodeIndex, const glm::mat4& pa
                              skinned ? &skinMats : nullptr);
         }
     }
-    for (int child : node.children) CollectNode(gltf, child, world, visited, out, worlds);
+    for (size_t k = firstNode; k < out.Nodes.size(); ++k) out.Nodes[k].Group = group;
+    for (int child : node.children) CollectNode(gltf, child, world, visited, out, worlds, group);
 }
 
 } // namespace

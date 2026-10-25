@@ -64,17 +64,35 @@ struct ImportedMaterial {
     bool NearestFilter = false;
 };
 
+// Узел ДЕРЕВА исходного файла: «пояс», у него «голова» и «руки». Отдельно от
+// ImportedNode, потому что узел дерева не обязан нести геометрию (пустышки,
+// группы), а геометрия одного узла бывает разбита на несколько ImportedNode
+// (по примитиву или материалу).
+//
+// По этому дереву модель ставится в сцену ИЕРАРХИЕЙ ОБЪЕКТОВ (см.
+// editor/src/ModelHierarchy.h): у каждого узла — свой объект со своим
+// именем и местом, и голову персонажа можно повернуть, не разбирая модель.
+struct ImportedGroup {
+    std::string Name;
+    int Parent = -1;             // в ImportedScene::Groups; -1 — корень
+    glm::mat4 World{1.0f};       // мировая матрица узла (в системе движка)
+};
+
 // Один объект сцены: геометрия + куда её поставить.
 struct ImportedNode {
     std::string Name;
     sage::render::MeshData Mesh;
     glm::mat4 Transform{1.0f};
     int MaterialIndex = -1;      // в ImportedScene::Materials; -1 — нет
+    int Group = -1;              // узел дерева, которому принадлежит геометрия; -1 — корень
 };
 
 struct ImportedScene {
     std::vector<ImportedNode> Nodes;
     std::vector<ImportedMaterial> Materials;
+    // Дерево узлов файла. Пусто у форматов, которые дерева не несут: такая
+    // модель ставится одним объектом, как раньше.
+    std::vector<ImportedGroup> Groups;
     // Свободные заметки импортёра для лога и панели импорта: «взято 3 объекта из
     // 5, два пропущены — кривые Безье». Молчаливая потеря данных хуже отказа.
     std::vector<std::string> Warnings;
@@ -94,6 +112,12 @@ struct ImportedScene {
     // четырнадцать материалов — обычное дело, и сорок вызовов отрисовки вместо
     // четырнадцати были бы платой ни за что.
     sage::render::MeshData Flatten() const;
+    // Геометрия ОДНОГО узла дерева в его собственных координатах (мировая
+    // матрица узла снята): ровно то, что рисует объект этого узла в иерархии.
+    // Подмеши и материалы — как у Flatten.
+    sage::render::MeshData FlattenGroup(int group) const;
+    // Мировая матрица узла -> локальная относительно родителя.
+    glm::mat4 GroupLocal(int group) const;
 };
 
 // Импортёр: путь -> сцена. err заполняется при false.

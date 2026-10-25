@@ -51,6 +51,10 @@ namespace ModelLoader {
 
         // --- Анимация --------------------------------------------------------
         bool ImportAnimation = true;             // скелет и клипы, если они есть
+        // Ставить в сцену ИЕРАРХИЕЙ объектов (узел файла — объект), а не
+        // одним куском. Модели со скелетом ставятся целиком всегда: их части
+        // двигают кости, а не объекты.
+        bool Hierarchy = true;
 
         // Трогают ли настройки геометрию вообще — без этого загрузка не
         // тратит время на пересчёты.
@@ -101,6 +105,23 @@ namespace ModelLoader {
     // которому нужны треугольники модели для трассировки и лайтмап-развёртки.
     sage::render::MeshData LoadMeshData(const std::string& path);
 
+    // --- МОДЕЛЬ ДЕРЕВОМ -------------------------------------------------------
+    //
+    // Модель из нескольких узлов (персонаж Blockbench: пояс, голова, руки,
+    // ноги) ставится в сцену иерархией объектов, у каждого — геометрия СВОЕГО
+    // узла (см. editor/src/ModelHierarchy.h). Здесь — то, что для этого нужно
+    // движку: дерево узлов и меш одного узла.
+    //
+    // rootMatrix — настройки импорта (.sageimport: масштаб, поворот, сдвиг,
+    // центрирование) одной матрицей: в иерархии их несёт корневой объект, а не
+    // вершины каждой части — иначе каждая часть центрировалась бы сама по себе.
+    bool LoadModelTree(const std::string& path, sage::assets::ImportedScene& scene,
+                       glm::mat4& rootMatrix, std::string& err);
+    // Геометрия узла group в его собственных координатах. Бросает
+    // std::runtime_error, если узла нет (модель переэкспортировали иначе).
+    sage::render::MeshData LoadMeshPartData(const std::string& path, int group);
+    std::shared_ptr<Mesh> LoadMeshPart(const std::string& path, int group, bool keepCpuData = false);
+
     // Поддерживается ли расширение файла (для панели Assets и подсказок).
     bool IsSupportedModel(const std::string& path);
 
@@ -111,9 +132,14 @@ namespace ModelLoader {
     // materialsOut — список материалов .mtl В ПОРЯДКЕ ФАЙЛА, если он нужен.
     // Порядок здесь не деталь: MeshData::Submeshes[i].Material — это индекс
     // именно в нём (и в том же порядке отдаёт материалы ExtractMaterials).
+    // objectOfSubmesh — разложить грани ещё и по ОБЪЕКТАМ файла («o Голова»):
+    // подмеш на пару «объект, материал», имя объекта — в этот список (по
+    // подмешу). Нужно дереву модели (ImportedScene::Groups): без него .obj из
+    // Blockbench ставился в сцену одним куском вместо головы, рук и ног.
     sage::render::MeshData LoadObjData(
         const std::string& path,
-        std::vector<sage::assets::ImportedMaterial>* materialsOut = nullptr);
+        std::vector<sage::assets::ImportedMaterial>* materialsOut = nullptr,
+        std::vector<std::string>* objectOfSubmesh = nullptr);
 
     // Геометрия glTF/GLB в ОДНОМ меше — но С ГРАНИЦАМИ по материалам.
     //

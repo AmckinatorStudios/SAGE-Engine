@@ -124,7 +124,8 @@ ModelMaterialImportResult& SetupModelAnimation(const Project& project, entt::reg
 // («поставил меш — не забудь ещё вот это») здесь уже дважды не удержалось.
 ModelMaterialImportResult SetEntityMesh(const Project& project, entt::registry& registry,
                                         entt::entity entity, MeshRef::Type type,
-                                        const std::string& path, std::shared_ptr<Mesh> mesh);
+                                        const std::string& path, std::shared_ptr<Mesh> mesh,
+                                        int part = -1);
 
 // --- КЛИПЫ АНИМАЦИИ В ОТДЕЛЬНЫЕ ФАЙЛЫ ---------------------------------------
 //

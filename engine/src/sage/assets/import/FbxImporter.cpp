@@ -266,9 +266,37 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
         return index;
     };
 
+    // --- Дерево узлов Model — для постановки в сцену иерархией ------------
+    //
+    // Мировая матрица узла переводится в систему движка сопряжением с
+    // единицами (U * W * U⁻¹): вершины уже приведены BuildCorners (U * W * v),
+    // и локальная геометрия узла тогда выходит в метрах, а сдвиги узлов —
+    // в тех же метрах.
+    std::unordered_map<int64_t, int> groupOf;
+    {
+        const glm::mat4 u = units.Matrix();
+        const glm::mat4 uInv = glm::inverse(u);
+        std::vector<int64_t> order;
+        for (const Node& n : objects->Children) {
+            if (n.Name != "Model" || n.Props.empty()) continue;
+            const int64_t uid = (int64_t)n.Props[0].Number;
+            if (!models.count(uid) || groupOf.count(uid)) continue;
+            groupOf[uid] = (int)out.Groups.size();
+            out.Groups.push_back(ImportedGroup{models[uid].Name, -1, u * worldOf(uid) * uInv});
+            order.push_back(uid);
+        }
+        for (int64_t uid : order) {
+            auto p = parentOf.find(uid);
+            if (p == parentOf.end()) continue;
+            auto g = groupOf.find(p->second);
+            if (g != groupOf.end()) out.Groups[(size_t)groupOf[uid]].Parent = g->second;
+        }
+    }
+
     size_t geometryIndex = 0;
     for (const Node& n : objects->Children) {
         if (n.Name != "Geometry") continue;
+        int ownerGroup = -1;
         glm::mat4 xform(1.0f);
         std::string nodeName;
         const std::vector<int64_t>* modelMaterials = nullptr;
@@ -277,6 +305,7 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
             if (owner != parentOf.end()) {
                 auto mi = models.find(owner->second);
                 if (mi != models.end()) {
+                    if (auto g = groupOf.find(owner->second); g != groupOf.end()) ownerGroup = g->second;
                     xform = worldOf(owner->second) * mi->second.Geometric;
                     nodeName = mi->second.Name;
                     auto mats = materialsOfModel.find(owner->second);
@@ -309,6 +338,7 @@ bool ImportFbx(const std::string& path, ImportedScene& out, std::string& err) {
             ImportedNode node;
             node.Name = used.size() > 1 ? baseName + "#" + std::to_string(local) : baseName;
             node.Mesh = BuildMesh(corners, local);
+            node.Group = ownerGroup;
             if (modelMaterials && !modelMaterials->empty()) {
                 const size_t k = local >= 0 && (size_t)local < modelMaterials->size()
                                      ? (size_t)local : 0;

@@ -1307,6 +1307,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
             // теряет — хранить их было бы обещанием, что они на что-то влияют.
             j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
             SaveAssetRef(j["mesh"], "path", mr.Ref.path);
+            if (mr.Ref.part >= 0) j["mesh"]["part"] = mr.Ref.part;
             SaveAssetRef(j, "material", mr.MaterialPath);
             // Материалы подмешей — массивом, по слоту на элемент разметки меша.
             // Пишется, только если слоты есть: у одноматериального объекта пустой
@@ -1467,6 +1468,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("mesh")) {
             mr.Ref.type = MeshTypeFromString(j["mesh"].value("type", "none"));
             mr.Ref.path = LoadAssetRef(j["mesh"], "path");
+            mr.Ref.part = j["mesh"].value("part", -1);
         }
 
         if (j.contains("decal")) {
@@ -1638,7 +1640,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             // персонажей это десяток лишних копий геометрии, и заметить их
             // нечем: картинка правильная, просто памяти вдвое больше.
             const bool animated = obj.Registry()->all_of<AnimationComponent>(obj.Entity());
-            mr.MeshPtr = animated ? nullptr : ResourceManager::Instance().GetModel(mr.Ref.path);
+            mr.MeshPtr = animated ? nullptr : ResourceManager::Instance().GetModel(mr.Ref.path, mr.Ref.part);
         } else {
             // Примитивы (Cube/Sphere/Plane/Cylinder/Cone) — из кэша; None -> nullptr.
             mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type);

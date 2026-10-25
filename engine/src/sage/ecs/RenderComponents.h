@@ -37,9 +37,13 @@ struct MeshRef {
     enum class Type { None, Cube, Sphere, Plane, Cylinder, Cone, Capsule, Model };
     Type type = Type::None;
     std::string path; // используется только при Type::Model
+    // ЧАСТЬ модели — номер узла её дерева (ImportedScene::Groups): объект
+    // иерархии, поставленной из модели, рисует только свой узел (голову,
+    // руку), а не всю модель. -1 — модель целиком (как раньше).
+    int part = -1;
 
     bool operator==(const MeshRef& other) const {
-        return type == other.type && path == other.path;
+        return type == other.type && path == other.path && part == other.part;
     }
 };
 

@@ -37,6 +37,29 @@ size_t ImportedScene::TotalTriangles() const {
     return n;
 }
 
+sage::render::MeshData ImportedScene::FlattenGroup(int group) const {
+    // Подмножество узлов этой группы, с мировой матрицей группы, вынесенной за
+    // скобки: Flatten сам разложит их по материалам, развернёт обход у
+    // зеркальных и пересчитает нормали — второй копии этих правил не нужно.
+    ImportedScene part;
+    const glm::mat4 inv =
+        group >= 0 && group < (int)Groups.size() ? glm::inverse(Groups[(size_t)group].World) : glm::mat4(1.0f);
+    for (const ImportedNode& n : Nodes) {
+        if (n.Group != group) continue;
+        ImportedNode copy = n;
+        copy.Transform = inv * n.Transform;
+        part.Nodes.push_back(std::move(copy));
+    }
+    return part.Flatten();
+}
+
+glm::mat4 ImportedScene::GroupLocal(int group) const {
+    if (group < 0 || group >= (int)Groups.size()) return glm::mat4(1.0f);
+    const ImportedGroup& g = Groups[(size_t)group];
+    if (g.Parent < 0 || g.Parent >= (int)Groups.size()) return g.World;
+    return glm::inverse(Groups[(size_t)g.Parent].World) * g.World;
+}
+
 sage::render::MeshData ImportedScene::Flatten() const {
     sage::render::MeshData out;
 
@@ -206,17 +229,29 @@ bool ImportObj(const std::string& path, ImportedScene& out, std::string& err) {
         // по material_id), поэтому здесь остаётся разложить её обратно по узлам:
         // по узлу на материал, чтобы Flatten() собрал ту же разметку, что и у
         // остальных форматов.
-        sage::render::MeshData data = ModelLoader::LoadObjData(path, &out.Materials);
+        std::vector<std::string> objects;
+        sage::render::MeshData data = ModelLoader::LoadObjData(path, &out.Materials, &objects);
         if (data.Empty()) {
             err = "в файле нет геометрии: " + path;
             return false;
         }
 
         const std::string stem = std::filesystem::path(path).stem().string();
-        for (const sage::render::Submesh& sub : data.SubmeshesOrWhole()) {
+        // Объекты файла — узлы дерева (плоского: у .obj нет родителей, и
+        // вершины уже в общих координатах — мировая матрица узла единичная).
+        std::unordered_map<std::string, int> groupOf;
+        const std::vector<sage::render::Submesh> subs = data.SubmeshesOrWhole();
+        for (size_t si = 0; si < subs.size(); ++si) {
+            const sage::render::Submesh& sub = subs[si];
+            const std::string object = si < objects.size() ? objects[si] : std::string();
             ImportedNode node;
-            node.Name = sub.Name.empty() ? stem : sub.Name;
+            node.Name = !object.empty() ? object : (sub.Name.empty() ? stem : sub.Name);
             node.MaterialIndex = sub.Material;
+            if (!object.empty()) {
+                auto [it, fresh] = groupOf.emplace(object, (int)out.Groups.size());
+                if (fresh) out.Groups.push_back(ImportedGroup{object, -1, glm::mat4(1.0f)});
+                node.Group = it->second;
+            }
             // Вершины части — только те, на которые она ссылается: узел обязан
             // быть самодостаточным, иначе «узел» здесь означал бы не объект, а
             // окно в чужой буфер.

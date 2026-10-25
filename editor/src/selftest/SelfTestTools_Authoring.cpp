@@ -359,7 +359,7 @@ bool EditorLayer::SelfTestToolsAuthoring() {
         MeshRendererComponent& mmr = modelObj.Renderer();
         mmr.Ref.type = MeshRef::Type::Model;
         mmr.Ref.path = objPath.string();
-        mmr.MeshPtr = ResourceManager::Instance().GetModel(mmr.Ref.path);
+        mmr.MeshPtr = ResourceManager::Instance().GetModel(mmr.Ref.path, mmr.Ref.part);
         if (!mmr.MeshPtr) {
             LOG_ERROR("Editor") << "SELFTEST: модель не загрузилась: " << mmr.Ref.path;
             ok = false;

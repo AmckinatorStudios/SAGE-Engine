@@ -7,6 +7,7 @@
 
 #include "sage/assets/import/Importer.h"
 #include "sage/render/ModelData.h"
+#include "sage/render/ModelLoader.h"
 #include "sage/render/ModelMaterial.h"
 #include "sage/render/SkinnedModel.h"
 
@@ -135,4 +136,37 @@ TEST(blockbench_pixel_texture_is_taken_by_nearest) {
         CHECK_TRUE(anyTextured);
     }
     fs::remove_all(dir, ec);
+}
+
+TEST(blockbench_tree_parts_add_up_to_the_whole_model) {
+    // Дерево узлов (для постановки иерархией): части в СВОИХ координатах,
+    // поставленные цепочкой локальных матриц, обязаны сложиться ровно в ту же
+    // модель, что и целиком.
+    for (const char* f : {"model.gltf", "model.fbx", "model.obj"}) {
+        ImportedScene scene;
+        glm::mat4 root(1.0f);
+        std::string err;
+        CHECK_TRUE(ModelLoader::LoadModelTree(Fixture(f), scene, root, err));
+        CHECK_TRUE(scene.Groups.size() >= 12);
+        bool head = false;
+        for (const ImportedGroup& g : scene.Groups) head = head || g.Name == "Head" || g.Name == "Head_1";
+        CHECK_TRUE(head);
+        glm::vec3 lo(1e9f), hi(-1e9f);
+        int parts = 0;
+        for (int g = 0; g < (int)scene.Groups.size(); ++g) {
+            const sage::render::MeshData part = scene.FlattenGroup(g);
+            if (part.Empty()) continue;
+            ++parts;
+            glm::mat4 w = scene.GroupLocal(g);
+            for (int p = scene.Groups[(size_t)g].Parent; p >= 0; p = scene.Groups[(size_t)p].Parent)
+                w = scene.GroupLocal(p) * w;
+            for (const Vertex& v : part.Vertices) {
+                const glm::vec3 q = glm::vec3(root * w * glm::vec4(v.Position, 1.0f));
+                lo = glm::min(lo, q);
+                hi = glm::max(hi, q);
+            }
+        }
+        CHECK_EQ(parts, 12);
+        CheckBounds(lo, hi);
+    }
 }
