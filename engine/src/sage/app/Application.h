@@ -32,7 +32,6 @@ struct AppConfig {
     int FrameCap = 0; // 0 — без ограничения
     int BackgroundFrameCap = 30; // кадров в секунду, пока окно не в фокусе (0 — как в фокусе)
     int Msaa = 0;     // сглаживание экранного буфера (GLFW_SAMPLES)
-    CursorLockMode CursorLock = CursorLockMode::Auto; // способ захвата курсора
 
     // --- Многопоточность (JobSystem) ---
     int WorkerThreads = 0;           // 0 — авто (аппаратные потоки − 1)
@@ -45,7 +44,6 @@ struct AppConfig {
         a.Mode = cfg.Mode; a.Resizable = cfg.Resizable; a.VSync = cfg.VSync;
         a.FrameCap = cfg.FrameCap; a.Msaa = cfg.Msaa;
         a.BackgroundFrameCap = cfg.BackgroundFrameCap;
-        a.CursorLock = cfg.CursorLock;
         a.Backend = cfg.Backend;
         a.WorkerThreads = cfg.WorkerThreads; a.MultithreadedRender = cfg.MultithreadedRender;
         return a;

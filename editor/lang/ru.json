@@ -2815,8 +2815,6 @@
     "Auto": "Авто",
     "System": "Системный",
     "Software": "Программный",
-    "Cursor Lock": "Захват курсора",
-    "How a captured cursor is held. Software: the engine returns it to the window centre every frame — use it if the hidden cursor drifts. Auto switches to Software by itself when the system keeps dropping the capture": "Как держится захваченный курсор. Программный: движок каждый кадр возвращает его в центр окна — выберите, если спрятанный курсор гуляет. Авто сам переходит на программный, если система раз за разом сбрасывает захват",
     "Area (panel)": "Площадной (панель)",
     "Area light": "Площадной свет",
     "Glowing panel: window, screen, softbox — soft light and shaped highlights": "Светящаяся панель: окно, экран, софтбокс — мягкий свет и блик её формы",

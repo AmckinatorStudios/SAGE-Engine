@@ -2939,6 +2939,248 @@ log = sage.core.log
 logError = sage.core.logError
 ---@type fun(...): any
 logWarn = sage.core.logWarn
+-- --- Процедурная генерация в стиле SAGE (ScriptApi_ProcGen.cpp) ----------
+---Цвет из трёх долей 0..1.
+---@param r number
+---@param g number
+---@param b number
+---@return Vec3
+function rgb(r, g, b) end
+
+---Серый цвет яркости v (0..1).
+---@param v number
+---@return Vec3
+function gray(v) end
+
+---Шум Перлина в [-1, 1]. z можно не давать.
+---@param x number
+---@param y? number
+---@param z? number
+---@return number
+function perlin(x, y, z) end
+
+---Симплекс-шум в [-1, 1].
+---@param x number
+---@param y? number
+---@param z? number
+---@return number
+function simplex(x, y, z) end
+
+---Value-шум в [-1, 1]: мягче, «облачнее» градиентного.
+---@param x number
+---@param y? number
+---@param z? number
+---@return number
+function value_noise(x, y, z) end
+
+---Клеточный шум: расстояние до ближайшей точки, до второй и номер клетки.
+---@param x number
+---@param y? number
+---@param z? number
+---@return number f1
+---@return number f2
+---@return number cell
+function worley(x, y, z) end
+
+---Фрактальный шум (несколько слоёв Перлина) в [-1, 1].
+---@param x number
+---@param y? number
+---@param z? number
+---@return number
+function fbm(x, y, z) end
+
+---Гребни: горные хребты, трещины. В [0, 1].
+---@param x number
+---@param y? number
+---@param z? number
+---@return number
+function ridged(x, y, z) end
+
+---Турбулентность: |шум| по слоям — дым, мрамор. В [0, 1].
+---@param x number
+---@param y? number
+---@param z? number
+---@return number
+function turbulence(x, y, z) end
+
+---Точка, сдвинутая шумом: искажение для «живых» узоров.
+---@param x number
+---@param y number
+---@param z number
+---@param strength? number
+---@return Vec3
+function warp(x, y, z, strength) end
+
+---Зерно для perlin, simplex, fbm и прочих простых функций шума.
+---@param seed integer
+function set_seed(seed) end
+
+---Свой генератор шума: noise{kind = "simplex", seed = 42, octaves = 5, scale = 0.02}.
+---@class sage.noise
+---@overload fun(opts?: table|string): Noise
+---@class Noise
+---@field seed integer
+---@field octaves integer
+---@field scale number
+---@field lacunarity number
+---@field gain number
+---@field ridged fun(x:number, y?:number, z?:number): number
+---@field turbulence fun(x:number, y?:number, z?:number): number
+---@field raw fun(x:number, y?:number, z?:number): number
+---@field hash fun(x:integer, y?:integer, z?:integer): number
+---@overload fun(x:number, y?:number, z?:number): number
+---Число из диапазона [a, b] — в диапазон [c, d].
+---@return number
+function remap(v, a, b, c, d) end
+
+---Где v между a и b: 0 в a, 1 в b.
+---@return number
+function inverse_lerp(a, b, v) end
+
+---Между a и b по доле t.
+---@return number
+function lerp(a, b, t) end
+
+---x в границах [lo, hi].
+---@return number
+function clamp(x, lo, hi) end
+
+---Дробная часть.
+---@return number
+function fract(x) end
+
+---x, замкнутый по кругу в [lo, hi).
+---@return number
+function wrap(x, lo, hi) end
+
+---Туда-обратно в [0, length].
+---@return number
+function ping_pong(t, length) end
+
+---0 до порога, 1 после.
+---@return number
+function step(edge, x) end
+
+---Плавная ступенька между e0 и e1.
+---@return number
+function smoothstep(e0, e1, x) end
+
+---Ещё более плавная ступенька.
+---@return number
+function smootherstep(e0, e1, x) end
+
+---Детерминированное «случайное» число 0..1 из целых координат.
+---@return number
+function hash(x, y, z, seed) end
+
+---@class Random
+---@field float fun(): number
+---@field range fun(a:number, b:number): number
+---@field int fun(a:integer, b:integer): integer
+---@field chance fun(p:number): boolean
+---@field pick fun(list:table): any
+---@field seed fun(seed:integer)
+---Свой генератор случайных чисел: одно зерно — одна последовательность.
+---@param seed? integer
+---@return Random
+function random(seed) end
+
+---Формула из строки — обычная функция: formula("sin(x) * y", "x, y").
+---Внутри видны math, шумы и помощники: sin, clamp, fbm, lerp...
+---@param expr string
+---@param args? string
+---@return function
+function formula(expr, args) end
+
+---@class Mesh
+---@field vertices integer
+---@field triangles integer
+---@field vertex fun(x:number|Vec3, y?:number|Vec3, z?:number|Vec2): integer
+---@field triangle fun(a:integer, b:integer, c:integer)
+---@field quad fun(a:integer, b:integer, c:integer, d:integer)
+---@field material fun(slot:integer)
+---@field position fun(i:integer): Vec3
+---@field set_position fun(i:integer, x:number|Vec3, y?:number, z?:number)
+---@field set_normal fun(i:integer, x:number|Vec3, y?:number, z?:number)
+---@field set_uv fun(i:integer, u:number, v:number)
+---@field normals fun(smooth?:boolean)
+---@field deform fun(fn:fun(p:Vec3, n:Vec3, uv:Vec2): Vec3)
+---@field move fun(x:number|Vec3, y?:number, z?:number)
+---@field scale fun(x:number|Vec3, y?:number, z?:number)
+---@field add fun(other:Mesh)
+---@field clear fun()
+---@field bounds fun(): Vec3, Vec3
+---@field apply fun(object:any)
+---@field save fun(path:string)
+---Пустой меш: вершины, треугольники, материалы — кодом.
+---@class sage.mesh
+---@overload fun(): Mesh
+---Плоскость width x depth из cols x rows клеток; height(x, z) — высота точки.
+---@param width number
+---@param depth? number
+---@param cols? integer
+---@param rows? integer
+---@param height? fun(x:number, z:number): number
+---@return Mesh
+function grid(width, depth, cols, rows, height) end
+
+---Коробка: одно число — куб, три — размеры по осям.
+---@param w number
+---@param h? number
+---@param d? number
+---@return Mesh
+function box(w, h, d) end
+
+---Сфера радиуса r.
+---@param r number
+---@param segments? integer
+---@param rings? integer
+---@return Mesh
+function sphere(r, segments, rings) end
+
+---Цилиндр радиуса r и высоты h; caps = false — без крышек.
+---@param r number
+---@param h number
+---@param segments? integer
+---@param caps? boolean
+---@return Mesh
+function cylinder(r, h, segments, caps) end
+
+---@class Texture
+---@field name string
+---@field width integer
+---@field height integer
+---@field nearest boolean
+---@field fill fun(fn:fun(u:number, v:number, x:integer, y:integer): Vec3|number)
+---@field set fun(x:integer, y:integer, color:Vec3|number)
+---@field get fun(x:integer, y:integer): Vec4
+---@field apply fun()
+---Текстура, нарисованная кодом: texture("noise", 256, 256).
+---@class sage.texture
+---@overload fun(name: string, width: integer, height?: integer): Texture
+---@class Material
+---@field name string
+---@field color Vec3
+---@field emissive Vec3
+---@field emissive_strength number
+---@field metallic number
+---@field roughness number
+---@field opacity number
+---@field texture string|Texture
+---@field normal_map string|Texture
+---@field metallic_map string|Texture
+---@field roughness_map string|Texture
+---@field ao_map string|Texture
+---@field emissive_map string|Texture
+---@field tiling number|Vec2
+---@field unlit boolean
+---@field double_sided boolean
+---@field cutoff number
+---@field nearest boolean
+---@field save fun(path:string)
+---Материал из кода: material("stone", {color = rgb(0.5, 0.45, 0.4), roughness = 0.9}).
+---@class sage.material
+---@overload fun(name: string, props?: table): Material
 
 -- --- Хуки скрипта ---------------------------------------------------------
 -- Объявляются в файле скрипта; движок зовёт их сам. Ни один не обязателен.

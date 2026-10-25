@@ -219,6 +219,7 @@ Language Server показывает `position`, `rotation`, `scale` и мето
 - [Публичные переменные, ссылки и события](#публичные-переменные-ссылки-и-события)
 - [Ход игры из скрипта: сцены, пауза, время](#ход-игры-из-скрипта-сцены-пауза-время)
 - [Процедурная генерация: шумы, формулы, меш, материал, текстура](#процедурная-генерация-шумы-формулы-меш-материал-текстура)
+- [Стиль API SAGE — стандарт языка](#стиль-api-sage--стандарт-языка)
 - [Скриптинг (Lua)](#скриптинг-lua)
 - [Тесты на Lua: в редакторе, в настоящем Play](#тесты-на-lua-в-редакторе-в-настоящем-play)
 - [Подсказка по API в редакторе кода](#подсказка-по-api-в-редакторе-кода)
@@ -312,6 +313,30 @@ for _, m in ipairs(sage.modules.List()) do
 end
 if sage.modules.Has("net") then ... end
 ```
+
+**Проверка, снятие, откат.**
+
+- `CheckScriptModules(список)` — без Lua находит повторы имён, обязательные
+  зависимости, которых нет, и кольца; отдаёт порядок установки. `Requires` —
+  обязательные зависимости, `After` — мягкий порядок («после, если есть»).
+- Последний хозяин состояния (бэкенд нового API) превращает «ждёт зависимость»
+  в ошибку «нет обязательного модуля X» — модуль не висит молча.
+- Установщик записывает за модулем всё, что тот положил в Lua (глобальные имена,
+  `sage.<модуль>.<функция>`, поля глобальных таблиц), и
+  `UninstallScriptModule(ctx, имя)` снимает модуль чисто: сначала зависящих (в
+  обратном порядке), затем его уборку `Uninstall` (ресурсы C++), затем его
+  имена — вместе с коротким. Имя, которое после установки переписала игра, не
+  трогается. Снятый модуль ставится снова; уже стоящий второй раз не ставится.
+- Модуль, упавший посреди установки, откатывается: полуустановленного API не
+  остаётся.
+
+**Цена.** Модули — это запуск: установка всего API — около 15 мс (из них ~10 мс
+на учёт имён, сделанный на самом Lua). В кадре нет ни обёрток, ни обращений к
+реестру: функция модуля — та же функция C++, вызов идёт напрямую.
+
+**Совместимость.** `tests/data/script_api_surface.txt` — снимок всех имён API
+скриптов (730+). Тест падает, если хоть одно пропало; новые имена допустимы.
+Сознательное обновление снимка — `SAGE_UPDATE_API_SURFACE=1 ./sage_tests`.
 
 Проверяет `tests/test_script_modules.cpp`.
 
@@ -874,52 +899,106 @@ sage.time.SetScale(0.5)     -- замедление; 0 — стоп, 2 — ус�
 Мир из кода — рельеф, пещеры, камни, деревья, текстуры — собирается целиком в
 Lua, без C++ и без файлов на диске. Всё детерминировано по зерну: одно зерно —
 один и тот же мир на любой машине, поэтому «зерно мира» можно хранить в
-сохранении.
+сохранении. Пишется по [стандарту стиля SAGE](#стиль-api-sage--стандарт-языка):
+простые имена, объекты через точку, свойства присваиванием.
 
 ```lua
--- Шумы: перлин, симплекс, value, worley (клетки), фракталы и искажение.
-local h = sage.noise.Perlin(x, y)                 -- [-1, 1], 2D или 3D
-local f1, f2, cell = sage.noise.Worley(x, y, z)   -- расстояния до точек, id клетки
-local n = sage.noise.New{ type = "simplex", seed = 42, octaves = 5,
-                          lacunarity = 2, gain = 0.5, frequency = 0.02 }
-n:Fbm(x, 0, z)  n:Ridged(x, 0, z)  n:Turbulence(x, 0, z)  n:Sample(x, y)
+-- Шум
+h = perlin(x, y)                      -- [-1, 1]; ещё simplex, value_noise
+f1, f2, cell = worley(x, y)           -- клетки: до ближайшей, до второй, номер
+h = fbm(x, y)                         -- слои шума; ещё ridged, turbulence
+p = warp(x, y, z, 0.5)                -- точка, сдвинутая шумом
+set_seed(42)                          -- зерно простых функций
 
--- Математика и формулы.
-sage.math.Remap(v, 0, 1, -5, 5)     -- и InverseLerp, Fract, Wrap, PingPong, Step, SmootherStep
-local rng = sage.math.Rng(42)       -- свой генератор: Float, Range, Int, Chance
-local wave = sage.math.Formula("sin(x * 3) * 0.5 + fbm(x, y) + clamp(y, 0, 1)", "x, y")
-wave(1.2, 0.4)                      -- формула из строки — обычная функция
+n = noise{kind = "simplex", seed = 42, octaves = 5, scale = 0.02}
+h = n(x, y)                           -- генератор — вызывается как функция
+r = n.ridged(x, y)                    -- и n.turbulence, n.raw, n.hash
+n.octaves = 3                         -- настройки — присваиванием
 
--- Меш кодом.
-local terrain = sage.mesh.Grid(100, 100, 128, 128, function(x, z)
-    return n:Fbm(x, 0, z) * 12
-end)
-terrain:Apply(self)                 -- меш объекта; материалы — по слотам
-local m = sage.mesh.New()
-local a, b, c = m:Vertex(Vec3(0,0,0)), m:Vertex(Vec3(0,0,1)), m:Vertex(Vec3(1,0,0))
-m:Material(2); m:Triangle(a, b, c)
-m:Deform(function(p, nrm, uv) return p + nrm * sage.noise.Perlin(p.x, p.y, p.z) * 0.1 end)
-m:RecalculateNormals(); m:Append(sage.mesh.Sphere(1, 24, 16))
-m:Save("Assets/Generated/rock.sagemesh")
+-- Математика
+v = remap(v, 0, 1, -5, 5)             -- lerp, inverse_lerp, clamp, fract, wrap,
+s = smoothstep(0, 1, t)               -- ping_pong, step, smootherstep, hash
+rng = random(42)
+k = rng.int(1, 6)                     -- rng.float(), rng.range(a, b), rng.chance(0.3), rng.pick(list)
+wave = formula("sin(x * 3) * 0.5 + fbm(x, y)", "x, y")
+h = wave(1.2, 0.4)                    -- формула из строки — обычная функция
 
--- Материал и текстура.
-sage.material.Create("stone", { albedo = Vec3(0.5, 0.45, 0.4), roughness = 0.9 })
-sage.material.Set("stone", "normalMap", "Assets/Textures/rock_n.png")
-local t = sage.texture.New("noise_tex", 256, 256)
-t:Fill(function(u, v) local k = sage.noise.Fbm(u * 8, v * 8) * 0.5 + 0.5; return Vec3(k, k, k) end)
-t:Apply()
-sage.material.Set("stone", "texture", "noise_tex")
+-- Меш
+ground = grid(100, 100, 128, 128, function(x, z) return n(x, z) * 12 end)
+ground.apply(self)                    -- меш объекта
+
+rock = sphere(1, 24, 16)              -- ещё box(w, h, d), cylinder(r, h), grid(...)
+rock.deform(function(p, normal, uv) return p + normal * perlin(p.x, p.y, p.z) * 0.1 end)
+rock.normals()
+rock.save("Assets/Generated/rock.sagemesh")
+
+m = mesh()                            -- свой меш с нуля
+a = m.vertex(0, 0, 0)
+b = m.vertex(0, 0, 1)
+c = m.vertex(1, 0, 0)
+m.material(2)                         -- следующие треугольники — второй слот
+m.triangle(a, b, c)
+m.add(box(1))                         -- ещё move, scale, set_position, set_uv, bounds, clear
+print(m.vertices, m.triangles)
+
+-- Текстура и материал
+tex = texture("noise_tex", 256, 256)
+tex.fill(function(u, v) return fbm(u * 8, v * 8) * 0.5 + 0.5 end)   -- число — серый
+stone = material("stone", {color = rgb(0.5, 0.45, 0.4), roughness = 0.9})
+stone.texture = tex                   -- текстура грузится на видеокарту здесь
+stone.normal_map = "Assets/Textures/rock_n.png"
+stone.tiling = 4
+stone.save("Assets/Materials/stone.sagemat")
 ```
+
+Свойства материала: `color`, `emissive`, `emissive_strength`, `metallic`,
+`roughness`, `opacity`, `texture`, `normal_map`, `metallic_map`,
+`roughness_map`, `ao_map`, `emissive_map`, `tiling` (число или пара),
+`unlit`, `double_sided`, `cutoff`, `nearest`. Опечатка в имени — ошибка с
+этим именем, а не молчаливое «ничего не произошло».
 
 **Формула компилируется один раз** (`load` Lua), а не разбирается на каждом
 вызове: на сетке 128×128 это шестнадцать тысяч вызовов за кадр генерации. Имена
-внутри — как в учебнике (`sin`, `clamp`, `fbm`, `lerp`): строчные ищутся и в
-`math`, и среди функций движка с заглавной буквы. У каждой формулы своё
+внутри — как в учебнике (`sin`, `clamp`, `fbm`, `lerp`). У каждой формулы своё
 окружение — присваивание внутри одной не трогает соседние и глобалы игры.
 
-Шумы — `engine/src/sage/core/Noise.h` (без зависимостей, годится и в C++
-системах), построитель — `engine/src/sage/render/MeshBuilder.h`, привязки —
-`ScriptApi_Procedural.cpp`. Проверяет `tests/test_procedural.cpp`.
+**Прежний стиль работает:** `sage.noise.Perlin`, `sage.mesh.Grid(...):Apply`,
+`sage.material.Create` — те же функции, а `noise`, `mesh`, `material`,
+`texture` — те же таблицы, что `sage.noise` и т.д., только ещё и вызываемые.
+Новый код пишется в новом стиле.
+
+Где что: шумы — `engine/src/sage/core/Noise.h` (без зависимостей, годится и в
+C++), построитель меша — `engine/src/sage/render/MeshBuilder.h`, привязки C++ —
+`ScriptApi_Procedural.cpp`, слой стиля SAGE — `ScriptApi_ProcGen.cpp` (модуль
+`procgen`). Проверяют `tests/test_procedural.cpp` и
+`editor/assets/tests/lua/procedural.test.lua` (в настоящем Play).
+
+## Стиль API SAGE — стандарт языка
+
+Постоянное правило для ВСЕГО нового API скриптов, примеров и документации —
+не только процедурной генерации. Цель — код, который читается как Python:
+минимум обязательных символов, ни одного лишнего слова.
+
+| Правило | Так | Не так |
+|---|---|---|
+| Без префикса модуля в примерах и новом API | `perlin(x, y)` | `sage.noise.Perlin(x, y)` |
+| Имена — строчными через `_` | `inverse_lerp`, `set_seed` | `InverseLerp`, `SetSeed` |
+| Методы объекта — через точку | `m.vertex(0, 0, 0)` | `m:Vertex(Vec3(0, 0, 0))` |
+| Свойства — присваиванием | `stone.roughness = 0.9` | `Set("stone", "roughness", 0.9)` |
+| Настройки — одной таблицей | `noise{kind = "simplex", octaves = 5}` | `New("simplex", 5, 2.0, 0.5, ...)` |
+| Числа вместо обёрток, где смысл ясен | `m.vertex(1, 2, 3)`, `box(1)` | `Vec3(1, 2, 3)` ради трёх чисел |
+| Необязательное — в конце и с умолчанием | `grid(10)` | обязательные `cols`, `rows`, `fn` |
+| Одно действие — одна строка | `m.add(box(1))` | `m:Append(...):Translate(...):Scale(...)` |
+| Объект создаётся вызовом своего имени | `mesh()`, `material("stone")` | `sage.mesh.New()`, `Create` |
+| Ошибка называет то, что не так | «неизвестное свойство 'shininess'» | молча ничего |
+
+Как это устроено, чтобы правило не стоило производительности: функции нового
+стиля — тонкий слой на Lua поверх привязок C++ (`ScriptApi_ProcGen.cpp`).
+Горячие вызовы (`perlin`, `fbm`, `lerp`) — прямые вызовы функций C++, объект
+(меш, материал) — таблица замыканий, созданная один раз. Прежние имена
+(`sage.*`, глобальные `SetMeshCube` и т.д.) остаются навсегда: на них написаны
+существующие игры, и сторож `tests/data/script_api_surface.txt` не даст ни
+одному из них пропасть.
 
 ## Скриптинг (Lua)
 Часть ЯДРА движка (`engine/src/sage/scripting/ScriptEngine.*`) — не зависит ни
@@ -1227,16 +1306,30 @@ end
 `Platform_DestroyWindow`, `editor/src/CursorCapture.cpp`). Проба
 `DETACHED_INPUT`.
 
-**Способ захвата курсора** — `window.cursorLock` в `sage.cfg`, в Game Settings
-«Захват курсора»: `system` — отключённый курсор системы (сырой ввод мыши);
-`software` — курсор спрятан, движок каждый кадр возвращает его в центр окна и
-считает смещение сам (запасной путь для машин, где системный захват не
-держится); `auto` (по умолчанию) — системный, а если система раз за разом
-сбрасывает захват у окна в фокусе — сам переходит на программный
-(`sage::CursorLockWatch`). Облёт камеры редактора в захвате берёт смещение из
-событий окна (`Window::FrameCursorDeltaX/Y`): мышь интерфейса тогда стоит на
-месте, и её разница — ноль. Пробы `CURSOR_LOCK`, `CURSOR_SOFTWARE`, тесты
-`CursorLock_auto_switches_to_software_only_after_repeated_losses`.
+**Захват курсора — штатный механизм системы.** `Input.setCursorLocked(true)`
+ставит окну `GLFW_CURSOR_DISABLED`: Windows держит курсор в окне `ClipCursor`,
+macOS отвязывает указатель от мыши, X11 захватывает указатель, а смещение
+приходит без границ и, где драйвер умеет, сырым (без ускорения рабочего
+стола). Потерю фокуса система обрабатывает сама — курсор отпускается, пока
+окно не в фокусе, и захватывается снова при возврате; движку остаётся не
+считать разницу положений «до» и «после» движением (`sage/input/CursorMotion.h`).
+
+Почему камера раньше вела себя плохо, и что было исправлено:
+
+- захват просят **каждый кадр** (Play редактора, скрипт в `Update`), а мост
+  ввода на каждом таком вызове начинал отсчёт смещения заново — первое
+  движение мыши каждого кадра выбрасывалось, обзор недокручивался и дёргался
+  на быстрых поворотах. Теперь отсчёт заново — только при **смене** захвата,
+  фокуса или входе курсора в окно;
+- запасной «программный» режим (курсор спрятан, движок возвращает его в
+  центр, когда тот отъедет) убран вместе с настройкой `window.cursorLock`: в
+  нём невидимый курсор гулял по окну. Если режим курсора сбросил кто-то
+  сторонний (бэкенд интерфейса), окно возвращает системный захват на
+  следующем кадре.
+
+Облёт камеры редактора в захвате берёт смещение из событий окна
+(`Window::FrameCursorDeltaX/Y`): мышь интерфейса тогда стоит на месте, и её
+разница — ноль. Пробы `CURSOR_LOCK`, `CURSOR_STEADY`, тесты `CursorMotion_*`.
 
 Всё это покрыто модульными тестами (`tests/test_scripting.cpp`): компоненты,
 иерархия, сообщения (адресные/широковещательные/с полезной нагрузкой),

@@ -14,19 +14,6 @@ using json = nlohmann::json;
 
 namespace sage {
 
-const char* CursorLockToStr(CursorLockMode m) {
-    switch (m) {
-        case CursorLockMode::System: return "system";
-        case CursorLockMode::Software: return "software";
-        default: return "auto";
-    }
-}
-CursorLockMode CursorLockFromStr(const std::string& s) {
-    if (s == "system") return CursorLockMode::System;
-    if (s == "software") return CursorLockMode::Software;
-    return CursorLockMode::Auto;
-}
-
 namespace {
 const char* ModeToStr(WindowMode m) {
     switch (m) {
@@ -198,7 +185,9 @@ bool EngineConfig::LoadFile(const std::string& path) {
     VSync     = win.value("vsync", VSync);
     FrameCap  = win.value("frameCap", FrameCap);
     Msaa      = win.value("msaa", Msaa);
-    CursorLock = CursorLockFromStr(win.value("cursorLock", std::string(CursorLockToStr(CursorLock))));
+    // Ключ «cursorLock» прежних версий (способ захвата) больше не читается:
+    // захват один — системный (см. Window::SetCursorCaptured). Старый файл
+    // остаётся валидным, ключ просто пропускается.
     BackgroundFrameCap = std::max(0, win.value("backgroundFrameCap", BackgroundFrameCap));
 
     auto disp = j.value("display", json::object());
@@ -272,7 +261,7 @@ std::string EngineConfig::ToJsonString() const {
         {"width", Width}, {"height", Height}, {"title", Title},
         {"mode", ModeToStr(Mode)}, {"resizable", Resizable},
         {"vsync", VSync}, {"frameCap", FrameCap}, {"msaa", Msaa},
-        {"cursorLock", CursorLockToStr(CursorLock)}, {"backgroundFrameCap", BackgroundFrameCap},
+        {"backgroundFrameCap", BackgroundFrameCap},
     };
     j["display"] = {
         {"aspect", AspectToStr(Aspect)}, {"renderScale", RenderScale},

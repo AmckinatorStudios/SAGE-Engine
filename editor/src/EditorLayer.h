@@ -523,7 +523,7 @@ private:
     bool m_detachedKeySeen = false;
     bool m_detachedKeyHooked = false;
     bool m_cursorLookOk = false;
-    sage::CursorLockMode m_probeLockRestore = sage::CursorLockMode::Auto;
+    float m_cursorSteadyDelta = 0.0f;   // самопроверка: движение при захвате каждый кадр
     // Какое окно выводить вперёд по «Играть» (см. EditorLayer_Play.cpp).
     void FocusPlayTarget();
     int m_probeStep = -1;     // -1 — не запущена
