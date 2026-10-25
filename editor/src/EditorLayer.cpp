@@ -254,9 +254,6 @@ void EditorLayer::OnUpdate(float dt) {
     // «Управление» живые события: назначить клавишу можно только поймав её.
     m_playInputBridge.PollGamepads();
     m_play.Input().BeginFrame();
-    // Способ захвата курсора — настройка игрока из sage.cfg проекта: в Play
-    // редактора курсор держится так же, как в собранной игре.
-    sage::Application::Get().GetWindow().SetCursorLockMode(Settings().CursorLock);
 
     if (m_play.Playing()) {
         // Ввод игре — только пока в фокусе панель Game (см. EditorPlayInput).

@@ -505,53 +505,25 @@ TEST(Scene_keeps_shadow_distance_and_renderer_flags) {
     CHECK_TRUE(found);
 }
 
-// --- Способ захвата курсора ---------------------------------------------------
+// --- Захват курсора: старый ключ способа захвата -----------------------------
 //
-// Выход для машины, где системный захват не держится: настройка доживает до
-// sage.cfg и обратно, а Auto сам переходит на программный, только когда
-// система сбрасывает захват у окна В ФОКУСЕ раз за разом — не от одного alt-tab.
-#include "sage/core/Window.h"
-
-TEST(Config_cursor_lock_mode_survives_sage_cfg) {
+// Способ захвата прежних версий («cursorLock»: auto/system/software) убран —
+// захват один, системный. Файл настроек со старым ключом обязан читаться, а
+// новый файл этот ключ больше не пишет.
+TEST(Config_old_cursor_lock_key_is_ignored_and_not_written) {
     const std::filesystem::path p = std::filesystem::temp_directory_path() / "sage_cursorlock_test.cfg";
-    sage::EngineConfig a;
-    CHECK_TRUE(a.CursorLock == sage::CursorLockMode::Auto);
-    a.CursorLock = sage::CursorLockMode::Software;
-    CHECK_TRUE(a.SaveFile(p.string()));
-    sage::EngineConfig b;
-    CHECK_TRUE(b.LoadFile(p.string()));
-    CHECK_TRUE(b.CursorLock == sage::CursorLockMode::Software);
+    {
+        std::ofstream f(p);
+        f << R"({"window": {"width": 1024, "cursorLock": "software"}})";
+    }
+    sage::EngineConfig c;
+    CHECK_TRUE(c.LoadFile(p.string()));
+    CHECK_EQ(c.Width, 1024);
+    CHECK_TRUE(c.SaveFile(p.string()));
+    std::ifstream in(p);
+    const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    CHECK_TRUE(text.find("cursorLock") == std::string::npos);
     std::filesystem::remove(p);
-    CHECK_TRUE(sage::CursorLockFromStr("system") == sage::CursorLockMode::System);
-    CHECK_TRUE(sage::CursorLockFromStr("ерунда") == sage::CursorLockMode::Auto);
-}
-
-TEST(CursorLock_auto_switches_to_software_only_after_repeated_losses) {
-    sage::CursorLockWatch w;
-    CHECK_TRUE(!w.UseSoftware(sage::CursorLockMode::Auto));
-    CHECK_TRUE(w.UseSoftware(sage::CursorLockMode::Software));
-    for (int i = 1; i < sage::CursorLockWatch::kLossLimit; ++i) w.LostWhileFocused();
-    CHECK_TRUE(!w.UseSoftware(sage::CursorLockMode::Auto));   // единичные сбросы — норма
-    w.BeginCapture();                                          // новый захват — счёт заново
-    for (int i = 1; i < sage::CursorLockWatch::kLossLimit; ++i) w.LostWhileFocused();
-    CHECK_TRUE(!w.UseSoftware(sage::CursorLockMode::Auto));
-    w.LostWhileFocused();
-    CHECK_TRUE(w.UseSoftware(sage::CursorLockMode::Auto));
-    CHECK_TRUE(!w.UseSoftware(sage::CursorLockMode::System)); // System — всегда системный
-    w.BeginCapture();
-    CHECK_TRUE(w.UseSoftware(sage::CursorLockMode::Auto));    // вердикт держится
-    w.Reset();
-    CHECK_TRUE(!w.UseSoftware(sage::CursorLockMode::Auto));
-}
-
-TEST(CursorLock_software_recentres_only_when_the_cursor_wandered_far) {
-    // Неизвестное положение — сразу в центр; рядом с центром — не трогать
-    // (возврат — обращение к системе); дальше четверти окна — вернуть.
-    CHECK_TRUE(sage::CursorNeedsRecentre(false, 0, 0, 800, 600));
-    CHECK_TRUE(!sage::CursorNeedsRecentre(true, 400, 300, 800, 600));
-    CHECK_TRUE(!sage::CursorNeedsRecentre(true, 400 + 140, 300, 800, 600));
-    CHECK_TRUE(sage::CursorNeedsRecentre(true, 400 + 160, 300, 800, 600));
-    CHECK_TRUE(!sage::CursorNeedsRecentre(true, 5, 5, 0, 0));   // свёрнутое окно
 }
 
 // --- Лимит кадров: заданный, фоновый, простой слоёв ---------------------------

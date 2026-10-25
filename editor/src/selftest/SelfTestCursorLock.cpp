@@ -16,8 +16,9 @@
 //     интерфейс уводил наведение и фокус на соседние панели;
 //   • облёт камеры в захвате брал смещение из мыши интерфейса — а она стоит
 //     на месте, и камера не поворачивалась (смещение — из окна, LookMouseDelta);
-//   • программный захват (sage::CursorLockMode::Software): курсор спрятан и
-//     возвращается в центр окна;
+//   • захват, который просят каждый кадр, терял первое движение мыши каждого
+//     кадра — обзор недокручивался (CURSOR_STEADY);
+//   • потеря и возврат фокуса давали скачок обзора;
 //   • окно панели, закрытое ImGui, захват забыл (иначе держал бы мёртвое окно).
 // Запускается ПОСЛЕ остальных живых проверок (последняя — Lua-тесты в Play):
 // захват курсора им мешал бы.
@@ -30,9 +31,6 @@ void EditorLayer::TickCursorLockProbe() {
     ImGuiIO& io = ImGui::GetIO();
     switch (m_cursorProbeStep++) {
         case 0:
-            m_probeLockRestore = m_settings.CursorLock;
-            m_settings.CursorLock = sage::CursorLockMode::System;
-            window.SetCursorLockMode(sage::CursorLockMode::System);
             window.SetCursorCaptured(true);
             return;
         case 1: {
@@ -61,39 +59,47 @@ void EditorLayer::TickCursorLockProbe() {
                                     << (pinned ? "" : "мышь интерфейса уехала вслед за виртуальным курсором; ")
                                     << (m_cursorLookOk ? "" : "смещение мыши в захвате не дошло до облёта");
             }
-            // Дальше — программный захват. Настройкой, а не прямо окну:
-            // OnUpdate каждый кадр ставит окну способ из настроек.
-            m_settings.CursorLock = sage::CursorLockMode::Software;
             return;
         }
         case 3:
-            window.SetCursorCaptured(true);
+            // Захват ПРОСЯТ КАЖДЫЙ КАДР (Play редактора, скрипт в Update) — и
+            // ни один такой запрос не должен выбрасывать движение мыши.
+            m_playInputBridge.SetCursorCaptured(true);
+            window.EmitCursorPos(300.0, 200.0);   // точка отсчёта после захвата
+            for (int k = 1; k <= 4; ++k) {
+                m_playInputBridge.SetCursorCaptured(true);
+                window.EmitCursorPos(300.0 + 10.0 * k, 200.0);
+            }
             return;
-        case 4: {
-            // Прошёл PollEvents: курсор спрятан (не отключён), а у окна в
-            // фокусе — ещё и в центре. Фокус у окна xvfb без оконного
-            // менеджера бывает не всегда — тогда центр не проверяется.
-            const bool hidden = glfwGetInputMode(handle, GLFW_CURSOR) == GLFW_CURSOR_HIDDEN;
-            const bool focused = glfwGetWindowAttrib(handle, GLFW_FOCUSED) == GLFW_TRUE;
-            double cx = 0, cy = 0;
-            int w = 0, h = 0;
-            glfwGetCursorPos(handle, &cx, &cy);
-            glfwGetWindowSize(handle, &w, &h);
-            const bool centred = !focused || (std::fabs(cx - w * 0.5) < 1.5 && std::fabs(cy - h * 0.5) < 1.5);
-            window.SetCursorCaptured(false);
+        case 4:
+            // События прошлого шага разобраны в начале этого кадра.
+            m_cursorSteadyDelta = m_play.Input().MouseDelta().x;
+            // Потеря и возврат фокуса: курсор за это время «уехал» далеко —
+            // это не движение, обзор не прыгает; дальше движение идёт как шло.
+            window.EmitFocus(false);
+            window.EmitFocus(true);
+            window.EmitCursorPos(5000.0, -300.0);
+            window.EmitCursorPos(5003.0, -300.0);
+            return;
+        case 5: {
+            const float afterFocus = m_play.Input().MouseDelta().x;
+            const bool held = glfwGetInputMode(handle, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
+            m_playInputBridge.SetCursorCaptured(false);
             const bool freed = glfwGetInputMode(handle, GLFW_CURSOR) == GLFW_CURSOR_NORMAL;
-            m_settings.CursorLock = m_probeLockRestore;
             // Окно панели из проверки многооконности закрылось — захват о нём знает.
             const bool forgot = m_detachedProbeWindow == nullptr ||
                                 (cursorcapture::LastForgottenWindow() == m_detachedProbeWindow &&
                                  window.CursorCaptureTarget() == handle);
             m_cursorProbeStep = -1;
-            if (hidden && centred && freed && forgot) {
-                LOG_INFO("Editor") << "CURSOR_SOFTWARE: OK — программный захват прячет курсор"
-                                   << (focused ? " и держит его в центре окна" : " (окно без фокуса — центр не проверен)")
-                                   << ", закрытое окно панели захват забыл";
+            const bool steady = std::fabs(m_cursorSteadyDelta - 40.0f) < 0.01f;
+            const bool focusOk = std::fabs(afterFocus - 3.0f) < 0.01f;
+            if (steady && focusOk && held && freed && forgot) {
+                LOG_INFO("Editor") << "CURSOR_STEADY: OK — захват, запрошенный каждый кадр, не теряет движения мыши, "
+                                      "потеря и возврат фокуса не дают скачка, захват держится системой, "
+                                      "закрытое окно панели захват забыл";
             } else {
-                LOG_ERROR("Editor") << "CURSOR_SOFTWARE: FAIL — спрятан " << hidden << ", в центре " << centred
+                LOG_ERROR("Editor") << "CURSOR_STEADY: FAIL — движение за кадры " << m_cursorSteadyDelta
+                                    << " (ждали 40), после фокуса " << afterFocus << " (ждали 3), держится " << held
                                     << ", отпущен " << freed << ", закрытое окно забыто " << forgot;
             }
             return;
@@ -136,7 +142,7 @@ void EditorLayer::CheckDetachedWindowInput(void* platformHandle) {
     window.SetCursorCaptured(false);
     const bool released = glfwGetInputMode(panelWindow, GLFW_CURSOR) == GLFW_CURSOR_NORMAL;
     // Цель захвата остаётся на окне панели: когда его закроют, захват обязан
-    // узнать об этом сам (проверяет CURSOR_SOFTWARE).
+    // узнать об этом сам (проверяет CURSOR_STEADY).
     m_detachedProbeWindow = panelWindow;
 
     if (keyReached && panelHeld && mainFree && released) {

@@ -788,3 +788,36 @@ TEST(Input_editor_escape_releases_and_the_game_recaptures_every_time) {
     frame();
     CHECK_TRUE(cursor.CursorCaptured());
 }
+
+// --- Относительное движение мыши (CursorMotion) ------------------------------
+#include "sage/input/CursorMotion.h"
+
+// Захват просят каждый кадр (редактор в Play, скрипт в Update). Повтор того же
+// состояния не начинает отсчёт заново: иначе первое движение каждого кадра
+// выбрасывалось, и обзор недокручивался на быстрых поворотах.
+TEST(CursorMotion_repeated_capture_requests_do_not_drop_motion) {
+    sage::input::CursorMotion m;
+    m.SetCaptured(true);
+    CHECK_TRUE(m.Feed({100, 100}) == glm::vec2(0.0f));   // точка отсчёта после захвата
+    float total = 0.0f;
+    for (int frame = 0; frame < 600; ++frame) {          // десять секунд поворота
+        m.SetCaptured(true);                              // запрос каждый кадр
+        total += m.Feed({100.0f + 7.0f * (frame + 1), 100}).x;
+    }
+    CHECK_NEAR(total, 7.0f * 600, 1e-3);
+}
+
+// Смена захвата, вход в окно и фокус — не движение: отсчёт заново, без скачка.
+TEST(CursorMotion_capture_change_and_focus_rebase_without_a_jump) {
+    sage::input::CursorMotion m;
+    m.Feed({10, 10});
+    CHECK_TRUE(m.Feed({15, 8}) == glm::vec2(5.0f, 2.0f));   // Y вверх
+    m.SetCaptured(true);                                   // система перенесла курсор
+    CHECK_TRUE(m.Feed({640, 360}) == glm::vec2(0.0f));
+    CHECK_TRUE(m.Feed({650, 360}) == glm::vec2(10.0f, 0.0f));
+    m.Rebase();                                            // alt-tab и обратно
+    CHECK_TRUE(m.Feed({5000, -300}) == glm::vec2(0.0f));
+    CHECK_TRUE(m.Feed({5003, -300}) == glm::vec2(3.0f, 0.0f));
+    m.SetCaptured(false);
+    CHECK_TRUE(m.Feed({1, 1}) == glm::vec2(0.0f));
+}

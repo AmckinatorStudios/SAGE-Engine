@@ -187,23 +187,19 @@ Window::Window(int width, int height, const std::string& title, Params params)
     glfwSetWindowUserPointer(m_handle, this);
     if (!s_primary) s_primary = this;
     glfwSetFramebufferSizeCallback(m_handle, FramebufferSizeCallback);
-    glfwGetWindowSize(m_handle, &m_winW, &m_winH);
     // Свёрнуто ли окно и в фокусе ли оно — из событий: спрашивать систему об
     // этом каждый кадр на X11 значит обмен с сервером на каждый вопрос.
     glfwSetWindowIconifyCallback(m_handle, [](GLFWwindow* h, int iconified) {
         if (auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h))) win->m_iconified = iconified != 0;
     });
     glfwSetWindowFocusCallback(m_handle, [](GLFWwindow* h, int focused) {
-        if (auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h))) win->m_focused = focused != 0;
+        if (auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h))) win->EmitFocus(focused != 0);
     });
     // Считаемся в фокусе, пока система не сказала обратного СОБЫТИЕМ: окно без
     // оконного менеджера (xvfb, CI) фокуса не получает никогда, и вопрос «в
     // фокусе ли» там отвечал бы «нет» — фоновый лимит кадров душил бы прогоны.
     m_focused = true;
     m_lastInput = glfwGetTime();
-    glfwSetWindowSizeCallback(m_handle, [](GLFWwindow* h, int w, int hh) {
-        if (auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h))) { win->m_winW = w; win->m_winH = hh; }
-    });
     glfwSetCursorPosCallback(m_handle, &Window::ForwardCursorPos);
     glfwSetScrollCallback(m_handle, &Window::ForwardScroll);
     glfwSetCharCallback(m_handle, &Window::ForwardChar);
@@ -250,82 +246,34 @@ void Window::WaitEvents(double timeoutSeconds) {
 
 void Window::AfterEvents() {
     if (!m_handle || !m_cursorCaptured) return;
-    GLFWwindow* target = CursorCaptureTarget();
-    // ЗАХВАТ ДЕРЖИТСЯ, А НЕ СТАВИТСЯ ОДИН РАЗ. Режим курсора окна могут
-    // сбросить со стороны: потеря и возврат фокуса, alt-tab, бэкенд интерфейса,
-    // который сам ставит вид курсора. Раньше окно верило своему флагу «уже
-    // захвачен» и повторно режим не ставило — курсор оставался спрятанным, но
-    // свободно гулял по экрану, и обзор упирался в край. Теперь фактический
-    // режим сверяется с желаемым каждый кадр. Сверка дешёвая: режим GLFW
-    // помнит сам и систему не спрашивает. Фокус (это уже вопрос оконной
-    // системе) спрашивается только тогда, когда он действительно нужен.
-    const int want = SoftwareCursorLock() ? GLFW_CURSOR_HIDDEN : GLFW_CURSOR_DISABLED;
-    if (glfwGetInputMode(target, GLFW_CURSOR) != want) {
-        // Сброс у окна в фокусе — система не держит захват. Хватит раз за
-        // разом возвращать его: Auto переходит на программный.
-        if (!SoftwareCursorLock() && glfwGetWindowAttrib(target, GLFW_FOCUSED) == GLFW_TRUE) {
-            m_lockWatch.LostWhileFocused();
-            if (SoftwareCursorLock())
-                LOG_WARN("Window") << "Система сбрасывает захват курсора у окна в фокусе ("
-                                   << sage::CursorLockWatch::kLossLimit
-                                   << " раз подряд) — перехожу на программный захват";
-        }
-        ApplyCursorMode();
-    }
-    if (!SoftwareCursorLock()) return;
-    // Программный захват: курсор — в центр, когда отъехал далеко (см.
-    // CursorNeedsRecentre), и только у окна в фокусе: человек, ушедший в
-    // другую программу, не должен получать мышь назад в игру.
-    int w = 0, h = 0;
-    TargetWindowSize(target, &w, &h);
-    if (sage::CursorNeedsRecentre(m_haveLast, m_lastX, m_lastY, w, h) &&
-        glfwGetWindowAttrib(target, GLFW_FOCUSED) == GLFW_TRUE)
-        WarpToCentre();
+    // ЗАХВАТ ДЕРЖИТСЯ, А НЕ СТАВИТСЯ ОДИН РАЗ. Режим курсора окна может
+    // сбросить кто-то сторонний — бэкенд интерфейса, который сам ставит вид
+    // курсора своим окнам. Окно сверяет фактический режим с желаемым и
+    // возвращает его. Сверка дешёвая: режим GLFW помнит сам и систему не
+    // спрашивает. Потеря фокуса здесь ни при чём: GLFW отпускает курсор у
+    // окна без фокуса и захватывает снова при возврате, не меняя режима.
+    if (glfwGetInputMode(CursorCaptureTarget(), GLFW_CURSOR) != GLFW_CURSOR_DISABLED) ApplyCursorMode();
 }
 
-// Размер окна в координатах курсора. Своё окно помнит его из события
-// изменения размера (спросить систему на X11 — это обмен с сервером на каждый
-// вопрос); окна панелей спрашиваются, их захват — редкость.
-void Window::TargetWindowSize(GLFWwindow* target, int* w, int* h) const {
-    if (target == m_handle && m_winW > 0) { *w = m_winW; *h = m_winH; return; }
-    glfwGetWindowSize(target, w, h);
-}
-
-void Window::WarpToCentre() {
-    GLFWwindow* target = CursorCaptureTarget();
-    int w = 0, h = 0;
-    TargetWindowSize(target, &w, &h);
-    if (w <= 0 || h <= 0) return;
-    const double cx = w * 0.5, cy = h * 0.5;
-    glfwSetCursorPos(target, cx, cy);
-    // Возврат — не движение мыши: точка отсчёта переезжает в центр, а событие
-    // положения, которое система может прислать о самом возврате, даст ноль.
-    m_lastX = cx;
-    m_lastY = cy;
-    m_haveLast = true;
-    if (m_cursorWarpFn) m_cursorWarpFn(cx, cy);
+void Window::EmitFocus(bool focused) {
+    const bool changed = focused != m_focused;
+    m_focused = focused;
+    if (!changed) return;
+    // Положение курсора до ухода и после возврата не связаны: разница — не
+    // движение мыши в окне.
+    m_haveLast = false;
+    for (const FocusFn& fn : m_focusFns) fn(focused);
 }
 
 void Window::SetCursorCaptured(bool captured) {
     if (!m_handle) return;
     const bool changed = captured != m_cursorCaptured;
     m_cursorCaptured = captured;
-    if (changed) {
-        m_haveLast = false;   // смещение от положения до захвата — не движение
-        if (captured) m_lockWatch.BeginCapture();
-    }
-    // Флаг совпал — но режим окна мог уйти сам (см. PollEvents): ставим, если
+    if (changed) m_haveLast = false;   // смещение от положения до захвата — не движение
+    // Флаг совпал — но режим окна мог уйти сам (см. AfterEvents): ставим, если
     // он не тот, а не «раз флаг тот, значит и окно в порядке».
-    const int want = !captured ? GLFW_CURSOR_NORMAL
-                               : SoftwareCursorLock() ? GLFW_CURSOR_HIDDEN : GLFW_CURSOR_DISABLED;
-    if (changed || (captured && glfwGetInputMode(CursorCaptureTarget(), GLFW_CURSOR) != want)) ApplyCursorMode();
-}
-
-void Window::SetCursorLockMode(sage::CursorLockMode mode) {
-    if (mode == m_lockMode) return;
-    m_lockMode = mode;
-    m_lockWatch.Reset();
-    if (m_handle && m_cursorCaptured) ApplyCursorMode();
+    if (changed || (captured && glfwGetInputMode(CursorCaptureTarget(), GLFW_CURSOR) != GLFW_CURSOR_DISABLED))
+        ApplyCursorMode();
 }
 
 void Window::SetCursorCaptureTarget(GLFWwindow* target) {
@@ -350,15 +298,13 @@ void Window::ApplyCursorMode() { ApplyCursorModeTo(CursorCaptureTarget(), m_curs
 
 void Window::ApplyCursorModeTo(GLFWwindow* target, bool captured) {
     if (!target) return;
-    const bool software = SoftwareCursorLock();
-    glfwSetInputMode(target, GLFW_CURSOR,
-                     !captured ? GLFW_CURSOR_NORMAL : software ? GLFW_CURSOR_HIDDEN : GLFW_CURSOR_DISABLED);
-    // Сырой ввод мыши, если драйвер умеет: в захвате нам нужно физическое
-    // смещение, а не ускорение/масштабирование рабочего стола — иначе
-    // чувствительность обзора зависит от настроек ОС, а не от игры. Только в
-    // системном захвате: GLFW даёт сырой ввод лишь отключённому курсору.
+    // Сырой ввод — ДО смены режима: GLFW включает его при отключении курсора,
+    // и первое же смещение после захвата должно быть уже физическим, а не
+    // ускоренным рабочим столом (иначе чувствительность обзора зависит от
+    // настроек ОС, а не от игры).
     if (glfwRawMouseMotionSupported())
-        glfwSetInputMode(target, GLFW_RAW_MOUSE_MOTION, captured && !software ? GLFW_TRUE : GLFW_FALSE);
+        glfwSetInputMode(target, GLFW_RAW_MOUSE_MOTION, captured ? GLFW_TRUE : GLFW_FALSE);
+    glfwSetInputMode(target, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
 }
 
 void Window::OnResize(int width, int height) {

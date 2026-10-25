@@ -122,32 +122,18 @@ void GlfwBridge::Attach(Window& window, InputSystem& input) {
         const MouseButton translated = FromGlfwMouseButton(button, &ok);
         if (!ok) return;
         const uint8_t m = FromGlfwMods(mods);
-        const glm::vec2 pos = m_lastCursor;
+        const glm::vec2 pos = m_motion.Last();
         if (action == GLFW_PRESS) m_input->Push(InputEvent::MouseDown(translated, pos, m));
         else if (action == GLFW_RELEASE) m_input->Push(InputEvent::MouseUp(translated, pos, m));
     });
 
     window.SetCursorPosCallback([this](double x, double y) {
         const glm::vec2 pos((float)x, (float)y);
-        // Первое событие задаёт только точку отсчёта: иначе смещением
-        // окажется расстояние от нуля до курсора, и обзор рванёт в сторону в
-        // первый же кадр после захвата мыши.
-        glm::vec2 delta(0.0f);
-        if (!m_firstCursorEvent) {
-            delta.x = pos.x - m_lastCursor.x;
-            delta.y = m_lastCursor.y - pos.y; // Y вверх: конвенция движка
-        }
-        m_firstCursorEvent = false;
-        m_lastCursor = pos;
-        m_input->Push(InputEvent::MouseMove(pos, delta));
+        m_input->Push(InputEvent::MouseMove(pos, m_motion.Feed(pos)));
     });
 
-    // Программный захват вернул курсор в центр: это не движение мыши, а
-    // новая точка отсчёта (см. Window::WarpToCentre).
-    window.SetCursorWarpCallback([this](double x, double y) {
-        m_lastCursor = glm::vec2((float)x, (float)y);
-        m_firstCursorEvent = false;
-    });
+    // Фокус ушёл или вернулся: положения до и после не связаны движением.
+    window.AddFocusCallback([this](bool) { m_motion.Rebase(); });
 
     window.SetScrollCallback([this](double, double yoffset) {
         m_input->Push(InputEvent::Wheeled((float)yoffset));
@@ -156,12 +142,12 @@ void GlfwBridge::Attach(Window& window, InputSystem& input) {
     window.SetCursorEnterCallback([this](bool entered) {
         InputEvent e;
         e.Type = entered ? InputEventType::MouseEnter : InputEventType::MouseLeave;
-        e.Position = m_lastCursor;
+        e.Position = m_motion.Last();
         m_input->Push(e);
         // Курсор вернулся в окно с другого места — отсчёт смещения надо
         // начинать заново, иначе первый же кадр даст скачок обзора на всю
         // ширину экрана.
-        if (entered) m_firstCursorEvent = true;
+        if (entered) m_motion.Rebase();
     });
 }
 
@@ -230,10 +216,11 @@ void GlfwBridge::EmitPadEvents(int slot) {
 void GlfwBridge::SetCursorCaptured(bool captured) {
     if (!m_window) return;
     m_window->SetCursorCaptured(captured);
-    // После захвата/отпускания курсор прыгает (система прячет его в центр),
-    // и первое же событие движения дало бы огромное смещение — то самое
-    // «камера дёрнулась при входе в режим обзора».
-    m_firstCursorEvent = true;
+    // После захвата/отпускания курсор прыгает (система прячет и переносит
+    // его) — отсчёт заново. Но только при СМЕНЕ: захват просят каждый кадр, и
+    // сброс на каждом вызове выбрасывал первое движение мыши каждого кадра
+    // (см. CursorMotion).
+    m_motion.SetCaptured(m_window->CursorCaptured());
 }
 
 bool GlfwBridge::CursorCaptured() const { return m_window && m_window->CursorCaptured(); }

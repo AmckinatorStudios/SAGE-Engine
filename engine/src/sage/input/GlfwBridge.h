@@ -3,6 +3,7 @@
 
 #include <glm/glm.hpp>
 
+#include "sage/input/CursorMotion.h"
 #include "sage/input/InputSystem.h"
 #include "sage/input/Keys.h"
 
@@ -53,8 +54,7 @@ private:
 
     // Положение курсора прошлого события — из него считается смещение. GLFW
     // отдаёт абсолютную позицию, а обзору от первого лица нужна разница.
-    glm::vec2 m_lastCursor{0.0f};
-    bool m_firstCursorEvent = true;
+    CursorMotion m_motion;   // смещение мыши из положений курсора
 
     // Снимок геймпадов прошлого кадра: событие «кнопку нажали» существует
     // только как РАЗНИЦА между двумя опросами.
