@@ -28,6 +28,20 @@ struct CursorLockWatch {
         return mode == CursorLockMode::Software || (mode == CursorLockMode::Auto && Tripped);
     }
 };
+
+// ВЕРНУТЬ ЛИ КУРСОР В ЦЕНТР (программный захват). Не каждый кадр: возврат —
+// обращение к оконной системе, а нужен он только тогда, когда курсор отъехал
+// настолько, что следующий рывок мыши мог бы вынести его за край окна. Порог —
+// четверть меньшей стороны окна: за кадр (16 мс) так далеко мышь не уезжает
+// даже при резком развороте. Неизвестное положение (только что захватили,
+// курсор вошёл в окно) — возвращаем сразу.
+inline bool CursorNeedsRecentre(bool known, double x, double y, int w, int h) {
+    if (w <= 0 || h <= 0) return false;
+    if (!known) return true;
+    const double limit = 0.25 * (w < h ? w : h);
+    const double dx = x - w * 0.5, dy = y - h * 0.5;
+    return dx * dx + dy * dy > limit * limit;
+}
 } // namespace sage
 
 // Обёртка над GLFW-окном + графическим контекстом. Само окно — чисто оконная
@@ -71,6 +85,20 @@ public:
     void CancelClose();
     void SwapBuffers();
     void PollEvents();
+    // То же, что PollEvents, но засыпает до первого события или до timeout
+    // секунд: в свёрнутом окне или при досыпе до лимита кадров процессор
+    // отдыхает, а ввод будит цикл сразу. Смещение курсора за кадр копится
+    // дальше, а не начинается заново.
+    void WaitEvents(double timeoutSeconds);
+
+    // Свёрнуто (или рисовать некуда — буфер нулевого размера). Рисовать в такое
+    // окно — впустую жечь видеокарту: кадра всё равно никто не увидит.
+    bool Iconified() const { return m_iconified || m_width <= 0 || m_height <= 0; }
+    // В фокусе ли окно. Из события, а не вопросом системе каждый кадр.
+    bool Focused() const { return m_focused; }
+    // Секунд с последнего события ввода (клавиша, мышь, колесо, символ) —
+    // любого окна приложения.
+    double SecondsSinceInput() const;
 
     GLFWwindow* Handle() const { return m_handle; }
     int Width() const { return m_width; }
@@ -173,6 +201,7 @@ private:
     void ApplyCursorMode();
     void ApplyCursorModeTo(GLFWwindow* target, bool captured);
     void WarpToCentre();
+    void TargetWindowSize(GLFWwindow* target, int* w, int* h) const;
     static Window* Owner(GLFWwindow* handle);
     static void ForwardCursorPos(GLFWwindow* handle, double x, double y);
     static void ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset);
@@ -201,4 +230,10 @@ private:
     double m_lastX = 0.0, m_lastY = 0.0;
     bool m_haveLast = false;
     double m_frameDx = 0.0, m_frameDy = 0.0;
+    int m_winW = 0, m_winH = 0;   // размер окна в координатах курсора
+    bool m_iconified = false;
+    bool m_focused = true;
+    double m_lastInput = 0.0;     // glfwGetTime() последнего события ввода
+    void TouchInput();
+    void AfterEvents();
 };

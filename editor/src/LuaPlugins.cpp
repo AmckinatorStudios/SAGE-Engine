@@ -510,9 +510,14 @@ void BindApi(sol::state& lua, Entry* entry) {
 
 // --- Где «включён ли» ----------------------------------------------------------
 std::string PrefKey(const std::string& id) { return "plugins.off." + id; }
+// Встроенные плагины — примеры, а не часть редактора: включаются по просьбе.
+// Отсюда отдельный ключ «включён» (по умолчанию нет) вместо «выключен»: старый
+// ключ «off» у тех, кто плагин не трогал, пуст и включил бы его снова.
+std::string BuiltinOnKey(const std::string& id) { return "plugins.builtin.on." + id; }
 
 bool IsEnabled(const pl::Manifest& m, Source from) {
     if (from == Source::Project) return m.Enabled;
+    if (from == Source::Builtin) return m.Enabled && sage::editor::prefs::GetBool(BuiltinOnKey(m.Id), false);
     return m.Enabled && !sage::editor::prefs::GetBool(PrefKey(m.Id), false);
 }
 
@@ -804,7 +809,8 @@ bool SetEnabled(EditorHost& host, const std::string& id, bool enabled, std::stri
             e->Info.Manifest.Enabled = true;   // выключен в самом файле — включаем там
             pl::WriteManifest(e->Info.Manifest, error);
         }
-        sage::editor::prefs::SetBool(PrefKey(id), !enabled);
+        if (e->Info.From == Source::Builtin) sage::editor::prefs::SetBool(BuiltinOnKey(id), enabled);
+        else sage::editor::prefs::SetBool(PrefKey(id), !enabled);
     }
     e->Info.Enabled = enabled;
     if (enabled) Load(&host, *e);

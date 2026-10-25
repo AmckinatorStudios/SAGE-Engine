@@ -172,6 +172,11 @@ struct Texture2DDesc {
     // HDR-режим: пиксели — float* (16F-хранилище на GPU). Нужен лайтмапам GI:
     // запечённая освещённость линейна и может быть > 1.0.
     bool FloatPixels = false;
+    // ДАННЫЕ, а не картинка: пиксели — float*, хранилище 32F (точное), выборка
+    // только texelFetch. Нужно списку источников кластерного света: позиция
+    // лампы в 16 битах ошибается на сантиметры уже в сотне метров, а номер
+    // лампы в 16 битах точен лишь до 2048. Фильтрация и мипы игнорируются.
+    bool Float32 = false;
     // Пиксели — ЦВЕТ в sRGB (альбедо, свечение): при выборке видеокарта
     // переводит их в линейные. Освещение считается в линейном пространстве, а
     // кадр на выходе кодируется в sRGB; без перевода на входе цвет картинки
@@ -185,6 +190,10 @@ class Texture2D : public CountedResource<ResourceKind::Texture> {
 public:
     virtual ~Texture2D() = default;
     virtual void Bind(int unit) const = 0;
+    // Перезалить содержимое (тот же размер и формат, что при создании). Для
+    // данных, меняющихся каждый кадр: пересоздавать текстуру ради новых чисел
+    // — это выделение видеопамяти в каждом кадре. false — бэкенд не умеет.
+    virtual bool Update(const void* pixels) { (void)pixels; return false; }
     // Хендл для привязки через GraphicsDevice::BindTexture2D.
     virtual TextureHandle Handle() const = 0;
 
@@ -293,6 +302,13 @@ struct RenderTargetDesc {
     // вредно (глубину нельзя усреднять, среднее двух глубин не является
     // глубиной ничего).
     int Samples = 1;
+    // ТОНКИЙ G-БУФЕР (только ColorHDRWithDepth): два вложения рядом с цветом —
+    // альбедо (RGBA8) и нормаль в мире (RGBA8, n*0.5+0.5). Пишут их только
+    // движковые шейдеры освещения и только пока включено
+    // GraphicsDevice::SetGBufferWrites; альфа 1 — «здесь поверхность записана».
+    // Нужен экранному GI: без него цвет поверхности угадывался по готовому
+    // кадру, а нормаль — по разнице глубин.
+    bool GBuffer = false;
 };
 
 class RenderTarget : public CountedResource<ResourceKind::RenderTarget> {
@@ -319,6 +335,9 @@ public:
     // карту теней, HDR-кадр, промежуточные буферы пост-обработки.
     virtual TextureHandle ColorTextureHandle() const = 0;
     virtual TextureHandle DepthTextureHandle() const = 0;
+    // Вложения G-буфера (невалидные — таргет без него, см. RenderTargetDesc::GBuffer).
+    virtual TextureHandle AlbedoTextureHandle() const { return {}; }
+    virtual TextureHandle NormalTextureHandle() const { return {}; }
     // Сырое число для ImGui — см. Texture2D::NativeHandle. Панели редактора
     // показывают кадр сцены именно так.
     virtual uint64_t NativeColorHandle() const = 0;

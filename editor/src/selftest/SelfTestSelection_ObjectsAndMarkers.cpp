@@ -1,3 +1,4 @@
+#include "ObjectCatalog.h"
 #include "SelfTestCommon.h"
 
 bool EditorLayer::SelfTestObjectsAndMarkers() {
@@ -316,20 +317,23 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
             }
         }
 
-        // Три типа света — ТРИ РАЗНЫХ значка.
+        // Четыре типа света — ЧЕТЫРЕ РАЗНЫХ значка.
         if (ok) {
-            std::string sun, point, spot;
-            for (const char* id : {"light.sun", "light.point", "light.spot"}) {
+            std::string sun, point, spot, area;
+            for (const char* id : {"light.sun", "light.point", "light.spot", "light.area"}) {
                 GameObject light = m_scene->Get(CreateCatalogObject(id));
                 if (!light.Valid()) { ok = false; break; }
                 const std::string icon = iconOf(light);
                 if (std::string(id) == "light.sun") sun = icon;
                 else if (std::string(id) == "light.point") point = icon;
-                else spot = icon;
+                else if (std::string(id) == "light.spot") spot = icon;
+                else area = icon;
             }
-            if (ok && (sun == point || point == spot || sun == spot)) {
+            const std::set<std::string> distinct{sun, point, spot, area};
+            if (ok && distinct.size() != 4) {
                 LOG_ERROR("Editor") << "SELFTEST: типы света неразличимы по значку: солнце '" << sun
-                                    << "', точечный '" << point << "', прожектор '" << spot << "'";
+                                    << "', точечный '" << point << "', прожектор '" << spot
+                                    << "', площадной '" << area << "'";
                 ok = false;
             }
             // И камера — своим значком, а не общим.
@@ -347,6 +351,24 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
                         LOG_ERROR("Editor") << "SELFTEST: новая камера смотрит не туда, куда вид редактора";
                         ok = false;
                     }
+                }
+            }
+            // «Создать потомка» под повёрнутым родителем: камера стоит в точке
+            // родителя, а смотрит всё так же по виду редактора — поворот
+            // каталога мировой, а не прибавка к повороту родителя.
+            if (ok) {
+                GameObject parent = m_scene->Get(CreateCatalogObject("shape.cube"));
+                parent.GetTransform().Position = {3.0f, 1.0f, -2.0f};
+                parent.GetTransform().Rotation = {20.0f, 90.0f, 10.0f};
+                GameObject cam = m_scene->Get(CreateCatalogObject("camera.game"));
+                sage::editor::objectcatalog::AttachAsChild(*m_scene, cam.Entity(), parent.Entity());
+                const glm::mat4 w = m_scene->WorldMatrix(cam.Entity());
+                const glm::vec3 fwd = glm::normalize(-glm::vec3(w[2]));
+                const glm::vec3 up = glm::normalize(glm::vec3(w[1]));
+                if (glm::dot(fwd, glm::normalize(m_camera.Front)) < 0.999f || std::abs(up.y) < 0.2f ||
+                    glm::length(glm::vec3(w[3]) - glm::vec3(3.0f, 1.0f, -2.0f)) > 1e-3f) {
+                    LOG_ERROR("Editor") << "SELFTEST: камера-потомок смотрит не по виду редактора";
+                    ok = false;
                 }
             }
         }

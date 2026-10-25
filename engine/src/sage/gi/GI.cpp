@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 
+#include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/render/ModelLoader.h"
@@ -31,8 +32,13 @@ struct Fnv {
     void AddPod(const T& v) { Add(&v, sizeof(T)); }
 };
 
-// Геометрия по MeshRef (CPU, без GL). Модели — только .obj (CPU-стадия
-// загрузчика); прочие форматы моделей в бейке пропускаются с предупреждением.
+// Геометрия по MeshRef (CPU, без GL): любой формат, который умеет загрузчик
+// моделей (.obj, .gltf/.glb, всё из реестра импортёров).
+//
+// Раньше здесь пропускалось всё, кроме .obj, — с комментарием «любой формат»
+// над проверкой «только .obj». Модель в glTF (а это почти любая модель из
+// магазина ассетов) при запекании исчезала: не заслоняла свет, не получала
+// лайтмапу, и стена из неё пропускала солнце в тёмную комнату.
 sage::render::MeshData ResolveMeshData(const MeshRef& ref) {
     using sage::render::MeshData;
     switch (ref.type) {
@@ -44,17 +50,17 @@ sage::render::MeshData ResolveMeshData(const MeshRef& ref) {
         case MeshRef::Type::Capsule:  return sage::render::BuildCapsule();
         case MeshRef::Type::Model: {
             const std::string& p = ref.path;
-            if (p.size() >= 4 && p.compare(p.size() - 4, 4, ".obj") == 0) {
-                try {
-                    // Любой поддерживаемый формат, а не только .obj: иначе
-                    // модель в glTF не отбрасывала бы запечённой тени и не
-                    // получала бы лайтмапу — то есть на бейке исчезала бы.
-                    return ModelLoader::LoadMeshData(p);
-                } catch (const std::exception& e) {
-                    LOG_WARN("GI") << "Модель не вошла в бейк (" << p << "): " << e.what();
-                }
-            } else if (!p.empty()) {
-                LOG_WARN("GI") << "GI-бейк моделей поддерживает только .obj, пропуск: " << p;
+            if (p.empty()) return {};
+            if (!ModelLoader::IsSupportedModel(p)) {
+                LOG_WARN("GI") << "Модель не вошла в бейк — формат не поддерживается: " << p;
+                return {};
+            }
+            try {
+                // Путь сцены — относительно проекта; искать файл так же, как
+                // его ищет рендер и физика (база ассетов).
+                return ModelLoader::LoadMeshData(sage::AssetDatabase::Instance().LocatePath(p));
+            } catch (const std::exception& e) {
+                LOG_WARN("GI") << "Модель не вошла в бейк (" << p << "): " << e.what();
             }
             return {};
         }

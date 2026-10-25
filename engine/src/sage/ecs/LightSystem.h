@@ -133,10 +133,19 @@ inline LightingEnvironment CollectLighting(Scene& scene) {
     // «иногда».
     int sunId = 0;
     bool sunTaken = false;
+    // Предел — общий на все локальные источники кадра (кластерный свет, см.
+    // render/LightClusters.h), а не восемь ламп каждого типа: восьмая лампа
+    // уровня гасла молча, и коридор с десятком светильников был тёмным с конца.
+    auto localCount = [&env] {
+        return (int)(env.PointLights.size() + env.SpotLights.size() + env.AreaLights.size());
+    };
     auto view = scene.Registry().view<LightComponent, Transform>();
     for (auto e : view) {
         if (scene.IsHidden(e)) continue; // выключенный источник не светит
         const LightComponent& lc = view.get<LightComponent>(e);
+        if (lc.Kind != LightComponent::Type::Directional &&
+            localCount() >= LightingEnvironment::MaxLights)
+            continue;
         // Мировые позиция/направление (учёт иерархии родителей).
         glm::mat4 world = scene.WorldMatrix(e);
         glm::vec3 wpos = glm::vec3(world[3]);
@@ -151,8 +160,18 @@ inline LightingEnvironment CollectLighting(Scene& scene) {
             env.Sun.Color = lc.Color;
             env.Sun.Intensity = lc.Intensity;
             env.Sun.CastShadows = lc.CastShadows;
+        } else if (lc.Kind == LightComponent::Type::Area) {
+            AreaLight a;
+            a.Position = wpos;
+            a.Direction = wdir;
+            a.Right = glm::normalize(glm::vec3(world * glm::vec4(1.0f, 0.0f, 0.0f, 0.0f)));
+            a.Color = lc.Color;
+            a.Intensity = lc.Intensity;
+            a.Width = std::max(lc.AreaWidth, 0.01f);
+            a.Height = std::max(lc.AreaHeight, 0.01f);
+            a.Range = lc.Range;
+            env.AreaLights.push_back(a);
         } else if (lc.Kind == LightComponent::Type::Spot) {
-            if ((int)env.SpotLights.size() >= LightingEnvironment::MaxSpotLights) continue;
             SpotLight s;
             s.Position = wpos;
             s.Direction = wdir;
@@ -164,7 +183,6 @@ inline LightingEnvironment CollectLighting(Scene& scene) {
             s.CastShadows = lc.CastShadows;
             env.SpotLights.push_back(s);
         } else {
-            if ((int)env.PointLights.size() >= LightingEnvironment::MaxPointLights) continue;
             PointLight p;
             p.Position = wpos;
             p.Color = lc.Color;

@@ -41,6 +41,7 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--update") == 0) SetUpdateMode(true);
         else if (std::strcmp(argv[i], "--references") == 0 && i + 1 < argc) referenceDir = argv[++i];
+        else if (std::strcmp(argv[i], "--properties") == 0) SetPropertiesOnly(true);
     }
     SetReferenceDir(referenceDir);
 
@@ -48,6 +49,7 @@ int main(int argc, char** argv) {
     std::printf("SAGE Engine — эталонные кадры\n");
     std::printf("=============================\n");
     if (UpdateMode()) std::printf("РЕЖИМ ОБНОВЛЕНИЯ: эталоны будут перезаписаны\n");
+    if (PropertiesOnly()) std::printf("РЕЖИМ СВОЙСТВ: только утверждения, без сравнения с эталонами\n");
     std::printf("Каталог эталонов: %s\n\n", referenceDir.c_str());
 
     // Окно нужно только ради графического контекста — на экране ему делать

@@ -42,6 +42,13 @@ bool EditorLayer::SelfTestPlugins() {
     // Встроенный пример «Расстановка»: десять копий выделенного — и один Ctrl+Z
     // убирает их все (каждая копия кладёт свой снимок, плагин склеивает).
     {
+        // Встроенный пример по умолчанию ВЫКЛЮЧЕН: он не должен появляться в
+        // меню у того, кто его не просил. Включаем на время проверки и
+        // возвращаем как было.
+        const lp::PluginInfo* off = Find(lp::List(), "scatter");
+        if (!off) fail("встроенного плагина «Расстановка» нет в списке");
+        else if (off->Enabled || off->Running) fail("встроенный плагин включён по умолчанию");
+        lp::SetEnabled(*this, "scatter", true, err);
         const lp::PluginInfo* scatter = Find(lp::List(), "scatter");
         if (!scatter || !scatter->Running || scatter->From != lp::Source::Builtin || scatter->Panels != 1) {
             fail("встроенный плагин «Расстановка» не запущен" +
@@ -56,6 +63,7 @@ bool EditorLayer::SelfTestPlugins() {
             Undo();
             if (m_scene->Count() != before) fail("один Ctrl+Z не убрал все копии «Расстановки»");
         }
+        lp::SetEnabled(*this, "scatter", false, err);
     }
 
     const fs::path dir = lp::Create(lp::ProjectDir(*this), "Проба плагина", "selftest", lp::Template::Both, err);

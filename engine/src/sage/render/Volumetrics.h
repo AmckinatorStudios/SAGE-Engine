@@ -132,25 +132,26 @@ public:
     // после такого события описывает другой мир, и смешивать её с новым кадром
     // — это призрак предыдущего.
     void ResetHistory();
+    // Есть ли у вида накопленный кадр (проверки: история одного окна обязана
+    // переживать кадр другого окна другого размера).
+    bool HistoryValid(int viewId) const;
 
 private:
     // Всё, что принадлежит ОДНОМУ виду: два буфера накопления (пинг-понг) и
     // матрица его прошлого кадра.
     struct ViewHistory {
         std::unique_ptr<sage::rhi::RenderTarget> Accum[2];
+        std::unique_ptr<sage::rhi::RenderTarget> March;     // сырой результат марша
+        std::unique_ptr<sage::rhi::RenderTarget> DepthLow;  // R — расстояние, G — небо
         glm::mat4 PrevViewProj{1.0f};
         int Width = 0, Height = 0;
         bool Valid = false;   // есть ли что перепроецировать
         int Current = 0;      // в какой из двух писать
     };
 
-    void EnsureShared(int w, int h);
     ViewHistory& HistoryFor(int viewId, int w, int h);
 
     std::unique_ptr<sage::rhi::Geometry> m_fsTri;
-    std::unique_ptr<sage::rhi::RenderTarget> m_march;    // сырой результат марша
-    std::unique_ptr<sage::rhi::RenderTarget> m_depthLow; // R — расстояние, G — небо
-    int m_w = 0, m_h = 0;   // размер уменьшенного буфера
     unsigned m_frame = 0;   // номер кадра — сдвиг шума накопления
 
     std::unordered_map<int, ViewHistory> m_history;

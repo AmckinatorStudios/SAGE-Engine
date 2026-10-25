@@ -28,6 +28,8 @@ struct State {
     Language Lang = Language::Lua;
     int Color = -1;         // номер цвета палитры; -1 — без цвета
     std::string Error;
+    bool CloseRequested = false;   // закрыть снаружи (самопроверка)
+    float Width = 0.0f;            // ширина окна в прошлом кадре
 };
 
 State& S() {
@@ -113,7 +115,6 @@ void Draw(EditorHost& host) {
     if (!s.Open) return;
     const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
     ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-    ImGui::SetNextWindowSize(ImVec2(ImGui::GetFontSize() * 26.0f, 0.0f), ImGuiCond_Appearing);
     char title[128];
     std::snprintf(title, sizeof(title), "%s%s", TitleOf(s.Req.Kind), kPopup);
     if (!ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
@@ -133,6 +134,11 @@ void Draw(EditorHost& host) {
     // ИМЯ — первым и сразу с курсором: окно открыли, чтобы назвать вещь.
     ImGui::TextDisabled("%s", T("Name"));
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+    // ШИРИНА ПОЛЯ — ЧИСЛОМ, А НЕ -1. В окне AlwaysAutoResize поле «до края»
+    // мерит себя по окну, а окно — по полю: каждый кадр оба становились чуть
+    // уже, и окно «Новый материал» (где больше нечему держать ширину, в отличие
+    // от палитры папки) сжималось до узкой полоски. Заданный ранее размер окна
+    // AlwaysAutoResize всё равно отменял.
     ImGui::SetNextItemWidth(-1.0f);
     bool create = ImGui::InputText("##create_name", s.Name, sizeof(s.Name), ImGuiInputTextFlags_EnterReturnsTrue);
 
@@ -213,11 +219,16 @@ void Draw(EditorHost& host) {
             s.Open = false;
             ImGui::CloseCurrentPopup();
         }
-    } else if (cancel) {
+    } else if (cancel || s.CloseRequested) {
         s.Open = false;
         ImGui::CloseCurrentPopup();
     }
+    s.CloseRequested = false;
+    s.Width = ImGui::GetWindowWidth();
     ImGui::EndPopup();
 }
+
+float WindowWidth() { return S().Open ? S().Width : 0.0f; }
+void RequestClose() { S().CloseRequested = true; }
 
 } // namespace sage::editor::createasset

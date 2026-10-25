@@ -78,6 +78,7 @@ const char* EntityIcon(entt::registry& reg, entt::entity e) {
             // Прожектор — КОНУС: это буквально форма его светового пучка,
             // и объяснять её не нужно.
             case LightComponent::Type::Spot: return "cone";
+            case LightComponent::Type::Area: return "ui-panel";   // панель — значок панели
             default: return "light";
         }
     }
@@ -365,10 +366,9 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
                 const int made = host.CreateCatalogObject(pick);   // снимок для отмены — внутри
                 GameObject child = scene.Get(made);
                 if (child.Valid()) {
-                    scene.SetParent(child.Entity(), e);
                     // На месте родителя: каталог ставит новое по виду камеры
                     // редактора, а потомка ждут там, где родитель.
-                    child.GetTransform().Position = glm::vec3(0.0f);
+                    sage::editor::objectcatalog::AttachAsChild(scene, child.Entity(), e);
                     host.Selection().SetPrimary(child.Id());
                 }
             }

@@ -44,6 +44,9 @@ namespace sage::render {
 // разъезда. Нечётные и великоватые значения приводятся к ближайшему разумному:
 // в конфиг число попадает из файла и переменной окружения, то есть от человека.
 int SceneSamples(const sage::EngineConfig& cfg);
+// Заводить ли буферу СЦЕНЫ тонкий G-буфер (альбедо + нормаль) — по тому же
+// конфигу и по той же причине общий для всех хостов.
+bool SceneWantsGBuffer(const sage::EngineConfig& cfg);
 
 // Рабочие цели и история кадра. Отдельной структурой, а не полями PostFX,
 // потому что их видит звено через контекст: встроенные звенья движка живут в
@@ -138,6 +141,12 @@ public:
     // Держится указателем до следующего вызова: окружение живёт у вызывающего
     // весь кадр. nullptr — такие звенья пропускаются с причиной в логе.
     void SetLighting(const LightingEnvironment* env) { m_lighting = env; }
+    // G-буфер кадра сцены (Framebuffer::AlbedoTexture/NormalTexture) — экранному
+    // GI. Пустые хендлы — его нет, и звено оценивает поверхность по кадру.
+    void SetGBuffer(sage::rhi::TextureHandle albedo, sage::rhi::TextureHandle normal) {
+        m_gAlbedo = albedo;
+        m_gNormal = normal;
+    }
 
     // Копирует готовую картинку в цель вывода (FBO вьюпорта либо экран), в
     // прямоугольник (outX,outY,outW,outH). Тем же проходом, которым
@@ -188,6 +197,7 @@ private:
 
     PostScratch m_scratch;
     const LightingEnvironment* m_lighting = nullptr;
+    sage::rhi::TextureHandle m_gAlbedo, m_gNormal;
 };
 
 } // namespace sage::render

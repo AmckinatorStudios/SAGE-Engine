@@ -37,6 +37,7 @@
 #include "sage/render/ResourceManager.h"
 #include "sage/render/ShadowAtlas.h"
 #include "sage/render/ShadowMap.h"
+#include "sage/gi/GI.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/rhi/Conformance.h"
@@ -693,6 +694,37 @@ void TestSkinnedPointLight(FrameRenderer& r) {
     Check(on > off * 1.5, "скелетная модель освещается точечным источником");
 }
 
+// 3б. ЗАПЕЧЁННЫЕ ПРОБЫ ОСВЕЩАЮТ СКИН так же, как статику.
+//
+// Раньше объём проб к скелетной модели не проброшен был вовсе: персонаж в
+// комнате с запечённым светом освещался полусферическим ambient, как будто
+// запекания нет, и выделялся из окружения. Здесь объём проб — ровный белый
+// свет, а свой ambient сцены почти нулевой: модель обязана посветлеть.
+void TestSkinnedGIProbes(FrameRenderer& r) {
+    const glm::mat4 proj = PerspectiveProj();
+    auto plain = MakeRigScene(0.05f, 0.0f);
+    const Image without = RenderFrame(r, *plain, proj, BaseChain(), kW, kH);
+
+    auto probed = MakeRigScene(0.05f, 0.0f);
+    auto gi = std::make_shared<sage::gi::GIState>();
+    sage::gi::ProbeVolume& v = gi->Probes;
+    v.Dims = {2, 2, 2};
+    v.Min = {-20.0f, -20.0f, -20.0f};
+    v.CellSize = {40.0f, 40.0f, 40.0f};
+    sage::gi::SH1 white;
+    const float c0 = 1.0f / 0.282095f;   // ровно единица освещённости/π по любой нормали
+    white.R = white.G = white.B = glm::vec4(c0, 0.0f, 0.0f, 0.0f);
+    v.Probes.assign(8, white);
+    probed->GI = gi;
+    const Image with = RenderFrame(r, *probed, proj, BaseChain(), kW, kH);
+
+    const Image backdrop = RigBackdrop(r);
+    const double off = MeanLumaOnModel(without, backdrop);
+    const double on = MeanLumaOnModel(with, backdrop);
+    std::printf("       пробы GI на модели: без %.2f -> с ними %.2f\n", off, on);
+    Check(on > off * 2.0, "скелетная модель освещается запечёнными пробами");
+}
+
 // 4. МАТЕРИАЛ ДОЕЗЖАЕТ ЦЕЛИКОМ: карты, свечение, отсечение по альфе.
 void TestSkinnedMaterialMaps(FrameRenderer& r) {
     auto scene = MakeRigScene(0.35f, 1.2f);
@@ -750,6 +782,7 @@ void RunAnimationChecks(FrameRenderer& r) {
     TestRigidPartsOnBones(r);
     TestSkinnedAmbient(r);
     TestSkinnedPointLight(r);
+    TestSkinnedGIProbes(r);
     TestSkinnedMaterialMaps(r);
     TestInverseKinematicsECS();
     TestClipFileMatchesModelClip();

@@ -19,6 +19,7 @@
 #include "sage/render/ModelData.h"
 #include "sage/anim/Retarget.h"
 #include "sage/gi/GIUpload.h"
+#include "sage/render/LightClusters.h"
 
 #include <algorithm>
 #include <cmath>
@@ -294,8 +295,10 @@ namespace {
 // молча ломает морфинг — выборка идёт из чужой текстуры и даёт нули, — поэтому
 // берём заведомо свободные и держим их рядом с этим списком.
 constexpr int kMaxActiveMorphs = 8;
-constexpr int kMorphPosUnit = 10;
-constexpr int kMorphNrmUnit = 11;
+// Не 10/11: там каскады теней, и фрагмент читал бы морф вместо тени (см.
+// раскладку юнитов в render/ShadowMap.h).
+constexpr int kMorphPosUnit = 16;
+constexpr int kMorphNrmUnit = 17;
 
 void UploadMorphs(const Shader& shader, const SkinnedSubMesh& sub,
                   const std::vector<float>* weights) {
@@ -344,7 +347,8 @@ void SkinnedModel::Draw(const glm::mat4& entityModel, const glm::mat4& view, con
                         const std::vector<glm::mat4>& bones,
                         const ShadowBinding& shadows,
                         const sage::render::ReflectionBinding* reflections,
-                        const std::vector<float>* morphWeights, int shadingMode) const {
+                        const std::vector<float>* morphWeights, int shadingMode,
+                        const sage::render::LightClusters* clusters, sage::gi::GIState* gi) const {
     const glm::mat4 model = entityModel * m_import;   // настройки импорта (см. SetImportTransform)
     Shader& shader = SkinShader();
     shader.Use();
@@ -357,13 +361,14 @@ void SkinnedModel::Draw(const glm::mat4& entityModel, const glm::mat4& view, con
     // Полное освещение сцены (ambient из скайбокса, солнце, точечные, прожекторы,
     // туман) — теми же uniform'ами, что и статический lit-проход.
     UploadLighting(shader, env);
+    // Лампы — тем же кластерным списком, что у статики этого вида.
+    if (clusters) clusters->Upload(shader);
 
-    // GI: юниты сэмплеров общего PBR-блока обязательны всегда (конфликт типов
-    // сэмплеров на юните 0 — см. SetGISamplerUnits). Объём проб к скиннингу
-    // пока не подключён (сюда не проброшена сцена) — непрямой свет остаётся
-    // полусферическим ambient.
-    sage::gi::SetGISamplerUnits(shader);
-    shader.SetInt("uGIVolumeEnabled", 0);
+    // GI-объём проб сцены — тот же, что освещает статику: персонаж, вошедший в
+    // тёмную комнату с красными стенами, обязан потемнеть и покраснеть вместе
+    // с ящиком рядом. Раньше объём сюда не проброшен был вовсе, и скелетная
+    // модель светилась полусферическим ambient, как будто запекания нет.
+    sage::gi::UploadGIVolume(shader, gi);
     // Лайтмапы у скина нет по смыслу: она печётся на неподвижную геометрию, а
     // персонаж двигается. Флаг выставляем ЯВНО — общий фрагмент его читает.
     shader.SetInt("uLightmapEnabled", 0);

@@ -75,6 +75,8 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         ImGui::SameLine();
         ImGui::Checkbox(T("Resizable"), &c.Resizable);
         ImGui::InputInt(T("Frame Cap (0=off)"), &c.FrameCap);
+        ImGui::InputInt(T("Background Frame Cap (0=off)"), &c.BackgroundFrameCap);
+        EditorTheme::Hint(T("Frames per second while the game window is not in focus: frames nobody sees still load the GPU"));
         static const int kMsaaVals[] = {0, 2, 4, 8};
         const char* msaa[] = {T("Off"), "2x", "4x", "8x"};
         int msaaIdx = c.Msaa >= 8 ? 3 : c.Msaa >= 4 ? 2 : c.Msaa >= 2 ? 1 : 0;
@@ -191,19 +193,46 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     // Держать её ещё и здесь значило бы иметь две системы, где половина
     // настроек работает глобально, а половина через компонент.
     if (EditorTheme::SectionHeader("camera", T("Post Processing" "###Post Processing"))) {
-        ImGui::TextWrapped("%s", T("Post processing is a component: on a camera it processes that "
-                                   "camera, on any other object — every camera of the scene. Add "
-                                   "\"Post Processing\" in the Inspector."));
+        ImGui::TextDisabled("%s", T("Post processing is a component"));
+        EditorTheme::Hint(T("Post processing is a component: on a camera it processes that "
+                            "camera, on any other object — every camera of the scene. Add "
+                            "\"Post Processing\" in the Inspector."));
     }
 
-    // ОБЪЁМНЫЙ СВЕТ ПОКА УБРАН ИЗ РЕДАКТОРА.
+    // ОБЪЁМНЫЙ СВЕТ — ВЕРНУЛСЯ.
     //
-    // Раздел с десятком ползунков стоял здесь и обещал готовую возможность, а
-    // возможность бета: лучи и облака ведут себя предсказуемо не во всякой
-    // сцене, и настраивать их приходилось наугад. Обещание в интерфейсе дороже
-    // неработающей функции: его видно всем, а работает оно у единиц. Код
-    // движка на месте (engine/src/sage/render/Volumetrics.h) и включается
-    // ключом в sage.cfg — вернуть раздел значит вернуть эти строки.
+    // Раздел убирали: лучи и облака вели себя предсказуемо не во всякой сцене.
+    // Причины найдены и исправлены (render/Volumetrics.cpp): накопление по
+    // кадрам сбрасывалось, когда в кадре два окна разного размера; лучи в
+    // ортографии шли веером из камеры; облака ночью подсвечивались дневным
+    // небом; один NaN навсегда оставался в истории. Ползунков — только те, что
+    // меняют картинку понятным образом; остальное — в sage.cfg.
+    if (EditorTheme::SectionHeader("sun", T("Volumetric Light" "###Volumetric Light"), 0, nullptr,
+                                   T("Light shafts in the air and volumetric clouds. The most expensive pass of the frame"))) {
+        ImGui::Checkbox(T("Enabled##volumetrics"), &c.Volumetrics);
+        ImGui::BeginDisabled(!c.Volumetrics);
+        ImGui::Checkbox(T("Light Shafts"), &c.VolumetricShafts);
+        ImGui::SameLine();
+        ImGui::Checkbox(T("Clouds"), &c.VolumetricClouds);
+        ImGui::BeginDisabled(!c.VolumetricShafts);
+        ImGui::SliderFloat(T("Haze Density"), &c.VolumetricDensity, 0.0f, 0.2f, "%.3f");
+        ImGui::SliderFloat(T("Shaft Intensity"), &c.VolumetricIntensity, 0.0f, 4.0f, "%.2f");
+        ImGui::SliderFloat(T("Haze Height Falloff"), &c.VolumetricHeightFalloff, 0.0f, 0.5f, "%.3f");
+        EditorTheme::Hint(T("How fast the haze thins out with height: 0 — the same at the ground and in the sky"));
+        ImGui::SliderFloat(T("Max Distance"), &c.VolumetricMaxDistance, 10.0f, 500.0f, "%.0f m");
+        ImGui::EndDisabled();
+        ImGui::BeginDisabled(!c.VolumetricClouds);
+        ImGui::SliderFloat(T("Cloud Coverage"), &c.CloudCoverage, 0.0f, 1.0f, "%.2f");
+        ImGui::SliderFloat(T("Cloud Density"), &c.CloudDensity, 0.1f, 4.0f, "%.2f");
+        ImGui::DragFloatRange2(T("Cloud Layer"), &c.CloudBottom, &c.CloudTop, 5.0f, 20.0f, 5000.0f, "%.0f m", "%.0f m");
+        ImGui::EndDisabled();
+        const char* scales[] = {T("Full"), T("Half")};
+        int scale = c.VolumetricScale < 0.75f ? 1 : 0;
+        if (ImGui::Combo(T("Resolution##volumetrics"), &scale, scales, IM_ARRAYSIZE(scales)))
+            c.VolumetricScale = scale == 1 ? 0.5f : 1.0f;
+        EditorTheme::Hint(T("Half is about four times cheaper; edges stay clean, the haze gets a little softer"));
+        ImGui::EndDisabled();
+    }
 
     ImGui::Separator();
     const bool haveProject = true; // проект есть всегда (см. LauncherPanel.h)

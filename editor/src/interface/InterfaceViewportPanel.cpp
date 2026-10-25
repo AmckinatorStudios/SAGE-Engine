@@ -1,3 +1,4 @@
+#include "EditorTheme.h"
 #include "InterfaceViewportPanel.h"
 
 #include <algorithm>
@@ -238,8 +239,8 @@ void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
         ImGui::OpenPopup("SafeArea###SafeArea");
     if (Sage::UI::MenuScope safeMenu; ImGui::BeginPopup("SafeArea###SafeArea")) {
         ImGui::Checkbox(T("Safe area"), &tools.ShowSafeArea);
-        ImGui::TextDisabled("%s", T("Everything outside it can be cut off: a camera\n"
-                                    "notch, rounded corners, TV overscan."));
+        EditorTheme::Hint(T("Everything outside it can be cut off: a camera\n"
+                            "notch, rounded corners, TV overscan."));
         ImGui::SetNextItemWidth(140.0f);
         ImGui::SliderFloat("##safe", &tools.SafeAreaPercent, 0.0f, 20.0f, "%.1f%%");
         ImGui::EndPopup();

@@ -79,10 +79,19 @@ void OpenGLDevice::Clear(bool color, bool depth) {
     if (color) mask |= GL_COLOR_BUFFER_BIT;
     if (depth) mask |= GL_DEPTH_BUFFER_BIT;
     glClear(mask);
+    // Очистка цвета у таргета с G-буфером чистит и его: иначе в пикселях, где
+    // в этом кадре ничего не нарисовано, лежала бы поверхность прошлого кадра.
+    if (color)
+        if (const GLRenderTarget* t = GLRenderTarget::Current()) t->ClearGBuffer();
+}
+
+void OpenGLDevice::SetGBufferWrites(bool on) {
+    if (const GLRenderTarget* t = GLRenderTarget::Current()) t->SetGBufferWrites(on);
 }
 
 void OpenGLDevice::BindDefaultFramebuffer() {
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    GLRenderTarget::ResetCurrent();
 }
 
 void OpenGLDevice::SetBlend(bool enabled) {

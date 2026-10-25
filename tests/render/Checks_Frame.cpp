@@ -1627,7 +1627,167 @@ void TestScreenSpaceGI(FrameRenderer& r) {
     Check(nearOn - nearOff > (farOn - farOff) * 1.5f, "отражённый свет сильнее у стены, чем вдали");
 }
 
+// --- Экранный GI берёт цвет поверхности из G-буфера, а не угадывает по кадру ---
+//
+// Пол, на который солнце не падает (свет идёт вдоль него), тёмен в кадре, хотя
+// сам он светло-серый. Оценка альбедо по кадру принимала его за тёмную
+// поверхность, и отражённый свет красной стены на нём почти пропадал — ровно в
+// тени, где GI виден больше всего. С G-буфером пол отражает по своему цвету.
+// Второй прогон — с MSAA: вложения G-буфера обязаны пережить перенос.
+void TestScreenSpaceGIUsesGBuffer(FrameRenderer& r) {
+    auto scene = std::make_unique<Scene>("GIG");
+    scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(1.0f, -0.02f, 0.0f));   // вдоль пола
+    scene->Lighting.Sun.Intensity = 1.2f;
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+    scene->Lighting.AmbientStrength = 0.12f;
+    scene->Lighting.Skybox.Enabled = false;
+    auto box = [&](const char* name, glm::vec3 pos, glm::vec3 scale, glm::vec3 color) {
+        GameObject o = scene->CreateObject(name);
+        o.GetTransform().Position = pos;
+        o.GetTransform().Scale = scale;
+        o.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+        o.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+        o.Renderer().Color = color;
+    };
+    box("Floor", {0.0f, -0.05f, 0.0f}, {12.0f, 0.1f, 12.0f}, {0.7f, 0.7f, 0.7f});
+    box("Wall", {1.5f, 1.5f, 0.0f}, {0.2f, 3.0f, 6.0f}, {0.9f, 0.05f, 0.05f});
 
+    const int w = 160, h = 120;
+    const glm::vec3 eye(-4.0f, 3.0f, 0.0f);
+    const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.5f, 0.3f, 0.0f), glm::vec3(0, 1, 0));
+    const glm::mat4 proj = glm::perspective(glm::radians(60.0f), (float)w / (float)h, 0.1f, 50.0f);
+    auto render = [&](const sage::render::PostChain& chain, bool gbuffer, int samples) {
+        Framebuffer sceneFbo(w, h, samples, gbuffer);
+        Framebuffer output(w, h);
+        auto& device = sage::rhi::GraphicsDevice::Get();
+        sceneFbo.Bind();
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear(true, true);
+        const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+        r.Batch.RenderColor(*scene, view, proj, eye, env, ShadowBinding(), 0);
+        sceneFbo.Resolve();
+        r.Fx.ResetHistory();
+        r.Fx.SetGBuffer(sceneFbo.AlbedoTexture(), sceneFbo.NormalTexture());
+        r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h, proj, view, chain,
+                    &output, 0, 0, w, h);
+        r.Fx.SetGBuffer({}, {});
+        output.Bind();
+        return Capture(w, h);
+    };
+    auto redness = [&](const Image& img, float fx, float fy) {
+        double s = 0.0;
+        int n = 0;
+        for (int y = (int)(fy * h) - 3; y <= (int)(fy * h) + 3; ++y)
+            for (int x = (int)(fx * w) - 3; x <= (int)(fx * w) + 3; ++x) {
+                const size_t i = ((size_t)y * w + x) * 3;
+                s += (double)img.Pixels[i] - (double)img.Pixels[i + 1];
+                ++n;
+            }
+        return (float)(s / n / 255.0);
+    };
+    sage::render::PostChain off = ToneOnly(4.0f, 0.0f);
+    sage::render::PostChain on = off;
+    AddEffect(on, "ssgi");
+    SetParam(on, "ssgi", "intensity", 2.0f);
+    const float base = redness(render(off, false, 1), 0.5f, 0.6f);
+    const float guessed = redness(render(on, false, 1), 0.5f, 0.6f) - base;
+    const float fromG = redness(render(on, true, 1), 0.5f, 0.6f) - base;
+    const float fromGMsaa = redness(render(on, true, 4), 0.5f, 0.6f) - base;
+    std::printf("       прибавка красноты тёмного пола: по кадру %.3f, по G-буферу %.3f, с MSAA %.3f\n",
+                guessed, fromG, fromGMsaa);
+    Check(fromG > 0.01f && fromG > guessed * 1.3f,
+          "экранный GI отражает по настоящему цвету поверхности (G-буфер), а не по яркости кадра");
+    Check(fromGMsaa > guessed * 1.3f, "G-буфер переживает перенос MSAA");
+}
+
+
+
+// --- Кластерный свет: шестнадцать ламп горят все, площадная панель светит ----
+//
+// Ряд ламп над полом, вид сверху. До кластерного света шейдер видел восемь
+// точечных: девятая и дальше гасли, и пол под ними оставался тёмным. Панель
+// (площадной источник) светит лицом вниз: пол под ней светлый, за дальностью — нет.
+void TestClusteredLights(FrameRenderer& r) {
+    auto scene = std::make_unique<Scene>("Lamps");
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+    scene->Lighting.AmbientStrength = 0.0f;
+    scene->Lighting.Skybox.Enabled = false;
+    GameObject floor = scene->CreateObject("Floor");
+    floor.GetTransform().Position = {0.0f, -0.05f, 0.0f};
+    floor.GetTransform().Scale = {60.0f, 0.1f, 20.0f};
+    floor.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+    floor.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+    floor.Renderer().Color = {0.8f, 0.8f, 0.8f};
+    const int kLamps = 16;
+    for (int i = 0; i < kLamps; ++i) {
+        GameObject lamp = scene->CreateEmptyObject("Lamp");
+        lamp.GetTransform().Position = {-22.5f + 3.0f * (float)i, 1.0f, -3.0f};
+        LightComponent lc;
+        lc.Kind = LightComponent::Type::Point;
+        lc.Color = {1.0f, 1.0f, 1.0f};
+        lc.Intensity = 8.0f;
+        lc.Range = 2.5f;
+        lc.CastShadows = false;
+        scene->Registry().emplace<LightComponent>(lamp.Entity(), lc);
+    }
+    GameObject panel = scene->CreateEmptyObject("Panel");
+    panel.GetTransform().Position = {0.0f, 1.5f, 4.0f};
+    panel.GetTransform().Rotation = {-90.0f, 0.0f, 0.0f};   // лицом вниз
+    LightComponent pc;
+    pc.Kind = LightComponent::Type::Area;
+    pc.Color = {1.0f, 1.0f, 1.0f};
+    pc.Intensity = 3.0f;
+    pc.Range = 4.0f;
+    pc.AreaWidth = 3.0f;
+    pc.AreaHeight = 2.0f;
+    scene->Registry().emplace<LightComponent>(panel.Entity(), pc);
+
+    const int w = 240, h = 80;
+    Framebuffer out(w, h);
+    out.Bind();
+    auto& device = sage::rhi::GraphicsDevice::Get();
+    device.SetSRGBWrite(true);
+    device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    device.Clear(true, true);
+    const glm::vec3 eye(0.0f, 20.0f, 0.0f);
+    const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.0f), glm::vec3(0, 0, -1));
+    const glm::mat4 proj = glm::ortho(-30.0f, 30.0f, -10.0f, 10.0f, 0.1f, 50.0f);
+    const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+    r.Batch.RenderColor(*scene, view, proj, eye, env, ShadowBinding(), 0);
+    device.SetSRGBWrite(false);
+    const Image img = Capture(w, h);
+    // Мир -> пиксель: x ∈ [-30,30] на ширину, z ∈ [-10,10] на высоту (верх кадра — -z).
+    auto lum = [&](float x, float z) {
+        const int px = (int)((x + 30.0f) / 60.0f * (float)w);
+        const int py = (int)((z + 10.0f) / 20.0f * (float)h);
+        double s = 0.0;
+        int n = 0;
+        for (int y = py - 1; y <= py + 1; ++y)
+            for (int xx = px - 1; xx <= px + 1; ++xx) {
+                const size_t i = ((size_t)y * w + xx) * 3;   // снимок — сверху вниз
+                s += (img.Pixels[i] + img.Pixels[i + 1] + img.Pixels[i + 2]) / 3.0;
+                ++n;
+            }
+        return (float)(s / n / 255.0);
+    };
+    int lit = 0;
+    float dimmest = 1.0f, brightest = 0.0f;
+    for (int i = 0; i < kLamps; ++i) {
+        const float v = lum(-22.5f + 3.0f * (float)i, -3.0f);
+        dimmest = std::min(dimmest, v);
+        brightest = std::max(brightest, v);
+        if (v > 0.1f) ++lit;
+    }
+    const float gap = lum(0.0f, -8.0f);           // далеко от всех ламп
+    const float underPanel = lum(0.0f, 4.0f);
+    const float pastPanel = lum(20.0f, 6.0f);     // за дальностью панели
+    std::printf("       ламп горит %d из %d (самая тусклая %.3f), пустой пол %.3f; под панелью %.3f, вдали %.3f\n",
+                lit, kLamps, dimmest, gap, underPanel, pastPanel);
+    Check(lit == kLamps && dimmest > brightest * 0.8f,
+          "горят все шестнадцать ламп одинаково, а не первые восемь (кластерный свет)");
+    Check(gap < 0.03f, "лампа не светит за своей дальностью");
+    Check(underPanel > 0.15f && pastPanel < 0.03f, "площадной источник освещает пол под собой и гаснет за дальностью");
+}
 
 void TestPostSelfCheck(FrameRenderer& r) {
     const sage::render::PostFX::SelfCheck& check = r.Fx.CheckPipeline();
@@ -1653,6 +1813,8 @@ void RunFrameChecks(FrameRenderer& r, Scene& scene) {
     TestAutoExposureIgnoresVoid(r);
     TestHeightFog(r);
     TestScreenSpaceGI(r);
+    TestScreenSpaceGIUsesGBuffer(r);
+    TestClusteredLights(r);
     TestSceneOrthographic(r, scene);
     TestNoPostFX(r, scene);
     TestDepthOfField(r, scene);

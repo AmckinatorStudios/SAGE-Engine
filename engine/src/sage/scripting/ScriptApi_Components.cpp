@@ -24,6 +24,8 @@ void ScriptEngine::RegisterComponentTypes() {
     m_lua.new_enum<LightComponent::Type>("LightType", {
         {"Point", LightComponent::Type::Point},
         {"Spot",  LightComponent::Type::Spot},
+        {"Directional", LightComponent::Type::Directional},
+        {"Area",  LightComponent::Type::Area},
     });
     m_lua.new_enum<sage::physics::BodyType>("BodyType", {
         {"Static",    sage::physics::BodyType::Static},
@@ -56,7 +58,9 @@ void ScriptEngine::RegisterComponentTypes() {
         "Intensity", &LightComponent::Intensity,
         "Range", &LightComponent::Range,
         "InnerConeDeg", &LightComponent::InnerConeDeg,
-        "OuterConeDeg", &LightComponent::OuterConeDeg
+        "OuterConeDeg", &LightComponent::OuterConeDeg,
+        "AreaWidth", &LightComponent::AreaWidth,
+        "AreaHeight", &LightComponent::AreaHeight
     );
     m_lua.new_usertype<CameraComponent>("CameraComponent",
         "Fov", &CameraComponent::Fov,

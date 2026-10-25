@@ -6,6 +6,7 @@
 
 class Scene;
 struct LightingEnvironment;
+namespace sage::render { class LightClusters; }
 
 // ---------------------------------------------------------------------------
 // Система скелетной анимации — связывает ECS со скелетным пайплайном (аналог
@@ -34,7 +35,8 @@ void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& pr
                         const glm::vec3& viewPos, const LightingEnvironment& env,
                         const ShadowBinding& shadows,
                         const sage::render::ReflectionBinding* reflections = nullptr,
-                        int shadingMode = 0);
+                        int shadingMode = 0,
+                        const sage::render::LightClusters* clusters = nullptr);
 
 // Рисует анимированные модели ТОЛЬКО в глубину (со скиннингом) — вызывается
 // внутри depth-прохода карты теней солнца, чтобы они отбрасывали тень.

@@ -81,8 +81,13 @@ sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& ba
 
     // Режим отладочного вида — тот же, что у статики: персонаж обязан
     // участвовать в разборе кадра наравне со всем остальным.
+    // Скелетные модели — тем же текстурным PBR-шейдером, что и статика, и
+    // G-буфер пишут так же (см. RenderBatch::RenderColor).
+    device.SetGBufferWrites(true);
     sage::anim::DrawAnimatedModels(scene, input.View, input.Proj, input.ViewPos, *input.Env,
-                                   input.Shadows, &input.Reflection, input.ShadingMode);
+                                   input.Shadows, &input.Reflection, input.ShadingMode,
+                                   &batch.Clusters());
+    device.SetGBufferWrites(false);
     return stats;
 }
 

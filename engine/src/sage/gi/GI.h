@@ -86,8 +86,11 @@ struct ProbeVolume {
     glm::vec3 CellSize{1.0f};
     std::vector<SH1> Probes; // Dims.x*Dims.y*Dims.z, x-major (x + y*W + z*W*H)
 
-    // 3D-текстуры каналов R/G/B (в каждой — vec4 гармоник канала). Лениво.
-    std::unique_ptr<sage::rhi::Texture3D> GpuR, GpuG, GpuB;
+    // ОДНА 3D-текстура на все три канала: по глубине три слоя R, G, B, в каждом
+    // vec4 гармоник канала. Одна, а не три, — ради юнитов: их у фрагментной
+    // стадии шестнадцать (столько даёт macOS), и все они были заняты; два
+    // освобождённых ушли под кластерный свет. Лениво.
+    std::unique_ptr<sage::rhi::Texture3D> Gpu;
 
     bool Valid() const { return Dims.x > 0 && Dims.y > 0 && Dims.z > 0; }
     int Index(int x, int y, int z) const { return x + y * Dims.x + z * Dims.x * Dims.y; }

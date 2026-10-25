@@ -360,6 +360,10 @@ struct PostContext {
     // Входы кадра как есть.
     sage::rhi::TextureHandle SceneColor;
     sage::rhi::TextureHandle SceneDepth;
+    // Тонкий G-буфер (альбедо, нормаль в мире; альфа 1 — записано). Может быть
+    // пуст: звено обязано уметь без него.
+    sage::rhi::TextureHandle SceneAlbedo;
+    sage::rhi::TextureHandle SceneNormal;
     sage::rhi::TextureHandle Velocity;
 
     // Текущее состояние тракта: что читает следующее звено.

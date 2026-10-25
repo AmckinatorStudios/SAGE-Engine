@@ -350,3 +350,96 @@ TEST(Lighting_scene_saved_with_a_burning_field_gets_a_real_sun_object) {
     CHECK_NEAR(env.Sun.Direction.y, -1.0f, 1e-3);
     CHECK_NEAR(env.Sun.Color.r, 1.0f, 1e-4);
 }
+
+// --- Кластерный свет и площадные источники ---------------------------------
+//
+// Восемь ламп каждого типа были потолком: девятая гасла молча. Теперь предел —
+// LightingEnvironment::MaxLights, а шейдер видит в каждой ячейке пирамиды
+// взгляда только те лампы, что до неё достают (render/LightClusters.h). Здесь —
+// то, что можно проверить без видеокарты: сбор, раскладка и форм-фактор
+// панели (по его зеркалу шейдер считает рассеянный свет).
+#include "sage/render/LightClusters.h"
+
+TEST(Lighting_more_than_eight_lamps_all_reach_the_frame) {
+    Scene scene("Коридор");
+    for (int i = 0; i < 20; ++i) {
+        GameObject lamp = MakeLight(scene, "Лампа", LightComponent::Type::Point);
+        lamp.GetTransform().Position = glm::vec3((float)i * 3.0f, 2.0f, 0.0f);
+    }
+    GameObject panel = MakeLight(scene, "Панель", LightComponent::Type::Area);
+    panel.GetTransform().Rotation = glm::vec3(-90.0f, 0.0f, 0.0f);
+    const LightingEnvironment env = sage::ecs::CollectLighting(scene);
+    CHECK_EQ((int)env.PointLights.size(), 20);   // было восемь
+    CHECK_EQ((int)env.AreaLights.size(), 1);
+    CHECK_NEAR(env.AreaLights[0].Direction.y, -1.0f, 1e-3);   // панель светит лицом вниз
+}
+
+TEST(LightClusters_each_cell_lists_only_the_lamps_that_reach_it) {
+    LightingEnvironment env;
+    PointLight a; a.Position = {-6.0f, 0.0f, -10.0f}; a.Range = 3.0f;
+    PointLight b; b.Position = {6.0f, 0.0f, -10.0f};  b.Range = 3.0f;
+    PointLight behind; behind.Position = {0.0f, 0.0f, 10.0f}; behind.Range = 3.0f;   // за камерой
+    env.PointLights = {a, b, behind};
+    const glm::mat4 view = glm::lookAt(glm::vec3(0.0f), glm::vec3(0, 0, -1), glm::vec3(0, 1, 0));
+    const glm::mat4 proj = glm::perspective(glm::radians(90.0f), 16.0f / 9.0f, 0.1f, 100.0f);
+    const sage::render::LightClusterData d = sage::render::BuildLightClusters(env, view, proj);
+    CHECK_EQ(d.LightCount, 3);
+    auto has = [&](const glm::vec3& at, int light) {
+        for (int l : d.CellLights(sage::render::ClusterCellOf(d, at)))
+            if (l == light) return true;
+        return false;
+    };
+    CHECK_TRUE(has({-6.0f, 0.0f, -10.0f}, 0));
+    CHECK_TRUE(!has({-6.0f, 0.0f, -10.0f}, 1));    // правая лампа до левого края не достаёт
+    CHECK_TRUE(has({6.0f, 0.5f, -9.0f}, 1));
+    CHECK_TRUE(!has({0.0f, 0.0f, -40.0f}, 0));     // далеко за шаром — пусто
+    // Лампа за спиной не попадает ни в одну ячейку перед камерой.
+    int behindRefs = 0;
+    for (int c = 0; c < sage::render::ClusterGrid::Cells; ++c)
+        for (int l : d.CellLights(c)) behindRefs += l == 2;
+    CHECK_EQ(behindRefs, 0);
+    CHECK_EQ(d.Dropped, 0);
+}
+
+TEST(LightClusters_ortho_view_and_a_thousand_lamps_fit) {
+    LightingEnvironment env;
+    for (int i = 0; i < 1000; ++i) {
+        PointLight p;
+        p.Position = glm::vec3((float)(i % 40) - 20.0f, 0.0f, -(float)(i / 40) - 2.0f);
+        p.Range = 1.5f;
+        env.PointLights.push_back(p);
+    }
+    const glm::mat4 view = glm::lookAt(glm::vec3(0, 30, 0), glm::vec3(0, 0, -12), glm::vec3(0, 0, -1));
+    const glm::mat4 proj = glm::ortho(-25.0f, 25.0f, -15.0f, 15.0f, -50.0f, 100.0f);
+    const sage::render::LightClusterData d = sage::render::BuildLightClusters(env, view, proj);
+    CHECK_EQ(d.LightCount, 1000);
+    CHECK_TRUE(d.IndexCount > 1000);
+    CHECK_EQ(d.Dropped, 0);
+    const int cell = sage::render::ClusterCellOf(d, env.PointLights[500].Position);
+    bool found = false;
+    for (int l : d.CellLights(cell)) found |= l == 500;
+    CHECK_TRUE(found);
+}
+
+TEST(AreaLight_form_factor_follows_the_area_law) {
+    AreaLight big;
+    big.Position = {0.0f, 1.0f, 0.0f};
+    big.Direction = {0.0f, -1.0f, 0.0f};
+    big.Right = {1.0f, 0.0f, 0.0f};
+    big.Width = big.Height = 400.0f;
+    // Панель на весь потолок закрывает почти всю полусферу: F -> 1.
+    const float full = sage::render::AreaFormFactor({0, 0, 0}, {0, 1, 0}, big);
+    CHECK_TRUE(full > 0.97f && full <= 1.0001f);
+    // За панелью — ноль: она светит одной стороной.
+    CHECK_NEAR(sage::render::AreaFormFactor({0, 2, 0}, {0, -1, 0}, big), 0.0f, 1e-6);
+    // Маленькая и далёкая — закон площади: F ≈ A / (π d²).
+    AreaLight small = big;
+    small.Position = {0.0f, 10.0f, 0.0f};
+    small.Width = small.Height = 1.0f;
+    const float f = sage::render::AreaFormFactor({0, 0, 0}, {0, 1, 0}, small);
+    const float expect = 1.0f / (3.14159265f * 100.0f);
+    CHECK_TRUE(std::fabs(f - expect) < expect * 0.03f);
+    // Вдвое больше площадь — вдвое больше свет (а не так же, как у лампы).
+    small.Width = 2.0f;
+    CHECK_NEAR(sage::render::AreaFormFactor({0, 0, 0}, {0, 1, 0}, small) / f, 2.0f, 0.05f);
+}

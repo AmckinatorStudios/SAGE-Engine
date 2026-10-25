@@ -30,6 +30,10 @@ constexpr double kMaxDiffFraction = 0.02; // не больше 2% заметно
 } // namespace
 
 void Report(const std::string& name, const Comparison& c) {
+    if (c.Skipped) {
+        std::printf("[skip] %-28s сравнение с эталоном (режим свойств)\n", name.c_str());
+        return;
+    }
     if (!c.ReferenceExisted) {
         std::printf("[ new] %-28s эталон записан (сравнивать было не с чем)\n", name.c_str());
         ++g_written;

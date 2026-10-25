@@ -2816,6 +2816,24 @@
     "System": "Системный",
     "Software": "Программный",
     "Cursor Lock": "Захват курсора",
-    "How a captured cursor is held. Software: the engine returns it to the window centre every frame — use it if the hidden cursor drifts. Auto switches to Software by itself when the system keeps dropping the capture": "Как держится захваченный курсор. Программный: движок каждый кадр возвращает его в центр окна — выберите, если спрятанный курсор гуляет. Авто сам переходит на программный, если система раз за разом сбрасывает захват"
+    "How a captured cursor is held. Software: the engine returns it to the window centre every frame — use it if the hidden cursor drifts. Auto switches to Software by itself when the system keeps dropping the capture": "Как держится захваченный курсор. Программный: движок каждый кадр возвращает его в центр окна — выберите, если спрятанный курсор гуляет. Авто сам переходит на программный, если система раз за разом сбрасывает захват",
+    "Area (panel)": "Площадной (панель)",
+    "Area light": "Площадной свет",
+    "Glowing panel: window, screen, softbox — soft light and shaped highlights": "Светящаяся панель: окно, экран, софтбокс — мягкий свет и блик её формы",
+    "A glowing panel facing the object's forward (-Z): window, screen, softbox. Highlights on glossy surfaces take its shape. It casts no shadow.": "Светящаяся панель, обращённая туда, куда смотрит объект (-Z): окно, экран, софтбокс. Блик на глянце повторяет её форму. Тени не отбрасывает.",
+    "Light shafts in the air and volumetric clouds. The most expensive pass of the frame": "Лучи света в воздухе и объёмные облака. Самый дорогой проход кадра",
+    "Haze Density": "Плотность дымки",
+    "Shaft Intensity": "Яркость лучей",
+    "Haze Height Falloff": "Убывание дымки с высотой",
+    "How fast the haze thins out with height: 0 — the same at the ground and in the sky": "Как быстро дымка редеет с высотой: 0 — одинаковая у земли и в небе",
+    "Cloud Coverage": "Облачность",
+    "Cloud Layer": "Слой облаков",
+    "Full": "Полное",
+    "Half": "Половина",
+    "Half is about four times cheaper; edges stay clean, the haze gets a little softer": "Половина примерно вчетверо дешевле; края остаются чистыми, дымка чуть мягче",
+    "Background Frame Cap (0=off)": "Лимит кадров в фоне (0 — выкл.)",
+    "Frames per second while the game window is not in focus: frames nobody sees still load the GPU": "Кадров в секунду, пока окно игры не в фокусе: кадры, которых никто не видит, тоже нагружают видеокарту",
+    "Scenes, scripts, models, textures, sounds, materials, interfaces; engine shaders and fonts": "Сцены, скрипты, модели, текстуры, звуки, материалы, интерфейсы; шейдеры и шрифты движка",
+    "Post processing is a component": "Обработка кадра — это компонент"
   }
 }

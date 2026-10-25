@@ -44,13 +44,27 @@ uniform vec3 uCamPos;
 uniform vec2 uFullTexel;   // размер пикселя ПОЛНОГО буфера
 uniform int  uBlock;       // сторона блока в полных пикселях (1 — без уменьшения)
 uniform float uMaxDist;
+// Луч через пиксель: начало и направление. В перспективе луч выходит из
+// камеры; в ортографии — из ближней плоскости (у ортокамеры все лучи
+// параллельны, и «из камеры» значило бы, что пиксели у края кадра смотрят
+// вбок, а дальность до пола у них разная — дымка шла пятнами по кадру).
+uniform int uOrtho;
+void PixelRay(vec2 uv, out vec3 origin, out vec3 dir) {
+    vec4 n4 = uInvViewProj * vec4(uv * 2.0 - 1.0, -1.0, 1.0);
+    vec4 f4 = uInvViewProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec3 nearP = n4.xyz / n4.w, farP = f4.xyz / f4.w;
+    dir = normalize(farP - nearP);
+    origin = uOrtho != 0 ? nearP : uCamPos;
+}
 
 float distAt(vec2 uv, out bool sky) {
     float d = texture(uDepth, uv).r;
     sky = d >= 0.9999;
     if (sky) return uMaxDist;
     vec4 wp = uInvViewProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
-    return length(wp.xyz / wp.w - uCamPos);
+    vec3 origin, dir;
+    PixelRay(uv, origin, dir);
+    return length(wp.xyz / wp.w - origin);
 }
 
 void main() {
@@ -124,6 +138,18 @@ uniform sampler2D uShadow0;
 uniform sampler2D uShadow1;
 uniform sampler2D uShadow2;
 uniform sampler2D uShadow3;
+// Луч через пиксель: начало и направление. В перспективе луч выходит из
+// камеры; в ортографии — из ближней плоскости (у ортокамеры все лучи
+// параллельны, и «из камеры» значило бы, что пиксели у края кадра смотрят
+// вбок, а дальность до пола у них разная — дымка шла пятнами по кадру).
+uniform int uOrtho;
+void PixelRay(vec2 uv, out vec3 origin, out vec3 dir) {
+    vec4 n4 = uInvViewProj * vec4(uv * 2.0 - 1.0, -1.0, 1.0);
+    vec4 f4 = uInvViewProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec3 nearP = n4.xyz / n4.w, farP = f4.xyz / f4.w;
+    dir = normalize(farP - nearP);
+    origin = uOrtho != 0 ? nearP : uCamPos;
+}
 
 // Фазовая функция Хеньи–Гринштейна: во сколько раз охотнее среда рассеивает
 // вперёд. Без неё солнце не «загорается» в дымке, когда смотришь на него, —
@@ -273,9 +299,8 @@ void main() {
     bool sky = sceneInfo.g > 0.5;
 
     // Мировой луч через пиксель.
-    vec4 far = uInvViewProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
-    vec3 farPos = far.xyz / far.w;
-    vec3 dir = normalize(farPos - uCamPos);
+    vec3 origin, dir;
+    PixelRay(uv, origin, dir);
 
     // Сдвиг начала марша: упорядоченный шум по пикселю ПЛЮС сдвиг кадра.
     //
@@ -294,7 +319,7 @@ void main() {
         float march = min(sceneDist, uMaxDist);
         float acc = 0.0;
         for (int i = 0; i < 32; ++i) {
-            acc += sunVisibility(uCamPos + dir * (march * (float(i) + 0.5) / 32.0));
+            acc += sunVisibility(origin + dir * (march * (float(i) + 0.5) / 32.0));
         }
         // Альфа 1 — предумноженное смешивание ЗАМЕНИТ кадр, а не добавит к
         // нему: поверх светлой сцены добавка всегда белая и ничего не говорит.
@@ -330,7 +355,7 @@ void main() {
         for (int i = 0; i < 128; ++i) {
             if (i >= steps || t >= march) break;
             float seg = min(dt, march - t);
-            vec3 p = uCamPos + dir * (t + seg * dither);
+            vec3 p = origin + dir * (t + seg * dither);
             // Плотность падает с высотой: у воды дымка густая, наверху её нет.
             float d = uDensity * exp(-max(p.y - uBaseHeight, 0.0) * uHeightFalloff);
             if (d > 1e-5) {
@@ -358,8 +383,8 @@ void main() {
     float cloudAlpha = 0.0;
     vec3 cloudColor = vec3(0.0);
     if (uClouds != 0 && sky && dir.y > 0.01) {
-        float t0 = (uCloudBottom - uCamPos.y) / dir.y;
-        float t1 = (uCloudTop - uCamPos.y) / dir.y;
+        float t0 = (uCloudBottom - origin.y) / dir.y;
+        float t1 = (uCloudTop - origin.y) / dir.y;
         if (t1 > t0) {
             t0 = max(t0, 0.0);
             // Потолок пути внутри слоя. У горизонта луч идёт сквозь облака
@@ -372,7 +397,7 @@ void main() {
             float ph = phaseHG(dot(dir, uSunDir), 0.35);
             for (int i = 0; i < 128; ++i) {
                 if (i >= uCloudSteps || trans < 0.02) break;
-                vec3 p = uCamPos + dir * t;
+                vec3 p = origin + dir * t;
                 float d = cloudAt(p);
                 if (d > 0.001) {
                     // Световой марш — самое дорогое место прохода. На еле
@@ -415,6 +440,12 @@ void main() {
     // же дымкой — оно за ней.
     float a = 1.0 - aerial * (1.0 - clamp(cloudAlpha, 0.0, 1.0));
     FragColor = vec4(scatter + cloudColor * aerial, clamp(a, 0.0, 1.0));
+    // НЕ ЧИСЛО НЕ ИМЕЕТ ПРАВА ВЫЙТИ ИЗ ПРОХОДА. Один NaN (вырожденное солнце,
+    // деление в фазовой функции на краю) попадает в историю накопления и
+    // остаётся там навсегда: neighborhood clamp NaN не лечит, смешивание его
+    // размножает, и на кадре растёт чёрное пятно, которое не уходит до смены
+    // сцены.
+    if (any(isnan(FragColor)) || any(isinf(FragColor))) FragColor = vec4(0.0);
 }
 )";
 
@@ -444,6 +475,18 @@ uniform vec3 uCamPos;
 uniform vec2 uTexel;
 uniform float uBlend;      // доля истории
 uniform int   uHasHistory;
+// Луч через пиксель: начало и направление. В перспективе луч выходит из
+// камеры; в ортографии — из ближней плоскости (у ортокамеры все лучи
+// параллельны, и «из камеры» значило бы, что пиксели у края кадра смотрят
+// вбок, а дальность до пола у них разная — дымка шла пятнами по кадру).
+uniform int uOrtho;
+void PixelRay(vec2 uv, out vec3 origin, out vec3 dir) {
+    vec4 n4 = uInvViewProj * vec4(uv * 2.0 - 1.0, -1.0, 1.0);
+    vec4 f4 = uInvViewProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec3 nearP = n4.xyz / n4.w, farP = f4.xyz / f4.w;
+    dir = normalize(farP - nearP);
+    origin = uOrtho != 0 ? nearP : uCamPos;
+}
 
 void main() {
     vec4 cur = texture(uCurrent, vUV);
@@ -454,10 +497,10 @@ void main() {
     // сама поверхность; для неба — очень далёкая точка вдоль луча: облака стоят
     // фактически на бесконечности, и привязывать их к дальности марша значило
     // бы тащить их за камерой при каждом шаге вбок.
-    vec4 far = uInvViewProj * vec4(vUV * 2.0 - 1.0, 1.0, 1.0);
-    vec3 dir = normalize(far.xyz / far.w - uCamPos);
+    vec3 origin, dir;
+    PixelRay(vUV, origin, dir);
     float dist = info.g > 0.5 ? 5000.0 : info.r;
-    vec3 world = uCamPos + dir * dist;
+    vec3 world = origin + dir * dist;
 
     vec4 clip = uPrevViewProj * vec4(world, 1.0);
     if (clip.w <= 0.0) { FragColor = cur; return; }
@@ -476,7 +519,10 @@ void main() {
             hi = max(hi, s);
         }
     }
-    vec4 hist = clamp(texture(uHistory, prevUV), lo, hi);
+    vec4 hist = texture(uHistory, prevUV);
+    // История, испорченная когда-то не-числом, — не история (см. марш).
+    if (any(isnan(hist)) || any(isinf(hist))) hist = cur;
+    hist = clamp(hist, lo, hi);
     FragColor = mix(cur, hist, uBlend);
 }
 )";
@@ -501,13 +547,27 @@ uniform mat4 uInvViewProj;
 uniform vec3 uCamPos;
 uniform vec2 uLowSize;     // размер уменьшенного буфера в текселях
 uniform float uMaxDist;
+// Луч через пиксель: начало и направление. В перспективе луч выходит из
+// камеры; в ортографии — из ближней плоскости (у ортокамеры все лучи
+// параллельны, и «из камеры» значило бы, что пиксели у края кадра смотрят
+// вбок, а дальность до пола у них разная — дымка шла пятнами по кадру).
+uniform int uOrtho;
+void PixelRay(vec2 uv, out vec3 origin, out vec3 dir) {
+    vec4 n4 = uInvViewProj * vec4(uv * 2.0 - 1.0, -1.0, 1.0);
+    vec4 f4 = uInvViewProj * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec3 nearP = n4.xyz / n4.w, farP = f4.xyz / f4.w;
+    dir = normalize(farP - nearP);
+    origin = uOrtho != 0 ? nearP : uCamPos;
+}
 
 void main() {
     float dFull = texture(uDepthFull, vUV).r;
     float distFull = uMaxDist;
     if (dFull < 0.9999) {
         vec4 wp = uInvViewProj * vec4(vUV * 2.0 - 1.0, dFull * 2.0 - 1.0, 1.0);
-        distFull = length(wp.xyz / wp.w - uCamPos);
+        vec3 origin, dir;
+        PixelRay(vUV, origin, dir);
+        distFull = length(wp.xyz / wp.w - origin);
     }
 
     // Координаты в текселях уменьшенного буфера и четыре ближайших центра.
@@ -602,21 +662,26 @@ void Volumetrics::ResetHistory() {
     for (auto& kv : m_history) kv.second.Valid = false;
 }
 
-void Volumetrics::EnsureShared(int w, int h) {
-    if (w == m_w && h == m_h && m_march && m_depthLow) return;
-    m_w = w;
-    m_h = h;
-    m_march = MakeColor(w, h);
-    m_depthLow = MakeColor(w, h);
-    // Размер прохода изменился — накопленное описывает другой растр.
-    ResetHistory();
+bool Volumetrics::HistoryValid(int viewId) const {
+    auto it = m_history.find(viewId);
+    return it != m_history.end() && it->second.Valid;
 }
 
+// ВСЕ буферы прохода — свои у каждого вида, а не только накопление.
+//
+// Раньше буферы марша и глубины были общими, а при смене их размера сбрасывалась
+// история ВСЕХ видов. В редакторе вьюпорт и панель Game почти всегда разного
+// размера и рисуются в одном кадре по очереди — то есть размер «менялся» дважды
+// за кадр, история не доживала ни до одного смешивания, и накопление по
+// кадрам не работало вовсе: дымка зернила и мерцала в обоих окнах. Снаружи это
+// и было «в одной сцене хорошо, в другой — каша».
 Volumetrics::ViewHistory& Volumetrics::HistoryFor(int viewId, int w, int h) {
     ViewHistory& v = m_history[viewId];
     if (v.Width != w || v.Height != h || !v.Accum[0] || !v.Accum[1]) {
         v.Accum[0] = MakeColor(w, h);
         v.Accum[1] = MakeColor(w, h);
+        v.March = MakeColor(w, h);
+        v.DepthLow = MakeColor(w, h);
         v.Width = w;
         v.Height = h;
         v.Valid = false;
@@ -640,45 +705,56 @@ void Volumetrics::Render(Framebuffer& target, sage::rhi::TextureHandle sceneDept
     const int lw = std::max(8, (int)((float)w * scale));
     const int lh = std::max(8, (int)((float)h * scale));
     const bool fullRes = (lw == w && lh == h);
-    EnsureShared(lw, lh);
+    ViewHistory& hist = HistoryFor(viewId, lw, lh);
+    RenderTarget& marchTarget = *hist.March;
+    RenderTarget& depthLow = *hist.DepthLow;
     ++m_frame;
 
     const glm::mat4 viewProj = proj * view;
     const glm::mat4 invViewProj = glm::inverse(viewProj);
-    const glm::vec3 sunDir = glm::normalize(-env.Sun.Direction);   // НА солнце
+    // Направление НА солнце. Нулевое (окружение собрано кодом без солнца) дало
+    // бы NaN во всём проходе — берём зенит: солнца всё равно нет, светить нечем.
+    const float sunLen = glm::length(env.Sun.Direction);
+    const glm::vec3 sunDir = sunLen > 1e-6f ? -env.Sun.Direction / sunLen : glm::vec3(0.0f, 1.0f, 0.0f);
     const float maxDist = std::max(s.MaxDistance, 1.0f);
+    const int ortho = std::fabs(proj[3][3] - 1.0f) < 1e-4f ? 1 : 0;
 
     device.SetDepthTest(false);
     device.SetBlend(false);
 
     // --- 1. Глубина прохода: расстояние до поверхности + признак неба ---
-    m_depthLow->Bind();
+    depthLow.Bind();
     Shader& dep = DepthShader();
     dep.Use();
     dep.SetInt("uDepth", 0);
     device.BindTexture2D(0, sceneDepth);
     dep.SetMat4("uInvViewProj", invViewProj);
     dep.SetVec3("uCamPos", camPos);
+    dep.SetInt("uOrtho", ortho);
     dep.SetVec2("uFullTexel", glm::vec2(1.0f / (float)w, 1.0f / (float)h));
     dep.SetInt("uBlock", glm::clamp((int)std::lround(1.0f / scale), 1, 4));
     dep.SetFloat("uMaxDist", maxDist);
     m_fsTri->DrawArrays(3);
 
     // --- 2. Марш в буфере прохода ---
-    m_march->Bind();
+    marchTarget.Bind();
     device.SetClearColor(0.0f, 0.0f, 0.0f, 0.0f);
     device.Clear();
 
     Shader& march = MarchShader();
     march.Use();
     march.SetInt("uSceneDist", 0);
-    device.BindTexture2D(0, m_depthLow->ColorTextureHandle());
+    device.BindTexture2D(0, depthLow.ColorTextureHandle());
     march.SetMat4("uInvViewProj", invViewProj);
     march.SetVec3("uCamPos", camPos);
+    march.SetInt("uOrtho", ortho);
     march.SetVec3("uSunDir", sunDir);
     march.SetVec3("uSunColor", glm::vec3(env.Sun.Color) * env.Sun.Intensity);
-    march.SetVec3("uSkyTop", glm::vec3(env.SkyColor));
-    march.SetVec3("uSkyHorizon", glm::vec3(env.Fog.Color));
+    // Облака подсвечивает небо ТЕКУЩЕГО часа (env.SkyTop/SkyHorizon), а не
+    // дневные цвета настроек и не цвет тумана: ночью облака светились
+    // полуденной голубизной поверх чёрного неба.
+    march.SetVec3("uSkyTop", env.SkyTop());
+    march.SetVec3("uSkyHorizon", env.SkyHorizon());
     march.SetFloat("uTime", time);
     march.SetVec2("uJitter", glm::vec2(1.0f / (float)lw, 1.0f / (float)lh));
     // Золотое сечение по номеру кадра: последовательность равномерно
@@ -729,8 +805,7 @@ void Volumetrics::Render(Framebuffer& target, sage::rhi::TextureHandle sceneDept
     m_fsTri->DrawArrays(3);
 
     // --- 3. Накопление по кадрам ---
-    sage::rhi::TextureHandle volume = m_march->ColorTextureHandle();
-    ViewHistory& hist = HistoryFor(viewId, lw, lh);
+    sage::rhi::TextureHandle volume = marchTarget.ColorTextureHandle();
     if (s.Temporal && !s.Debug) {
         RenderTarget& dst = *hist.Accum[hist.Current];
         RenderTarget& prev = *hist.Accum[1 - hist.Current];
@@ -740,12 +815,13 @@ void Volumetrics::Render(Framebuffer& target, sage::rhi::TextureHandle sceneDept
         tmp.SetInt("uCurrent", 0);
         tmp.SetInt("uHistory", 1);
         tmp.SetInt("uSceneDist", 2);
-        device.BindTexture2D(0, m_march->ColorTextureHandle());
+        device.BindTexture2D(0, marchTarget.ColorTextureHandle());
         device.BindTexture2D(1, prev.ColorTextureHandle());
-        device.BindTexture2D(2, m_depthLow->ColorTextureHandle());
+        device.BindTexture2D(2, depthLow.ColorTextureHandle());
         tmp.SetMat4("uInvViewProj", invViewProj);
         tmp.SetMat4("uPrevViewProj", hist.PrevViewProj);
         tmp.SetVec3("uCamPos", camPos);
+        tmp.SetInt("uOrtho", ortho);
         tmp.SetVec2("uTexel", glm::vec2(1.0f / (float)lw, 1.0f / (float)lh));
         tmp.SetFloat("uBlend", glm::clamp(s.TemporalBlend, 0.0f, 0.98f));
         tmp.SetInt("uHasHistory", hist.Valid ? 1 : 0);
@@ -780,10 +856,11 @@ void Volumetrics::Render(Framebuffer& target, sage::rhi::TextureHandle sceneDept
         up.SetInt("uSceneDistLow", 1);
         up.SetInt("uDepthFull", 2);
         device.BindTexture2D(0, volume);
-        device.BindTexture2D(1, m_depthLow->ColorTextureHandle());
+        device.BindTexture2D(1, depthLow.ColorTextureHandle());
         device.BindTexture2D(2, sceneDepth);
         up.SetMat4("uInvViewProj", invViewProj);
         up.SetVec3("uCamPos", camPos);
+        up.SetInt("uOrtho", ortho);
         up.SetVec2("uLowSize", glm::vec2((float)lw, (float)lh));
         up.SetFloat("uMaxDist", maxDist);
     }

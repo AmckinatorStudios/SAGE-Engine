@@ -543,3 +543,29 @@ TEST(CursorLock_auto_switches_to_software_only_after_repeated_losses) {
     w.Reset();
     CHECK_TRUE(!w.UseSoftware(sage::CursorLockMode::Auto));
 }
+
+TEST(CursorLock_software_recentres_only_when_the_cursor_wandered_far) {
+    // Неизвестное положение — сразу в центр; рядом с центром — не трогать
+    // (возврат — обращение к системе); дальше четверти окна — вернуть.
+    CHECK_TRUE(sage::CursorNeedsRecentre(false, 0, 0, 800, 600));
+    CHECK_TRUE(!sage::CursorNeedsRecentre(true, 400, 300, 800, 600));
+    CHECK_TRUE(!sage::CursorNeedsRecentre(true, 400 + 140, 300, 800, 600));
+    CHECK_TRUE(sage::CursorNeedsRecentre(true, 400 + 160, 300, 800, 600));
+    CHECK_TRUE(!sage::CursorNeedsRecentre(true, 5, 5, 0, 0));   // свёрнутое окно
+}
+
+// --- Лимит кадров: заданный, фоновый, простой слоёв ---------------------------
+#include "sage/app/Application.h"
+
+TEST(FrameCap_takes_the_strictest_of_user_background_and_idle) {
+    CHECK_EQ(sage::EffectiveFrameCap(0, 30, true, 0), 0);      // в фокусе, всем нужны кадры — без лимита
+    CHECK_EQ(sage::EffectiveFrameCap(0, 30, false, 0), 30);    // окно в фоне
+    CHECK_EQ(sage::EffectiveFrameCap(144, 30, false, 0), 30);
+    CHECK_EQ(sage::EffectiveFrameCap(20, 30, false, 0), 20);   // свой лимит строже фонового
+    CHECK_EQ(sage::EffectiveFrameCap(0, 0, false, 0), 0);      // фоновый выключен
+    CHECK_EQ(sage::EffectiveFrameCap(0, 30, true, 30), 30);    // простаивающий редактор
+    CHECK_EQ(sage::EffectiveFrameCap(60, 30, true, 30), 30);
+    sage::EngineConfig cfg;
+    CHECK_EQ(cfg.BackgroundFrameCap, 30);
+    CHECK_EQ(sage::AppConfig::FromEngineConfig(cfg).BackgroundFrameCap, 30);
+}

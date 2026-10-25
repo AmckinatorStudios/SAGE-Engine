@@ -504,3 +504,98 @@ TEST(gi_lightmap_lights_the_right_place) {
     CHECK_TRUE(lo > 0.05f && hi > 0.05f);
     CHECK_TRUE(std::abs(lo - hi) < 0.25f * std::max(lo, hi));
 }
+
+// --- Модель в glTF заслоняет свет при запекании ------------------------------
+//
+// Раньше бейк брал только .obj: крыша-модель в glTF при запекании пропадала, и
+// пол под ней оставался освещён небом, как открытый. Здесь крыша — квадрат в
+// .gltf (данные зашиты в файл), и пол под ней обязан потемнеть так же, как под
+// крышей-примитивом в gi_bake_occlusion_darkens.
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+namespace {
+std::string Base64(const std::string& in) {
+    static const char* t = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    size_t i = 0;
+    for (; i + 2 < in.size(); i += 3) {
+        const unsigned v = ((unsigned char)in[i] << 16) | ((unsigned char)in[i + 1] << 8) | (unsigned char)in[i + 2];
+        out += t[(v >> 18) & 63]; out += t[(v >> 12) & 63]; out += t[(v >> 6) & 63]; out += t[v & 63];
+    }
+    if (i < in.size()) {
+        unsigned v = (unsigned char)in[i] << 16;
+        if (i + 1 < in.size()) v |= (unsigned char)in[i + 1] << 8;
+        out += t[(v >> 18) & 63]; out += t[(v >> 12) & 63];
+        out += i + 1 < in.size() ? t[(v >> 6) & 63] : '=';
+        out += '=';
+    }
+    return out;
+}
+
+// Квадрат 2×2 в плоскости XZ, данные внутри файла (data URI).
+std::string WriteQuadGltf() {
+    const float pos[12] = {-1, 0, -1, 1, 0, -1, 1, 0, 1, -1, 0, 1};
+    const unsigned short idx[6] = {0, 2, 1, 0, 3, 2};
+    std::string bin((const char*)pos, sizeof(pos));
+    bin.append((const char*)idx, sizeof(idx));
+    const std::string json =
+        R"({"asset":{"version":"2.0"},"scene":0,"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],)"
+        R"("meshes":[{"primitives":[{"attributes":{"POSITION":0},"indices":1}]}],)"
+        R"("buffers":[{"byteLength":60,"uri":"data:application/octet-stream;base64,)" + Base64(bin) + R"("}],)"
+        R"("bufferViews":[{"buffer":0,"byteOffset":0,"byteLength":48},{"buffer":0,"byteOffset":48,"byteLength":12}],)"
+        R"("accessors":[{"bufferView":0,"componentType":5126,"count":4,"type":"VEC3","min":[-1,0,-1],"max":[1,0,1]},)"
+        R"({"bufferView":1,"componentType":5123,"count":6,"type":"SCALAR"}]})";
+    const std::string path = (std::filesystem::temp_directory_path() / "sage_gi_roof.gltf").string();
+    std::ofstream(path, std::ios::binary) << json;
+    return path;
+}
+} // namespace
+
+TEST(gi_bake_gltf_model_occludes_like_a_primitive) {
+    const std::string roofPath = WriteQuadGltf();
+    auto bakeAvgFloor = [&](bool roofed) {
+        Scene scene("gltf");
+        scene.Lighting.Sun.Intensity = 0.0f;
+        scene.Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+        scene.Lighting.SkyColor = {1.0f, 1.0f, 1.0f};
+        scene.Lighting.GroundColor = {0.0f, 0.0f, 0.0f};
+        scene.Lighting.AmbientStrength = 1.0f;
+        GameObject floor = scene.CreateObject("floor");
+        floor.Renderer().Ref = MeshRef{MeshRef::Type::Plane, ""};
+        floor.GetTransform().Scale = {8.0f, 1.0f, 8.0f};
+        floor.Registry()->emplace<GIStaticComponent>(floor.Entity());
+        if (roofed) {
+            GameObject roof = scene.CreateObject("roof");
+            roof.Renderer().Ref = MeshRef{MeshRef::Type::Model, roofPath};
+            roof.GetTransform().Position = {0.0f, 1.0f, 0.0f};
+            roof.GetTransform().Scale = {8.0f, 1.0f, 8.0f};
+            roof.Registry()->emplace<GIStaticComponent>(roof.Entity()).Lightmapped = false;
+        }
+        GISettings s;
+        s.TexelsPerUnit = 2;
+        s.AtlasSize = 128;
+        s.SampleCount = 32;
+        s.Bounces = 1;
+        s.MaxProbeAxis = 4;
+        BakeInput in = CollectBakeInput(scene, s);
+        if (roofed) CHECK_EQ((int)in.Items.size(), 2);   // модель вошла в бейк
+        auto state = Bake(in);
+        const LightmapPage& p = state->Pages[0];
+        double sum = 0.0;
+        int cnt = 0;
+        for (size_t i = 0; i < p.Texels.size(); ++i) {
+            if (!p.Coverage[i]) continue;
+            sum += p.Texels[i].r;
+            ++cnt;
+        }
+        return cnt > 0 ? sum / cnt : 0.0;
+    };
+    const double open = bakeAvgFloor(false);
+    const double roofed = bakeAvgFloor(true);
+    CHECK_TRUE(open > 0.5);
+    CHECK_TRUE(roofed < open * 0.6);
+    std::filesystem::remove(roofPath);
+}

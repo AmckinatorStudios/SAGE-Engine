@@ -458,11 +458,16 @@ private:
     // Набор Lua-тестов движка (assets/tests/lua) — в настоящем Play через
     // «Run Lua Tests»: весь API скриптинга живым кадром.
     void CheckLuaTestsFrame();
+    // Окно «Новый материал» не сжимается кадр за кадром (см. .cpp).
+    void CheckCreateDialogFrame();
     // Окно Tween живым кадром: твин объекта играет и сбрасывается общим
     // проигрывателем сцены, окно и секция инспектора рисуются без ошибок.
     void CheckTweenFrame();
     int m_tweenSelfTestStep = 0;
     bool m_tweenChecked = false;
+    bool m_createDialogChecked = false;
+    int m_createDialogStep = 0;
+    float m_createDialogWidth = 0.0f;
     double m_tweenSelfTestAt = 0.0;
     int m_tweenSelfTestErrors = 0;
     int m_luaSelfTestStep = 0;
@@ -576,6 +581,9 @@ private:
     // задержать закрытие и спросить; ответ «не сохранять»/«сохранено» закроет
     // приложение сам (см. DrawUnsavedPrompt).
     bool OnCloseRequest() override;
+    // Простаивающий редактор (не идёт игра, ввода не было несколько секунд)
+    // рисует реже — см. Layer::IdleFrameCap.
+    int IdleFrameCap() const override;
     void AskUnsaved(std::function<void()> action);
     void DrawUnsavedPrompt();
 

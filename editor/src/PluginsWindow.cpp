@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "imgui.h"
+#include "EditorTheme.h"
 
 #include "EditorHost.h"
 #include "EditorIcons.h"
@@ -235,7 +236,7 @@ void DrawLuaDetails(EditorHost& host, const lp::PluginInfo& info) {
             if (lp::SaveSettings(host, m.Id, settings, err)) s.Message = T("Settings saved to plugin.json");
             else s.Message = err;
         }
-        ImGui::TextDisabled("%s", T("The game part picks the settings up on the next Play."));
+        EditorTheme::Hint(T("The game part picks the settings up on the next Play."));
     }
 }
 
@@ -243,13 +244,13 @@ void DrawNativeDetails(const fs::path& file, const Native& native) {
     ImGui::TextUnformatted(sage::PathToUtf8(file.filename()).c_str());
     ImGui::SameLine();
     ImGui::TextDisabled("%s", T("C++ plugin"));
+    // Предупреждение о доверии — при наведении на тип, а не абзацем под ним.
+    EditorTheme::Hint(T("A C++ plugin is a compiled library: it runs without a sandbox and must be rebuilt "
+                        "for every editor version. Turn it on only if you trust it. For your own tools "
+                        "write a Lua plugin instead — no compiler needed."));
     const std::string name = native.Manager ? native.Manager->NameOf(file) : std::string();
     if (!name.empty()) ImGui::TextColored(ImVec4(0.45f, 0.85f, 0.5f, 1.0f), T("Loaded: %s"), name.c_str());
     else ImGui::TextDisabled("%s", T("Not loaded"));
-    ImGui::Spacing();
-    ImGui::TextWrapped("%s", T("A C++ plugin is a compiled library: it runs without a sandbox and must be rebuilt "
-                               "for every editor version. Turn it on only if you trust it. For your own tools "
-                               "write a Lua plugin instead — no compiler needed."));
 }
 
 void DrawCreate(EditorHost& host) {

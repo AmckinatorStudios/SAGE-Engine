@@ -375,7 +375,7 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                     } else {
                         if (ImGui::SliderInt(T("Chain Length"), &g.ChainLength, 2, 8)) g.Resolved = false;
                         host.TrackLastImGuiItem();
-                        ImGui::TextDisabled("%s", T("2 = analytic two-bone, more = FABRIK"));
+                        EditorTheme::Hint(T("2 = analytic two-bone, more = FABRIK"));
                         // Полюс, выравнивание стопы и её фиксация — тонкая
                         // настройка ног; цель и вес — выше и ниже, на виду.
                         if (EditorTheme::BeginMore("ikMore")) {

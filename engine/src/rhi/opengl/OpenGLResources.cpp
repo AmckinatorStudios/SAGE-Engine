@@ -299,6 +299,20 @@ GLTexture2D::GLTexture2D(const Texture2DDesc& desc, const void* pixels) {
     // Одноканальные (R8) текстуры — например, атлас шрифта — могут иметь ширину,
     // не кратную 4; выравнивание строк по 1 байту защищает от косой загрузки.
     if (desc.Channels == 1) glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    m_width = desc.Width;
+    m_height = desc.Height;
+    m_format = format;
+    m_type = (desc.FloatPixels || desc.Float32) ? GL_FLOAT : GL_UNSIGNED_BYTE;
+    if (desc.Float32) {
+        GLenum internal = desc.Channels == 4 ? GL_RGBA32F : (desc.Channels == 3 ? GL_RGB32F : GL_R32F);
+        glTexImage2D(GL_TEXTURE_2D, 0, internal, desc.Width, desc.Height, 0, format, GL_FLOAT, pixels);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        if (desc.Channels == 1) glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+        return;
+    }
     if (desc.FloatPixels) {
         // HDR-текстура (лайтмапы GI): 16F-хранилище, данные — float.
         GLenum internal = desc.Channels == 4 ? GL_RGBA16F : (desc.Channels == 3 ? GL_RGB16F : GL_R16F);
@@ -327,6 +341,13 @@ GLTexture2D::~GLTexture2D() {
 void GLTexture2D::Bind(int unit) const {
     glActiveTexture(GL_TEXTURE0 + unit);
     glBindTexture(GL_TEXTURE_2D, m_id);
+}
+
+bool GLTexture2D::Update(const void* pixels) {
+    if (!m_id || !pixels) return false;
+    glBindTexture(GL_TEXTURE_2D, m_id);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_width, m_height, m_format, m_type, pixels);
+    return true;
 }
 
 // ============================================================================
@@ -480,8 +501,57 @@ void GLCubeRenderTarget::Bind(int unit) const {
 //  GLRenderTarget
 // ============================================================================
 
+namespace {
+const GLRenderTarget* s_boundTarget = nullptr;   // таргет с G-буфером, привязанный сейчас
+// G-вложение: RGBA8 — альбедо в [0,1] и нормаль, упакованная в [0,1], большего
+// не требуют, а NaN в восьми битах не бывает (половинная точность пропустила
+// бы мусор неосторожного шейдера в размытие GI).
+unsigned int MakeGTex(int w, int h) {
+    unsigned int t = 0;
+    glGenTextures(1, &t);
+    glBindTexture(GL_TEXTURE_2D, t);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    return t;
+}
+const GLenum kOnlyColor[] = {GL_COLOR_ATTACHMENT0};
+const GLenum kWithGBuffer[] = {GL_COLOR_ATTACHMENT0, GL_COLOR_ATTACHMENT1, GL_COLOR_ATTACHMENT2};
+} // namespace
+
+const GLRenderTarget* GLRenderTarget::Current() { return s_boundTarget; }
+void GLRenderTarget::ResetCurrent() { s_boundTarget = nullptr; }
+
+// Привязан ли этот таргет на самом деле. Запомненный «текущий» мог устареть:
+// буфер привязывают и мимо Bind (создание таргета, перенос MSAA, чужие кубы), и
+// включать три вложения рисования у чужого буфера — ошибка GL.
+static bool IsDrawBound(unsigned int fbo, unsigned int msFbo) {
+    GLint bound = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &bound);
+    return bound != 0 && ((unsigned)bound == fbo || (unsigned)bound == msFbo);
+}
+
+void GLRenderTarget::SetGBufferWrites(bool on) const {
+    if (!m_gbuffer || !IsDrawBound(m_fbo, m_msFbo)) return;
+    glDrawBuffers(on ? 3 : 1, on ? kWithGBuffer : kOnlyColor);
+}
+
+void GLRenderTarget::ClearGBuffer() const {
+    if (!m_gbuffer || !IsDrawBound(m_fbo, m_msFbo)) return;
+    // glClearBuffer чистит вложение по номеру в списке рисования — на миг
+    // включаем все три. Ноль в альфе — «поверхности нет».
+    glDrawBuffers(3, kWithGBuffer);
+    const float zero[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    glClearBufferfv(GL_COLOR, 1, zero);
+    glClearBufferfv(GL_COLOR, 2, zero);
+    glDrawBuffers(1, kOnlyColor);
+}
+
 GLRenderTarget::GLRenderTarget(const RenderTargetDesc& desc)
-    : m_kind(desc.Kind), m_width(desc.Width), m_height(desc.Height) {
+    : m_kind(desc.Kind), m_width(desc.Width), m_height(desc.Height),
+      m_gbuffer(desc.GBuffer && desc.Kind == RenderTargetKind::ColorHDRWithDepth) {
     // MSAA имеет смысл только там, где растеризуется геометрия. У буферов
     // пост-эффектов её нет, у карты теней усреднять глубину нельзя.
     if (desc.Kind == RenderTargetKind::ColorHDRWithDepth && desc.Samples > 1) {
@@ -528,6 +598,13 @@ void GLRenderTarget::CreateStorage() {
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
             glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, m_depthTex, 0);
         }
+        if (m_gbuffer) {
+            m_albedoTex = MakeGTex(m_width, m_height);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, m_albedoTex, 0);
+            m_normalTex = MakeGTex(m_width, m_height);
+            glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, m_normalTex, 0);
+            glDrawBuffers(1, kOnlyColor);
+        }
     } else { // DepthOnly (карта теней)
         glGenTextures(1, &m_depthTex);
         glBindTexture(GL_TEXTURE_2D, m_depthTex);
@@ -568,13 +645,26 @@ void GLRenderTarget::CreateStorage() {
         glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_DEPTH_COMPONENT24,
                                          m_width, m_height);
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, m_msDepth);
+        if (m_gbuffer) {
+            glGenRenderbuffers(1, &m_msAlbedo);
+            glBindRenderbuffer(GL_RENDERBUFFER, m_msAlbedo);
+            glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_RGBA8, m_width, m_height);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_RENDERBUFFER, m_msAlbedo);
+            glGenRenderbuffers(1, &m_msNormal);
+            glBindRenderbuffer(GL_RENDERBUFFER, m_msNormal);
+            glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_RGBA8, m_width, m_height);
+            glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_RENDERBUFFER, m_msNormal);
+            glDrawBuffers(1, kOnlyColor);
+        }
 
         if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
             LOG_ERROR("RHI") << "Многосэмпловый рендер-таргет неполный — MSAA отключён";
             glDeleteFramebuffers(1, &m_msFbo);
             glDeleteRenderbuffers(1, &m_msColor);
             glDeleteRenderbuffers(1, &m_msDepth);
-            m_msFbo = m_msColor = m_msDepth = 0;
+            if (m_msAlbedo) glDeleteRenderbuffers(1, &m_msAlbedo);
+            if (m_msNormal) glDeleteRenderbuffers(1, &m_msNormal);
+            m_msFbo = m_msColor = m_msDepth = m_msAlbedo = m_msNormal = 0;
             m_samples = 1;
         }
         glBindFramebuffer(GL_FRAMEBUFFER, m_fbo);
@@ -598,7 +688,24 @@ void GLRenderTarget::Resolve() {
                       GL_COLOR_BUFFER_BIT, GL_NEAREST);
     glBlitFramebuffer(0, 0, m_width, m_height, 0, 0, m_width, m_height,
                       GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    // Вложения G-буфера — каждое своим переносом: blit цвета берёт ОДНО
+    // вложение чтения (glReadBuffer) и пишет во все включённые для рисования.
+    if (m_gbuffer && m_msAlbedo) {
+        for (int i = 1; i <= 2; ++i) {
+            const GLenum att = GL_COLOR_ATTACHMENT0 + i;
+            glReadBuffer(att);
+            glDrawBuffers(1, &att);
+            glBlitFramebuffer(0, 0, m_width, m_height, 0, 0, m_width, m_height,
+                              GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        }
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glDrawBuffers(1, kOnlyColor);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, m_msFbo);
+        glReadBuffer(GL_COLOR_ATTACHMENT0);
+        glDrawBuffers(1, kOnlyColor);
+    }
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    s_boundTarget = nullptr;
 }
 
 void GLRenderTarget::DestroyStorage() {
@@ -607,6 +714,12 @@ void GLRenderTarget::DestroyStorage() {
     if (m_depthRbo) glDeleteRenderbuffers(1, &m_depthRbo);
     if (m_msColor) glDeleteRenderbuffers(1, &m_msColor);
     if (m_msDepth) glDeleteRenderbuffers(1, &m_msDepth);
+    if (m_albedoTex) glDeleteTextures(1, &m_albedoTex);
+    if (m_normalTex) glDeleteTextures(1, &m_normalTex);
+    if (m_msAlbedo) glDeleteRenderbuffers(1, &m_msAlbedo);
+    if (m_msNormal) glDeleteRenderbuffers(1, &m_msNormal);
+    m_albedoTex = m_normalTex = m_msAlbedo = m_msNormal = 0;
+    if (s_boundTarget == this) s_boundTarget = nullptr;
     if (m_msFbo) glDeleteFramebuffers(1, &m_msFbo);
     if (m_fbo) glDeleteFramebuffers(1, &m_fbo);
     m_colorTex = m_depthTex = m_depthRbo = m_fbo = 0;
@@ -618,6 +731,10 @@ void GLRenderTarget::Bind() const {
     // покрытие пикселя. Обычные текстуры — только приёмник Resolve.
     glBindFramebuffer(GL_FRAMEBUFFER, m_samples > 1 && m_msFbo ? m_msFbo : m_fbo);
     glViewport(0, 0, m_width, m_height);
+    // Запись G-буфера выключена при каждой привязке: включает её только
+    // освещаемый проход (GraphicsDevice::SetGBufferWrites).
+    if (m_gbuffer) glDrawBuffers(1, kOnlyColor);
+    s_boundTarget = m_gbuffer ? this : nullptr;
 }
 
 void GLRenderTarget::Resize(int width, int height) {
@@ -635,6 +752,11 @@ void GLRenderTarget::Resize(int width, int height) {
             glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0,
                          GL_DEPTH_COMPONENT, GL_FLOAT, nullptr);
         }
+        for (unsigned int t : {m_albedoTex, m_normalTex}) {
+            if (!t) continue;
+            glBindTexture(GL_TEXTURE_2D, t);
+            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+        }
     } else {
         glBindTexture(GL_TEXTURE_2D, m_depthTex);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT24, width, height, 0,
@@ -650,6 +772,11 @@ void GLRenderTarget::Resize(int width, int height) {
         glBindRenderbuffer(GL_RENDERBUFFER, m_msDepth);
         glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_DEPTH_COMPONENT24,
                                          width, height);
+        for (unsigned int rb : {m_msAlbedo, m_msNormal}) {
+            if (!rb) continue;
+            glBindRenderbuffer(GL_RENDERBUFFER, rb);
+            glRenderbufferStorageMultisample(GL_RENDERBUFFER, m_samples, GL_RGBA8, width, height);
+        }
     }
 }
 

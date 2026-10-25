@@ -49,7 +49,8 @@ void EditorSceneRenderer::RenderCameraPreview(Scene& scene, const LightingEnviro
     if (!frame.HasPrimary) return;   // не камера (или сущности уже нет)
 
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
-    EnsureFramebuffer(m_previewFbo, m_previewW, m_previewH, sage::render::SceneSamples(cfg));
+    EnsureFramebuffer(m_previewFbo, m_previewW, m_previewH, sage::render::SceneSamples(cfg),
+                      sage::render::SceneWantsGBuffer(cfg));
     m_previewFbo->Bind();
     const glm::vec3 clear = sage::render::SceneClearColor(env);
     device.SetClearColor(clear.r, clear.g, clear.b, 1.0f);
@@ -74,6 +75,7 @@ void EditorSceneRenderer::RenderCameraPreview(Scene& scene, const LightingEnviro
         EnsureFramebuffer(m_previewPostFbo, m_previewW, m_previewH);
         m_previewPostFbo->Resize(m_previewW, m_previewH);
         m_previewPostfx->SetLighting(&env);
+        m_previewPostfx->SetGBuffer(m_previewFbo->AlbedoTexture(), m_previewFbo->NormalTexture());
         m_previewPostfx->Render(m_previewFbo->ColorTexture(), m_previewFbo->DepthTexture(),
                          m_previewFbo->Width(), m_previewFbo->Height(), frame.Proj, frame.View,
                          previewChain,
@@ -132,7 +134,8 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     }
 
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
-    EnsureFramebuffer(m_gameFbo, m_gameW, m_gameH, sage::render::SceneSamples(cfg));
+    EnsureFramebuffer(m_gameFbo, m_gameW, m_gameH, sage::render::SceneSamples(cfg),
+                      sage::render::SceneWantsGBuffer(cfg));
     m_gameFrameValid = true;
     m_gameFbo->Bind();
     // Заливка — общим правилом (SkyDraw.h): выключенное небо чёрное, а не
@@ -188,6 +191,7 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     if (PostWorks()) {
         m_gamePostFbo->Resize(m_gameW, m_gameH);
         m_gamePostfx->SetLighting(&env);
+        m_gamePostfx->SetGBuffer(m_gameFbo->AlbedoTexture(), m_gameFbo->NormalTexture());
         m_gamePostfx->Render(m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),
                              m_gameFbo->Width(), m_gameFbo->Height(), proj, view, gameChain,
                              /*output=*/&*m_gamePostFbo, 0, 0, m_gameW, m_gameH, gameVelocity);
@@ -224,7 +228,8 @@ bool EditorSceneRenderer::DrawGameUI(Scene& scene, const sage::EngineConfig& cfg
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
     if (onlyBackdrop) {
         // Своего кадра ещё нет: собираем его с нуля из одной заливки.
-        EnsureFramebuffer(m_gameFbo, m_gameW, m_gameH, sage::render::SceneSamples(cfg));
+        EnsureFramebuffer(m_gameFbo, m_gameW, m_gameH, sage::render::SceneSamples(cfg),
+                      sage::render::SceneWantsGBuffer(cfg));
         m_gameFrameValid = true;
         m_gamePostApplied = false;
         m_gameFbo->Bind();

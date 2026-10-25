@@ -12,6 +12,7 @@
 // ---------------------------------------------------------------------------
 #include <cstdarg>
 #include "InspectorPanel.h"
+#include "EditorTheme.h"
 #include "../UIElementProperties.h"
 
 #include <cmath>
@@ -48,17 +49,17 @@ namespace fs = std::filesystem;
 
 // Кнопка «Add Component» + попап со списком компонентов, которых у сущности ещё
 // нет. Так добавление унифицировано (а удаление — кнопкой Remove в самой секции).
-// Серое пояснение, КОТОРОЕ ПЕРЕНОСИТСЯ. Панель инспектора узкая (её ширину
-// задаёт раскладка доккинга), а TextDisabled не переносит — поэтому пояснения
-// обрезались по краю панели прямо посередине слова: «габарит 1.00 x 1.00 x 1.0(»,
-// «задаём вид объекта целик». Пропадал ровно тот текст, ради которого их писали.
 void InspectorPanel::HintWrapped(const char* fmt, ...) {
+    // ПОЯСНЕНИЕ — ВСПЛЫВАЮЩЕЕ, А НЕ ТЕКСТОМ В ПАНЕЛИ. Серые абзацы под каждым
+    // полем превращали инспектор в справочник: нужное поле терялось среди
+    // объяснений. Теперь пояснение появляется при наведении на тот элемент,
+    // к которому относится (стоящий перед вызовом).
+    char buf[1024];
     va_list args;
     va_start(args, fmt);
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::TextWrappedV(fmt, args);
-    ImGui::PopStyleColor();
+    std::vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
+    EditorTheme::Hint(buf);
 }
 
 

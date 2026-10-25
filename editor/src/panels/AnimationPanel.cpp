@@ -250,9 +250,11 @@ void AnimationPanel::DrawNoClip(EditorHost& host) {
     EditorIcons::Inline("anim");
     ImGui::SameLine(0.0f, EditorIcons::TextGap());
     ImGui::TextUnformatted(T("No clip open"));
+    // Как устроена анимация — при наведении, панель остаётся кнопкой и статусом.
+    EditorTheme::Hint(T("An animation lives in a clip file and is played by a component\n"
+                        "on the object. Create one and both appear at once."));
+    EditorTheme::Hint(T("An existing clip opens from Assets: double-click the .sageclip."));
     ImGui::Separator();
-    ImGui::TextWrapped("%s", T("An animation lives in a clip file and is played by a component\n"
-                               "on the object. Create one and both appear at once."));
     ImGui::Dummy(ImVec2(0.0f, 6.0f));
 
     ImGui::BeginDisabled(!sel.Valid());
@@ -271,7 +273,6 @@ void AnimationPanel::DrawNoClip(EditorHost& host) {
     }
 
     ImGui::Dummy(ImVec2(0.0f, 4.0f));
-    ImGui::TextDisabled("%s", T("An existing clip opens from Assets: double-click the .sageclip."));
     if (!m_status.empty()) ImGui::TextDisabled("%s", m_status.c_str());
 }
 
