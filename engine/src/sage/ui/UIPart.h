@@ -203,7 +203,7 @@ struct PartDrawContext {
     bool OwnerEnabled = true;
 
     // Оформление движка (Element::SkinMode::Engine): части берут у себя только
-    // цвет, остальное — из общей темы движка (см. EngineLook в UIParts.cpp).
+    // цвет, остальное — из общей темы движка (см. EngineLook в UIParts_Look.cpp).
     bool EngineSkin = false;
 
     UIRenderer* Ui = nullptr;

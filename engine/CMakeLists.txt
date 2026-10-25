@@ -23,6 +23,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/audio/AudioSystem.cpp
     src/sage/audio/miniaudio_impl.cpp
     src/sage/ecs/RenderBatch.cpp
+    src/sage/ecs/RenderBatch_Color.cpp
     src/sage/gi/BVH.cpp
     src/sage/gi/GI.cpp
     src/sage/gi/LightBaker.cpp
@@ -132,13 +133,20 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/PostChainIO.cpp
     src/sage/render/PostEffect.cpp
     src/sage/render/PostFX.cpp
+    src/sage/render/PostFXCatalog.cpp
+    src/sage/render/PostFXPasses.cpp
+    src/sage/render/PostFXShaders_Color.cpp
+    src/sage/render/PostFXShaders_Light.cpp
     src/sage/render/RenderTexture.cpp
     src/sage/render/Volumetrics.cpp
     src/sage/render/ResourceManager.cpp
+    src/sage/render/ResourceManager_Materials.cpp
+    src/sage/render/ResourceManager_Memory.cpp
     src/sage/render/AlphaBleed.cpp
     src/sage/render/Screenshot.cpp
     src/sage/render/Shader.cpp
     src/sage/render/SkinnedModel.cpp
+    src/sage/render/SkinnedModel_Gltf.cpp
     src/sage/render/SkyRenderer.cpp
     src/sage/render/stb_truetype_impl.cpp
     src/sage/render/Skybox.cpp
@@ -150,8 +158,10 @@ set(SAGE_ENGINE_SOURCES
     src/physics/CharacterMotor.cpp
     src/physics/PhysicsWorld.cpp
     src/physics/PhysicsScene.cpp
+    src/physics/PhysicsScene_Characters.cpp
     src/physics/Ragdoll.cpp
     src/physics/builtin/BuiltinWorld.cpp
+    src/physics/builtin/BuiltinWorld_Solver.cpp
     src/physics/builtin/Collide.cpp
     src/sage/scene/CopyName.cpp
     src/sage/scene/ScaleLock.cpp
@@ -160,14 +170,24 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/SceneFlow.cpp
     src/sage/scene/ComponentRegistry.cpp
     src/sage/scene/SceneSerializer.cpp
+    src/sage/scene/SceneSerializer_Components.cpp
+    src/sage/scene/SceneSerializer_Environment.cpp
     src/sage/scene/SceneMigrations.cpp
     src/sage/scene/SceneValueJson.cpp
     src/sage/scene/Signals.cpp
     src/sage/scene/EnvironmentSchema.cpp
     src/sage/scripting/ScriptEngine.cpp
+    src/sage/scripting/ScriptModules.cpp
     src/sage/lang/SageLexer.cpp
     src/sage/lang/SageParser.cpp
+    src/sage/lang/SageParser_Decl.cpp
+    src/sage/lang/SageParser_Expr.cpp
+    src/sage/lang/SageParser_Stmt.cpp
     src/sage/lang/SageCheck.cpp
+    src/sage/lang/SageCheck_Body.cpp
+    src/sage/lang/SageCheck_Decls.cpp
+    src/sage/lang/SageCheck_Expr.cpp
+    src/sage/lang/SageCheck_Types.cpp
     src/sage/lang/SageCodegen.cpp
     src/sage/lang/SageCompiler.cpp
     src/sage/lang/SagePrelude.cpp
@@ -204,6 +224,9 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_Events.cpp
     src/sage/scripting/ScriptApi_Physics.cpp
     src/sage/ui/UIParts.cpp
+    src/sage/ui/UIParts_Input.cpp
+    src/sage/ui/UIParts_Look.cpp
+    src/sage/ui/UIParts_Visual.cpp
     src/sage/ui/NineSlice.cpp
     src/sage/ui/UISerialize.cpp
     src/sage/ui/Interface.cpp
@@ -268,7 +291,7 @@ target_link_libraries(sage_engine PRIVATE
 # включает jolt-ветки в PhysicsWorld.cpp/JoltWorld.cpp; всё под Jolt изолировано
 # в src/physics/jolt/ (как opengl-бэкенд изолирован в rhi/opengl/).
 if (TARGET Jolt)
-    target_sources(sage_engine PRIVATE src/physics/jolt/JoltWorld.cpp)
+    target_sources(sage_engine PRIVATE src/physics/jolt/JoltWorld.cpp src/physics/jolt/JoltWorld_Bodies.cpp)
     target_compile_definitions(sage_engine PRIVATE SAGE_HAS_JOLT)
     target_link_libraries(sage_engine PRIVATE Jolt)
 endif()

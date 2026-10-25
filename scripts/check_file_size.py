@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""Файл редактора — не длиннее LIMIT строк.
+"""Файл редактора, движка и рантайма — не длиннее LIMIT строк.
 
 ЗАЧЕМ. Редактор рос файлами-«комбайнами»: самопроверка на восемь с половиной
 тысяч строк, инспектор объекта, в котором одна функция рисовала двадцать
@@ -18,20 +18,26 @@
 предела — скрипт попросит убрать его из базы (--update перепишет её).
 
 Сгенерированное (*.inl — переводы, шрифт значков) не считается.
+
+ДВИЖОК И РАНТАЙМ — под тем же пределом. Там жили файлы на две с половиной
+тысячи строк (пост-обработка, проверка типов SAGE Lua, сериализатор сцены,
+части интерфейса): их разделили по обязанностям, помощники модуля — в
+<Модуль>Detail.h рядом. Длинный встроенный текст (GLSL, Lua) держится
+частями и склеивается при компиляции (sage/core/StaticText.h).
 """
 import json
 import os
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "editor", "src")
+SRCS = [os.path.join(ROOT, d, "src") for d in ("editor", "engine", "runtime")]
 BASELINE = os.path.join(ROOT, "scripts", "file_size_baseline.json")
 LIMIT = 1000
 
 
 def scan():
     sizes = {}
-    for dp, _, files in os.walk(SRC):
+    for dp, _, files in (w for src in SRCS for w in os.walk(src)):
         for f in files:
             if not f.endswith((".cpp", ".h")):
                 continue
@@ -57,8 +63,8 @@ def main():
             baseline = json.load(fh)
     bad = {k: v for k, v in over.items() if v > baseline.get(k, LIMIT)}
     if bad:
-        print(f"ФАЙЛ РЕДАКТОРА ДЛИННЕЕ {LIMIT} СТРОК — разделите его по обязанностям")
-        print("(docs/architecture.md, «Модули редактора»):")
+        print(f"ФАЙЛ ДЛИННЕЕ {LIMIT} СТРОК — разделите его по обязанностям")
+        print("(docs/architecture.md, «Модули редактора» и «Крупные файлы движка»):")
         for k, v in sorted(bad.items()):
             was = baseline.get(k)
             print(f"    {k}: {v}" + (f" (в базе {was})" if was else ""))
@@ -69,7 +75,7 @@ def main():
         for k, v in sorted(stale.items()):
             print(f"    {k}: {sizes.get(k, 0)} (в базе {v})")
         return 1
-    print(f"размер файлов редактора держится: проверено {len(sizes)}, длиннее {LIMIT} строк — "
+    print(f"размер файлов редактора, движка и рантайма держится: проверено {len(sizes)}, длиннее {LIMIT} строк — "
           f"{len(over)} (все из базы, ни один не вырос)")
     return 0
 

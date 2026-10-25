@@ -6,6 +6,8 @@ sage_add_game(
     SOURCES
         src/main.cpp
         src/PlayerLayer.cpp
+        src/PlayerLayer_Render.cpp
+        src/PlayerLayer_Scene.cpp
     ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/assets
 )
 # Чтение project.sageproj (имя игры) — nlohmann приватен у движка.

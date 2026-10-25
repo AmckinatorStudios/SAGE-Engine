@@ -10,6 +10,7 @@ add_executable(sage_tests
     test_blockbench_formats.cpp
     test_reset_default.cpp
     test_procedural.cpp
+    test_script_modules.cpp
     test_serialization.cpp
     test_zip.cpp
     test_animation.cpp
