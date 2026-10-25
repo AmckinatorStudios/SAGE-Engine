@@ -153,7 +153,7 @@ Backend::Backend(const LuaBackendConfig& config) : m_interop(config.Interop) {
             mod("Fields", "публичные поля скрипта", {"Scene"}, &RegisterFields),
         };
         ScriptModuleContext ctx{*m_lua, m_interop, this};
-        InstallScriptModules(ctx, builtins, true);
+        InstallScriptModules(ctx, builtins, /*withRegistry=*/true, /*final=*/true);
         if (m_interop) m_interop->RegisterShortNames();
     }
 

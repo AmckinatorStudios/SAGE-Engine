@@ -174,7 +174,9 @@ void ScriptEngine::RegisterEngineApi() {
         mod("net", "мультиплеер", {}, true, &ScriptEngine::RegisterNetApi),
     };
     ScriptModuleContext ctx{m_lua, this, nullptr};
-    sage::scripting::InstallScriptModules(ctx, builtins, true);
+    // Не последний хозяин: модулю нового API (Requires = {"Scene"}) ещё
+    // придёт бэкенд — он и скажет «нет модуля», если тот так и не появится.
+    sage::scripting::InstallScriptModules(ctx, builtins, /*withRegistry=*/true, /*final=*/false);
     // Короткие имена — ПОСЛЕДНИМИ: они раздают псевдонимы уже собранным модулям.
     RegisterShortNames();
 }

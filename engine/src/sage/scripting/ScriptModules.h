@@ -66,11 +66,31 @@ struct ScriptModuleContext {
 struct ScriptModule {
     std::string Name;                    // уникальное имя: "procedural", "net"
     std::string Summary;                 // одна строка для sage.modules.List()
-    std::vector<std::string> Requires;   // имена модулей, без которых не работает
+    std::vector<std::string> Requires;   // ОБЯЗАТЕЛЬНЫЕ зависимости: без них модуль не ставится
     // false — модуль нельзя выключить (на нём стоят типы для остальных).
     bool Optional = true;
     std::function<void(ScriptModuleContext&)> Install;
+    // Необязательная уборка своих ресурсов при снятии модуля (потоки,
+    // подписки, кэши на стороне C++). Имена, которые модуль положил в Lua,
+    // установщик снимает сам — их он записал при установке.
+    std::function<void(ScriptModuleContext&)> Uninstall;
+    // Мягкий порядок: если такой модуль есть в списке — ставиться после него,
+    // но без него модуль тоже работает.
+    std::vector<std::string> After;
 };
+
+// --- Проверка списка модулей до установки -----------------------------------
+//
+// То, что можно знать, не трогая Lua: имена повторяются, обязательная
+// зависимость не существует, зависимости ходят по кругу. Порядок установки —
+// тот, в котором модули встанут (зависимости раньше зависящих, при равных —
+// порядок записи).
+struct ModuleCheckReport {
+    std::vector<std::string> Order;      // порядок установки
+    std::vector<std::string> Problems;   // по строке на каждую ошибку списка
+    bool Ok() const { return Problems.empty(); }
+};
+ModuleCheckReport CheckScriptModules(const std::vector<ScriptModule>& modules);
 
 // --- Реестр модулей процесса (игра, плагин, редактор) ------------------------
 //
@@ -99,10 +119,25 @@ struct ModuleInstallReport {
 };
 
 // Ставит модули в ctx.Lua в порядке зависимостей. Уже стоящие пропускаются.
-ModuleInstallReport InstallScriptModules(ScriptModuleContext& ctx, const std::vector<ScriptModule>& modules);
+//
+// final = true — последний хозяин состояния (бэкенд нового API или движок,
+// после которого ничего не придёт): модуль, чья обязательная зависимость так
+// и не появилась, — уже не «ждёт», а ошибка «нет модуля X».
+//
+// Модуль, упавший посреди установки, откатывается: имена, которые он успел
+// положить в Lua, снимаются — полуустановленного API не остаётся.
+ModuleInstallReport InstallScriptModules(ScriptModuleContext& ctx, const std::vector<ScriptModule>& modules,
+                                         bool final = false);
 // Встроенный список хозяина, затем реестр процесса.
 ModuleInstallReport InstallScriptModules(ScriptModuleContext& ctx, const std::vector<ScriptModule>& builtins,
-                                         bool withRegistry);
+                                         bool withRegistry, bool final);
+
+// Снимает модуль из состояния Lua: сначала — зависящих от него (в обратном
+// порядке установки), затем его собственную уборку (Uninstall) и имена,
+// которые он положил в Lua. Имя, которое после установки переписал кто-то
+// другой, не трогается — оно уже не его. Возвращает снятые модули; пусто —
+// модуля не было. Снятый модуль можно поставить снова тем же InstallScriptModules.
+std::vector<std::string> UninstallScriptModule(ScriptModuleContext& ctx, const std::string& name);
 
 // Стоит ли модуль в этом состоянии Lua.
 bool IsScriptModuleInstalled(sol::state& lua, const std::string& name);
