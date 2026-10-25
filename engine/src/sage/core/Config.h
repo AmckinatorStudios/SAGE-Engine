@@ -76,6 +76,10 @@ struct EngineConfig {
     int FrameCap = 0;     // максимум кадров/с (0 — без ограничения; при VSync обычно 0)
     int Msaa = 0;         // сглаживание экранного буфера: 0/2/4/8 (GLFW_SAMPLES)
     CursorLockMode CursorLock = CursorLockMode::Auto; // способ захвата курсора (см. CursorLockMode)
+    // Кадров в секунду, пока окно НЕ В ФОКУСЕ (0 — как в фокусе). Игра за
+    // другим окном рисует кадры, которых никто не видит, и забирает видеокарту
+    // у того, чем человек занят; тридцати хватает, чтобы фоновое окно жило.
+    int BackgroundFrameCap = 30;
 
     // --- Дисплей ---
     AspectMode Aspect = AspectMode::Free;

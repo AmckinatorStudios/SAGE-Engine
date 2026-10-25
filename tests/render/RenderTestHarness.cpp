@@ -29,6 +29,10 @@ void SetReferenceDir(const std::string& dir) { g_referenceDir = dir; }
 void SetUpdateMode(bool update) { g_update = update; }
 bool UpdateMode() { return g_update; }
 
+namespace { bool g_propertiesOnly = false; }
+void SetPropertiesOnly(bool on) { g_propertiesOnly = on; }
+bool PropertiesOnly() { return g_propertiesOnly; }
+
 Image Capture(int width, int height) {
     Image img;
     img.Width = width;
@@ -69,6 +73,13 @@ bool LoadPng(const std::string& path, Image& out) {
 
 Comparison CompareWithReference(const std::string& name, const Image& image) {
     Comparison result;
+    // Режим свойств: эталоны сняты на программном растеризаторе, и попиксельное
+    // сравнение с ними на настоящей видеокарте меряет разницу драйверов, а не
+    // поломку. Сравнения нет, эталон не пишется.
+    if (g_propertiesOnly) {
+        result.Skipped = true;
+        return result;
+    }
     const std::string refPath = (fs::path(g_referenceDir) / (name + ".png")).string();
 
     Image reference;

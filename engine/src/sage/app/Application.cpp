@@ -258,6 +258,15 @@ void Application::Run() {
         // Viewport экранного буфера держим в размер окна каждый кадр (раньше
         // это делал Window::OnResize напрямую через glViewport; теперь окно к
         // GL не обращается — за viewport отвечает графический слой).
+        // СВЁРНУТОЕ ОКНО НЕ РИСУЕТСЯ. Кадра никто не увидит, а видеокарта и
+        // процессор работали бы на полную. Логика идёт дальше (сеть, таймеры,
+        // фоновая загрузка), но цикл спит до события или десятой доли секунды.
+        if (m_window->Iconified()) {
+            profile::EndFrame();
+            m_window->WaitEvents(0.1);
+            continue;
+        }
+
         m_device->SetViewport(0, 0, m_window->Width(), m_window->Height());
         {
             SAGE_PROFILE("Отрисовка");
@@ -302,13 +311,22 @@ void Application::Run() {
             }
         }
 
-        // Ограничитель кадров (если задан и без VSync): досыпаем до 1/cap секунды.
-        if (m_config.FrameCap > 0) {
-            float target = 1.0f / (float)m_config.FrameCap;
+        // Ограничитель кадров: заданный, фоновый (окно не в фокусе) и то, что
+        // хватает слоям (простаивающий редактор). Досыпаем до 1/cap секунды —
+        // ожиданием СОБЫТИЙ, а не сном: нажатие будит цикл сразу, и простой не
+        // ощущается задержкой ввода.
+        int layerCap = -1;
+        for (auto& layer : m_layers) {
+            const int c = layer->IdleFrameCap();
+            if (c <= 0) { layerCap = 0; break; }   // кому-то нужны все кадры
+            layerCap = std::max(layerCap, c);
+        }
+        const int cap = EffectiveFrameCap(m_config.FrameCap, m_config.BackgroundFrameCap,
+                                          m_window->Focused(), std::max(layerCap, 0));
+        if (cap > 0) {
+            float target = 1.0f / (float)cap;
             float frameTime = (float)glfwGetTime() - now;
-            if (frameTime < target) {
-                glfwWaitEventsTimeout(target - frameTime); // спит, но не игнорирует события
-            }
+            if (frameTime < target) m_window->WaitEvents(target - frameTime);
         }
     }
 

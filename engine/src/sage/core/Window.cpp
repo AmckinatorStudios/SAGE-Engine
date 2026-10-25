@@ -23,7 +23,12 @@ void Window::ForwardCursorPos(GLFWwindow* handle, double x, double y) {
     if (Window* win = Owner(handle)) win->EmitCursorPos(x, y);
 }
 
+void Window::TouchInput() { m_lastInput = glfwGetTime(); }
+
+double Window::SecondsSinceInput() const { return glfwGetTime() - m_lastInput; }
+
 void Window::EmitCursorPos(double x, double y) {
+    TouchInput();
     if (m_haveLast) {
         m_frameDx += x - m_lastX;
         m_frameDy += y - m_lastY;
@@ -36,11 +41,13 @@ void Window::EmitCursorPos(double x, double y) {
 
 void Window::ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset) {
     Window* win = Owner(handle);
+    if (win) win->TouchInput();
     if (win && win->m_scrollFn) win->m_scrollFn(xoffset, yoffset);
 }
 
 void Window::ForwardChar(GLFWwindow* handle, unsigned int codepoint) {
     Window* win = Owner(handle);
+    if (win) win->TouchInput();
     if (win && win->m_charFn) win->m_charFn(codepoint);
 }
 
@@ -49,12 +56,14 @@ void Window::ForwardKey(GLFWwindow* handle, int key, int, int action, int mods) 
 }
 
 void Window::EmitKey(int key, int action, int mods) {
+    TouchInput();
     for (const KeyFn& fn : m_keyFns) fn(key, action, mods);
 }
 
 void Window::ForwardMouseButton(GLFWwindow* handle, int button, int action, int mods) {
     Window* win = Owner(handle);
     if (!win) return;
+    win->TouchInput();
     for (const MouseButtonFn& fn : win->m_mouseButtonFns) fn(button, action, mods);
 }
 
@@ -179,6 +188,19 @@ Window::Window(int width, int height, const std::string& title, Params params)
     if (!s_primary) s_primary = this;
     glfwSetFramebufferSizeCallback(m_handle, FramebufferSizeCallback);
     glfwGetWindowSize(m_handle, &m_winW, &m_winH);
+    // Свёрнуто ли окно и в фокусе ли оно — из событий: спрашивать систему об
+    // этом каждый кадр на X11 значит обмен с сервером на каждый вопрос.
+    glfwSetWindowIconifyCallback(m_handle, [](GLFWwindow* h, int iconified) {
+        if (auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h))) win->m_iconified = iconified != 0;
+    });
+    glfwSetWindowFocusCallback(m_handle, [](GLFWwindow* h, int focused) {
+        if (auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h))) win->m_focused = focused != 0;
+    });
+    // Считаемся в фокусе, пока система не сказала обратного СОБЫТИЕМ: окно без
+    // оконного менеджера (xvfb, CI) фокуса не получает никогда, и вопрос «в
+    // фокусе ли» там отвечал бы «нет» — фоновый лимит кадров душил бы прогоны.
+    m_focused = true;
+    m_lastInput = glfwGetTime();
     glfwSetWindowSizeCallback(m_handle, [](GLFWwindow* h, int w, int hh) {
         if (auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h))) { win->m_winW = w; win->m_winH = hh; }
     });
@@ -216,6 +238,17 @@ void Window::SwapBuffers() {
 void Window::PollEvents() {
     m_frameDx = m_frameDy = 0.0;
     glfwPollEvents();
+    AfterEvents();
+}
+
+void Window::WaitEvents(double timeoutSeconds) {
+    // Смещение за кадр НЕ сбрасывается: ожидание идёт после PollEvents того же
+    // кадра (досып до лимита), и сброс потерял бы уже собранное движение мыши.
+    glfwWaitEventsTimeout(timeoutSeconds > 0.0 ? timeoutSeconds : 0.0);
+    AfterEvents();
+}
+
+void Window::AfterEvents() {
     if (!m_handle || !m_cursorCaptured) return;
     GLFWwindow* target = CursorCaptureTarget();
     // ЗАХВАТ ДЕРЖИТСЯ, А НЕ СТАВИТСЯ ОДИН РАЗ. Режим курсора окна могут

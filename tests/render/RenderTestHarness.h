@@ -36,6 +36,7 @@ struct Comparison {
     double MeanDiff = 0.0; // средняя разница по каналам, 0..255
     int MaxDiff = 0;       // худший канал одного пикселя, 0..255
     double DiffFraction = 0.0; // доля пикселей, отличающихся заметно (>2/255)
+    bool Skipped = false;      // режим свойств: попиксельного сравнения не было
 };
 
 // Кадр в памяти: RGB, слева направо и СВЕРХУ вниз (в отличие от того, как
@@ -64,5 +65,12 @@ Comparison CompareWithReference(const std::string& name, const Image& image);
 void SetReferenceDir(const std::string& dir);
 void SetUpdateMode(bool update);
 bool UpdateMode();
+
+// РЕЖИМ СВОЙСТВ (--properties): только проверки-утверждения («пол у красной
+// стены краснеет», «горят все лампы»), без попиксельного сравнения с эталонами.
+// Для прогона на настоящей видеокарте: эталоны сняты программным
+// растеризатором, и разница с ними там — разница драйверов, а не поломка.
+void SetPropertiesOnly(bool on);
+bool PropertiesOnly();
 
 } // namespace sage::rendertest

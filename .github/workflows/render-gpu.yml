@@ -1,0 +1,48 @@
+name: Кадровые проверки на видеокарте
+
+# Кадровые проверки (tests/render) в CI идут на программном растеризаторе
+# (llvmpipe под xvfb): поломку, видимую лишь на настоящей видеокарте — точность,
+# фильтрация, запись в sRGB, лимиты юнитов, — они не ловят. Здесь те же проверки
+# на машине с видеокартой, в РЕЖИМЕ СВОЙСТВ (--properties): только утверждения
+# («пол у красной стены краснеет», «горят все шестнадцать ламп»), без
+# попиксельного сравнения с эталонами — эталоны сняты растеризатором, и разница
+# с ними на другом драйвере меряет драйвер, а не поломку.
+#
+# У бесплатных раннеров GitHub видеокарты нет: на macOS там нет OpenGL вовсе
+# («Failed to find a suitable pixel format»), на Linux — только llvmpipe.
+# Поэтому раннер — свой: переменная репозитория SAGE_GPU_RUNNER с меткой
+# раннера (свой компьютер с видеокартой, зарегистрированный как self-hosted, или
+# GPU-раннер GitHub). Пока её нет, работа пропускается и честно говорит почему.
+on:
+  schedule:
+    - cron: '17 3 * * *'   # каждую ночь
+  workflow_dispatch:
+
+jobs:
+  gpu:
+    name: Кадровые проверки (видеокарта, режим свойств)
+    if: ${{ vars.SAGE_GPU_RUNNER != '' }}
+    runs-on: ${{ vars.SAGE_GPU_RUNNER }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Сборка
+        run: |
+          cmake -B build-gpu -DCMAKE_BUILD_TYPE=Release -DSAGE_VULKAN=OFF -DSAGE_BUILD_SAMPLES=OFF
+          cmake --build build-gpu -j4 --target sage_render_tests
+      - name: Проверки
+        run: |
+          # Окно с контекстом нужно настоящее: xvfb здесь подменил бы видеокарту
+          # программным растеризатором, и прогон потерял бы смысл.
+          ./build-gpu/tests/render/sage_render_tests --properties --references tests/render/references
+      - name: Какая видеокарта
+        if: always()
+        run: grep -h "Видеокарта:" sage_render_tests.log build-gpu/sage_render_tests.log 2>/dev/null || true
+
+  no-gpu:
+    name: Раннер с видеокартой не задан
+    if: ${{ vars.SAGE_GPU_RUNNER == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "::notice::Кадровые проверки на видеокарте пропущены: задайте переменную репозитория SAGE_GPU_RUNNER (метка раннера с видеокартой)."

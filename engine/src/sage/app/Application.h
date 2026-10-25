@@ -30,6 +30,7 @@ struct AppConfig {
     bool Resizable = true;
     bool VSync = true;
     int FrameCap = 0; // 0 — без ограничения
+    int BackgroundFrameCap = 30; // кадров в секунду, пока окно не в фокусе (0 — как в фокусе)
     int Msaa = 0;     // сглаживание экранного буфера (GLFW_SAMPLES)
     CursorLockMode CursorLock = CursorLockMode::Auto; // способ захвата курсора
 
@@ -43,12 +44,23 @@ struct AppConfig {
         a.Width = cfg.Width; a.Height = cfg.Height; a.Title = cfg.Title;
         a.Mode = cfg.Mode; a.Resizable = cfg.Resizable; a.VSync = cfg.VSync;
         a.FrameCap = cfg.FrameCap; a.Msaa = cfg.Msaa;
+        a.BackgroundFrameCap = cfg.BackgroundFrameCap;
         a.CursorLock = cfg.CursorLock;
         a.Backend = cfg.Backend;
         a.WorkerThreads = cfg.WorkerThreads; a.MultithreadedRender = cfg.MultithreadedRender;
         return a;
     }
 };
+
+// Итоговый лимит кадров: самый строгий из заданного, фонового (окно не в
+// фокусе) и того, что сейчас хватает слоям. Ноль у каждого — «без лимита».
+inline int EffectiveFrameCap(int frameCap, int backgroundCap, bool focused, int layerCap) {
+    int cap = frameCap;
+    auto tighten = [&cap](int c) { if (c > 0 && (cap <= 0 || c < cap)) cap = c; };
+    if (!focused) tighten(backgroundCap);
+    tighten(layerCap);
+    return cap;
+}
 
 // ---------------------------------------------------------------------------
 // Application — универсальный «драйвер» движка: владеет окном и контекстом,

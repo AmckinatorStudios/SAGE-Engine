@@ -576,6 +576,9 @@ private:
     // задержать закрытие и спросить; ответ «не сохранять»/«сохранено» закроет
     // приложение сам (см. DrawUnsavedPrompt).
     bool OnCloseRequest() override;
+    // Простаивающий редактор (не идёт игра, ввода не было несколько секунд)
+    // рисует реже — см. Layer::IdleFrameCap.
+    int IdleFrameCap() const override;
     void AskUnsaved(std::function<void()> action);
     void DrawUnsavedPrompt();
 

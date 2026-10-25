@@ -199,6 +199,7 @@ bool EngineConfig::LoadFile(const std::string& path) {
     FrameCap  = win.value("frameCap", FrameCap);
     Msaa      = win.value("msaa", Msaa);
     CursorLock = CursorLockFromStr(win.value("cursorLock", std::string(CursorLockToStr(CursorLock))));
+    BackgroundFrameCap = std::max(0, win.value("backgroundFrameCap", BackgroundFrameCap));
 
     auto disp = j.value("display", json::object());
     Aspect      = AspectFromStr(disp.value("aspect", std::string(AspectToStr(Aspect))));
@@ -271,7 +272,7 @@ std::string EngineConfig::ToJsonString() const {
         {"width", Width}, {"height", Height}, {"title", Title},
         {"mode", ModeToStr(Mode)}, {"resizable", Resizable},
         {"vsync", VSync}, {"frameCap", FrameCap}, {"msaa", Msaa},
-        {"cursorLock", CursorLockToStr(CursorLock)},
+        {"cursorLock", CursorLockToStr(CursorLock)}, {"backgroundFrameCap", BackgroundFrameCap},
     };
     j["display"] = {
         {"aspect", AspectToStr(Aspect)}, {"renderScale", RenderScale},

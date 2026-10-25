@@ -85,6 +85,20 @@ public:
     void CancelClose();
     void SwapBuffers();
     void PollEvents();
+    // То же, что PollEvents, но засыпает до первого события или до timeout
+    // секунд: в свёрнутом окне или при досыпе до лимита кадров процессор
+    // отдыхает, а ввод будит цикл сразу. Смещение курсора за кадр копится
+    // дальше, а не начинается заново.
+    void WaitEvents(double timeoutSeconds);
+
+    // Свёрнуто (или рисовать некуда — буфер нулевого размера). Рисовать в такое
+    // окно — впустую жечь видеокарту: кадра всё равно никто не увидит.
+    bool Iconified() const { return m_iconified || m_width <= 0 || m_height <= 0; }
+    // В фокусе ли окно. Из события, а не вопросом системе каждый кадр.
+    bool Focused() const { return m_focused; }
+    // Секунд с последнего события ввода (клавиша, мышь, колесо, символ) —
+    // любого окна приложения.
+    double SecondsSinceInput() const;
 
     GLFWwindow* Handle() const { return m_handle; }
     int Width() const { return m_width; }
@@ -217,4 +231,9 @@ private:
     bool m_haveLast = false;
     double m_frameDx = 0.0, m_frameDy = 0.0;
     int m_winW = 0, m_winH = 0;   // размер окна в координатах курсора
+    bool m_iconified = false;
+    bool m_focused = true;
+    double m_lastInput = 0.0;     // glfwGetTime() последнего события ввода
+    void TouchInput();
+    void AfterEvents();
 };
