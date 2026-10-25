@@ -1317,8 +1317,11 @@ function Script:OnAnimationEvent(name) end
 ---@field input sage.input
 ---@field lensflare sage.lensflare
 ---@field light sage.light
+---@field material sage.material
 ---@field math sage.math
+---@field mesh sage.mesh
 ---@field msg sage.msg
+---@field noise sage.noise
 ---@field physics sage.physics
 ---@field reflect sage.reflect
 ---@field render sage.render
@@ -1600,8 +1603,8 @@ function sage.game.IsPaused() end
 function sage.game.Pause(paused) end
 function sage.game.Quit() end
 function sage.game.Restart() end
----@param enabled boolean
-function sage.game.SetPauseMenu(enabled) end
+---@param arg1 boolean
+function sage.game.SetPauseMenu(arg1) end
 
 ---@class sage.ik
 sage.ik = {}
@@ -1802,6 +1805,26 @@ function sage.light.SetSkyPreset(name) end
 ---@param t table
 function sage.light.SetSun(t) end
 
+---@class sage.material
+sage.material = {}
+
+---Короткое имя того же модуля: `material.X()` — это ТОТ ЖЕ объект,
+---что `sage.material`, а не копия. Движок ставит его, только если имя
+---свободно: игра, объявившая своё, остаётся при своём.
+---@type sage.material
+material = nil
+
+---@param name string
+---@param props table
+function sage.material.Create(name, props) end
+---@param name string
+---@param path string
+function sage.material.Save(name, path) end
+---@param name string
+---@param propsOrKey any
+---@param value any
+function sage.material.Set(name, propsOrKey, value) end
+
 ---@class sage.math
 sage.math = {}
 
@@ -1820,6 +1843,13 @@ function sage.math.Clamp(x, lo, hi) end
 function sage.math.Cross(a, b) end
 ---@param rad number
 function sage.math.Degrees(rad) end
+---@param x number
+function sage.math.Fract(x) end
+---@param x number
+---@param y number
+---@param z number
+---@param seed number
+function sage.math.Hash(x, y, z, seed) end
 ---@param origin Vec3
 ---@param dir Vec3
 ---@param planePoint Vec3
@@ -1832,6 +1862,13 @@ function sage.math.IntersectRayPlane(origin, dir, planePoint, planeNormal) end
 ---@param radius number
 ---@return Vec3
 function sage.math.IntersectRaySphere(origin, dir, center, radius) end
+---@param a number
+---@param b number
+---@param v number
+function sage.math.InverseLerp(a, b, v) end
+---@param t number
+---@param len number
+function sage.math.PingPong(t, len) end
 ---@param deg number
 function sage.math.Radians(deg) end
 ---@return Vec2
@@ -1843,6 +1880,14 @@ function sage.math.RandomOnUnitSphere() end
 ---@param lo number
 ---@param hi number
 function sage.math.RandomRange(lo, hi) end
+---@param v number
+---@param a0 number
+---@param a1 number
+---@param b0 number
+---@param b1 number
+function sage.math.Remap(v, a0, a1, b0, b1) end
+---@param seed number
+function sage.math.Rng(seed) end
 ---@param a Vec3
 ---@param b Vec3
 ---@param t number
@@ -1852,6 +1897,45 @@ function sage.math.Slerp(a, b, t) end
 ---@param edge1 number
 ---@param x number
 function sage.math.SmoothStep(edge0, edge1, x) end
+---@param e0 number
+---@param e1 number
+---@param x number
+function sage.math.SmootherStep(e0, e1, x) end
+---@param edge number
+---@param x number
+function sage.math.Step(edge, x) end
+---@param x number
+---@param lo number
+---@param hi number
+function sage.math.Wrap(x, lo, hi) end
+
+---@class sage.mesh
+sage.mesh = {}
+
+---Короткое имя того же модуля: `mesh.X()` — это ТОТ ЖЕ объект,
+---что `sage.mesh`, а не копия. Движок ставит его, только если имя
+---свободно: игра, объявившая своё, остаётся при своём.
+---@type sage.mesh
+mesh = nil
+
+---@param size any
+function sage.mesh.Box(size) end
+---@param r number
+---@param h number
+---@param seg number
+---@param caps boolean
+function sage.mesh.Cylinder(r, h, seg, caps) end
+---@param sx number
+---@param sz number
+---@param rx number
+---@param rz number
+---@param h function
+function sage.mesh.Grid(sx, sz, rx, rz, h) end
+function sage.mesh.New() end
+---@param r number
+---@param seg number
+---@param rings number
+function sage.mesh.Sphere(r, seg, rings) end
 
 ---@class sage.msg
 sage.msg = {}
@@ -1874,6 +1958,40 @@ function sage.msg.Call(target, name, args) end
 ---@param name string
 ---@param data any
 function sage.msg.Send(target, name, data) end
+
+---@class sage.noise
+sage.noise = {}
+
+---Короткое имя того же модуля: `noise.X()` — это ТОТ ЖЕ объект,
+---что `sage.noise`, а не копия. Движок ставит его, только если имя
+---свободно: игра, объявившая своё, остаётся при своём.
+---@type sage.noise
+noise = nil
+
+---@param opts table
+function sage.noise.New(opts) end
+---@param x number
+---@param y number
+---@param z number
+function sage.noise.Perlin(x, y, z) end
+---@param seed number
+function sage.noise.Seed(seed) end
+---@param x number
+---@param y number
+---@param z number
+function sage.noise.Simplex(x, y, z) end
+---@param x number
+---@param y number
+---@param z number
+function sage.noise.Value(x, y, z) end
+---@param p Vec3
+---@param strength number
+---@param opts table
+function sage.noise.Warp(p, strength, opts) end
+---@param x number
+---@param y number
+---@param z number
+function sage.noise.Worley(x, y, z) end
 
 ---@class sage.physics
 sage.physics = {}
@@ -2184,6 +2302,10 @@ texture = nil
 ---@param t table
 ---@return string
 function sage.texture.Generate(name, t) end
+---@param name string
+---@param w number
+---@param h number
+function sage.texture.New(name, w, h) end
 
 ---@class sage.time
 sage.time = {}

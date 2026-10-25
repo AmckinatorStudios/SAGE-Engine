@@ -639,6 +639,18 @@ std::shared_ptr<Skybox> ResourceManager::GetSkyboxImage(const std::string& file,
     return sky;
 }
 
+void ResourceManager::RegisterMaterial(const std::string& name, std::shared_ptr<Material> material) {
+    if (name.empty() || !material) return;
+    const std::string key = CacheKey(name);
+    // Тот же объект, если имя уже занято: объекты, которым материал назначен,
+    // держат указатель — заменить запись значило бы оставить их со старым.
+    auto it = m_materials.find(key);
+    if (it != m_materials.end() && it->second) *it->second = *material;
+    else m_materials[key] = material;
+    m_materialStamps.erase(key);   // не файл — перечитывать с диска нечего
+    ResolveMaterialTextures(*m_materials[key]);
+}
+
 void ResourceManager::RegisterTexture(const std::string& name, std::shared_ptr<Texture> texture) {
     if (name.empty() || !texture) return;
     // Имя приводится тем же CacheKey, что и путь файла: спрашивать

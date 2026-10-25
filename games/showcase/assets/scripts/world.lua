@@ -119,9 +119,6 @@ function OnStart(entity)
     log("SHOWCASE: сборка витрины движка")
 
     bindControls()
-    -- Меню паузы у плеера встроенное и здесь уместно: своего меню у витрины
-    -- нет и не нужно, а выйти из неё чем-то надо.
-    sage.game.SetPauseMenu(true)
 
     local tiles = F.Build()
     zones = Zones.Load()

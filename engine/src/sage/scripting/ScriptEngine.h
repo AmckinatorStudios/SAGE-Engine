@@ -359,14 +359,6 @@ public:
     bool Paused() const { return m_paused; }
     void SetPaused(bool paused) { m_paused = paused; }
 
-    // Показывать ли ВСТРОЕННОЕ меню паузы плеера (ESC → «Продолжить/Выйти»).
-    //
-    // Оно есть у каждой игры на движке даром — и ровно поэтому обязано
-    // выключаться: игра со своим меню получала два меню сразу, потому что ESC
-    // перехватывал плеер, а до скрипта клавиша не доходила вовсе. Игра
-    // объявляет sage.game.SetPauseMenu(false) в OnStart и дальше сама решает,
-    // что делать с ESC.
-    bool PauseMenuEnabled() const { return m_pauseMenuEnabled; }
     float TimeScale() const { return m_timeScale; }
     // Множитель кадра с учётом паузы: 0 на паузе. Одно место, где эти два
     // понятия сводятся вместе, — иначе каждый вызывающий сводил бы их сам и
@@ -408,6 +400,8 @@ private:
     void RegisterGameObject();    // GameObject + аксессоры компонентов + иерархия
     void RegisterSceneApi();      // log, Spawn/Find/DestroyObject
     void RegisterMeshApi();       // SetMeshCube/Sphere/…/Model/None
+    // Шумы, формулы, меши/материалы/текстуры, собранные кодом (ScriptApi_Procedural.cpp).
+    void RegisterProceduralApi();
     void RegisterInputApi();      // IsActionDown/WasActionPressed/…
     void RegisterCameraApi();     // Camera usertype + GetCamera
     void RegisterParticleApi();   // ParticleEffect, LoadEffect, Emit/Stream, эмиттер объекта
@@ -528,7 +522,6 @@ private:
     bool m_restartRequested = false;
     bool m_quitRequested = false;
     bool m_paused = false;
-    bool m_pauseMenuEnabled = true;
     float m_timeScale = 1.0f;
 
     int m_nextTimerId = 1;

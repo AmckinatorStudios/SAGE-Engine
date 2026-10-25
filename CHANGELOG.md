@@ -12,6 +12,30 @@
 
 ## 0.5.0 → 1.0 (в работе)
 
+### 2026-10-25 (процедурная генерация в скриптах, ESC без встроенной паузы)
+
+**Исправлено**
+- В собранной игре ESC больше не ставит встроенную паузу с меню
+  «Продолжить / Выйти» — клавиша целиком принадлежит игре.
+- Сборки CI (Linux, macOS) падали на тестах моделей Blockbench: образец .obj
+  не попал в репозиторий из-за правила `*.obj` в `.gitignore`.
+
+**Добавлено**
+- `sage.noise`: Perlin, Simplex, Value, Worley (2D/3D), фракталы Fbm / Ridged /
+  Turbulence, искажение Warp, генераторы с зерном `sage.noise.New{...}`.
+- `sage.math`: Remap, InverseLerp, Fract, Wrap, PingPong, Step, SmootherStep,
+  Hash, генератор `Rng(seed)` и `Formula("выражение", "x, y")` — формула из
+  строки как функция.
+- `sage.mesh`: меш кодом — вершины, треугольники, слоты материалов, Deform,
+  нормали, Append, готовые Grid (с рельефом) / Box / Sphere / Cylinder,
+  `Apply(объект)` и `Save(путь)`.
+- `sage.material.Create / Set / Save` и `sage.texture.New` (холст с `Fill`,
+  `SetPixel`, `Apply`) — материалы и текстуры из скрипта.
+
+**Изменено**
+- `sage.game.SetPauseMenu` ничего не делает, `HasPauseMenu()` всегда `false`.
+  Нужна пауза — своя: `sage.game.Pause` + интерфейс сцены.
+
 ### 2026-10-25 (загрузка моделей: развёртка, иерархия, папки, сброс значений)
 
 **Исправлено**
