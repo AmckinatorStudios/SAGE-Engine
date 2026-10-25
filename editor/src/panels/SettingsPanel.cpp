@@ -136,15 +136,42 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
 
     if (EditorTheme::SectionHeader("chart", T("Graphics" "###Graphics"), ImGuiTreeNodeFlags_DefaultOpen,
                                        nullptr, T("Whether a pass runs at all and at what resolution. Which light casts those shadows is a property of the light object."))) {
-        ImGui::Checkbox(T("Shadows"), &c.Shadows);
         static const int kShadowVals[] = {512, 1024, 2048, 4096};
         const char* shadowRes[] = {"512", "1024", "2048", "4096"};
-        int sr = c.ShadowResolution >= 4096 ? 3 : c.ShadowResolution >= 2048 ? 2 : c.ShadowResolution >= 1024 ? 1 : 0;
+        auto resIndex = [](int v) { return v >= 4096 ? 3 : v >= 2048 ? 2 : v >= 1024 ? 1 : 0; };
+        ImGui::Checkbox(T("Shadows"), &c.Shadows);
+        ImGui::BeginDisabled(!c.Shadows);
+        int sr = resIndex(c.ShadowResolution);
         if (ImGui::Combo(T("Shadow Resolution"), &sr, shadowRes, IM_ARRAYSIZE(shadowRes)))
             c.ShadowResolution = kShadowVals[sr];
+        ImGui::SliderInt(T("Shadow Cascades"), &c.ShadowCascades, 1, 3);
+        EditorTheme::Hint(T("More cascades keep shadows sharp both near and far"));
+        ImGui::SliderFloat(T("Shadow Distance"), &c.ShadowDistance, 20.0f, 500.0f, "%.0f m");
+        ImGui::Checkbox(T("Lamp Shadows"), &c.LocalShadows);
+        EditorTheme::Hint(T("Shadows of point and spot lights: each lamp costs extra passes"));
+        ImGui::BeginDisabled(!c.LocalShadows);
+        int lr = resIndex(c.LocalShadowResolution);
+        if (ImGui::Combo(T("Lamp Shadow Resolution"), &lr, shadowRes, IM_ARRAYSIZE(shadowRes)))
+            c.LocalShadowResolution = kShadowVals[lr];
+        ImGui::EndDisabled();
+        ImGui::EndDisabled();
+
+        ImGui::SeparatorText(T("Lighting"));
+        // Экранный GI — отражённый свет по кадру (звено «Global Illumination»).
+        // Здесь только разрешение: сколько и как — у камеры, в её обработке.
+        ImGui::Checkbox(T("Global Illumination (screen-space)"), &c.ScreenSpaceGI);
+        EditorTheme::Hint(T("Bounced light: lit surfaces light their neighbours with their own color. "
+                            "Strength and quality are set on the camera (Post Processing → Global Illumination)"));
+        ImGui::Checkbox(T("Reflections"), &c.Reflections);
+        ImGui::SameLine();
+        ImGui::BeginDisabled(!c.Reflections);
+        ImGui::Checkbox(T("Mirror Reflections"), &c.PlanarReflections);
+        ImGui::EndDisabled();
         ImGui::Checkbox(T("Fog"), &c.Fog);
         ImGui::SameLine();
         ImGui::Checkbox(T("Skybox"), &c.Skybox);
+        ImGui::Checkbox(T("Occlusion Culling"), &c.OcclusionCulling);
+        EditorTheme::Hint(T("Skips objects hidden behind others: faster in dense scenes"));
     }
 
     // ПОСТ-ОБРАБОТКИ В НАСТРОЙКАХ БОЛЬШЕ НЕТ.

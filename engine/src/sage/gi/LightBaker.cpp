@@ -282,50 +282,71 @@ void RasterizeChart(const StaticItem& item, const sage::render::MeshData& mesh,
     const int pad = kChartPadding;
     const glm::vec2 inner((float)(chart.W - 2 * pad), (float)(chart.H - 2 * pad));
 
-    for (int t : chart.Tris) {
-        glm::vec3 wp[3], wn[3];
-        glm::vec2 q[3]; // координаты в текселях страницы
-        for (int k = 0; k < 3; ++k) {
-            const Vertex& v = mesh.Vertices[mesh.Indices[t * 3 + k]];
-            wp[k] = glm::vec3(item.World * glm::vec4(v.Position, 1.0f));
-            wn[k] = nrm * v.Normal;
-            glm::vec2 proj = ProjectAxis(wp[k], chart.Axis);
-            glm::vec2 local = (proj - chart.WorldMin) / chart.WorldSize;
-            q[k] = glm::vec2((float)chart.X + pad, (float)chart.Y + pad) + local * inner;
-        }
-        float area = (q[1].x - q[0].x) * (q[2].y - q[0].y) -
-                     (q[2].x - q[0].x) * (q[1].y - q[0].y);
-        if (std::abs(area) < 1e-6f) continue; // треугольник ребром к проекции
-        float invArea = 1.0f / area;
+    // ДВА ПРОХОДА. Первый — строгое покрытие: тексель берёт тот треугольник,
+    // внутри которого лежит его центр. Второй — запас за краем, и только для
+    // текселей, которых не взял никто: крайние тексели чарта получают позицию
+    // на ближайшей кромке, и билинейная выборка у шва не тянет чёрное.
+    //
+    // ЗАПАС — В ТЕКСЕЛЯХ, а не в долях барицентра. Раньше стояло «-0.35» прямо
+    // по барицентрическим координатам и в одном проходе: у треугольника в
+    // сотню текселей это треть его размера, и первый треугольник квадрата
+    // забирал себе десятки текселей ВТОРОГО, проецируя их на свою диагональ.
+    // Тексели середины пола получали позицию у чужого края — под кубом, у
+    // стены, — и на запечённом полу появлялся тёмный клин вдоль диагонали.
+    const float kEdgeMarginTexels = 0.75f;   // половина диагонали текселя с запасом
+    for (int pass = 0; pass < 2; ++pass) {
+        for (int t : chart.Tris) {
+            glm::vec3 wp[3], wn[3];
+            glm::vec2 q[3]; // координаты в текселях страницы
+            for (int k = 0; k < 3; ++k) {
+                const Vertex& v = mesh.Vertices[mesh.Indices[t * 3 + k]];
+                wp[k] = glm::vec3(item.World * glm::vec4(v.Position, 1.0f));
+                wn[k] = nrm * v.Normal;
+                glm::vec2 proj = ProjectAxis(wp[k], chart.Axis);
+                glm::vec2 local = (proj - chart.WorldMin) / chart.WorldSize;
+                q[k] = glm::vec2((float)chart.X + pad, (float)chart.Y + pad) + local * inner;
+            }
+            float area = (q[1].x - q[0].x) * (q[2].y - q[0].y) -
+                         (q[2].x - q[0].x) * (q[1].y - q[0].y);
+            if (std::abs(area) < 1e-6f) continue; // треугольник ребром к проекции
+            float invArea = 1.0f / area;
+            // Длины рёбер против вершин: барицентр b_i, умноженный на |area|/len_i,
+            // — расстояние в текселях от центра текселя до этого ребра.
+            const float len[3] = {glm::length(q[1] - q[2]), glm::length(q[2] - q[0]),
+                                  glm::length(q[0] - q[1])};
 
-        int x0 = std::max(chart.X, (int)std::floor(std::min({q[0].x, q[1].x, q[2].x})) - 1);
-        int x1 = std::min(chart.X + chart.W - 1, (int)std::ceil(std::max({q[0].x, q[1].x, q[2].x})) + 1);
-        int y0 = std::max(chart.Y, (int)std::floor(std::min({q[0].y, q[1].y, q[2].y})) - 1);
-        int y1 = std::min(chart.Y + chart.H - 1, (int)std::ceil(std::max({q[0].y, q[1].y, q[2].y})) + 1);
+            int x0 = std::max(chart.X, (int)std::floor(std::min({q[0].x, q[1].x, q[2].x})) - 1);
+            int x1 = std::min(chart.X + chart.W - 1, (int)std::ceil(std::max({q[0].x, q[1].x, q[2].x})) + 1);
+            int y0 = std::max(chart.Y, (int)std::floor(std::min({q[0].y, q[1].y, q[2].y})) - 1);
+            int y1 = std::min(chart.Y + chart.H - 1, (int)std::ceil(std::max({q[0].y, q[1].y, q[2].y})) + 1);
 
-        for (int y = y0; y <= y1; ++y) {
-            for (int x = x0; x <= x1; ++x) {
-                size_t ci = (size_t)y * pageSize + x;
-                if (covered[ci]) continue;
-                glm::vec2 pc((float)x + 0.5f, (float)y + 0.5f);
-                float b0 = ((q[1].x - pc.x) * (q[2].y - pc.y) - (q[2].x - pc.x) * (q[1].y - pc.y)) * invArea;
-                float b1 = ((q[2].x - pc.x) * (q[0].y - pc.y) - (q[0].x - pc.x) * (q[2].y - pc.y)) * invArea;
-                float b2 = 1.0f - b0 - b1;
-                // Запас 0.35 текселя за краем: крайние тексели получают валидную
-                // позицию (клампится в треугольник ниже) — без чёрной каймы.
-                const float margin = -0.35f;
-                if (b0 < margin || b1 < margin || b2 < margin) continue;
-                float c0 = std::max(b0, 0.0f), c1 = std::max(b1, 0.0f), c2 = std::max(b2, 0.0f);
-                float norm = c0 + c1 + c2;
-                if (norm < 1e-6f) continue;
-                c0 /= norm; c1 /= norm; c2 /= norm;
-                TexelJob job;
-                job.Page = chart.Page; job.X = x; job.Y = y;
-                job.Pos = wp[0] * c0 + wp[1] * c1 + wp[2] * c2;
-                glm::vec3 n = wn[0] * c0 + wn[1] * c1 + wn[2] * c2;
-                job.N = glm::dot(n, n) > 1e-12f ? glm::normalize(n) : glm::vec3(0, 1, 0);
-                covered[ci] = 1;
-                jobs.push_back(job);
+            for (int y = y0; y <= y1; ++y) {
+                for (int x = x0; x <= x1; ++x) {
+                    size_t ci = (size_t)y * pageSize + x;
+                    if (covered[ci]) continue;
+                    glm::vec2 pc((float)x + 0.5f, (float)y + 0.5f);
+                    float b[3];
+                    b[0] = ((q[1].x - pc.x) * (q[2].y - pc.y) - (q[2].x - pc.x) * (q[1].y - pc.y)) * invArea;
+                    b[1] = ((q[2].x - pc.x) * (q[0].y - pc.y) - (q[0].x - pc.x) * (q[2].y - pc.y)) * invArea;
+                    b[2] = 1.0f - b[0] - b[1];
+                    bool accept = true;
+                    for (int k = 0; k < 3 && accept; ++k) {
+                        if (pass == 0) accept = b[k] >= -1e-5f;
+                        else accept = len[k] <= 1e-6f || b[k] * std::abs(area) / len[k] >= -kEdgeMarginTexels;
+                    }
+                    if (!accept) continue;
+                    float c0 = std::max(b[0], 0.0f), c1 = std::max(b[1], 0.0f), c2 = std::max(b[2], 0.0f);
+                    float norm = c0 + c1 + c2;
+                    if (norm < 1e-6f) continue;
+                    c0 /= norm; c1 /= norm; c2 /= norm;
+                    TexelJob job;
+                    job.Page = chart.Page; job.X = x; job.Y = y;
+                    job.Pos = wp[0] * c0 + wp[1] * c1 + wp[2] * c2;
+                    glm::vec3 n = wn[0] * c0 + wn[1] * c1 + wn[2] * c2;
+                    job.N = glm::dot(n, n) > 1e-12f ? glm::normalize(n) : glm::vec3(0, 1, 0);
+                    covered[ci] = 1;
+                    jobs.push_back(job);
+                }
             }
         }
     }

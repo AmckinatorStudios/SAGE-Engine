@@ -14,6 +14,7 @@
 #include "sage/core/Systems.h"
 #include "sage/render/PostFX.h"
 #include "sage/render/PbrShader.h"
+#include "sage/render/PostProcessComponent.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/ecs/RenderComponents.h"
@@ -239,6 +240,40 @@ TEST(Config_preset_roundtrip_through_file) {
     CHECK_EQ(loaded.ShadowResolution, 1024);
 
     std::remove(path);
+}
+
+// Экранный GI — настройка графики: пресет решает, по силам ли он машине, файл
+// её помнит, а выключенная она гасит звено у ЛЮБОЙ камеры, в том числе в
+// базовом выводе камеры без своей обработки.
+TEST(Config_screen_space_gi_is_a_graphics_switch) {
+    EngineConfig low;
+    low.ApplyPreset(QualityPreset::Low);
+    CHECK_FALSE(low.ScreenSpaceGI);
+    EngineConfig high;
+    high.ApplyPreset(QualityPreset::High);
+    CHECK_TRUE(high.ScreenSpaceGI);
+
+    const char* path = "sage_test_gi.cfg";
+    CHECK_TRUE(low.SaveFile(path));
+    EngineConfig loaded;
+    CHECK_TRUE(loaded.ScreenSpaceGI);   // умолчание — включён
+    CHECK_TRUE(loaded.LoadFile(path));
+    CHECK_FALSE(loaded.ScreenSpaceGI);
+    std::remove(path);
+
+    auto giEnabled = [](const sage::render::PostChain& chain) {
+        for (const sage::render::PostEffect& e : chain.Effects)
+            if (e.Kind == "ssgi" && e.Enabled) return true;
+        return false;
+    };
+    Scene scene;
+    EngineConfig& live = EngineConfig::Get();
+    const bool was = live.ScreenSpaceGI;
+    live.ScreenSpaceGI = true;
+    CHECK_TRUE(giEnabled(sage::render::FramePostChain(scene, entt::null)));
+    live.ScreenSpaceGI = false;
+    CHECK_FALSE(giEnabled(sage::render::FramePostChain(scene, entt::null)));
+    live.ScreenSpaceGI = was;
 }
 
 // --- Сохранения игры: прогресс игрока, а не сцена ------------------------------

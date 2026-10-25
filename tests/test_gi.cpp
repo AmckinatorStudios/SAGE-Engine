@@ -1,5 +1,6 @@
 #include "TestFramework.h"
 
+#include <algorithm>
 #include <cstdio>
 
 #include <glm/glm.hpp>
@@ -381,4 +382,125 @@ TEST(gi_transplant_matches_hash) {
     c.Get(2).GetTransform().Position.y += 1.0f;
     Transplant(a, c);
     CHECK_TRUE(c.GI == nullptr);
+}
+
+// --- Лайтмапа читается там, где запечена -----------------------------------
+//
+// Две ошибки делали запечённый свет «хуже незапечённого», и обе не видны ни по
+// отдельности, ни по средним значениям — только по тому, ГДЕ лёг свет:
+//   • UV2 вершины переводились в атлас по разу на КАЖДЫЙ её треугольник, и
+//     развёртка грани разъезжалась: рендер читал тексели не той точки;
+//   • запас растеризации был в долях барицентра, и треугольник квадрата
+//     забирал тексели соседнего, проецируя их на свою диагональ — тёмный клин.
+namespace {
+
+struct WallScene {
+    Scene scene{"wall"};
+    int FloorId = 0;
+    WallScene() {
+        scene.Lighting.Sun.Direction = glm::normalize(glm::vec3(0.7f, -0.6f, -0.3f));
+        scene.Lighting.Sun.Intensity = 0.9f;
+        scene.Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+        scene.Lighting.SkyColor = {0.5f, 0.6f, 0.8f};
+        scene.Lighting.AmbientStrength = 0.15f;
+        auto box = [&](const char* name, glm::vec3 pos, glm::vec3 scale, glm::vec3 color) {
+            GameObject o = scene.CreateObject(name);
+            o.Renderer().Ref = MeshRef{MeshRef::Type::Cube, ""};
+            o.Renderer().Color = color;
+            o.GetTransform().Position = pos;
+            o.GetTransform().Scale = scale;
+            o.Registry()->emplace<GIStaticComponent>(o.Entity());
+            return o;
+        };
+        FloorId = (int)box("floor", {0.0f, -0.05f, 0.0f}, {12.0f, 0.1f, 12.0f}, {0.6f, 0.6f, 0.6f}).Id();
+        box("wall", {1.5f, 1.5f, 0.0f}, {0.2f, 3.0f, 6.0f}, {0.9f, 0.05f, 0.05f});
+        box("cube", {-1.0f, 0.5f, 1.2f}, {1.0f, 1.0f, 1.0f}, {0.2f, 0.4f, 0.9f});
+    }
+};
+
+glm::mat4 FloorWorld() {
+    glm::mat4 m(1.0f);
+    m[0][0] = 12.0f; m[1][1] = 0.1f; m[2][2] = 12.0f;
+    m[3] = glm::vec4(0.0f, -0.05f, 0.0f, 1.0f);
+    return m;
+}
+
+// Значение лайтмапы пола в точке (x, z) верхней грани — так, как его прочтёт
+// рендер: UV2 по барицентрам треугольника, ближайший тексель.
+bool SampleFloor(const GIState& st, int floorId, float X, float Z, glm::vec3& out) {
+    auto it = st.Entities.find(floorId);
+    if (it == st.Entities.end()) return false;
+    const EntityBake& eb = it->second;
+    const LightmapPage& page = st.Pages[eb.Page];
+    const glm::mat4 world = FloorWorld();
+    for (size_t t = 0; t + 2 < eb.Mesh.Indices.size(); t += 3) {
+        const Vertex* v[3];
+        glm::vec3 w[3];
+        bool top = true;
+        for (int k = 0; k < 3; ++k) {
+            v[k] = &eb.Mesh.Vertices[eb.Mesh.Indices[t + k]];
+            w[k] = glm::vec3(world * glm::vec4(v[k]->Position, 1.0f));
+            top = top && v[k]->Normal.y > 0.5f;
+        }
+        if (!top) continue;
+        const float den = (w[1].z - w[2].z) * (w[0].x - w[2].x) + (w[2].x - w[1].x) * (w[0].z - w[2].z);
+        const float b0 = ((w[1].z - w[2].z) * (X - w[2].x) + (w[2].x - w[1].x) * (Z - w[2].z)) / den;
+        const float b1 = ((w[2].z - w[0].z) * (X - w[2].x) + (w[0].x - w[2].x) * (Z - w[2].z)) / den;
+        const float b2 = 1.0f - b0 - b1;
+        if (b0 < 0.0f || b1 < 0.0f || b2 < 0.0f) continue;
+        const glm::vec2 uv = v[0]->TexCoords2 * b0 + v[1]->TexCoords2 * b1 + v[2]->TexCoords2 * b2;
+        const int tx = std::clamp((int)(uv.x * page.Size), 0, page.Size - 1);
+        const int ty = std::clamp((int)(uv.y * page.Size), 0, page.Size - 1);
+        out = page.Texels[(size_t)ty * page.Size + tx];
+        return true;
+    }
+    return false;
+}
+
+} // namespace
+
+TEST(gi_lightmap_uv_follows_the_face) {
+    // Развёртка грани — та же проекция, что у растеризации бейка: вдоль грани
+    // UV2 растёт ровно на TexelsPerUnit текселей на метр, в каждой вершине.
+    WallScene ws;
+    GISettings s = FastSettings();
+    s.TexelsPerUnit = 4;
+    s.SampleCount = 4;
+    auto st = Bake(CollectBakeInput(ws.scene, s));
+    auto it = st->Entities.find(ws.FloorId);
+    CHECK_TRUE(it != st->Entities.end());
+    if (it == st->Entities.end()) return;
+    const float pageSize = (float)st->Pages[it->second.Page].Size;
+    const glm::mat4 world = FloorWorld();
+    std::vector<std::pair<glm::vec3, glm::vec2>> top;
+    for (const Vertex& v : it->second.Mesh.Vertices)
+        if (v.Normal.y > 0.5f) top.push_back({glm::vec3(world * glm::vec4(v.Position, 1.0f)), v.TexCoords2});
+    CHECK_EQ(top.size(), (size_t)4);
+    for (size_t i = 1; i < top.size(); ++i) {
+        const glm::vec3 dw = top[i].first - top[0].first;
+        const glm::vec2 duv = (top[i].second - top[0].second) * pageSize;
+        if (std::abs(dw.x) > 1.0f) CHECK_NEAR(duv.x / dw.x, 4.0f, 0.2f);
+        if (std::abs(dw.z) > 1.0f) CHECK_NEAR(duv.y / dw.z, 4.0f, 0.2f);
+    }
+}
+
+TEST(gi_lightmap_lights_the_right_place) {
+    WallScene ws;
+    GISettings s;
+    s.SampleCount = 64;
+    auto st = Bake(CollectBakeInput(ws.scene, s));
+    glm::vec3 nearWall, open, openFar;
+    CHECK_TRUE(SampleFloor(*st, ws.FloorId, 1.0f, 0.0f, nearWall));
+    CHECK_TRUE(SampleFloor(*st, ws.FloorId, -3.0f, 0.0f, open));
+    CHECK_TRUE(SampleFloor(*st, ws.FloorId, -4.0f, -4.0f, openFar));
+    std::printf("       у стены %.3f %.3f %.3f, открытый пол %.3f %.3f %.3f / %.3f %.3f %.3f\n",
+                nearWall.r, nearWall.g, nearWall.b, open.r, open.g, open.b, openFar.r, openFar.g,
+                openFar.b);
+    // Освещённая красная стена подкрашивает пол у своего основания...
+    CHECK_TRUE(nearWall.r > nearWall.g * 2.0f);
+    // ...а открытый пол вдали от предметов получает небо, а не чёрный клин
+    // чужих текселей: две открытые точки почти одинаковы.
+    const float lo = open.g + open.b, hi = openFar.g + openFar.b;
+    CHECK_TRUE(lo > 0.05f && hi > 0.05f);
+    CHECK_TRUE(std::abs(lo - hi) < 0.25f * std::max(lo, hi));
 }

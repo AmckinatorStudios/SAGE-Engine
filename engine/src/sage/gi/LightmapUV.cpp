@@ -145,13 +145,22 @@ int PackCharts(std::vector<Chart*>& charts, int pageSize) {
 void ApplyAtlasTransform(MeshData& mesh, const std::vector<Chart>& charts, int pageSize) {
     const float pad = (float)kChartPadding;
     const float inv = 1.0f / (float)pageSize;
+    // КАЖДАЯ ВЕРШИНА ПЕРЕВОДИТСЯ РОВНО ОДИН РАЗ. Перевод читает UV2 и пишет
+    // его же, а вершина общая у треугольников своего чарта: обход по
+    // треугольникам переводил её второй раз — уже из координат атласа, — и
+    // развёртка грани разъезжалась (угол квадрата 12x12 м попадал в чужой
+    // чарт). Бейк при этом писал тексели в ПРАВИЛЬНЫЕ места (растеризация
+    // считает их от мировой позиции), а рендер читал их не оттуда: запечённый
+    // свет ложился пятнами не там, где должен, и выходил хуже незапечённого.
+    std::vector<uint8_t> done(mesh.Vertices.size(), 0);
     for (const Chart& c : charts) {
         const glm::vec2 inner((float)(c.W - 2 * kChartPadding), (float)(c.H - 2 * kChartPadding));
         for (int t : c.Tris) {
             for (int k = 0; k < 3; ++k) {
-                Vertex& v = mesh.Vertices[mesh.Indices[t * 3 + k]];
-                // Вершины чарта уникальны (дублирование в BuildCharts), поэтому
-                // повторная запись при общих вершинах треугольников чарта безвредна.
+                const unsigned idx = mesh.Indices[t * 3 + k];
+                if (done[idx]) continue;
+                done[idx] = 1;
+                Vertex& v = mesh.Vertices[idx];
                 glm::vec2 local = glm::clamp(v.TexCoords2, glm::vec2(0.0f), glm::vec2(1.0f));
                 v.TexCoords2 = (glm::vec2((float)c.X, (float)c.Y) + pad + local * inner) * inv;
             }

@@ -380,6 +380,33 @@ TEST(PostProcess_belongs_to_the_camera_and_nowhere_else) {
     CHECK_FALSE(ResolvePostChain(scene, entt::null, none));
 }
 
+TEST(PostProcess_camera_without_component_still_gets_a_display_chain) {
+    // Нет своей обработки — это не «показать буфер сцены как есть»: буфер
+    // линейный HDR, и на экране он тёмный и кислотный. Хосты берут тракт у
+    // FramePostChain, и у такой камеры он — базовый вывод (кривая + sRGB).
+    Scene scene;
+    GameObject plain = scene.CreateObject("Plain");
+    scene.Registry().emplace<CameraComponent>(plain.Entity());
+    const PostChain display = FramePostChain(scene, plain.Entity());
+    CHECK_TRUE(display.Compile().Ok);
+    const PostEffect* tone = EffectOf(display, "tonemap");
+    CHECK_TRUE(tone != nullptr);
+    if (tone) CHECK_NEAR(tone->Float("mode"), 4.0f, 1e-4);   // Cinematic, как у новой камеры
+    // Эффектов, которых никто не просил, в базовом выводе нет.
+    CHECK_TRUE(EffectOf(display, "bloom") == nullptr);
+    CHECK_TRUE(EffectOf(display, "autoexposure") == nullptr);
+
+    // Выключенный компонент — тот же базовый вывод, а не его тракт.
+    PostProcessComponent component;
+    component.Chain = ChainOf({"bloom", "tonemap"});
+    component.Enabled = false;
+    scene.Registry().emplace<PostProcessComponent>(plain.Entity(), component);
+    CHECK_TRUE(EffectOf(FramePostChain(scene, plain.Entity()), "bloom") == nullptr);
+    // Включённый — свой тракт камеры.
+    scene.Registry().get<PostProcessComponent>(plain.Entity()).Enabled = true;
+    CHECK_TRUE(EffectOf(FramePostChain(scene, plain.Entity()), "bloom") != nullptr);
+}
+
 TEST(PostProcess_two_cameras_keep_their_own_settings) {
     // То, ради чего обработка и переехала на камеру: у каждой свой вид.
     Scene scene;

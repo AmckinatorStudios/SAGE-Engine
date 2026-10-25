@@ -109,6 +109,7 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             LocalShadows = false;
             Msaa = 0;
             RenderScale = 0.75f;
+            ScreenSpaceGI = false;   // полноэкранная трассировка — первое, что слабой машине не по силам
             // Объём не выключаем — его включает игра, а не пресет, — но на
             // слабой машине он идёт в половине стороны и с коротким маршем.
             VolumetricScale = 0.5f;
@@ -126,6 +127,7 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             LocalShadowResolution = 1024;
             Msaa = 0;
             RenderScale = 1.0f;
+            ScreenSpaceGI = true;
             VolumetricScale = 0.5f;
             VolumetricSteps = 28;
             CloudSteps = 40;
@@ -139,6 +141,7 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             LocalShadowResolution = 2048;
             Msaa = 0;
             RenderScale = 1.0f;
+            ScreenSpaceGI = true;
             VolumetricScale = 1.0f;
             VolumetricSteps = 32;
             CloudSteps = 48;
@@ -154,6 +157,7 @@ void EngineConfig::ApplyPreset(QualityPreset preset) {
             LocalShadowResolution = 4096;
             Msaa = 4;
             RenderScale = 1.0f;
+            ScreenSpaceGI = true;
             VolumetricScale = 1.0f;
             VolumetricSteps = 48;
             CloudSteps = 64;
@@ -196,6 +200,7 @@ bool EngineConfig::LoadFile(const std::string& path) {
     OcclusionCulling = gfx.value("occlusionCulling", OcclusionCulling);
     Reflections      = gfx.value("reflections", Reflections);
     PlanarReflections= gfx.value("planarReflections", PlanarReflections);
+    ScreenSpaceGI    = gfx.value("screenSpaceGI", ScreenSpaceGI);
     ShadowDistance = gfx.value("shadowDistance", ShadowDistance);
     Fog              = gfx.value("fog", Fog);
     Skybox           = gfx.value("skybox", Skybox);
@@ -263,6 +268,7 @@ std::string EngineConfig::ToJsonString() const {
         {"localShadows", LocalShadows}, {"localShadowResolution", LocalShadowResolution},
         {"occlusionCulling", OcclusionCulling},
         {"reflections", Reflections}, {"planarReflections", PlanarReflections},
+        {"screenSpaceGI", ScreenSpaceGI},
         {"fog", Fog}, {"skybox", Skybox},
     };
     j["ui"] = {

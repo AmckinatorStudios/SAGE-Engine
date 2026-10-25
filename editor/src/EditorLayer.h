@@ -440,7 +440,8 @@ private:
     bool SelfTestRenderStability(); // кадр вьюпорта не «уплывает» от повторов
     bool SelfTestPickerAndPrefabs(); // пипетка слота объекта, префабы броском
     bool SelfTestPlugins();
-    bool SelfTestPanelRegistry();    // реестр панелей: встроенные, на ходу, окна плагинов          // плагины на Lua: шаблон, меню, отмена, ошибки, Play
+    bool SelfTestPanelRegistry();
+    bool SelfTestGIBake();           // запекание освещения: разметка, фон, свет по месту, «устарело»    // реестр панелей: встроенные, на ходу, окна плагинов          // плагины на Lua: шаблон, меню, отмена, ошибки, Play
     // Многооконность — проверка В ЖИВОМ КАДРЕ: окно системы заводит платформа,
     // а не флаг, и этот последний шаг ломается молча (см. EditorSelfTest.cpp).
     void CheckMultiWindowFrame();

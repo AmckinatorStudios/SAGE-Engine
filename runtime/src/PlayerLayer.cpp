@@ -1115,15 +1115,15 @@ void PlayerLayer::OnRender() {
         // хуже, чем с редактором: там хотя бы есть отладочные виды, а здесь
         // человек видит просто чёрное окно. Лучше кадр без свечения, чем ничего.
         // ТРАКТ БЕРЁТСЯ У КАМЕРЫ. Нет компонента «Пост-обработка» или он
-        // выключен — кадр идёт на экран как есть: обработки в игре не бывает
-        // «вообще», она бывает у камеры, которая снимает (см.
-        // sage/render/PostProcessComponent.h).
-        sage::render::PostChain cameraChain;
-        const bool cameraWantsPost = sage::render::ResolvePostChain(
-            *m_scene, sage::ecs::PrimaryCameraEntity(*m_scene), cameraChain);
+        // выключен — кадр выводится базовым трактом (кривая и кодирование для
+        // экрана, см. FramePostChain): эффектов нет, но картинка правильная.
+        // Сырой HDR с одной аппаратной sRGB-записью пересвечивался и выглядел
+        // кислотным — кривой, сжимающей света, у него не было.
+        const sage::render::PostChain cameraChain =
+            sage::render::FramePostChain(*m_scene, sage::ecs::PrimaryCameraEntity(*m_scene));
 
         bool postOk = true;
-        if (cameraWantsPost && m_postfx) {
+        if (m_postfx) {
             const sage::render::PostFX::SelfCheck& check = m_postfx->CheckPipeline();
             postOk = !check.Ran || check.Ok;
             if (!postOk && !m_postWarned) {
@@ -1132,7 +1132,7 @@ void PlayerLayer::OnRender() {
                                     << check.Reason << ") — кадр без эффектов";
             }
         }
-        const bool usePost = cameraWantsPost && !debugging && postOk;
+        const bool usePost = !debugging && postOk;
         if (usePost) {
             if (!m_postfx) m_postfx.emplace();
             // Число сэмплов — по конфигу и той же функцией, что у редактора:

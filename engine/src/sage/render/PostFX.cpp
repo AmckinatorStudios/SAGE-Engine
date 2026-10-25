@@ -214,6 +214,157 @@ void main() {
 }
 )";
 
+// --- Экранное глобальное освещение (SSGI): отражённый свет соседних поверхностей ---
+//
+// Непрямой свет сцены без запекания — то, чего кадру не хватало, чтобы стать
+// «настоящим»: красная стена не подкрашивала пол, освещённый солнцем пол не
+// подсвечивал низ предметов, и всё, что вне прямого света, заливалось одним
+// ровным ambient. Здесь для каждого пикселя трассируются лучи по полусфере
+// нормали В ЭКРАННОМ ПРОСТРАНСТВЕ: луч идёт по глубине кадра, и там, где он
+// упирается в поверхность, берётся её цвет из HDR-кадра — это и есть свет,
+// который она отражает на нас. Лучи распределены по косинусу (Ламберт), поэтому
+// среднее найденного — уже освещённость, без лишних весов.
+//
+// Чего метод НЕ видит — того, чего нет на экране (свет за краем кадра или за
+// предметом). Поэтому он — добавка к окружающему свету и запечённому GI, а не
+// их замена: промахнувшийся луч не вносит ничего, а не «чёрное».
+//
+// Позиция и нормаль — из глубины тем же приёмом, что у SSAO (сосед, ближний по
+// глубине): на силуэтах производная дала бы случайную нормаль и шумную кайму.
+const char* kSsgiFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uDepth;
+uniform sampler2D uScene;
+uniform mat4 uProj;
+uniform mat4 uInvProj;
+uniform vec2 uTexel;
+uniform float uRadius;     // как далеко ищется отражающая поверхность, м
+uniform float uThickness;  // за сколько метров за поверхностью луч ещё считается попавшим
+uniform int uRays;
+uniform int uSteps;
+
+vec3 ViewPos(vec2 uv) {
+    float d = texture(uDepth, uv).r;
+    vec4 c = uInvProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
+    return c.xyz / c.w;
+}
+vec3 NormalFromDepth(vec2 uv, vec3 P) {
+    vec3 l = ViewPos(uv - vec2(uTexel.x, 0.0));
+    vec3 r = ViewPos(uv + vec2(uTexel.x, 0.0));
+    vec3 d = ViewPos(uv - vec2(0.0, uTexel.y));
+    vec3 u = ViewPos(uv + vec2(0.0, uTexel.y));
+    vec3 dx = (abs(l.z - P.z) < abs(r.z - P.z)) ? (P - l) : (r - P);
+    vec3 dy = (abs(d.z - P.z) < abs(u.z - P.z)) ? (P - d) : (u - P);
+    vec3 n = cross(dx, dy);
+    float len2 = dot(n, n);
+    return len2 > 1e-12 ? n * inversesqrt(len2) : vec3(0.0, 0.0, 1.0);
+}
+
+void main() {
+    float d = texture(uDepth, vUV).r;
+    if (d >= 1.0) { FragColor = vec4(0.0, 0.0, 0.0, 1e6); return; }   // небо не освещается
+    vec3 P = ViewPos(vUV);
+    vec3 N = NormalFromDepth(vUV, P);
+    if (dot(N, -P) < 0.0) N = -N;
+
+    // Базис полусферы и шум: свой поворот лучей и сдвиг шага у каждого пикселя,
+    // иначе одинаковый узор лучей складывается в видимую решётку. Шум потом
+    // гасит размытие с учётом глубины.
+    vec3 T = normalize(abs(N.z) < 0.999 ? cross(N, vec3(0.0, 0.0, 1.0)) : cross(N, vec3(0.0, 1.0, 0.0)));
+    vec3 B = cross(N, T);
+    float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+
+    vec3 sum = vec3(0.0);
+    for (int i = 0; i < uRays; ++i) {
+        float u1 = (float(i) + ign) / float(uRays);
+        float phi = 6.2831853 * fract(float(i) * 0.618034 + ign * 0.5);
+        float sr = sqrt(u1);
+        vec3 dir = T * (cos(phi) * sr) + B * (sin(phi) * sr) + N * sqrt(max(1.0 - u1, 0.0));
+        for (int s = 0; s < uSteps; ++s) {
+            // Шаги гуще у поверхности: ближние соседи отражают больше всего.
+            float f = (float(s) + 0.5 + 0.5 * ign) / float(uSteps);
+            vec3 sp = P + dir * (uRadius * f * f + 0.02);
+            vec4 clip = uProj * vec4(sp, 1.0);
+            if (clip.w <= 0.0) break;
+            vec2 suv = clip.xy / clip.w * 0.5 + 0.5;
+            if (suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0) break;
+            if (texture(uDepth, suv).r >= 1.0) continue;   // над лучом небо — дальше
+            vec3 Q = ViewPos(suv);
+            float behind = Q.z - sp.z;                      // > 0: поверхность ближе к камере, чем точка луча
+            if (behind > 0.0 && behind < uThickness) {
+                vec3 L = Q - P;
+                float dist2 = dot(L, L);
+                // Обращённость отражающей поверхности к нам: изнанка не светит.
+                vec3 Nq = NormalFromDepth(suv, Q);
+                if (dot(Nq, -Q) < 0.0) Nq = -Nq;   // видимая грань смотрит на камеру
+                float facing = clamp(dot(Nq, -L) * inversesqrt(max(dist2, 1e-6)) * 2.0 + 0.5, 0.0, 1.0);
+                // Без затухания «по квадрату»: его уже даёт телесный угол — далёкая
+                // стена занимает меньше лучей. Мягко гасим только у границы
+                // радиуса, чтобы край поиска не читался кольцом.
+                float falloff = 1.0 - smoothstep(0.6 * uRadius, uRadius, sqrt(dist2));
+                sum += max(texture(uScene, suv).rgb, vec3(0.0)) * facing * falloff;
+                break;
+            }
+        }
+    }
+    // Линейная глубина — в альфу: по ней размытие не переносит свет через силуэт.
+    FragColor = vec4(sum / float(uRays), -P.z);
+}
+)";
+
+// Размытие отражённого света с учётом глубины, крестом: тот же фильтр, что у
+// затенения (kAoBlurFrag), только по трём каналам цвета.
+const char* kSsgiBlurFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uGI;
+uniform vec2 uTexel;
+uniform vec2 uDirection;
+void main() {
+    vec4 c = texture(uGI, vUV);
+    float centerDepth = c.a;
+    vec3 sum = c.rgb;
+    float weight = 1.0;
+    float tolerance = max(centerDepth * 0.03, 0.03);
+    for (int i = 1; i <= 6; ++i) {
+        for (int s = -1; s <= 1; s += 2) {
+            vec4 t = texture(uGI, vUV + uDirection * uTexel * float(i * s) * 1.5);
+            float w = abs(t.a - centerDepth) < tolerance ? 1.0 - float(i) / 7.0 : 0.0;
+            sum += t.rgb * w;
+            weight += w;
+        }
+    }
+    FragColor = vec4(sum / weight, centerDepth);
+}
+)";
+
+// Подмешивание: отражённый свет падает на поверхность и отражается ЕЁ цветом.
+//
+// Отдельного буфера альбедо у кадра нет, поэтому цвет поверхности оценивается
+// по самому кадру: оттенок — нормированный цвет пикселя, светлота — его
+// яркость, сжатая к единице (белая стена отражает больше, тёмный пол меньше).
+// Это приближение, но оно держит главное: красное подкрашивает соседей
+// красным, а чёрное почти не светится.
+const char* kSsgiApplyFrag = R"(#version 330 core
+in vec2 vUV;
+out vec4 FragColor;
+uniform sampler2D uScene;
+uniform sampler2D uGI;
+uniform float uIntensity;
+uniform float uSaturation;   // насколько отражённый свет сохраняет цвет поверхности-источника
+void main() {
+    vec3 c = max(texture(uScene, vUV).rgb, vec3(0.0));
+    vec3 gi = texture(uGI, vUV).rgb;
+    float giLuma = dot(gi, vec3(0.2126, 0.7152, 0.0722));
+    gi = max(mix(vec3(giLuma), gi, uSaturation), vec3(0.0));
+    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    float peak = max(max(c.r, c.g), max(c.b, 1e-4));
+    vec3 albedo = (c / peak) * (l / (l + 0.2));
+    FragColor = vec4(c + gi * albedo * uIntensity, 1.0);
+}
+)";
+
 // Bright-pass: выделяет яркие участки выше порога (мягкий knee).
 const char* kBrightFrag = R"(#version 330 core
 in vec2 vUV;
@@ -953,9 +1104,16 @@ vec3 PbrNeutral(vec3 c) {
 // Кодирование для экрана. sRGB — кусочная кривая стандарта (её ждут мониторы
 // и браузеры), гамма — степенная (как было в движке до выбора), линейный —
 // без кодирования: для внешней обработки кадра и для отладки.
+//
+// ГАММА РАБОТАЕТ ПРИ ЛЮБОМ ВЫВОДЕ. Раньше её читал только вывод «Gamma», а по
+// умолчанию стоит sRGB — и ползунок, который двигают первым, не менял ничего.
+// Для sRGB и линейного она — поправка средних тонов относительно стандартных
+// 2.2: pow(c, 2.2/g). Ровно 2.2 — без поправки (старые сцены не меняются),
+// больше — светлее, меньше — темнее, как и у вывода «Gamma».
 vec3 Encode(vec3 c) {
-    if (uOutput == 2) return c;
     if (uOutput == 1) return pow(c, vec3(1.0 / uGamma));
+    c = pow(c, vec3(2.2 / uGamma));
+    if (uOutput == 2) return c;
     vec3 lo = c * 12.92;
     vec3 hi = 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055;
     return mix(hi, lo, vec3(lessThanEqual(c, vec3(0.0031308))));
@@ -1071,6 +1229,9 @@ void main() { FragColor = vec4(texture(uScene, vUV).rgb, 1.0); }
 
 Shader& SsaoShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kSsaoFrag, "PostFX.SSAO")); return *s; }
 Shader& AoBlurShader()    { static Shader* s = new Shader(Shader::FromSource(kFsVert, kAoBlurFrag, "PostFX.AOBlur")); return *s; }
+Shader& SsgiShader()      { static Shader* s = new Shader(Shader::FromSource(kFsVert, kSsgiFrag, "PostFX.SSGI")); return *s; }
+Shader& SsgiBlurShader()  { static Shader* s = new Shader(Shader::FromSource(kFsVert, kSsgiBlurFrag, "PostFX.SSGIBlur")); return *s; }
+Shader& SsgiApplyShader() { static Shader* s = new Shader(Shader::FromSource(kFsVert, kSsgiApplyFrag, "PostFX.SSGIApply")); return *s; }
 // Общий блок круга нерезкости подставляется в оба шейдера, которым он нужен:
 // считай его каждый по-своему — и граница «в фокусе» у prep и у сведения
 // разошлась бы.
@@ -1258,6 +1419,65 @@ void RunAmbientOcclusion(PostContext& ctx, const PostEffect& e) {
     mul.SetInt("uMul", 1);
     device.BindTexture2D(0, ctx.Color);
     device.BindTexture2D(1, sc.Ao->ColorTextureHandle());
+    DrawFullscreen(ctx);
+    PostSetColor(ctx, out->ColorTextureHandle(), ctx.ColorIsLdr);
+}
+
+// --- Звено «Global Illumination» (экранное) ----------------------------------
+// Трассировка в половинном разрешении: отражённый свет — низкочастотный, и
+// полное разрешение стоило бы вчетверо дороже без видимой разницы, а шум
+// выборки всё равно гасит размытие.
+void RunScreenSpaceGI(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("SSGI");
+    GraphicsDevice& device = Dev(ctx);
+    PostScratch& sc = *ctx.Scratch;
+    const int hw = std::max(1, ctx.Width / 2), hh = std::max(1, ctx.Height / 2);
+    RenderTarget* trace = Keep(sc.GiTrace, hw, hh);
+    RenderTarget* blur = Keep(sc.GiBlur, hw, hh);
+    // Качество — число лучей и шагов на пиксель: цена звена растёт ровно с ним.
+    static const int kRays[] = {4, 8, 12};
+    static const int kSteps[] = {6, 8, 12};
+    const int q = glm::clamp(e.Int("quality", 1), 0, 2);
+
+    trace->Bind();
+    Shader& gi = SsgiShader();
+    gi.Use();
+    gi.SetInt("uDepth", 0);
+    gi.SetInt("uScene", 1);
+    device.BindTexture2D(0, ctx.SceneDepth);
+    device.BindTexture2D(1, ctx.Color);
+    gi.SetMat4("uProj", ctx.Proj);
+    gi.SetMat4("uInvProj", glm::inverse(ctx.Proj));
+    gi.SetVec2("uTexel", glm::vec2(1.0f / (float)ctx.Width, 1.0f / (float)ctx.Height));
+    gi.SetFloat("uRadius", glm::max(e.Float("radius", 3.0f), 0.05f));
+    gi.SetFloat("uThickness", glm::max(e.Float("thickness", 0.5f), 0.01f));
+    gi.SetInt("uRays", kRays[q]);
+    gi.SetInt("uSteps", kSteps[q]);
+    DrawFullscreen(ctx);
+
+    Shader& b = SsgiBlurShader();
+    b.Use();
+    b.SetInt("uGI", 0);
+    b.SetVec2("uTexel", glm::vec2(1.0f / (float)hw, 1.0f / (float)hh));
+    blur->Bind();
+    b.SetVec2("uDirection", glm::vec2(1.0f, 0.0f));
+    device.BindTexture2D(0, trace->ColorTextureHandle());
+    DrawFullscreen(ctx);
+    trace->Bind();
+    b.SetVec2("uDirection", glm::vec2(0.0f, 1.0f));
+    device.BindTexture2D(0, blur->ColorTextureHandle());
+    DrawFullscreen(ctx);
+
+    RenderTarget* out = PostAcquireTarget(ctx, 1);
+    out->Bind();
+    Shader& apply = SsgiApplyShader();
+    apply.Use();
+    apply.SetInt("uScene", 0);
+    apply.SetInt("uGI", 1);
+    apply.SetFloat("uIntensity", glm::max(e.Float("intensity", 1.0f), 0.0f));
+    apply.SetFloat("uSaturation", glm::clamp(e.Float("saturation", 1.0f), 0.0f, 2.0f));
+    device.BindTexture2D(0, ctx.Color);
+    device.BindTexture2D(1, trace->ColorTextureHandle());
     DrawFullscreen(ctx);
     PostSetColor(ctx, out->ColorTextureHandle(), ctx.ColorIsLdr);
 }
@@ -1759,6 +1979,26 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
     }
     {
         PostEffectKind k;
+        k.Id = "ssgi";
+        k.Label = "Global Illumination";
+        k.Hint = "Отражённый свет: освещённые поверхности подсвечивают соседей своим цветом. "
+                 "Считается по кадру, без запекания";
+        k.Needs = PostNeeds::HdrColor | PostNeeds::Depth;
+        k.Stage = PostStage::Depth;
+        k.Params = {Param("intensity", "Intensity", 1.0f, 0.0f, 4.0f, "Сила отражённого света"),
+                    Param("radius", "Radius", 3.0f, 0.25f, 12.0f,
+                          "Как далеко ищется отражающая поверхность, м"),
+                    Param("thickness", "Thickness", 0.5f, 0.05f, 4.0f,
+                          "Толщина поверхностей для лучей: больше — меньше просветов, но больше ложных попаданий"),
+                    Param("saturation", "Color Bleeding", 1.0f, 0.0f, 2.0f,
+                          "Насколько отражённый свет несёт цвет источника: 0 — серый, 1 — как есть"),
+                    EnumParam("quality", "Quality", 1, {"Low", "Medium", "High"},
+                              "Лучей на пиксель: 4, 8 или 12. Больше — чище и дороже")};
+        k.Run = RunScreenSpaceGI;
+        catalog.Register(std::move(k));
+    }
+    {
+        PostEffectKind k;
         k.Id = "ao";
         k.Label = "Ambient Occlusion";
         k.Hint = "Затемняет щели и места контакта предметов; считается по глубине кадра";
@@ -1900,7 +2140,9 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
                               "Кодирование для экрана: sRGB — стандарт мониторов,\n"
                               "Gamma — степенная кривая с показателем ниже,\n"
                               "Linear — без кодирования (для внешней обработки)"),
-                    Param("gamma", "Gamma", 2.2f, 1.0f, 3.0f, "Показатель для вывода Gamma")};
+                    Param("gamma", "Gamma", 2.2f, 1.0f, 3.0f,
+                          "Гамма экрана: 2.2 — стандарт, больше — светлее средние тона,\n"
+                          "меньше — темнее. Работает при любом выводе")};
         k.Run = RunTonemap;
         catalog.Register(std::move(k));
     }
@@ -1970,10 +2212,23 @@ PostChain PostChain::Default() {
     PostChain chain;
     chain.Effects.push_back(MakePostEffect("exposure"));
     chain.Effects.push_back(MakePostEffect("autoexposure"));
+    chain.Effects.push_back(MakePostEffect("ssgi"));
     chain.Effects.push_back(MakePostEffect("bloom"));
     chain.Effects.push_back(MakePostEffect("color"));
     PostEffect tonemap = MakePostEffect("tonemap");
     if (PostValue* mode = tonemap.Find("mode")) mode->V[0] = 4.0f;   // Cinematic
+    chain.Effects.push_back(std::move(tonemap));
+    return chain;
+}
+
+PostChain PostChain::Display() {
+    PostChain chain;
+    // Отражённый свет — часть ОСВЕЩЕНИЯ, а не эффект: без него всё, что вне
+    // прямого света, заливается одним ровным ambient. Выключается он настройкой
+    // графики (EngineConfig::ScreenSpaceGI), а не тем, что у камеры нет обработки.
+    chain.Effects.push_back(MakePostEffect("ssgi"));
+    PostEffect tonemap = MakePostEffect("tonemap");
+    if (PostValue* mode = tonemap.Find("mode")) mode->V[0] = 4.0f;   // Cinematic, как у новой камеры
     chain.Effects.push_back(std::move(tonemap));
     return chain;
 }
@@ -1995,6 +2250,8 @@ void PostFX::EnsureTargets(int w, int h) {
     // Смена размера обесценивает рабочие буферы, пул целей и историю кадра:
     // репроецировать старую матрицу на другой кадр нельзя, а цель другого
     // размера не подходит ни одному звену.
+    m_scratch.GiTrace.reset();
+    m_scratch.GiBlur.reset();
     m_scratch.DofPrep.reset();
     m_scratch.DofBlur.reset();
     m_scratch.DofNearMaxA.reset();
