@@ -180,6 +180,9 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptModules.cpp
     src/sage/lang/SageLexer.cpp
     src/sage/lang/SageParser.cpp
+    src/sage/lang/SageParser_Decl.cpp
+    src/sage/lang/SageParser_Expr.cpp
+    src/sage/lang/SageParser_Stmt.cpp
     src/sage/lang/SageCheck.cpp
     src/sage/lang/SageCheck_Body.cpp
     src/sage/lang/SageCheck_Decls.cpp
