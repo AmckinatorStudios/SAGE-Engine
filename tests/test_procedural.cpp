@@ -164,3 +164,97 @@ TEST(script_builds_noise_formulas_meshes_materials_and_textures) {
     CHECK_NEAR(px.x, 0.875f, 0.01);   // центр последнего пикселя: (3 + 0.5) / 4
     CHECK_NEAR(px.y, 0.75f, 0.01);
 }
+
+// ПРОЦЕДУРНАЯ ГЕНЕРАЦИЯ В СТИЛЕ SAGE: без префиксов, объекты через точку,
+// свойства присваиванием, настройки таблицей. Те же возможности, что выше.
+TEST(script_procgen_in_sage_style_covers_everything) {
+    ScriptEngine se;
+    Scene scene("P");
+    se.BindScene(scene);
+    se.Lua().script(R"LUA(
+        set_seed(9)
+        p = perlin(1.5, 2.5)
+        s = simplex(1.5, 2.5, 0.5)
+        f1, f2, cell = worley(0.3, 0.7)
+        layered = fbm(0.3, 0.7) + ridged(0.3, 0.7) + turbulence(0.3, 0.7) + value_noise(0.3)
+        bent = warp(1, 2, 3, 0.5)
+
+        n = noise{kind = "simplex", seed = 42, octaves = 4, scale = 0.5}
+        same = n(1, 2) == noise{kind = "simplex", seed = 42, octaves = 4, scale = 0.5}(1, 2)
+        n.octaves = 2
+        octaves = n.octaves
+        scale = n.scale
+        extra = n.ridged(1, 2) + n.turbulence(1, 2) + n.raw(1, 2) + n.hash(3, 4)
+
+        math_ok = remap(5, 0, 10, 100, 200) == 150 and clamp(7, 0, 5) == 5 and lerp(0, 10, 0.5) == 5
+            and inverse_lerp(0, 10, 2.5) == 0.25 and fract(2.25) == 0.25 and step(1, 2) == 1
+            and ping_pong(3, 2) == 1 and smoothstep(0, 1, 1) == 1 and smootherstep(0, 1, 0) == 0
+        r1, r2 = random(5), random(5)
+        rnd = r1.int(1, 1000) == r2.int(1, 1000) and r1.chance(1) and r1.pick({"a"}) == "a"
+        wave = formula("sin(x) * y + clamp(z, 0, 1)", "x, y, z")
+        wave_v = wave(math.pi / 2, 3, 5)
+
+        ground = grid(10, 10, 4, 4, function(x, z) return fbm(x * 0.1, z * 0.1) end)
+        m = mesh()
+        a = m.vertex(0, 0, 0); b = m.vertex(0, 0, 1); c = m.vertex(1, 0, 0)
+        m.material(2)
+        m.triangle(a, b, c)
+        m.add(ground)
+        m.add(box(1))
+        m.add(sphere(0.5, 8, 6))
+        m.add(cylinder(0.5, 1, 8))
+        m.set_uv(a, 0.5, 0.5)
+        m.deform(function(pos, nrm, uv) return pos + nrm * 0.01 end)
+        m.normals()
+        m.move(0, 1, 0)
+        m.scale(2)
+        lo, hi = m.bounds()
+        verts, tris = m.vertices, m.triangles
+
+        tex = texture("pg_tex", 4, 2)
+        tex.fill(function(u, v) return u end)          -- число — серый
+        px = tex.get(3, 1)
+        tex.nearest = true
+        stone = material("pg_stone", {color = rgb(0.5, 0.4, 0.3), roughness = 0.9, tiling = 2})
+        stone.metallic = 0.25
+        stone.texture = "pg_tex"   -- объект текстуры (stone.texture = tex) грузится на видеокарту — это проверяет Play
+        bad_key = not pcall(function() stone.shininess = 1 end)
+        stone_name, stone_rough = stone.name, stone.roughness
+    )LUA");
+    auto L = [&](const char* k) { return se.Lua()[k]; };
+    CHECK_TRUE(std::fabs(L("p").get<float>()) <= 1.05f);
+    CHECK_TRUE(L("f1").get<float>() <= L("f2").get<float>());
+    CHECK_TRUE(L("same").get<bool>());
+    CHECK_EQ(L("octaves").get<int>(), 2);
+    CHECK_NEAR(L("scale").get<float>(), 0.5f, 1e-6);
+    CHECK_TRUE(L("math_ok").get<bool>());
+    CHECK_TRUE(L("rnd").get<bool>());
+    CHECK_NEAR(L("wave_v").get<float>(), 4.0f, 1e-4);
+    CHECK_TRUE(L("verts").get<int>() > 100);
+    CHECK_TRUE(L("tris").get<int>() > 100);
+    CHECK_NEAR(L("px").get<glm::vec4>().x, 0.875f, 0.01);
+    CHECK_TRUE(L("bad_key").get<bool>());
+    CHECK_TRUE(L("stone_name").get<std::string>() == "pg_stone");
+    CHECK_NEAR(L("stone_rough").get<float>(), 0.9f, 1e-6);
+    std::shared_ptr<Material> mat = ResourceManager::Instance().GetMaterial("pg_stone");
+    CHECK_TRUE(mat != nullptr);
+    if (mat) {
+        CHECK_NEAR(mat->Metallic, 0.25f, 1e-6);
+        CHECK_NEAR(mat->Render.UVScaleX, 2.0f, 1e-6);
+        CHECK_TRUE(mat->TexturePath == "pg_tex");
+    }
+    // Старый стиль работает и дальше: те же таблицы.
+    CHECK_TRUE(se.Lua().script("return sage.noise == noise and sage.mesh == mesh and type(sage.noise.Perlin) == 'function'")
+                   .get<bool>());
+}
+
+// Слой стиля SAGE — отдельный модуль: снимается, не задевая прежний API.
+#include "sage/scripting/ScriptModules.h"
+TEST(script_procgen_is_a_module_that_can_be_removed_cleanly) {
+    ScriptEngine se;
+    CHECK_TRUE(sage::scripting::IsScriptModuleInstalled(se.Lua(), "procgen"));
+    sage::scripting::ScriptModuleContext ctx{se.Lua(), &se};
+    sage::scripting::UninstallScriptModule(ctx, "procgen");
+    CHECK_TRUE(se.Lua().script("return perlin == nil and grid == nil and rgb == nil").get<bool>());
+    CHECK_TRUE(se.Lua().script("return type(sage.noise.Perlin(0.5, 0.5)) == 'number'").get<bool>());
+}

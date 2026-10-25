@@ -155,6 +155,8 @@ void ScriptEngine::RegisterEngineApi() {
         mod("mesh", "меш объекта: примитивы и модели", {"object"}, true, &ScriptEngine::RegisterMeshApi),
         mod("procedural", "шумы, формулы, меш/материал/текстура кодом", {"object"}, true,
             &ScriptEngine::RegisterProceduralApi),
+        mod("procgen", "процедурная генерация в стиле SAGE: perlin, noise{}, mesh(), material()",
+            {"procedural", "mathx"}, true, &ScriptEngine::RegisterProcGenApi),
         mod("input", "действия и клавиши", {"math"}, true, &ScriptEngine::RegisterInputApi),
         mod("camera", "камера сцены", {"math"}, true, &ScriptEngine::RegisterCameraApi),
         mod("particles", "частицы", {"object"}, true, &ScriptEngine::RegisterParticleApi),

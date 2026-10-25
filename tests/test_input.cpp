@@ -815,9 +815,15 @@ TEST(CursorMotion_capture_change_and_focus_rebase_without_a_jump) {
     m.SetCaptured(true);                                   // система перенесла курсор
     CHECK_TRUE(m.Feed({640, 360}) == glm::vec2(0.0f));
     CHECK_TRUE(m.Feed({650, 360}) == glm::vec2(10.0f, 0.0f));
-    m.Rebase();                                            // alt-tab и обратно
-    CHECK_TRUE(m.Feed({5000, -300}) == glm::vec2(0.0f));
-    CHECK_TRUE(m.Feed({5003, -300}) == glm::vec2(3.0f, 0.0f));
+    // alt-tab и обратно В ЗАХВАТЕ: виртуальное положение непрерывно, первое
+    // же движение после возврата доходит целиком.
+    m.FocusChanged();
+    m.FocusChanged();
+    CHECK_TRUE(m.Feed({655, 360}) == glm::vec2(5.0f, 0.0f));
     m.SetCaptured(false);
     CHECK_TRUE(m.Feed({1, 1}) == glm::vec2(0.0f));
+    // Свободный курсор после alt-tab — где угодно: отсчёт заново.
+    m.FocusChanged();
+    CHECK_TRUE(m.Feed({5000, -300}) == glm::vec2(0.0f));
+    CHECK_TRUE(m.Feed({5003, -300}) == glm::vec2(3.0f, 0.0f));
 }

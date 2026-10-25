@@ -74,12 +74,12 @@ void EditorLayer::TickCursorLockProbe() {
         case 4:
             // События прошлого шага разобраны в начале этого кадра.
             m_cursorSteadyDelta = m_play.Input().MouseDelta().x;
-            // Потеря и возврат фокуса: курсор за это время «уехал» далеко —
-            // это не движение, обзор не прыгает; дальше движение идёт как шло.
+            // Потеря и возврат фокуса в захвате: виртуальное положение у
+            // системы непрерывно — первое же движение после возврата доходит
+            // целиком (раньше отсчёт начинался заново и оно выбрасывалось).
             window.EmitFocus(false);
             window.EmitFocus(true);
-            window.EmitCursorPos(5000.0, -300.0);
-            window.EmitCursorPos(5003.0, -300.0);
+            window.EmitCursorPos(343.0, 200.0);
             return;
         case 5: {
             const float afterFocus = m_play.Input().MouseDelta().x;
@@ -95,7 +95,7 @@ void EditorLayer::TickCursorLockProbe() {
             const bool focusOk = std::fabs(afterFocus - 3.0f) < 0.01f;
             if (steady && focusOk && held && freed && forgot) {
                 LOG_INFO("Editor") << "CURSOR_STEADY: OK — захват, запрошенный каждый кадр, не теряет движения мыши, "
-                                      "потеря и возврат фокуса не дают скачка, захват держится системой, "
+                                      "потеря и возврат фокуса не теряют движения, захват держится системой, "
                                       "закрытое окно панели захват забыл";
             } else {
                 LOG_ERROR("Editor") << "CURSOR_STEADY: FAIL — движение за кадры " << m_cursorSteadyDelta

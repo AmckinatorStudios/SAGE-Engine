@@ -1448,6 +1448,28 @@ function OnMessage(entity, name, data) end
 '''
 
 
+# Слой стиля SAGE (perlin, grid, rgb…) написан на Lua внутри
+# ScriptApi_ProcGen.cpp, и подсказка к нему — его же аннотации «---» рядом с
+# каждой функцией. Источник правды тот же: код, который движок исполняет.
+PROCGEN = ROOT / "engine/src/sage/scripting/ScriptApi_ProcGen.cpp"
+
+
+def procgen_hints():
+    text = PROCGEN.read_text(encoding='utf-8')
+    m = re.search(r'R"LUA\((.*?)\)LUA"', text, re.S)
+    if not m:
+        return ''
+    out = ['-- --- Процедурная генерация в стиле SAGE (ScriptApi_ProcGen.cpp) ----------\n']
+    for line in m.group(1).split('\n'):
+        if line.startswith('---'):
+            out.append(line + '\n')
+        else:
+            fn = re.match(r'^function (\w+)\(([^)]*)\)', line)
+            if fn:
+                out.append(f'function {fn.group(1)}({fn.group(2)}) end\n\n')
+    return ''.join(out)
+
+
 def render(modules, legacy):
     out = [HEADER]
     out.append('-- --- Модули ---------------------------------------------------------------\n')
@@ -1477,6 +1499,7 @@ def render(modules, legacy):
     out.append('-- Работают и работать будут: на них написаны существующие игры.\n')
     for old, module, name in legacy:
         out.append(f'---@type fun(...): any\n{old} = sage.{module}.{name}\n')
+    out.append(procgen_hints())
     out.append(HOOKS)
     return ''.join(out)
 

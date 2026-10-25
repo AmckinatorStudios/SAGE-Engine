@@ -259,9 +259,10 @@ void Window::EmitFocus(bool focused) {
     const bool changed = focused != m_focused;
     m_focused = focused;
     if (!changed) return;
-    // Положение курсора до ухода и после возврата не связаны: разница — не
-    // движение мыши в окне.
-    m_haveLast = false;
+    // Свободный курсор до ухода и после возврата — в разных местах: разница —
+    // не движение. В захвате положение виртуальное и непрерывное (см.
+    // CursorMotion::FocusChanged) — сброс выбросил бы первое движение.
+    if (!m_cursorCaptured) m_haveLast = false;
     for (const FocusFn& fn : m_focusFns) fn(focused);
 }
 

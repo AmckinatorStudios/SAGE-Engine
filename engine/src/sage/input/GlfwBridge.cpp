@@ -132,8 +132,8 @@ void GlfwBridge::Attach(Window& window, InputSystem& input) {
         m_input->Push(InputEvent::MouseMove(pos, m_motion.Feed(pos)));
     });
 
-    // Фокус ушёл или вернулся: положения до и после не связаны движением.
-    window.AddFocusCallback([this](bool) { m_motion.Rebase(); });
+    // Фокус ушёл или вернулся (см. CursorMotion::FocusChanged).
+    window.AddFocusCallback([this](bool) { m_motion.FocusChanged(); });
 
     window.SetScrollCallback([this](double, double yoffset) {
         m_input->Push(InputEvent::Wheeled((float)yoffset));

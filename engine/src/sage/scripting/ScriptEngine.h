@@ -405,6 +405,7 @@ private:
     void RegisterMeshApi();       // SetMeshCube/Sphere/…/Model/None
     // Шумы, формулы, меши/материалы/текстуры, собранные кодом (ScriptApi_Procedural.cpp).
     void RegisterProceduralApi();
+    void RegisterProcGenApi();     // тот же API в стиле SAGE: perlin, noise{}, mesh(), material()
     void RegisterInputApi();      // IsActionDown/WasActionPressed/…
     void RegisterCameraApi();     // Camera usertype + GetCamera
     void RegisterParticleApi();   // ParticleEffect, LoadEffect, Emit/Stream, эмиттер объекта

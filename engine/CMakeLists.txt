@@ -111,6 +111,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/Noise.cpp
     src/sage/render/MeshBuilder.cpp
     src/sage/scripting/ScriptApi_Procedural.cpp
+    src/sage/scripting/ScriptApi_ProcGen.cpp
     src/sage/assets/import/FbxSkin.cpp
     src/sage/assets/Quarantine.cpp
     src/sage/assets/import/GltfAccessor.cpp
