@@ -155,8 +155,10 @@ set(SAGE_ENGINE_SOURCES
     src/physics/CharacterMotor.cpp
     src/physics/PhysicsWorld.cpp
     src/physics/PhysicsScene.cpp
+    src/physics/PhysicsScene_Characters.cpp
     src/physics/Ragdoll.cpp
     src/physics/builtin/BuiltinWorld.cpp
+    src/physics/builtin/BuiltinWorld_Solver.cpp
     src/physics/builtin/Collide.cpp
     src/sage/scene/CopyName.cpp
     src/sage/scene/ScaleLock.cpp
@@ -283,7 +285,7 @@ target_link_libraries(sage_engine PRIVATE
 # включает jolt-ветки в PhysicsWorld.cpp/JoltWorld.cpp; всё под Jolt изолировано
 # в src/physics/jolt/ (как opengl-бэкенд изолирован в rhi/opengl/).
 if (TARGET Jolt)
-    target_sources(sage_engine PRIVATE src/physics/jolt/JoltWorld.cpp)
+    target_sources(sage_engine PRIVATE src/physics/jolt/JoltWorld.cpp src/physics/jolt/JoltWorld_Bodies.cpp)
     target_compile_definitions(sage_engine PRIVATE SAGE_HAS_JOLT)
     target_link_libraries(sage_engine PRIVATE Jolt)
 endif()
