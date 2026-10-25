@@ -7,6 +7,7 @@
 - [Архитектура (ключевые решения)](#архитектура-ключевые-решения)
 - [Слои движка и как его расширять](#слои-движка-и-как-его-расширять)
 - [Структура репозитория](#структура-репозитория)
+- [Крупные файлы движка](#крупные-файлы-движка)
 - [Как сделать новую игру](#как-сделать-новую-игру)
 - [games/sandbox — минимальный showcase движка](#gamessandbox--минимальный-showcase-движка)
 - [games/testgame — боевая игра-стресс-тест движка](#gamestestgame--боевая-игра-стресс-тест-движка)
@@ -276,6 +277,33 @@ host.Panels().Register(std::move(notes));
   одна функция).
 - Отрисовка каждого кадра не ходит на диск: списки папок и время правки файлов
   берутся из `FsCache` (`fscache::List`, `fscache::Stamp`).
+
+## Крупные файлы движка
+
+Тот же предел, что у редактора, — 1000 строк на файл — действует для
+`engine/src` и `runtime/src` (`scripts/check_file_size.py`). Большой файл
+делится **по обязанностям**, а внутренняя кухня модуля, общая для его частей,
+живёт в `<Модуль>Detail.h` рядом (наружу модуль виден по-прежнему через свой
+заголовок):
+
+| Модуль | Части |
+|---|---|
+| Пост-обработка | `PostFX.cpp` (тракт), `PostFXPasses.cpp` (звенья `Run*`), `PostFXCatalog.cpp` (виды и готовые цепочки), `PostFXShaders_Light.cpp` / `_Color.cpp` (шейдеры), `PostFXDetail.h` |
+| Проверка типов SAGE Lua | `SageCheck.cpp` (вход), `_Types.cpp`, `_Decls.cpp` (проходы 1–3, импорт), `_Body.cpp` (проход 4), `_Expr.cpp`, `SageCheckDetail.h` |
+| Разбор SAGE Lua | `SageParser.cpp`, `_Stmt.cpp`, `_Decl.cpp`, `_Expr.cpp`, `SageParserDetail.h` |
+| Сериализатор сцены | `SceneSerializer.cpp` (сборка/разбор сцены), `_Environment.cpp` (свет, отражения, GI), `_Components.cpp` (компоненты, ещё не переехавшие в реестр), `SceneSerializerDetail.h` |
+| Части интерфейса | `UIParts.cpp` (регистрация), `_Look.cpp` (оформление), `_Visual.cpp`, `_Input.cpp`, `UIPartsDetail.h` |
+| Скелетные модели | `SkinnedModel.cpp`, `SkinnedModel_Gltf.cpp` (разбор glTF) |
+| Батч рендера | `RenderBatch.cpp`, `RenderBatch_Color.cpp` (цветовой проход), `RenderBatchDetail.h` |
+| Кэш ресурсов | `ResourceManager.cpp`, `_Materials.cpp`, `_Memory.cpp` (бюджет), `ResourceManagerDetail.h` |
+| Физика | `BuiltinWorld.cpp` + `_Solver.cpp`, `JoltWorld.cpp` + `_Bodies.cpp`, `PhysicsScene.cpp` + `_Characters.cpp` |
+| Плеер | `PlayerLayer.cpp` (запуск, ввод), `_Scene.cpp` (сцены и переходы), `_Render.cpp` (кадр) |
+
+**Длинный встроенный текст** (общий GLSL-блок PBR, прелюдия SAGE Lua) держится
+частями по смыслу (`PbrShaderLighting.h` + `PbrShaderShading.h`,
+`SagePreludeCore.h` + `SagePreludeRuntime.h`) и склеивается **при компиляции**
+(`sage/core/StaticText.h`): наружу выходит та же строка байт в байт, готовая
+до любого статического инициализатора.
 
 ## Как сделать новую игру
 ```cmake

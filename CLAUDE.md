@@ -53,7 +53,7 @@ python3 scripts/check_asset_slots.py                              # ассеты
 python3 scripts/check_popup_ids.py                                # имена всплывающих окон
 python3 scripts/check_menu_style.py                               # отступы меню
 python3 scripts/check_imgui_pairs.py                              # EndCombo и подписи кнопок
-python3 scripts/check_file_size.py                                # файлы редактора ≤ 1000 строк
+python3 scripts/check_file_size.py                                # файлы ≤ 1000 строк
 python3 scripts/gen_script_api.py --check                         # подсказка по API скриптов
 cmake --build build-windows -j"$(nproc)"                          # кросс-сборка mingw
 ```
@@ -121,8 +121,10 @@ mingw) — половина поломок Windows-сборки на Linux не 
   `editor/src/PanelRegistry.h`; встроенные — `EditorLayer_Panels.cpp`), а не
   правка меню «Окно», палитры, раскладки и отрисовки по отдельности: всё это
   читает реестр.
-- **Файл редактора — не длиннее 1000 строк.** Вырос — разделить по
-  обязанностям (секция, этап, операция), помощники модуля — в `<Модуль>Detail.h`
-  (docs/architecture.md, «Модули редактора»). Отрисовка кадра не ходит на диск —
+- **Файл редактора, движка и рантайма — не длиннее 1000 строк.** Вырос —
+  разделить по обязанностям (секция, этап, операция), помощники модуля — в
+  `<Модуль>Detail.h` (docs/architecture.md, «Модули редактора», «Крупные файлы
+  движка»). Длинный встроенный текст (GLSL, Lua) — частями, склейка при
+  компиляции (`sage/core/StaticText.h`). Отрисовка кадра не ходит на диск —
   через `FsCache`. Проверяет `scripts/check_file_size.py`.
 - **Правка поведения — вместе с проверкой**, которая на старом коде падает.
