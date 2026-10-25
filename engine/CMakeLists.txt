@@ -23,6 +23,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/audio/AudioSystem.cpp
     src/sage/audio/miniaudio_impl.cpp
     src/sage/ecs/RenderBatch.cpp
+    src/sage/ecs/RenderBatch_Color.cpp
     src/sage/gi/BVH.cpp
     src/sage/gi/GI.cpp
     src/sage/gi/LightBaker.cpp

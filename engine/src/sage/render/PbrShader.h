@@ -1,8 +1,7 @@
 #pragma once
-#include <array>
-#include <cstddef>
 #include <string>
 
+#include "sage/core/StaticText.h"
 #include "sage/render/PbrShaderLighting.h"
 #include "sage/render/PbrShaderShading.h"
 
@@ -16,19 +15,8 @@
 // ---------------------------------------------------------------------------
 namespace sage::render {
 
-// Склейка частей — при компиляции, а не при запуске: строка та же, что была
-// одним литералом, и готова до любого статического инициализатора.
-namespace pbr_detail {
-template <size_t A, size_t B>
-constexpr std::array<char, A + B - 1> Concat(const char (&a)[A], const char (&b)[B]) {
-    std::array<char, A + B - 1> out{};
-    for (size_t i = 0; i + 1 < A; ++i) out[i] = a[i];
-    for (size_t i = 0; i < B; ++i) out[A - 1 + i] = b[i];
-    return out;
-}
-} // namespace pbr_detail
-
-inline constexpr auto kPbrSharedGlslStorage = pbr_detail::Concat(kPbrGlslLighting, kPbrGlslShading);
+// Склейка частей — при компиляции (sage/core/StaticText.h).
+inline constexpr auto kPbrSharedGlslStorage = sage::text::Concat(kPbrGlslLighting, kPbrGlslShading);
 inline const char* kPbrSharedGlsl = kPbrSharedGlslStorage.data();
 
 
