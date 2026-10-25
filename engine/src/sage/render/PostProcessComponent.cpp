@@ -1,5 +1,6 @@
 #include "sage/render/PostProcessComponent.h"
 
+#include "sage/core/Config.h"
 #include "sage/ecs/CameraLightComponents.h"
 #include "sage/scene/Scene.h"
 
@@ -29,6 +30,18 @@ bool ResolvePostChain(Scene& scene, entt::entity camera, PostChain& out) {
     // в готовый вид» (см. PostChain::Completed), а не «забыл настроить».
     out = pp->Chain;
     return true;
+}
+
+PostChain FramePostChain(Scene& scene, entt::entity camera) {
+    PostChain chain;
+    if (!ResolvePostChain(scene, camera, chain)) chain = PostChain::Display();
+    // Экранный GI — проход, за который платит машина игрока, поэтому РАЗРЕШАЕТ
+    // его настройка графики, как тени и отражения: выключенный там, он не идёт
+    // ни у одной камеры, а включённый — только там, где камера его держит.
+    if (!sage::EngineConfig::Get().ScreenSpaceGI)
+        for (PostEffect& e : chain.Effects)
+            if (e.Kind == "ssgi") e.Enabled = false;
+    return chain;
 }
 
 } // namespace sage::render

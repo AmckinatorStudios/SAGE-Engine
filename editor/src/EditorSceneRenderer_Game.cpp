@@ -69,8 +69,8 @@ void EditorSceneRenderer::RenderCameraPreview(Scene& scene, const LightingEnviro
     // Пост-обработка — как в игре: превью обещает игровой кадр, а не «сцену без
     // эффектов». Объёмного света и блика здесь нет намеренно: два лишних
     // полноэкранных прохода ради картинки в углу.
-    sage::render::PostChain previewChain;
-    if (sage::render::ResolvePostChain(scene, camera, previewChain) && PostWorks()) {
+    const sage::render::PostChain previewChain = sage::render::FramePostChain(scene, camera);
+    if (PostWorks()) {
         EnsureFramebuffer(m_previewPostFbo, m_previewW, m_previewH);
         m_previewPostFbo->Resize(m_previewW, m_previewH);
         m_previewPostfx->SetLighting(&env);
@@ -146,10 +146,10 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     DrawLit(scene, env, view, proj, camPos, /*shadingMode=*/0, /*wireframe=*/false,
             /*viewId=*/kGameViewId);
     sage::rhi::TextureHandle gameVelocity;
-    sage::render::PostChain gameChain;
-    const bool gameWantsPost =
-        sage::render::ResolvePostChain(scene, sage::ecs::PrimaryCameraEntity(scene), gameChain);
-    if (gameWantsPost && sage::render::ChainNeedsVelocity(gameChain)) {
+    // Тракт есть всегда: без своей обработки у камеры — базовый вывод (FramePostChain).
+    const sage::render::PostChain gameChain =
+        sage::render::FramePostChain(scene, sage::ecs::PrimaryCameraEntity(scene));
+    if (sage::render::ChainNeedsVelocity(gameChain)) {
         gameVelocity = m_gameVelocity.Render(m_batch, view, proj, m_gameW, m_gameH);
         m_gameFbo->Bind();
         device.SetViewport(0, 0, m_gameW, m_gameH);
@@ -185,7 +185,7 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     m_gameFbo->Resolve();   // MSAA -> обычные текстуры (без MSAA — пустышка)
 
     m_gamePostApplied = false;
-    if (gameWantsPost && PostWorks()) {
+    if (PostWorks()) {
         m_gamePostFbo->Resize(m_gameW, m_gameH);
         m_gamePostfx->SetLighting(&env);
         m_gamePostfx->Render(m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),

@@ -54,6 +54,8 @@ struct PostScratch {
 
     // Затенение: считается в Ao, размывается через AoBlur и возвращается в Ao.
     std::unique_ptr<sage::rhi::RenderTarget> Ao, AoBlur;
+    // Экранный GI (половинные): трассировка в GiTrace, размытие через GiBlur обратно.
+    std::unique_ptr<sage::rhi::RenderTarget> GiTrace, GiBlur;
     // Свечение: bright-pass в Bright, две итерации размытия через BloomA/BloomB.
     std::unique_ptr<sage::rhi::RenderTarget> Bright, BloomA, BloomB;
     // Глубина резкости (половинные): префильтр, дальний план, досягаемость

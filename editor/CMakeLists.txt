@@ -41,6 +41,7 @@ add_executable(SageEditor WIN32
     src/selftest/SelfTestInputProbe.cpp
     src/selftest/SelfTestPlugins.cpp
     src/selftest/SelfTestPanels.cpp
+    src/selftest/SelfTestGIBake.cpp
     src/selftest/SelfTestProjectAndAssets.cpp
     src/selftest/SelfTestRenderStability.cpp
     src/selftest/SelfTestRun.cpp
@@ -106,6 +107,7 @@ add_executable(SageEditor WIN32
     src/panels/AssetsPanel_Files.cpp
     src/panels/AssetsPanel_Import.cpp
     src/panels/EnvironmentPanel.cpp
+    src/panels/GIBakeSection.cpp
     src/EditorPrefs.cpp
     src/HotkeyScope.cpp
     src/PanelWindows.cpp

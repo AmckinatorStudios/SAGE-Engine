@@ -33,6 +33,7 @@
 #include "sage/render/GridRenderer.h"
 #include "sage/render/LensFlare.h"
 #include "sage/render/PostFX.h"
+#include "sage/render/PostProcessComponent.h"
 #include "sage/render/Reflection.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/ShadowAtlas.h"
@@ -45,6 +46,7 @@
 #include "sage/scene/Scene.h"
 
 namespace sage::rendertest {
+sage::render::PostChain ToneOnly(float mode, float output);   // ниже, у проверок кривых
 namespace {
 
 void TestScenePerspective(FrameRenderer& r, Scene& scene) {
@@ -254,13 +256,36 @@ void TestSceneOrthographic(FrameRenderer& r, Scene& scene) {
 }
 
 void TestNoPostFX(FrameRenderer& r, Scene& scene) {
-    // Пост-обработка ВЫКЛЮЧЕНА — отдельный путь кода, и он тоже должен давать
-    // стабильную картинку. Проверяется отсутствием ТРАКТА (nullptr), а не полем
-    // в настройках: поля Enabled не читал никто, и эталон этого кадра был снят
-    // С пост-обработкой — то есть проверка сторожила копию обычного кадра.
-    Report("scene_no_postfx",
-           CompareWithReference("scene_no_postfx",
-                                RenderFrame(r, scene, PerspectiveProj(), nullptr, kW, kH)));
+    // У камеры НЕТ своей обработки — кадр выводится базовым трактом
+    // (PostChain::Display: кривая и кодирование), а не сырым буфером сцены.
+    // Сырой линейный HDR на экране — тёмная кислотная картинка: ровно та
+    // жалоба, с которой это и чинилось.
+    const Image display =
+        RenderFrame(r, scene, PerspectiveProj(), sage::render::PostChain::Display(), kW, kH);
+    Report("scene_no_postfx", CompareWithReference("scene_no_postfx", display));
+
+    // СВОЙСТВО, а не только эталон: кадр без обработки по яркости близок к
+    // обработанному (тот же свет, та же кривая), а сырой — заметно темнее.
+    auto mean = [](const Image& img) {
+        double s = 0.0;
+        for (unsigned char p : img.Pixels) s += p;
+        return img.Pixels.empty() ? 0.0 : s / (double)img.Pixels.size();
+    };
+    const Image processed = RenderFrame(r, scene, PerspectiveProj(), BaseChain(), kW, kH);
+    sage::render::PostChain raw = ToneOnly(0.0f, 2.0f);   // обрезка, без кодирования — как прежде
+    const Image rawFrame = RenderFrame(r, scene, PerspectiveProj(), raw, kW, kH);
+    const double mDisplay = mean(display), mProcessed = mean(processed), mRaw = mean(rawFrame);
+    std::printf("       средняя яркость: базовый вывод %.1f, с обработкой %.1f, сырой HDR %.1f\n",
+                mDisplay, mProcessed, mRaw);
+    Check(std::abs(mDisplay - mProcessed) < mProcessed * 0.3,
+          "кадр камеры без обработки по яркости как обработанный, а не тёмный сырой HDR");
+    Check(mDisplay > mRaw * 1.3, "базовый вывод кодирует кадр для экрана (светлее сырого линейного)");
+
+    // Хосты берут тракт у FramePostChain: у камеры без компонента он не пустой.
+    Scene bare("Bare");
+    const sage::render::PostChain chain = sage::render::FramePostChain(bare, entt::null);
+    Check(chain.Compile().Ok && HasEffect(chain, "tonemap"),
+          "камера без компонента получает тракт вывода с тон-маппингом");
 }
 
 // --- Качество размытия: гладкость и сохранность фокуса -----------------------
@@ -1183,6 +1208,18 @@ void TestOutputEncodingAndCurves(FrameRenderer& r) {
     Check(std::abs(linear - 0.18f) < 0.02f, "линейный вывод оставляет значение как есть");
     Check(std::abs(gamma - 0.459f) < 0.02f, "вывод «гамма» — степенная кривая 2.2");
 
+    // Гамма работает и при выводе sRGB (по умолчанию). Раньше её читал только
+    // вывод «Gamma», и ползунок у всех остальных не менял ничего.
+    sage::render::PostChain brighter = ToneOnly(0.0f, 0.0f);
+    SetParam(brighter, "tonemap", "gamma", 2.8f);
+    sage::render::PostChain darker = ToneOnly(0.0f, 0.0f);
+    SetParam(darker, "tonemap", "gamma", 1.6f);
+    const float srgbBright = FlatThroughChain(r, 0.18f, brighter);
+    const float srgbDark = FlatThroughChain(r, 0.18f, darker);
+    std::printf("       sRGB, серый 0.18: гамма 1.6 %.3f, 2.2 %.3f, 2.8 %.3f\n", srgbDark, srgb, srgbBright);
+    Check(srgbBright > srgb + 0.05f, "гамма больше 2.2 светлит средние тона и при выводе sRGB");
+    Check(srgbDark < srgb - 0.05f, "гамма меньше 2.2 темнит средние тона и при выводе sRGB");
+
     // Кинематографическая кривая держит средне-серый на месте (InMatch = OutMatch =
     // 0.18) и сжимает света: 16x ярче серого — всё ещё не белый в клип.
     const float ueGrey = FlatThroughChain(r, 0.18f, ToneOnly(4.0f, 2.0f));
@@ -1520,6 +1557,78 @@ void TestHeightFog(FrameRenderer& r) {
     Check(std::abs(lb - lt) < 0.08f, "линейный туман от высоты не зависит (проверка не пустая)");
 }
 
+// --- Экранный GI: освещённая цветная стена подкрашивает соседний пол ----------
+//
+// Ровно то, чего кадру не хватало: белый пол рядом с красной стеной оставался
+// белым, как будто стены нет. Звено «Global Illumination» обязано перенести на
+// пол ЦВЕТ стены — рядом с ней сильно, вдали почти никак.
+void TestScreenSpaceGI(FrameRenderer& r) {
+    auto scene = std::make_unique<Scene>("GI");
+    scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(0.7f, -0.6f, -0.3f));
+    scene->Lighting.Sun.Intensity = 0.9f;
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+    scene->Lighting.AmbientStrength = 0.15f;
+    scene->Lighting.Skybox.Enabled = false;
+    auto box = [&](const char* name, glm::vec3 pos, glm::vec3 scale, glm::vec3 color) {
+        GameObject o = scene->CreateObject(name);
+        o.GetTransform().Position = pos;
+        o.GetTransform().Scale = scale;
+        o.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+        o.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+        o.Renderer().Color = color;
+    };
+    box("Floor", {0.0f, -0.05f, 0.0f}, {12.0f, 0.1f, 12.0f}, {0.6f, 0.6f, 0.6f});
+    // Стена справа, освещённой гранью к полю зрения (солнце светит слева).
+    box("Wall", {1.5f, 1.5f, 0.0f}, {0.2f, 3.0f, 6.0f}, {0.9f, 0.05f, 0.05f});
+
+    const int w = 160, h = 120;
+    const glm::vec3 eye(-4.0f, 3.0f, 0.0f);
+    const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.5f, 0.3f, 0.0f), glm::vec3(0, 1, 0));
+    const glm::mat4 proj = glm::perspective(glm::radians(60.0f), (float)w / (float)h, 0.1f, 50.0f);
+    auto render = [&](const sage::render::PostChain& chain) {
+        Framebuffer sceneFbo(w, h);
+        Framebuffer output(w, h);
+        auto& device = sage::rhi::GraphicsDevice::Get();
+        sceneFbo.Bind();
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear(true, true);
+        const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+        r.Batch.RenderColor(*scene, view, proj, eye, env, ShadowBinding(), 0);
+        r.Fx.ResetHistory();
+        r.Fx.Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h, proj, view, chain,
+                    &output, 0, 0, w, h);
+        output.Bind();
+        return Capture(w, h);
+    };
+    // Краснота (R - G) пола: у самой стены и в дальнем от неё углу.
+    auto redness = [&](const Image& img, float fx, float fy) {
+        double s = 0.0;
+        int n = 0;
+        for (int y = (int)(fy * h) - 3; y <= (int)(fy * h) + 3; ++y)
+            for (int x = (int)(fx * w) - 3; x <= (int)(fx * w) + 3; ++x) {
+                const size_t i = ((size_t)y * w + x) * 3;
+                s += (double)img.Pixels[i] - (double)img.Pixels[i + 1];
+                ++n;
+            }
+        return (float)(s / n / 255.0);
+    };
+    sage::render::PostChain off = ToneOnly(4.0f, 0.0f);
+    sage::render::PostChain on = off;
+    AddEffect(on, "ssgi");
+    SetParam(on, "ssgi", "intensity", 2.0f);
+    const Image a = render(off), b = render(on);
+    // Камера смотрит на стену; пол у её основания — середина кадра чуть ниже
+    // кромки стены, дальний от неё пол — низ кадра (там до стены несколько метров).
+    const float nearOff = redness(a, 0.5f, 0.55f), nearOn = redness(b, 0.5f, 0.55f);
+    const float farOff = redness(a, 0.5f, 0.94f), farOn = redness(b, 0.5f, 0.94f);
+    std::printf("       краснота пола: у стены %.3f -> %.3f, вдали %.3f -> %.3f\n", nearOff, nearOn,
+                farOff, farOn);
+    Check(nearOn > nearOff + 0.02f, "экранный GI переносит цвет освещённой стены на пол рядом");
+    Check(nearOn - nearOff > (farOn - farOff) * 1.5f, "отражённый свет сильнее у стены, чем вдали");
+}
+
+
+
 void TestPostSelfCheck(FrameRenderer& r) {
     const sage::render::PostFX::SelfCheck& check = r.Fx.CheckPipeline();
     if (check.Ran && check.Ok) {
@@ -1543,6 +1652,7 @@ void RunFrameChecks(FrameRenderer& r, Scene& scene) {
     TestAutoExposure(r);
     TestAutoExposureIgnoresVoid(r);
     TestHeightFog(r);
+    TestScreenSpaceGI(r);
     TestSceneOrthographic(r, scene);
     TestNoPostFX(r, scene);
     TestDepthOfField(r, scene);

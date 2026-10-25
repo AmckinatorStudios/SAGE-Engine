@@ -459,21 +459,20 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Скрипт (поведение в Play-режиме) ---
-    // GI STATIC — ТОЛЬКО СТРОКА И КНОПКА «УБРАТЬ».
-    //
-    // Выпечка GI из редактора временно убрана (см. EnvironmentPanel.h), а
-    // значит «Lightmapped» и «Texel Scale» настраивать нечего: их читал бейк,
-    // которого больше нельзя запустить. Настройка, ни на что не влияющая, врёт
-    // сильнее, чем её отсутствие. Сам компонент остаётся видимым и снимаемым:
-    // в сценах, размеченных раньше, он есть, и человек должен понимать, что
-    // это такое и как от него избавиться.
-    if (reg.all_of<GIStaticComponent>(obj.Entity())) {
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(T("GI Static"));
-        EditorTheme::Hint(Hint2(T("Marked as static geometry for baked lighting"),
-                                T("Baking is temporarily unavailable in the editor")).c_str());
-        ImGui::SameLine();
-        if (ImGui::Button(T("Remove##gistatic"))) rm.GiStatic = true;
+    // GI STATIC — объект участвует в запечённом освещении (Environment →
+    // «Запечённое освещение»). Настроек две, и обе читает бейк: есть ли у
+    // объекта своя лайтмапа (иначе он только заслоняет и отражает свет) и во
+    // сколько раз она плотнее обычной.
+    if (reg.all_of<GIStaticComponent>(obj.Entity()) &&
+        EditorTheme::SectionHeader("sun", T("GI Static" "###GIStatic"), ImGuiTreeNodeFlags_DefaultOpen,
+                                   &rm.GiStatic, T("Static geometry for baked lighting"))) {
+        GIStaticComponent& gs = reg.get<GIStaticComponent>(obj.Entity());
+        if (ImGui::Checkbox(T("Lightmapped"), &gs.Lightmapped)) host.PushUndoSnapshot();
+        EditorTheme::Hint(T("Off — the object only blocks and bounces light, without its own lightmap"));
+        ImGui::BeginDisabled(!gs.Lightmapped);
+        if (ImGui::SliderFloat(T("Texel Scale"), &gs.TexelScale, 0.25f, 4.0f, "%.2fx")) host.TrackLastImGuiItem();
+        EditorTheme::Hint(T("Lightmap density relative to the scene's: more is sharper and slower to bake"));
+        ImGui::EndDisabled();
     }
 
     // У этого компонента НЕТ ПОЛЕЙ: он флаг, и вся его настройка — есть он или

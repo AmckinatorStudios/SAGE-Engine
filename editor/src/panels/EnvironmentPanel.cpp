@@ -492,6 +492,9 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     // система — в подсказке её заголовка.
     for (const env::System& s : env::Systems()) DrawSystem(host, s, e);
 
-    // ВЫПЕЧКА GI ПОКА УБРАНА ИЗ РЕДАКТОРА (см. EnvironmentPanel.h).
+    // Запечённое освещение — своим модулем (GIBakeSection.h): фоновое
+    // запекание, разметка статики и статус «устарело» к небу и туману
+    // отношения не имеют.
+    m_giBake.Draw(host);
     ImGui::End();
 }

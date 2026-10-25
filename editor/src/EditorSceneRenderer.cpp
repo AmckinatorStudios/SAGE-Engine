@@ -72,9 +72,13 @@ void EditorSceneRenderer::PrepareReflections(Scene& scene, const LightingEnviron
     // Пересъёмка карт отражений. Здесь, а не внутри прохода сцены: захват
     // меняет привязанный буфер и viewport, и посреди отрисовки вьюпорта это
     // писало бы небо в панель редактора.
-    m_reflections.SetEnabled(scene.Reflections.Enabled);
+    // Настройка графики «Отражения» запрещает их так же, как в собранной игре
+    // (PlayerLayer): иначе галка в окне настроек меняла бы только игру, а
+    // вьюпорт и Game продолжали бы показывать отражения.
+    const bool enabled = scene.Reflections.Enabled && sage::EngineConfig::Get().Reflections;
+    m_reflections.SetEnabled(enabled);
     m_reflections.SetIntensity(scene.Reflections.Intensity);
-    if (!scene.Reflections.Enabled) return;
+    if (!enabled) return;
 
     // Небо: если у сцены задан набор граней, отражается ОН, а не процедурный
     // градиент — иначе вода отражала бы совсем другое небо, чем видно в кадре.
@@ -472,10 +476,9 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     // подменил бы его чужим.
     sage::rhi::TextureHandle viewportVelocity;
     {
-        sage::render::PostChain chain;
         if (primary && mode == EditorRenderMode::Shaded && !viewOverride.Use &&
-            sage::render::ResolvePostChain(scene, sage::ecs::PrimaryCameraEntity(scene), chain) &&
-            sage::render::ChainNeedsVelocity(chain)) {
+            sage::render::ChainNeedsVelocity(
+                sage::render::FramePostChain(scene, sage::ecs::PrimaryCameraEntity(scene)))) {
             viewportVelocity = m_viewportVelocity.Render(m_batch, outView, outProj, w, h);
             sceneFbo.Bind();
             device.SetViewport(0, 0, w, h);
@@ -518,13 +521,13 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     // обработка принадлежит камере. Главная камера и есть тот кадр, ради
     // которого настраивают вид, поэтому вьюпорт показывает её обработку: «в
     // редакторе одно, в игре другое» начинается ровно с расхождения этих двух.
-    // Нет камеры с компонентом — вьюпорт честно показывает кадр без обработки.
+    // Нет камеры с компонентом — кадр всё равно ВЫВОДИТСЯ базовым трактом
+    // (кривая и кодирование для экрана, см. FramePostChain): сырой линейный
+    // HDR на экране — тёмная кислотная картинка, а не «кадр без обработки».
     bool postApplied = false;
-    sage::render::PostChain viewportChain;
-    const bool viewportWantsPost = sage::render::ResolvePostChain(
-        scene, sage::ecs::PrimaryCameraEntity(scene), viewportChain);
-    if (viewportWantsPost && mode == EditorRenderMode::Shaded && !viewOverride.Use &&
-        PostWorks()) {
+    const sage::render::PostChain viewportChain =
+        sage::render::FramePostChain(scene, sage::ecs::PrimaryCameraEntity(scene));
+    if (mode == EditorRenderMode::Shaded && !viewOverride.Use && PostWorks()) {
         postFbo.Resize(w, h);
         m_postfx->SetLighting(&env);   // солнце — звену «Lens Flare»
         m_postfx->Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), sceneFbo.Width(),
