@@ -24,17 +24,6 @@ Player.public = {
     LookSensitivity = field.number(0.1, 0.001, 2.0),
     InvertLookY     = field.boolean(false),
 
-    -- --- Курсор ----------------------------------------------------------
-    -- Захватить мышь при старте: курсор прячется и не упирается в край окна,
-    -- обзор крутится без предела. Выключают для персонажа, которым правят
-    -- мышью по интерфейсу (стратегия, меню поверх игры).
-    LockCursor      = field.boolean(true),
-    -- Клавиша, которая отпускает и снова захватывает курсор. Пусто — нет такой.
-    CursorToggleKey = field.string("ESCAPE"),
-    -- Крутить обзор только пока курсор захвачен: иначе камера вертится от
-    -- простого наведения мыши на кнопку.
-    LookOnlyWhenLocked = field.boolean(true),
-
     -- Камера взгляда. Пусто — берётся дочерняя камера, а если камера висит на
     -- САМОМ персонаже, для неё заводится дочерний «взгляд» (см. FindEye).
     Camera   = field.entity(),
@@ -82,13 +71,18 @@ function Player:Start()
     -- Контроллер можно не расставлять мышью: если поле пустое, берём свой.
     self.Character = self.Character or self:GetCharacterController()
 
-    if self.LockCursor then Input:SetCursorCaptured(true) end
+    -- Курсор — одно поведение, без настроек: захвачен в игре, ESC отпускает,
+    -- щелчок по окну захватывает снова. Обзор крутится только в захвате —
+    -- иначе камера вертелась бы от наведения мыши на кнопку.
+    Input:SetCursorCaptured(true)
 end
 
 function Player:Update(dt)
     -- --- Курсор --------------------------------------------------------
-    if self.CursorToggleKey ~= "" and Input:IsKeyPressed(self.CursorToggleKey) then
-        Input:SetCursorCaptured(not Input:IsCursorCaptured())
+    if Input:IsCursorCaptured() then
+        if Input:IsKeyPressed("ESCAPE") then Input:SetCursorCaptured(false) end
+    elseif Input:IsMouseButtonPressed("MOUSE_LEFT") then
+        Input:SetCursorCaptured(true)
     end
 
     local character = self.Character
@@ -123,7 +117,7 @@ function Player:Update(dt)
     end
 
     -- --- Обзор ---------------------------------------------------------
-    if not self.LookOnlyWhenLocked or Input:IsCursorCaptured() then
+    if Input:IsCursorCaptured() then
         local look = Input:GetMouseDelta()
         local lookY = self.InvertLookY and -look.y or look.y
 
