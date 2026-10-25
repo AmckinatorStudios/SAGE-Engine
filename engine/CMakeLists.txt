@@ -143,6 +143,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/Screenshot.cpp
     src/sage/render/Shader.cpp
     src/sage/render/SkinnedModel.cpp
+    src/sage/render/SkinnedModel_Gltf.cpp
     src/sage/render/SkyRenderer.cpp
     src/sage/render/stb_truetype_impl.cpp
     src/sage/render/Skybox.cpp
