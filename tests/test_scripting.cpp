@@ -1344,18 +1344,18 @@ TEST(Scripting_ui_hovered_action_answers_by_name) {
     CHECK_TRUE(hovered == "craft:plank");
 }
 
-// Встроенное меню паузы плеера выключается игрой, у которой меню своё. Пока
-// выключить его было нечем, «своё меню» означало два меню сразу: ESC
-// перехватывал плеер, а до скрипта клавиша не доходила.
-TEST(Scripting_game_can_turn_off_the_builtin_pause_menu) {
+// Встроенной паузы на ESC у собранной игры нет: клавиша — игре. Старые
+// скрипты с SetPauseMenu не падают, а HasPauseMenu не обещает меню, которого
+// нет, даже если его «включили».
+TEST(Scripting_player_has_no_builtin_pause_menu) {
     ScriptEngine se;
-    CHECK_TRUE(se.PauseMenuEnabled());
-    se.Lua().script("sage.game.SetPauseMenu(false)");
-    CHECK_FALSE(se.PauseMenuEnabled());
-    bool asked = se.Lua().script("return sage.game.HasPauseMenu()");
-    CHECK_FALSE(asked);
+    bool has = se.Lua().script("return sage.game.HasPauseMenu()");
+    CHECK_FALSE(has);
     se.Lua().script("sage.game.SetPauseMenu(true)");
-    CHECK_TRUE(se.PauseMenuEnabled());
+    has = se.Lua().script("return sage.game.HasPauseMenu()");
+    CHECK_FALSE(has);
+    se.Lua().script("sage.game.SetPauseMenu(false)");
+    CHECK_FALSE(se.Paused());
 }
 
 // --- Модули в СОБРАННОЙ игре --------------------------------------------------

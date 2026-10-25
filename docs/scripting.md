@@ -217,6 +217,7 @@ Language Server показывает `position`, `rotation`, `scale` и мето
 - [Сцены из скрипта](#сцены-из-скрипта)
 - [Публичные переменные, ссылки и события](#публичные-переменные-ссылки-и-события)
 - [Ход игры из скрипта: сцены, пауза, время](#ход-игры-из-скрипта-сцены-пауза-время)
+- [Процедурная генерация: шумы, формулы, меш, материал, текстура](#процедурная-генерация-шумы-формулы-меш-материал-текстура)
 - [Скриптинг (Lua)](#скриптинг-lua)
 - [Тесты на Lua: в редакторе, в настоящем Play](#тесты-на-lua-в-редакторе-в-настоящем-play)
 - [Подсказка по API в редакторе кода](#подсказка-по-api-в-редакторе-кода)
@@ -806,6 +807,65 @@ sage.time.SetScale(0.5)     -- замедление; 0 — стоп, 2 — ус�
 (`tests/test_scripting.cpp`), а то, что хозяин кадра его ВЫПОЛНЯЕТ, — smoke-тестом,
 который собирает игру с двумя сценами, запускает её и ждёт в логе перехода
 `main.sage → level2.sage`.
+
+
+**ESC в собранной игре — игре.** Встроенного меню паузы у плеера нет: оно
+перехватывало клавишу, которую игра хотела для себя, и вставало поверх готового
+интерфейса. Пауза — `sage.game.Pause`, выход — `sage.game.Quit`, меню —
+интерфейс сцены. `sage.game.SetPauseMenu` оставлен ради старых скриптов и
+ничего не делает, `HasPauseMenu()` всегда `false`.
+
+## Процедурная генерация: шумы, формулы, меш, материал, текстура
+
+Мир из кода — рельеф, пещеры, камни, деревья, текстуры — собирается целиком в
+Lua, без C++ и без файлов на диске. Всё детерминировано по зерну: одно зерно —
+один и тот же мир на любой машине, поэтому «зерно мира» можно хранить в
+сохранении.
+
+```lua
+-- Шумы: перлин, симплекс, value, worley (клетки), фракталы и искажение.
+local h = sage.noise.Perlin(x, y)                 -- [-1, 1], 2D или 3D
+local f1, f2, cell = sage.noise.Worley(x, y, z)   -- расстояния до точек, id клетки
+local n = sage.noise.New{ type = "simplex", seed = 42, octaves = 5,
+                          lacunarity = 2, gain = 0.5, frequency = 0.02 }
+n:Fbm(x, 0, z)  n:Ridged(x, 0, z)  n:Turbulence(x, 0, z)  n:Sample(x, y)
+
+-- Математика и формулы.
+sage.math.Remap(v, 0, 1, -5, 5)     -- и InverseLerp, Fract, Wrap, PingPong, Step, SmootherStep
+local rng = sage.math.Rng(42)       -- свой генератор: Float, Range, Int, Chance
+local wave = sage.math.Formula("sin(x * 3) * 0.5 + fbm(x, y) + clamp(y, 0, 1)", "x, y")
+wave(1.2, 0.4)                      -- формула из строки — обычная функция
+
+-- Меш кодом.
+local terrain = sage.mesh.Grid(100, 100, 128, 128, function(x, z)
+    return n:Fbm(x, 0, z) * 12
+end)
+terrain:Apply(self)                 -- меш объекта; материалы — по слотам
+local m = sage.mesh.New()
+local a, b, c = m:Vertex(Vec3(0,0,0)), m:Vertex(Vec3(0,0,1)), m:Vertex(Vec3(1,0,0))
+m:Material(2); m:Triangle(a, b, c)
+m:Deform(function(p, nrm, uv) return p + nrm * sage.noise.Perlin(p.x, p.y, p.z) * 0.1 end)
+m:RecalculateNormals(); m:Append(sage.mesh.Sphere(1, 24, 16))
+m:Save("Assets/Generated/rock.sagemesh")
+
+-- Материал и текстура.
+sage.material.Create("stone", { albedo = Vec3(0.5, 0.45, 0.4), roughness = 0.9 })
+sage.material.Set("stone", "normalMap", "Assets/Textures/rock_n.png")
+local t = sage.texture.New("noise_tex", 256, 256)
+t:Fill(function(u, v) local k = sage.noise.Fbm(u * 8, v * 8) * 0.5 + 0.5; return Vec3(k, k, k) end)
+t:Apply()
+sage.material.Set("stone", "texture", "noise_tex")
+```
+
+**Формула компилируется один раз** (`load` Lua), а не разбирается на каждом
+вызове: на сетке 128×128 это шестнадцать тысяч вызовов за кадр генерации. Имена
+внутри — как в учебнике (`sin`, `clamp`, `fbm`, `lerp`): строчные ищутся и в
+`math`, и среди функций движка с заглавной буквы. У каждой формулы своё
+окружение — присваивание внутри одной не трогает соседние и глобалы игры.
+
+Шумы — `engine/src/sage/core/Noise.h` (без зависимостей, годится и в C++
+системах), построитель — `engine/src/sage/render/MeshBuilder.h`, привязки —
+`ScriptApi_Procedural.cpp`. Проверяет `tests/test_procedural.cpp`.
 
 ## Скриптинг (Lua)
 Часть ЯДРА движка (`engine/src/sage/scripting/ScriptEngine.*`) — не зависит ни

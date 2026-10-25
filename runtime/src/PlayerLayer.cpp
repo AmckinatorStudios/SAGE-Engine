@@ -116,7 +116,6 @@ fs::path PlayerLayer::FindMainScene() const {
     return scenes.empty() ? fs::path() : fs::path(scenes.front());
 }
 
-
 // --- Экран отказа -----------------------------------------------------------
 //
 // Плеер, которому нечего запускать, раньше звал app.Close(): окно мигало и
@@ -339,8 +338,6 @@ void PlayerLayer::OnAttach() {
                        << m_physics->BackendName() << ")";
 }
 
-
-
 // Курсор из координат ОКНА в координаты ИГРОВОГО КАДРА.
 //
 // Три системы координат, и путать их нельзя. glfwGetCursorPos отдаёт точку в
@@ -380,7 +377,6 @@ void PlayerLayer::QuitGame() {
     sage::Application::Get().Close();
 }
 
-
 void PlayerLayer::OnDetach() {
     // Закрытие окна крестиком приходит сюда, минуя меню и скрипты: последний
     // шанс игре сохраниться. Повторный вызов безвреден — DispatchQuit
@@ -400,7 +396,6 @@ void PlayerLayer::OnDetach() {
     sage::scene::ClearPrefabCache();
     ResourceManager::Instance().Clear();
 }
-
 
 // ---------------------------------------------------------------------------
 //  Подъём рантайма под загруженную сцену
@@ -1145,7 +1140,6 @@ void PlayerLayer::OnRender() {
                                   m_sceneTime);
         }
 
-
         if (usePost) {
             m_sceneFbo->Resolve(); // MSAA -> обычные текстуры (без MSAA — пустышка)
             device.BindDefaultFramebuffer();
@@ -1206,7 +1200,6 @@ void PlayerLayer::OnRender() {
         sage::ui::DrawSceneUI(*m_scene, *m_ui, vpW, vpH);
         m_ui->End();
     }
-
 
     TakeAutoScreenshot();
 }

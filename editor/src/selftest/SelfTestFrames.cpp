@@ -345,7 +345,7 @@ void EditorLayer::CheckLuaTestsFrame() {
     const LuaTestRun& r = m_luaTests;
     // Тестов меньше, чем в наборе, — тоже провал: файл, в котором разбор не
     // увидел ни одного test_*, иначе «проходил» бы молча.
-    const bool enough = r.Passed + r.Failed >= 67;
+    const bool enough = r.Passed + r.Failed >= 70;
     // Твин из редактора своё отыграл — объект больше не нужен.
     if (GameObject e = m_scene->FindByName("LT_EditorTween"); e.Valid()) m_scene->RemoveObject(e.Id());
     // Инспектор видит глобальные переменные простого скрипта: speed и
@@ -367,7 +367,7 @@ void EditorLayer::CheckLuaTestsFrame() {
     if (r.Failed == 0 && enough && inspectorOk && !m_play.Active()) {
         LOG_INFO("Editor") << "LUA_TESTS: OK — тестов на Lua прошло " << r.Passed
                            << " в настоящем Play (объект, жизненный цикл, сигналы, UI, ввод, физика, "
-                           << "скрипты, окружение, прежний API, простой вид скрипта на учебных примерах, твины)";
+                           << "скрипты, окружение, прежний API, простой вид скрипта на учебных примерах, твины, процедурная генерация)";
         return;
     }
     for (const std::string& f : r.Failures) LOG_ERROR("Editor") << "LUA_TESTS:   " << f;

@@ -405,17 +405,13 @@ void ScriptEngine::RegisterGameFlowApi() {
     Bind("game", "Pause", nullptr, [this](bool paused) { m_paused = paused; });
     Bind("game", "IsPaused", nullptr, [this]() { return m_paused; });
 
-    // Встроенное меню паузы плеера: выключается игрой, у которой меню своё.
-    //
-    // Пока выключить его было нечем, «своё меню» означало ДВА меню: ESC
-    // перехватывал плеер, показывал своё и ставил игру на паузу, а скрипт про
-    // нажатие даже не узнавал. Игра при этом честно объявляла действие на
-    // ESCAPE — и оно молча не работало, что выглядит как поломка ввода, а не
-    // как решение движка.
-    Bind("game", "SetPauseMenu", "SetPauseMenu", [this](bool enabled) {
-        m_pauseMenuEnabled = enabled;
-    });
-    Bind("game", "HasPauseMenu", nullptr, [this]() { return m_pauseMenuEnabled; });
+    // Встроенного меню паузы у плеера больше нет: ESC целиком принадлежит игре
+    // (пауза — sage.game.Pause, выход — sage.game.Quit, меню — интерфейс
+    // сцены). Вызовы оставлены, чтобы старые скрипты с SetPauseMenu(false) в
+    // OnStart не падали; HasPauseMenu честно отвечает «нет» — игра, которая
+    // по нему решала, рисовать ли своё меню, теперь рисует его всегда.
+    Bind("game", "SetPauseMenu", "SetPauseMenu", [](bool) {});
+    Bind("game", "HasPauseMenu", nullptr, []() { return false; });
 
     // Масштаб времени: 0.5 — замедление, 2 — ускорение, 0 — стоп.
     //

@@ -1603,8 +1603,8 @@ function sage.game.IsPaused() end
 function sage.game.Pause(paused) end
 function sage.game.Quit() end
 function sage.game.Restart() end
----@param enabled boolean
-function sage.game.SetPauseMenu(enabled) end
+---@param arg1 boolean
+function sage.game.SetPauseMenu(arg1) end
 
 ---@class sage.ik
 sage.ik = {}

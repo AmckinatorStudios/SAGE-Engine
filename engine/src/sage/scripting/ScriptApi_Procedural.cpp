@@ -15,6 +15,7 @@
 #include "sage/render/Texture.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
+#include "sage/scripting/lua/LuaInternal.h"
 
 // ---------------------------------------------------------------------------
 // ПРОЦЕДУРНАЯ ГЕНЕРАЦИЯ ИЗ СКРИПТА: шумы, формулы, меши, материалы, текстуры.
@@ -378,7 +379,17 @@ void ScriptEngine::RegisterProceduralApi() {
         // Поставить меш объекту: то, что видно в кадре, и то, по чему щёлкают
         // мышью и строят коллайдер-меш. В файл сцены процедурный меш не
         // пишется — его строит скрипт при старте (или сохраните :Save).
-        "Apply", [](const MeshBuilder& b, GameObject& obj) {
+        // Объект — любой из трёх видов, что видит скрипт: объект нового API,
+        // self скрипта (его gameObject) или GameObject прежнего.
+        "Apply", [](const MeshBuilder& b, const sol::object& target) {
+            GameObject obj;
+            if (target.is<sage::scripting::lua::ObjectRef>()) obj = target.as<sage::scripting::lua::ObjectRef>().Obj;
+            else if (target.is<GameObject>()) obj = target.as<GameObject>();
+            else if (target.get_type() == sol::type::table) {
+                sol::object go = target.as<sol::table>()["gameObject"];
+                if (go.is<sage::scripting::lua::ObjectRef>()) obj = go.as<sage::scripting::lua::ObjectRef>().Obj;
+            }
+            if (!obj.Valid()) throw std::runtime_error("mesh:Apply: нужен объект сцены");
             const sage::render::MeshData d = b.ToMeshData();
             if (d.Empty()) throw std::runtime_error("mesh:Apply: в меше нет треугольников");
             MeshRendererComponent& mr = obj.EnsureRenderer();
