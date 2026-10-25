@@ -132,6 +132,10 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/PostChainIO.cpp
     src/sage/render/PostEffect.cpp
     src/sage/render/PostFX.cpp
+    src/sage/render/PostFXCatalog.cpp
+    src/sage/render/PostFXPasses.cpp
+    src/sage/render/PostFXShaders_Color.cpp
+    src/sage/render/PostFXShaders_Light.cpp
     src/sage/render/RenderTexture.cpp
     src/sage/render/Volumetrics.cpp
     src/sage/render/ResourceManager.cpp
