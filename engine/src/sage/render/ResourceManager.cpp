@@ -19,128 +19,11 @@
 #include <mutex>
 #include <thread>
 #include <utility>
+#include "sage/render/ResourceManagerDetail.h"
 
-// ---------------------------------------------------------------------------
-// Асинхронный конвейер декодирования. Спрятан в .cpp, чтобы <thread>/очереди не
-// протекали в каждый TU, включающий ResourceManager.h. Один фоновый поток:
-// декодирует файлы изображений в CPU-буферы RGBA8; главный поток забирает
-// готовое в PumpAsyncUploads() и заливает в VRAM (GL только с главного потока).
-// ---------------------------------------------------------------------------
-struct ResourceManager::AsyncImpl {
-    struct Decoded {
-        std::string Path;
-        std::vector<unsigned char> Pixels;
-        int W = 0, H = 0;
-        bool Ok = false;
-    };
+using namespace resource_detail;
 
-    std::thread Worker;
-    std::mutex JobMx;
-    std::condition_variable JobCv;
-    // Ключ кэша и путь, который реально открывается, — разные строки (см.
-    // Locate ниже). Разрешение делает главный поток при постановке задачи:
-    // воркеру нельзя трогать базу ассетов, её могут пересканировать в этот же
-    // момент.
-    struct Job {
-        std::string Key;
-        std::string File;
-        bool Bleed = false;   // вырез по альфе: цвет под прозрачностью (AlphaBleed.h)
-    };
-    std::deque<Job> Jobs;
 
-    std::mutex ResMx;
-    std::deque<Decoded> Results;
-
-    std::atomic<bool> Stop{false};
-    std::atomic<int> Pending{0}; // задач в полёте (в очереди/декодируются/ждут pump)
-
-    void Run() {
-        for (;;) {
-            Job job;
-            {
-                std::unique_lock<std::mutex> lk(JobMx);
-                JobCv.wait(lk, [&] { return Stop.load() || !Jobs.empty(); });
-                if (Stop.load() && Jobs.empty()) return;
-                if (Jobs.empty()) continue;
-                job = std::move(Jobs.front());
-                Jobs.pop_front();
-            }
-            Decoded d;
-            d.Path = job.Key;
-            d.Ok = ResourceManager::DecodeImageFile(job.File, d.Pixels, d.W, d.H);
-            if (d.Ok && job.Bleed) sage::render::BleedTransparentColor(d.Pixels, d.W, d.H);
-            {
-                std::lock_guard<std::mutex> lk(ResMx);
-                Results.push_back(std::move(d));
-            }
-        }
-    }
-};
-
-namespace {
-// Путь из проекта -> путь, который откроется ИЗ ТЕКУЩЕГО каталога процесса.
-std::string Locate(const std::string& path) {
-    return sage::AssetDatabase::Instance().LocatePath(path);
-}
-
-// КЛЮЧ КЭША: один файл — одна запись, как бы путь ни написали.
-//
-// Ключом раньше был путь «как дали», и это ломало редактор материалов
-// НАСМЕРТЬ. Сущность держит ссылку относительно проекта («assets/wall.sagemat»
-// — так пишет Project::AssetRef, так она уезжает в .sage), а панель ассетов
-// работает настоящим путём в файловой системе («<проект>/assets/wall.sagemat»).
-// Два написания — две записи в кэше — ДВА РАЗНЫХ объекта Material на один файл:
-// редактор правил свой, рендер рисовал свой. Со стороны это выглядело как
-// «правки материала не применяются» — и не применялись они никогда, ни к
-// одному полю. Тем же путём один и тот же меш и одна и та же текстура ложились
-// в память по два раза.
-//
-// НАСТРОЙКИ ВЫБОРКИ — ЧАСТЬ КЛЮЧА.
-//
-// Раньше ключом был только путь, то есть одна картинка на файл. Два
-// потребителя с разными требованиями (материал просит анизотропную с
-// мипмапами, элемент интерфейса — Nearest без них) перекидывали её туда-сюда
-// каждый кадр; чтобы не заливать текстуру на видеокарту дважды за кадр, после
-// двух перекидываний настройка ЗАМОРАЖИВАЛАСЬ на той, что уже на карте.
-//
-// Снаружи это и было «фильтрация не работает»: набор спрайтов 16x16 остаётся
-// сглаженным, что ни поставь, — потому что ту же картинку рядом показывает
-// слот ассета, и он просит сглаживание. Причём замирало оно молча (кроме одной
-// строки в логе), а от порядка обращений зависело, чья настройка победит.
-//
-// Теперь у каждой пары «фильтр + мипмапы» своя запись: никто ни у кого ничего
-// не отнимает, пересоздавать нечего, и обе картинки на видеокарте существуют
-// ровно столько, сколько ими действительно пользуются (GarbageCollectUnused
-// выгружает ту, на которую не осталось ссылок).
-//
-// Сначала Locate (ссылка проекта -> открывающийся путь), затем
-// weakly_canonical: он убирает «.», «..», разницу разделителей и символические
-// ссылки, и НЕ требует существования файла — несуществующий путь тоже получает
-// одно каноническое написание, поэтому негативный кэш работает так же.
-//
-// Загрузка при этом идёт по-прежнему через Locate(исходный путь): ключ — дело
-// кэша, а чем открыть файл, решает база ассетов.
-//
-// Цена — около двух микросекунд на вызов (Locate плюс weakly_canonical, обе
-// ходят в файловую систему), и её НЕ НАДО прятать за таблицей запомненных
-// ответов: ключ считается только при загрузке ассета и при назначении его
-// объекту, а не в кадре — в кадре материалы и текстуры уже разобраны в
-// shared_ptr. Таблица же добавила бы устаревание, привязанное к текущему
-// каталогу процесса и к корню проекта: файл при этом существует, просто не тот.
-std::string SamplingSuffix(TextureFilter filter, bool mipmaps, bool bleed = false,
-                           bool srgb = false) {
-    return std::string("|f") + std::to_string((int)filter) + (mipmaps ? "m" : "") +
-           (bleed ? "b" : "") + (srgb ? "s" : "");
-}
-
-std::string CacheKey(const std::string& path) {
-    if (path.empty()) return path;
-    std::error_code ec;
-    const std::filesystem::path full = std::filesystem::weakly_canonical(Locate(path), ec);
-    if (ec || full.empty()) return std::filesystem::path(path).lexically_normal().generic_string();
-    return full.generic_string();
-}
-} // namespace
 
 // --- GL-независимое декодирование (используется и воркером, и юнит-тестом) ---
 ResourceManager::ResourceManager() = default;
@@ -202,29 +85,7 @@ std::vector<size_t> ResourceManager::SelectEvictions(const std::vector<EvictCand
     return result;
 }
 
-namespace {
-// Время последней правки файла в виде числа; 0 — файла нет/недоступен.
-long long FileStamp(const std::string& path) {
-    std::error_code ec;
-    auto t = std::filesystem::last_write_time(path, ec);
-    if (ec) return 0;
-    return (long long)t.time_since_epoch().count();
-}
-} // namespace
 
-namespace {
-// Ключ части модели: «полный путь␟номер». Разделитель — символ, которого не
-// бывает в путях, чтобы ключ разбирался обратно однозначно (перечитывание).
-constexpr char kPartSep = '\x1f';
-std::string FileOfKey(const std::string& key) {
-    const size_t at = key.find(kPartSep);
-    return at == std::string::npos ? key : key.substr(0, at);
-}
-int PartOfKey(const std::string& key) {
-    const size_t at = key.find(kPartSep);
-    return at == std::string::npos ? -1 : std::atoi(key.c_str() + at + 1);
-}
-} // namespace
 
 std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path, int part) {
     if (part < 0) return GetModel(path);
@@ -639,18 +500,6 @@ std::shared_ptr<Skybox> ResourceManager::GetSkyboxImage(const std::string& file,
     return sky;
 }
 
-void ResourceManager::RegisterMaterial(const std::string& name, std::shared_ptr<Material> material) {
-    if (name.empty() || !material) return;
-    const std::string key = CacheKey(name);
-    // Тот же объект, если имя уже занято: объекты, которым материал назначен,
-    // держат указатель — заменить запись значило бы оставить их со старым.
-    auto it = m_materials.find(key);
-    if (it != m_materials.end() && it->second) *it->second = *material;
-    else m_materials[key] = material;
-    m_materialStamps.erase(key);   // не файл — перечитывать с диска нечего
-    ResolveMaterialTextures(*m_materials[key]);
-}
-
 void ResourceManager::RegisterTexture(const std::string& name, std::shared_ptr<Texture> texture) {
     if (name.empty() || !texture) return;
     // Имя приводится тем же CacheKey, что и путь файла: спрашивать
@@ -671,50 +520,6 @@ void ResourceManager::RegisterTexture(const std::string& name, std::shared_ptr<T
     rec.Tex = std::move(texture);
     m_textureBytes += rec.Bytes;
     m_textures[key] = std::move(rec);
-}
-
-std::shared_ptr<Material> ResourceManager::GetMaterial(const std::string& path) {
-    const std::string key = CacheKey(path);
-    auto it = m_materials.find(key);
-    if (it != m_materials.end()) {
-        // ПУТИ МОГЛИ ПОМЕНЯТЬСЯ ПОСЛЕ ЗАГРУЗКИ — и меняет их не одно место (см.
-        // Material::ResolvedFrom). Раньше кэш отдавал материал как есть, с
-        // указателями от прежних путей: назначенная кнопкой «Обзор…» текстура
-        // не появлялась НИКОГДА, потому что перерезолвить её было некому.
-        // Сравнение шести строк дешевле любой попытки помнить это правило
-        // руками — и, в отличие от правила, не забывается.
-        RefreshMaterialTextures(*it->second);
-        return it->second;
-    }
-    auto material = std::make_shared<Material>();
-    try {
-        *material = Material::LoadFromFile(Locate(path));
-    } catch (const std::exception& e) {
-        LOG_ERROR("Resources") << "Материал не загрузился, использую дефолт: " << e.what();
-    }
-    ResolveMaterialTextures(*material);
-    if (material->HasCustomShader())
-        material->ShaderPtr = GetShader(material->VertexShaderPath, material->FragmentShaderPath);
-    m_materials[key] = material;
-    m_materialStamps[key] = FileStamp(Locate(path));
-    return material;
-}
-
-std::shared_ptr<Material> ResourceManager::MakeMaterial(const std::string& name) {
-    // КЛЮЧ — ТОТ ЖЕ, ПО КОТОРОМУ ИЩЕТ GetMaterial. Материал лежал под именем
-    // как его дали, а искался по CacheKey — и они совпадали только случайно:
-    // на macOS (libc++) weakly_canonical делает из «test/lantern» абсолютный
-    // путь, и SetMaterial вместо собранного скриптом материала назначал
-    // пустой. То же везде с именем вида «./a» или «a/../b».
-    const std::string key = CacheKey(name);
-    auto it = m_materials.find(key);
-    if (it != m_materials.end()) return it->second;
-    auto material = std::make_shared<Material>();
-    m_materials[key] = material;
-    // Штамп НЕ ставим: у материала нет файла, и ReloadChangedAssets, увидев
-    // штамп 0 против несуществующего файла, перечитывал бы его каждый кадр,
-    // затирая всё, что скрипт в нём настроил.
-    return material;
 }
 
 
@@ -769,86 +574,6 @@ int ResourceManager::ReloadChangedShaders() {
         }
     }
     return reloaded;
-}
-
-std::shared_ptr<Material> ResourceManager::ReloadMaterial(const std::string& path) {
-    auto it = m_materials.find(CacheKey(path));
-    if (it == m_materials.end()) return GetMaterial(path);
-    try {
-        *it->second = Material::LoadFromFile(Locate(path));
-    } catch (const std::exception& e) {
-        LOG_ERROR("Resources") << "Перезагрузка материала не удалась: " << e.what();
-    }
-    ResolveMaterialTextures(*it->second);
-    if (it->second->HasCustomShader())
-        it->second->ShaderPtr = GetShader(it->second->VertexShaderPath, it->second->FragmentShaderPath);
-    return it->second;
-}
-
-// Карты материала — АНИЗОТРОПНЫЕ, а не трилинейные.
-//
-// Поддержка анизотропии в движке была с самого начала: и режим фильтрации, и
-// запрос лимита у драйвера, и применение в бэкенде. Не было одного — её никто
-// не просил: каждая карта грузилась трилинейной, потому что таково значение
-// параметра по умолчанию. То есть код работал вхолостую, а пол под острым
-// углом мылился на любой видеокарте — включая те, где резкость досталась бы
-// даром.
-//
-// Почему именно карты материала, а не все текстуры подряд: анизотропия имеет
-// смысл там, где поверхность видна ПОД УГЛОМ и сжата сильнее по одной оси, —
-// это пол, стены, дорога. Картинки интерфейса всегда фронтальны, и платить за
-// них нечем и незачем.
-//
-// Карта без расширения получает трилинейную фильтрацию сама (см.
-// EffectiveFilter в Texture.cpp) — запрос не отказывает, а опускается.
-//
-// Фильтрация «ближайший пиксель» (MaterialRender::Filter) — Nearest С
-// мипмапами: вблизи чёткие квадраты, вдали — уменьшенные копии, а не рябь.
-void ResourceManager::ResolveMaterialTextures(Material& m) {
-    const TextureFilter kSurface = m.Render.Filter == MaterialRender::Filtering::Nearest
-                                       ? TextureFilter::Nearest
-                                       : TextureFilter::Anisotropic;
-    // Цвет под прозрачностью правится только у карты, которую материал режет
-    // по альфе (см. AlphaBleed.h): у остальных альфа значит что-то своё.
-    const bool cutout = m.Render.AlphaCutoff > 0.0f;
-    auto get = [&](const std::string& path, bool bleed, bool colour) {
-        return m_streamMaterialTextures ? GetTextureAsync(path, kSurface, true, bleed, colour)
-                                        : GetTexture(path, kSurface, true, bleed, colour);
-    };
-    // ЦВЕТ — в sRGB, ДАННЫЕ — как есть. Альбедо и свечение — это картинки,
-    // нарисованные для глаза (sRGB); нормали, металличность, шероховатость и
-    // затенение — числа, и переводить их нельзя: нормаль «исказилась бы».
-    m.AlbedoTex = get(m.TexturePath, cutout, true);
-    m.NormalTex = get(m.NormalMapPath, false, false);
-    m.MetallicTex = get(m.MetallicMapPath, false, false);
-    m.RoughnessTex = get(m.RoughnessMapPath, false, false);
-    m.AOTex = get(m.AOMapPath, false, false);
-    m.EmissiveTex = get(m.EmissiveMap, false, true);
-    m.TexturesFrom = PathsOf(m);
-    m.TexturesCutout = cutout;
-    m.TexturesFilter = m.Render.Filter;
-}
-
-// Слепок путей к картам — по нему видно, что указатели устарели.
-Material::ResolvedFrom ResourceManager::PathsOf(const Material& m) {
-    Material::ResolvedFrom f;
-    f.Albedo = m.TexturePath;
-    f.Normal = m.NormalMapPath;
-    f.Metallic = m.MetallicMapPath;
-    f.Roughness = m.RoughnessMapPath;
-    f.AO = m.AOMapPath;
-    f.Emissive = m.EmissiveMap;
-    return f;
-}
-
-bool ResourceManager::RefreshMaterialTextures(Material& m) {
-    // Включили или сняли вырез — карта альбедо нужна другая (с цветом под
-    // прозрачностью или без), хотя пути не менялись.
-    if (m.TexturesFrom == PathsOf(m) && m.TexturesCutout == (m.Render.AlphaCutoff > 0.0f) &&
-        m.TexturesFilter == m.Render.Filter)
-        return false;
-    ResolveMaterialTextures(m);
-    return true;
 }
 
 void ResourceManager::DownscaleRGBA(const std::vector<unsigned char>& src, int w, int h,
@@ -906,154 +631,6 @@ std::vector<size_t> ResourceManager::SelectDowngrades(
         chosen.push_back(c->Index);
     }
     return chosen;
-}
-
-void ResourceManager::EvictToBudget() {
-    if (m_textureBudget == 0 || m_textureBytes <= m_textureBudget) return;
-
-    // Кандидаты: резидентные, не в полёте, не ссылаемые извне (use_count()==1 —
-    // держит только кэш). Ссылающиеся текстуры не трогаем — это была бы висячая
-    // ссылка у материала/UI.
-    std::vector<EvictCandidate> cands;
-    std::vector<std::string> keys;
-    cands.reserve(m_textures.size());
-    keys.reserve(m_textures.size());
-    for (auto& kv : m_textures) {
-        const TextureRecord& rec = kv.second;
-        EvictCandidate c;
-        c.Index = keys.size();
-        c.Bytes = rec.Bytes;
-        c.Tick = rec.Tick;
-        c.Evictable = rec.Tex && !rec.Pending && !rec.Generated && rec.Tex.use_count() == 1;
-        cands.push_back(c);
-        keys.push_back(kv.first);
-    }
-
-    std::vector<size_t> toEvict = SelectEvictions(cands, m_textureBytes, m_textureBudget);
-    for (size_t idx : toEvict) {
-        auto it = m_textures.find(keys[idx]);
-        if (it == m_textures.end()) continue;
-        m_textureBytes -= std::min(m_textureBytes, it->second.Bytes);
-        m_textures.erase(it);
-        ++m_evictions;
-    }
-
-    // СТРИМИНГ МИПОВ. Вытеснение бессильно, когда все текстуры кому-то нужны:
-    // выгрузить их нельзя (это висячая ссылка), и бюджет просто молча
-    // превышается — то есть настройка «бюджет VRAM» не работает ровно в том
-    // случае, ради которого её заводили, в тяжёлой сцене.
-    //
-    // Понижение разрешения работает и здесь: объект Texture остаётся жив, у
-    // держателей ничего не рвётся, меняется только картинка внутри.
-    if (!m_mipStreaming || m_textureBytes <= m_textureBudget) return;
-
-    std::vector<DowngradeCandidate> dcands;
-    dcands.reserve(m_textures.size());
-    for (size_t i = 0; i < keys.size(); ++i) {
-        const TextureRecord& rec = m_textures.count(keys[i]) ? m_textures[keys[i]] : TextureRecord{};
-        if (!rec.Tex) continue;
-        DowngradeCandidate d;
-        d.Index = i;
-        d.Bytes = rec.Bytes;
-        d.Tick = rec.Tick;
-        d.Side = std::max(rec.Tex->Width(), rec.Tex->Height());
-        d.Streamable = !rec.Pending && !rec.Generated;
-        dcands.push_back(d);
-    }
-    for (size_t idx : SelectDowngrades(dcands, m_textureBytes, m_textureBudget)) {
-        DowngradeTexture(keys[idx]);
-    }
-}
-
-void ResourceManager::DowngradeTexture(const std::string& key) {
-    auto it = m_textures.find(key);
-    if (it == m_textures.end() || !it->second.Tex) return;
-    TextureRecord& rec = it->second;
-    // Пиксели читаются ПО ПУТИ записи: ключ теперь несёт ещё и настройки
-    // выборки, и открыть его как файл нельзя.
-    const std::string path = rec.Source;
-
-    // Пиксели берём заново с диска: держать их копию в оперативной памяти ради
-    // возможного понижения значило бы экономить видеопамять за счёт обычной,
-    // то есть менять шило на мыло. Чтение синхронное — понижение случается
-    // редко (только при исчерпанном бюджете) и стоит дешевле, чем срыв кадра
-    // из-за нехватки видеопамяти.
-    std::vector<unsigned char> pixels;
-    int w = 0, h = 0;
-    if (!DecodeImageFile(path, pixels, w, h)) return;
-    if (rec.Bleed) sage::render::BleedTransparentColor(pixels, w, h);
-
-    // Целевая сторона — вдвое меньше текущей, а не исходной: понижения
-    // накапливаются, и второй проход должен уменьшать то, что уже уменьшено.
-    int targetSide = std::max(rec.Tex->Width(), rec.Tex->Height()) / 2;
-    targetSide = std::max(targetSide, 64);
-
-    std::vector<unsigned char> scaled;
-    int sw = w, sh = h;
-    while (std::max(sw, sh) > targetSide && std::max(sw, sh) > 1) {
-        DownscaleRGBA(pixels, sw, sh, scaled, sw, sh);
-        pixels.swap(scaled);
-    }
-
-    const size_t before = rec.Bytes;
-    rec.Tex->ReplacePixels(pixels.data(), sw, sh, rec.Filter, rec.Mipmaps);
-    rec.Bytes = rec.Tex->GpuBytes();
-    rec.MaxSide = std::max(sw, sh);
-    m_textureBytes -= std::min(m_textureBytes, before);
-    m_textureBytes += rec.Bytes;
-    ++m_downgrades;
-}
-
-int ResourceManager::GarbageCollectUnused() {
-    int freed = 0;
-
-    // Материалы первыми: отпускают ссылки на свои текстуры, после чего те могут
-    // стать неиспользуемыми и тоже выгрузиться этим же проходом.
-    for (auto it = m_materials.begin(); it != m_materials.end();) {
-        if (!it->second || it->second.use_count() == 1) {
-            it = m_materials.erase(it);
-            ++freed;
-        } else {
-            ++it;
-        }
-    }
-    for (auto it = m_textures.begin(); it != m_textures.end();) {
-        TextureRecord& rec = it->second;
-        // Посчитанная текстура остаётся даже неиспользуемой: перечитать её
-        // неоткуда, а собрана она была ровно затем, чтобы ею вот-вот покрасили
-        // объект (материал заводят и назначают разными вызовами).
-        const bool unused = !rec.Generated &&
-                            (!rec.Tex || (!rec.Pending && rec.Tex.use_count() == 1));
-        if (unused) {
-            m_textureBytes -= std::min(m_textureBytes, rec.Bytes);
-            it = m_textures.erase(it);
-            ++freed;
-        } else {
-            ++it;
-        }
-    }
-    for (auto it = m_models.begin(); it != m_models.end();) {
-        if (!it->second || it->second.use_count() == 1) {
-            it = m_models.erase(it);
-            ++freed;
-        } else {
-            ++it;
-        }
-    }
-    return freed;
-}
-
-ResourceManager::Stats ResourceManager::GetStats() const {
-    Stats s;
-    s.Downgrades = m_downgrades;
-    s.Textures = m_textures.size();
-    s.Models = m_models.size();
-    s.Materials = m_materials.size();
-    s.TextureBytes = m_textureBytes;
-    s.TextureBudget = m_textureBudget;
-    s.PendingAsync = m_async ? (size_t)std::max(0, m_async->Pending.load()) : 0;
-    s.Evictions = m_evictions;
-    return s;
 }
 
 void ResourceManager::StartWorker() {

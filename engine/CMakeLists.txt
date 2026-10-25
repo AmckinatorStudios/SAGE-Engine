@@ -140,6 +140,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/RenderTexture.cpp
     src/sage/render/Volumetrics.cpp
     src/sage/render/ResourceManager.cpp
+    src/sage/render/ResourceManager_Materials.cpp
+    src/sage/render/ResourceManager_Memory.cpp
     src/sage/render/AlphaBleed.cpp
     src/sage/render/Screenshot.cpp
     src/sage/render/Shader.cpp
