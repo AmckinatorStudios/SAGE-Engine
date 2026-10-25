@@ -1,4 +1,5 @@
 #include "ModelImportDialog.h"
+#include "EditorTheme.h"
 
 #include <algorithm>
 #include <string>
@@ -159,6 +160,10 @@ bool DrawSettings(ModelLoader::ImportSettings& s, bool* overwriteMaterials) {
     }
     changed |= ImGui::Checkbox(T("Flip the texture vertically"), &s.FlipUV);
     changed |= ImGui::Checkbox(T("Flip faces (the model is inside out)"), &s.FlipWinding);
+    changed |= ImGui::Checkbox(T("Place as a hierarchy of objects"), &s.Hierarchy);
+    EditorTheme::Hint(T("Each node of the file becomes its own object in the scene (head, arms, legs),\n"
+                        "with its name, place and material. Off: the model is one object.\n"
+                        "Models with a skeleton are always placed whole."));
 
     ImGui::SeparatorText(T("Materials"));
     changed |= ImGui::Checkbox(T("Create materials from the file"), &s.ImportMaterials);

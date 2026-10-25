@@ -55,6 +55,7 @@ void EditorLayer::RunSelfTest() {
         ok = SelfTestRenderStability() && ok;
         ok = SelfTestPickerAndPrefabs() && ok;
         ok = SelfTestPlugins() && ok;
+        ok = SelfTestModelHierarchy() && ok;
         ok = SelfTestPanelRegistry() && ok;
         ok = SelfTestGIBake() && ok;
     }

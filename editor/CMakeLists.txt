@@ -42,6 +42,7 @@ add_executable(SageEditor WIN32
     src/selftest/SelfTestCreateDialog.cpp
     src/selftest/SelfTestInputProbe.cpp
     src/selftest/SelfTestPlugins.cpp
+    src/selftest/SelfTestModelHierarchy.cpp
     src/selftest/SelfTestPanels.cpp
     src/selftest/SelfTestGIBake.cpp
     src/selftest/SelfTestCursorLock.cpp
@@ -80,6 +81,7 @@ add_executable(SageEditor WIN32
     src/GameBuilder.cpp
     src/ScreenColor.cpp
     src/ModelMaterialImport.cpp
+    src/ModelHierarchy.cpp
     src/ProjectTemplates.cpp
     src/TemplateStore.cpp
     src/ProjectTemplateCover.cpp
@@ -177,7 +179,10 @@ target_compile_definitions(SageEditor PRIVATE
     # Оснастка «как у настоящих персонажей»: жёсткие детали на костях,
     # упакованная карта металличности и шероховатости, свечение, отсечение по
     # альфе (tools/make_test_rig.py).
-    SAGE_TEST_RIG="${CMAKE_CURRENT_SOURCE_DIR}/../engine/assets/test_rig.glb")
+    SAGE_TEST_RIG="${CMAKE_CURRENT_SOURCE_DIR}/../engine/assets/test_rig.glb"
+    # Модель Blockbench в четырёх форматах (tests/data/blockbench_skin) —
+    # проверка постановки модели иерархией объектов.
+    SAGE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../tests/data")
 
 # ImGui хранит своё состояние (GImGui) в статической глобальной переменной.
 # Плагины (.so) НЕ линкуют libimgui.a сами (см. sage_add_editor_plugin) —

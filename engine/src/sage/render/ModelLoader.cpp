@@ -9,7 +9,9 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <filesystem>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -85,6 +87,7 @@ ImportSettings LoadImportSettings(const std::string& modelPath) {
                       : twoSided == "off" ? ImportSettings::TwoSided::Off
                                           : ImportSettings::TwoSided::Auto;
         s.ImportAnimation = j.value("importAnimation", s.ImportAnimation);
+        s.Hierarchy = j.value("hierarchy", s.Hierarchy);
         s.AutoUnits = j.value("autoUnits", s.AutoUnits);
     } catch (const std::exception& e) {
         LOG_WARN("Model") << "Битый .sageimport (" << modelPath << "): " << e.what();
@@ -104,6 +107,7 @@ bool SaveImportSettings(const std::string& modelPath, const ImportSettings& s) {
         {"flipUV", s.FlipUV},
         {"flipWinding", s.FlipWinding},
         {"importMaterials", s.ImportMaterials},
+        {"hierarchy", s.Hierarchy},
         {"alpha", kAlpha[(int)s.Alpha]},
         {"alphaCutoff", s.AlphaCutoff},
         {"twoSided", kTwoSided[(int)s.DoubleSided]},
@@ -290,7 +294,8 @@ std::shared_ptr<Mesh> LoadObj(const std::string& path) {
 }
 
 sage::render::MeshData LoadObjData(const std::string& path,
-                                   std::vector<sage::assets::ImportedMaterial>* materialsOut) {
+                                   std::vector<sage::assets::ImportedMaterial>* materialsOut,
+                                   std::vector<std::string>* objectOfSubmesh) {
     tinyobj::ObjReaderConfig config;
     // Грани режем САМИ (TriangulatePolygon), а не силами tinyobj: он делит
     // четырёхугольник по КОРОТКОЙ диагонали, а многоугольник — веером. У
@@ -365,17 +370,21 @@ sage::render::MeshData LoadObjData(const std::string& path,
     // Ключ — material_id из .obj; порядок групп — порядок появления в файле.
     struct Bucket {
         int Material = -1;
+        int Shape = -1;   // объект файла — только когда раскладка по объектам
         std::vector<Vertex> Vertices;
     };
     std::vector<Bucket> buckets;
-    auto bucketFor = [&buckets](int material) -> Bucket& {
+    int currentShape = -1;
+    auto bucketFor = [&buckets, &currentShape, objectOfSubmesh](int material) -> Bucket& {
+        const int shape = objectOfSubmesh ? currentShape : -1;
         for (Bucket& b : buckets)
-            if (b.Material == material) return b;
-        buckets.push_back(Bucket{material, {}});
+            if (b.Material == material && b.Shape == shape) return b;
+        buckets.push_back(Bucket{material, shape, {}});
         return buckets.back();
     };
 
     for (const auto& shape : shapes) {
+        ++currentShape;
         size_t corner = 0;
         for (size_t f = 0; f < shape.mesh.num_face_vertices.size(); ++f) {
             const size_t faceVerts = (size_t)shape.mesh.num_face_vertices[f];
@@ -431,6 +440,9 @@ sage::render::MeshData LoadObjData(const std::string& path,
         sub.Material = b.Material;
         sub.Name = (b.Material >= 0 && (size_t)b.Material < materials.size())
                        ? materials[(size_t)b.Material].name : std::string();
+        if (objectOfSubmesh)
+            objectOfSubmesh->push_back(b.Shape >= 0 && (size_t)b.Shape < shapes.size()
+                                           ? shapes[(size_t)b.Shape].name : std::string());
         sub.FirstIndex = (unsigned int)out.Indices.size();
         sub.IndexCount = (unsigned int)b.Vertices.size();
         for (const Vertex& v : b.Vertices) {
@@ -441,7 +453,7 @@ sage::render::MeshData LoadObjData(const std::string& path,
     }
     // Одна группа без материала — это «геометрия без .mtl», то есть состояние по
     // умолчанию, а не разметка (см. ImportedScene::Flatten).
-    if (out.Submeshes.size() == 1 && out.Submeshes[0].Material < 0) out.Submeshes.clear();
+    if (out.Submeshes.size() == 1 && out.Submeshes[0].Material < 0 && !objectOfSubmesh) out.Submeshes.clear();
 
     // Применяем настройки импорта из сайдкара (масштаб/центрирование/нормализация)
     // ДО создания GPU-меша — модель приходит в сцену уже приведённой.
@@ -544,6 +556,88 @@ std::shared_ptr<Mesh> LoadMesh(const std::string& path, bool keepCpuData) {
     // Разметка по материалам едет на видеокарту вместе с геометрией: без неё
     // многоматериальная модель рисовалась бы одним материалом — тем самым, из-за
     // которого «текстуры не работают».
+    return std::make_shared<Mesh>(d.Vertices, d.Indices, d.Submeshes, keepCpuData);
+}
+
+bool LoadModelTree(const std::string& path, sage::assets::ImportedScene& scene, glm::mat4& rootMatrix,
+                   std::string& err) {
+    // ДЕРЕВО ОДНО НА ФАЙЛ, а частей у модели десятки: каждая грузится своим
+    // запросом, и разбирать ради каждой весь файл заново значило бы платить
+    // N разборов за одну модель. Помним последний разобранный файл (по пути и
+    // времени правки) — части одной модели грузятся подряд.
+    struct Cached {
+        std::string Key;
+        sage::assets::ImportedScene Scene;
+        glm::mat4 Root{1.0f};
+    };
+    static std::mutex mx;
+    static Cached cache;
+    std::error_code ec;
+    const auto stamp = std::filesystem::last_write_time(path, ec);
+    const std::string key =
+        path + "|" + std::to_string(ec ? 0 : (long long)stamp.time_since_epoch().count());
+    {
+        std::lock_guard<std::mutex> lk(mx);
+        if (cache.Key == key) {
+            scene = cache.Scene;
+            rootMatrix = cache.Root;
+            return true;
+        }
+    }
+    sage::assets::ImportedScene fresh;
+    if (!sage::assets::ImporterRegistry::Instance().Import(path, fresh, err)) return false;
+    glm::mat4 root(1.0f);
+    // .obj приходит из LoadObjData уже с настройками импорта — второй раз их
+    // не применяем.
+    if (ExtensionLower(path) != "obj") {
+        const sage::render::MeshData whole = fresh.Flatten();
+        glm::vec3 lo(std::numeric_limits<float>::max()), hi(std::numeric_limits<float>::lowest());
+        for (const Vertex& v : whole.Vertices) {
+            lo = glm::min(lo, v.Position);
+            hi = glm::max(hi, v.Position);
+        }
+        root = ImportMatrix(ResolveImportSettings(path, lo, hi), lo, hi);
+    }
+    {
+        std::lock_guard<std::mutex> lk(mx);
+        cache.Key = key;
+        cache.Scene = fresh;
+        cache.Root = root;
+    }
+    scene = std::move(fresh);
+    rootMatrix = root;
+    return true;
+}
+
+sage::render::MeshData LoadMeshPartData(const std::string& path, int group) {
+    if (!sage::assets::vfs::Exists(path)) throw std::runtime_error("Файл модели не найден: " + path);
+    sage::assets::ImportedScene scene;
+    glm::mat4 root(1.0f);
+    std::string err;
+    if (!LoadModelTree(path, scene, root, err)) throw std::runtime_error(err);
+    if (group < 0 || group >= (int)scene.Groups.size())
+        throw std::runtime_error("в модели нет части №" + std::to_string(group) + ": " + path +
+                                 " (её переэкспортировали с другим составом?)");
+    sage::render::MeshData d = scene.FlattenGroup(group);
+    // Настройки, меняющие ГЕОМЕТРИЮ части (развёртка, обход, нормали), — ей;
+    // размер, поворот и место — корню иерархии (см. LoadModelTree).
+    if (ExtensionLower(path) != "obj") {
+        ImportSettings s = LoadImportSettings(path);
+        s.Scale = 1.0f;
+        s.Recenter = false;
+        s.NormalizeSize = false;
+        s.Rotation = glm::vec3(0.0f);
+        s.Offset = glm::vec3(0.0f);
+        ApplyImportSettings(d, s);
+    }
+    return d;
+}
+
+std::shared_ptr<Mesh> LoadMeshPart(const std::string& path, int group, bool keepCpuData) {
+    sage::render::MeshData d = LoadMeshPartData(path, group);
+    // Пустой узел (группа без своей геометрии) — законный: объекту нечего
+    // рисовать, но место в дереве он держит.
+    if (d.Empty()) return nullptr;
     return std::make_shared<Mesh>(d.Vertices, d.Indices, d.Submeshes, keepCpuData);
 }
 

@@ -103,12 +103,15 @@ bool EditorLayer::SelfTestToolsAssetsAndPanels() {
 
         const fs::path destDir = m_project.AssetsDir() / "selftest_import";
         const AssetsPanel::ImportReport rep = AssetsPanel::ImportAsset(outside / "crate.obj", destDir);
+        // Модель приезжает В СВОЮ ПАПКУ (selftest_import/crate/) — со своими
+        // спутниками, а позже и с материалами, текстурами и клипами.
+        const fs::path modelDir = destDir / "crate";
         if (!rep.Ok) {
             LOG_ERROR("Editor") << "SELFTEST: импорт не удался: " << rep.Error;
             ok = false;
-        } else if (!fs::exists(destDir / "crate.obj", ec) ||
-                   !fs::exists(destDir / "crate.mtl", ec) ||
-                   !fs::exists(destDir / "crate_albedo.png", ec)) {
+        } else if (!fs::exists(modelDir / "crate.obj", ec) ||
+                   !fs::exists(modelDir / "crate.mtl", ec) ||
+                   !fs::exists(modelDir / "crate_albedo.png", ec)) {
             LOG_ERROR("Editor") << "SELFTEST: импорт не принёс спутников модели (.mtl/текстура)";
             ok = false;
         } else if (!rep.Missing.empty()) {
@@ -119,9 +122,9 @@ bool EditorLayer::SelfTestToolsAssetsAndPanels() {
         // Ссылка на внесённый файл обязана быть ОТНОСИТЕЛЬНОЙ: именно так её
         // найдёт собранная игра, делающая chdir в свою папку.
         if (ok) {
-            const std::string ref = m_project.AssetRef(destDir / "crate.obj");
+            const std::string ref = m_project.AssetRef(modelDir / "crate.obj");
             if (ref.empty() || fs::path(ref).is_absolute() ||
-                ref != "assets/selftest_import/crate.obj") {
+                ref != "assets/selftest_import/crate/crate.obj") {
                 LOG_ERROR("Editor") << "SELFTEST: ссылка на ассет не относительна проекту: " << ref;
                 ok = false;
             }
@@ -148,7 +151,7 @@ bool EditorLayer::SelfTestToolsAssetsAndPanels() {
         // .mtl. Без этого модель в сцене — белая болванка.
         if (ok) {
             const ModelLoader::ExtractedMaterial ex =
-                ModelLoader::ExtractMaterial((destDir / "crate.obj").string());
+                ModelLoader::ExtractMaterial((modelDir / "crate.obj").string());
             // Kd в .mtl — линейный; в материале цвет хранится так, как его
             // показывает инспектор (sRGB, см. ExtractMaterials).
             if (!ex.Found || std::abs(SrgbToLinear(ex.Albedo.g) - 0.6f) > 1e-3f) {
@@ -196,7 +199,7 @@ bool EditorLayer::SelfTestToolsAssetsAndPanels() {
     // некому: вьюпорт и иерархия целей не имели вовсе, а окно не слышало
     // проводник системы.
     if (ok) {
-        const fs::path modelPath = m_project.AssetsDir() / "selftest_import" / "crate.obj";
+        const fs::path modelPath = m_project.AssetsDir() / "selftest_import" / "crate" / "crate.obj";   // импорт кладёт модель в свою папку
         const fs::path matPath = m_assetsCwd / "selftest_mat.sagemat";
 
         // 1. Бросок модели в СПИСОК сцены: появляется новая сущность с этим мешем.

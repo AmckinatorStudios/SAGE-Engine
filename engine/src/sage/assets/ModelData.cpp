@@ -17,14 +17,27 @@ const char* ModelDataFolder(ModelData kind) {
     return "Data";
 }
 
+fs::path ModelHomeDir(const fs::path& modelPath) {
+    const fs::path dir = modelPath.parent_path();
+    // Модель уже в своей папке (так её кладёт импорт: assets/Steve/Steve.gltf)
+    // — её данные рядом. Иначе — в папке с её именем рядом с файлом.
+    if (dir.filename() == modelPath.stem()) return dir;
+    return dir / modelPath.stem();
+}
+
 fs::path ModelDataDir(const fs::path& modelPath, ModelData kind) {
-    return modelPath.parent_path() / ModelDataFolder(kind);
+    return ModelHomeDir(modelPath) / ModelDataFolder(kind);
 }
 
 fs::path ModelDataPath(const fs::path& modelPath, ModelData kind, const std::string& fileName) {
     std::error_code ec;
+    // Файлы, разложенные по-старому, остаются на месте и используются — на них
+    // ссылаются сцены: сперва рядом с моделью, потом в общей на папку
+    // Materials/ (раскладка, у которой данные моделей перемешивались).
     const fs::path legacy = modelPath.parent_path() / fileName;
     if (fs::exists(legacy, ec)) return legacy;
+    const fs::path shared = modelPath.parent_path() / ModelDataFolder(kind) / fileName;
+    if (fs::exists(shared, ec) && ModelHomeDir(modelPath) != modelPath.parent_path()) return shared;
     return ModelDataDir(modelPath, kind) / fileName;
 }
 

@@ -7,6 +7,8 @@
 add_executable(sage_tests
     main.cpp
     test_math.cpp
+    test_blockbench_formats.cpp
+    test_reset_default.cpp
     test_serialization.cpp
     test_zip.cpp
     test_animation.cpp
@@ -117,6 +119,10 @@ target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 # tinygltf — ради проверки разреженных аксессоров: она сверяет то, что отдаёт
 # общий читатель (assets/import/GltfAccessor.h), а он работает с tinygltf::Model.
 target_link_libraries(sage_tests PRIVATE sage::engine nlohmann_json::nlohmann_json tinygltf imgui imguizmo)
+
+# Файлы-образцы (модели из чужих редакторов, на которых нашлись дефекты
+# импорта) — путём в исходниках: копировать их рядом с тестом незачем.
+target_compile_definitions(sage_tests PRIVATE SAGE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 
 add_test(NAME sage_tests COMMAND sage_tests)
 

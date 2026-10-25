@@ -359,7 +359,7 @@ bool EditorLayer::SelfTestToolsAuthoring() {
         MeshRendererComponent& mmr = modelObj.Renderer();
         mmr.Ref.type = MeshRef::Type::Model;
         mmr.Ref.path = objPath.string();
-        mmr.MeshPtr = ResourceManager::Instance().GetModel(mmr.Ref.path);
+        mmr.MeshPtr = ResourceManager::Instance().GetModel(mmr.Ref.path, mmr.Ref.part);
         if (!mmr.MeshPtr) {
             LOG_ERROR("Editor") << "SELFTEST: модель не загрузилась: " << mmr.Ref.path;
             ok = false;
@@ -488,6 +488,13 @@ bool EditorLayer::SelfTestToolsAuthoring() {
         }
         sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
 
+        // Целиком, а не иерархией: проверяется разметка ОДНОГО объекта на две
+        // части (иерархию проверяет SelfTestModelHierarchy).
+        {
+            ModelLoader::ImportSettings whole;
+            whole.Hierarchy = false;
+            ModelLoader::SaveImportSettings((pack / "scene.gltf").string(), whole);
+        }
         // Тот самый жест: бросить модель в сцену.
         const size_t before = m_scene->Count();
         if (!AddAssetToScene(pack / "scene.gltf") || m_scene->Count() != before + 1) {

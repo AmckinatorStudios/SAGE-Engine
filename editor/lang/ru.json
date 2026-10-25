@@ -2834,6 +2834,12 @@
     "Background Frame Cap (0=off)": "Лимит кадров в фоне (0 — выкл.)",
     "Frames per second while the game window is not in focus: frames nobody sees still load the GPU": "Кадров в секунду, пока окно игры не в фокусе: кадры, которых никто не видит, тоже нагружают видеокарту",
     "Scenes, scripts, models, textures, sounds, materials, interfaces; engine shaders and fonts": "Сцены, скрипты, модели, текстуры, звуки, материалы, интерфейсы; шейдеры и шрифты движка",
-    "Post processing is a component": "Обработка кадра — это компонент"
+    "Post processing is a component": "Обработка кадра — это компонент",
+    "Albedo, normal, metallic, roughness, emissive and AO maps of the material": "Карты материала: альбедо, нормали, металличность, шероховатость, свечение и затенение",
+    "Each node of the file becomes its own object in the scene (head, arms, legs),\nwith its name, place and material. Off: the model is one object.\nModels with a skeleton are always placed whole.": "Каждый узел файла становится своим объектом сцены (голова, руки, ноги)\nсо своим именем, местом и материалом. Выключено — модель одним объектом.\nМодели со скелетом всегда ставятся целиком.",
+    "Place as a hierarchy of objects": "Ставить иерархией объектов",
+    "Reset to default values (a single field: right-click it)": "Сбросить к значениям по умолчанию (одно поле — правый щелчок по нему)",
+    "Textures": "Текстуры",
+    "Reset to default": "Сбросить к значению по умолчанию"
   }
 }

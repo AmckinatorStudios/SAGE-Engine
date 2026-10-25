@@ -16,6 +16,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
+#include <glm/gtc/type_ptr.hpp>
 
 // ---------------------------------------------------------------------------
 // glTF/GLB -> ImportedScene: УЗЛЫ, а не один слипшийся меш.
@@ -94,6 +95,7 @@ glm::mat4 NodeLocalMatrix(const tinygltf::Node& node) {
 // модель открывалась в панели ассетов, но роняла редактор, когда её клали в
 // сцену.
 using sage::assets::gltf::ReadFloats;
+using sage::assets::gltf::ReadUInts;
 
 bool ReadIndices(const tinygltf::Model& gltf, int accessorIndex, size_t vertexCount,
                  std::vector<unsigned int>& out) {
@@ -173,8 +175,26 @@ std::string PrimitiveName(const tinygltf::Model& gltf, const tinygltf::Node& nod
     return name;
 }
 
+// Матрицы костей скина В ПОЗЕ ПРИВЯЗКИ: мировая матрица узла кости на её
+// обратную матрицу привязки. Ровно то, что палитра скелетного прохода даёт до
+// начала клипа (см. SkinnedModel::LoadGltf).
+std::vector<glm::mat4> BindPoseSkin(const tinygltf::Model& gltf, const tinygltf::Skin& skin,
+                                    const std::vector<glm::mat4>& worlds) {
+    const std::vector<float> ibm =
+        skin.inverseBindMatrices >= 0 ? ReadFloats(gltf, skin.inverseBindMatrices, 16) : std::vector<float>();
+    std::vector<glm::mat4> out(skin.joints.size(), glm::mat4(1.0f));
+    for (size_t j = 0; j < skin.joints.size(); ++j) {
+        const int node = skin.joints[j];
+        const glm::mat4 w = node >= 0 && node < (int)worlds.size() ? worlds[(size_t)node] : glm::mat4(1.0f);
+        const glm::mat4 inv = (j + 1) * 16 <= ibm.size() ? glm::make_mat4(&ibm[j * 16]) : glm::mat4(1.0f);
+        out[j] = w * inv;
+    }
+    return out;
+}
+
 void CollectPrimitive(const tinygltf::Model& gltf, const tinygltf::Primitive& prim,
-                      const glm::mat4& world, std::string name, ImportedScene& out) {
+                      const glm::mat4& world, std::string name, ImportedScene& out,
+                      const std::vector<glm::mat4>* skin = nullptr) {
     if (prim.mode != TINYGLTF_MODE_TRIANGLES) return; // линии и точки геометрией не считаем
     auto posIt = prim.attributes.find("POSITION");
     if (posIt == prim.attributes.end()) return;
@@ -251,11 +271,45 @@ void CollectPrimitive(const tinygltf::Model& gltf, const tinygltf::Primitive& pr
     }
     if (node.Mesh.Indices.size() < 3) return;
 
+    // СКИН — В ПОЗУ ПРИВЯЗКИ. Вершины скинового меша заданы в пространстве
+    // скелета, и на место их ставят только кости. Статическая копия (контур
+    // выделения, габариты, попадание мышью, запекание) брала их как есть: у
+    // модели Blockbench ноги уходили под пол, а тело — на пояс ниже, хотя
+    // скелетный проход рисовал персонажа верно.
+    if (skin && !skin->empty()) {
+        auto jIt = prim.attributes.find("JOINTS_0");
+        auto wIt = prim.attributes.find("WEIGHTS_0");
+        const std::vector<unsigned int> joints =
+            jIt != prim.attributes.end() ? ReadUInts(gltf, jIt->second, 4) : std::vector<unsigned int>();
+        const std::vector<float> weights =
+            wIt != prim.attributes.end() ? ReadFloats(gltf, wIt->second, 4) : std::vector<float>();
+        if (joints.size() >= count * 4 && weights.size() >= count * 4) {
+            for (size_t i = 0; i < count; ++i) {
+                glm::mat4 m(0.0f);
+                float total = 0.0f;
+                for (int k = 0; k < 4; ++k) {
+                    const unsigned int j = joints[i * 4 + k];
+                    const float w = weights[i * 4 + k];
+                    if (w <= 0.0f || j >= skin->size()) continue;
+                    m += (*skin)[j] * w;
+                    total += w;
+                }
+                if (total <= 1e-6f) continue;
+                m /= total;
+                Vertex& v = node.Mesh.Vertices[i];
+                v.Position = glm::vec3(m * glm::vec4(v.Position, 1.0f));
+                const glm::vec3 n = glm::mat3(glm::transpose(glm::inverse(m))) * v.Normal;
+                if (glm::length(n) > 1e-6f) v.Normal = glm::normalize(n);
+            }
+        }
+    }
+
     out.Nodes.push_back(std::move(node));
 }
 
 void CollectNode(const tinygltf::Model& gltf, int nodeIndex, const glm::mat4& parent,
-                 std::vector<bool>& visited, ImportedScene& out) {
+                 std::vector<bool>& visited, ImportedScene& out, const std::vector<glm::mat4>& worlds,
+                 int parentGroup = -1) {
     if (nodeIndex < 0 || nodeIndex >= (int)gltf.nodes.size()) return;
     // Узел, встреченный дважды, — это либо кривой файл, либо цикл в дереве.
     // Без этой отметки цикл означал бы бесконечную рекурсию на загрузке модели.
@@ -264,6 +318,13 @@ void CollectNode(const tinygltf::Model& gltf, int nodeIndex, const glm::mat4& pa
 
     const tinygltf::Node& node = gltf.nodes[(size_t)nodeIndex];
     const glm::mat4 world = parent * NodeLocalMatrix(node);
+
+    // Узел — в дерево, даже пустой: пустышка «Пояс» держит руки и голову, и
+    // без неё иерархия в сцене потеряла бы точку, вокруг которой они вращаются.
+    const int group = (int)out.Groups.size();
+    out.Groups.push_back(ImportedGroup{node.name.empty() ? "Node " + std::to_string(nodeIndex) : node.name,
+                                       parentGroup, world});
+    const size_t firstNode = out.Nodes.size();
 
     if (node.mesh >= 0 && node.mesh < (int)gltf.meshes.size()) {
         // У СКИНОВОГО МЕША ТРАНСФОРМ УЗЛА НЕ ПРИМЕНЯЕТСЯ — так требует glTF, и
@@ -280,12 +341,16 @@ void CollectNode(const tinygltf::Model& gltf, int nodeIndex, const glm::mat4& pa
         // Детей это не касается: их трансформ считается как обычно.
         const bool skinned = node.skin >= 0 && node.skin < (int)gltf.skins.size();
         const tinygltf::Mesh& mesh = gltf.meshes[(size_t)node.mesh];
+        const std::vector<glm::mat4> skinMats =
+            skinned ? BindPoseSkin(gltf, gltf.skins[(size_t)node.skin], worlds) : std::vector<glm::mat4>();
         for (size_t p = 0; p < mesh.primitives.size(); ++p) {
             CollectPrimitive(gltf, mesh.primitives[p], skinned ? glm::mat4(1.0f) : world,
-                             PrimitiveName(gltf, node, node.mesh, p, mesh.primitives.size()), out);
+                             PrimitiveName(gltf, node, node.mesh, p, mesh.primitives.size()), out,
+                             skinned ? &skinMats : nullptr);
         }
     }
-    for (int child : node.children) CollectNode(gltf, child, world, visited, out);
+    for (size_t k = firstNode; k < out.Nodes.size(); ++k) out.Nodes[k].Group = group;
+    for (int child : node.children) CollectNode(gltf, child, world, visited, out, worlds, group);
 }
 
 } // namespace
@@ -307,13 +372,30 @@ bool ImportGltf(const std::string& path, ImportedScene& out, std::string& err) {
 
     ReadMaterials(gltf, out);
 
+    // Мировые матрицы всех узлов — для поз привязки скинов: кость может стоять
+    // в любой ветке дерева, не там, где меш.
+    std::vector<glm::mat4> worlds(gltf.nodes.size(), glm::mat4(1.0f));
+    {
+        std::vector<int> up(gltf.nodes.size(), -1);
+        for (size_t i = 0; i < gltf.nodes.size(); ++i)
+            for (int c : gltf.nodes[i].children)
+                if (c >= 0 && c < (int)gltf.nodes.size()) up[(size_t)c] = (int)i;
+        for (size_t i = 0; i < gltf.nodes.size(); ++i) {
+            glm::mat4 m = NodeLocalMatrix(gltf.nodes[i]);
+            int guard = 0;
+            for (int p = up[i]; p >= 0 && guard < 256; p = up[(size_t)p], ++guard)
+                m = NodeLocalMatrix(gltf.nodes[(size_t)p]) * m;
+            worlds[i] = m;
+        }
+    }
+
     std::vector<bool> visited(gltf.nodes.size(), false);
     if (!gltf.scenes.empty()) {
         const size_t sceneIndex =
             (gltf.defaultScene >= 0 && gltf.defaultScene < (int)gltf.scenes.size())
                 ? (size_t)gltf.defaultScene : 0;
         for (int root : gltf.scenes[sceneIndex].nodes)
-            CollectNode(gltf, root, glm::mat4(1.0f), visited, out);
+            CollectNode(gltf, root, glm::mat4(1.0f), visited, out, worlds);
     }
     // Узлы, не попавшие ни в одну сцену (или файл вовсе без сцен): экспортёры
     // такое делают, и терять из-за этого геометрию нельзя — «модель пустая»
@@ -322,7 +404,7 @@ bool ImportGltf(const std::string& path, ImportedScene& out, std::string& err) {
         if (visited[i]) continue;
         const tinygltf::Node& n = gltf.nodes[i];
         if (n.mesh < 0) continue;   // пустышки и кости сами по себе не геометрия
-        CollectNode(gltf, (int)i, glm::mat4(1.0f), visited, out);
+        CollectNode(gltf, (int)i, glm::mat4(1.0f), visited, out, worlds);
     }
 
     if (out.Nodes.empty()) {

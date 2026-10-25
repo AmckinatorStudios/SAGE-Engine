@@ -11,6 +11,8 @@
 // строк, в которых рядом лежали сборка игры, отмена правки и раскладка окон —
 // три области, у которых нет ничего общего, кроме имени класса.
 // ---------------------------------------------------------------------------
+#include "ModelHierarchy.h"
+#include <limits>
 #include "EditorLayer.h"
 #include "ModelImportDialog.h"
 #include "sage/assets/Pack.h"
@@ -392,6 +394,13 @@ bool EditorLayer::AddAssetToScene(const fs::path& asset) {
             SetStatusMessage(T("The prefab could not be placed: ") + asset.filename().string());
             return true;
         }
+    } else if (ModelLoader::IsSupportedModel(ext) &&
+               sage::editor::modelhierarchy::PlacesAsHierarchy(ref)) {
+        // Модель из нескольких узлов — деревом объектов (ModelHierarchy.h).
+        PushUndoSnapshot();
+        ModelMaterialImportResult report;
+        newId = sage::editor::modelhierarchy::Place(m_project, *m_scene, ref, asset.stem().string(), report);
+        ReportModelMaterials(report);
     } else if (ModelLoader::IsSupportedModel(ext)) {
         std::shared_ptr<Mesh> mesh = ResourceManager::Instance().GetModel(ref);
         if (!mesh) {
@@ -414,6 +423,31 @@ bool EditorLayer::AddAssetToScene(const fs::path& asset) {
     SetStatusMessage(T("Added to the scene: ") + asset.filename().string());
     return true;
 }
+
+namespace {
+// Нижняя точка объекта ВМЕСТЕ С ПОТОМКАМИ, в мире: модель-дерево ставится на
+// пол по своей самой низкой части, а у корня своего меша нет.
+float LowestPointOf(Scene& scene, entt::entity e) {
+    float lowest = std::numeric_limits<float>::max();
+    std::vector<entt::entity> stack{e};
+    while (!stack.empty()) {
+        const entt::entity cur = stack.back();
+        stack.pop_back();
+        if (const MeshRendererComponent* mr = scene.Registry().try_get<MeshRendererComponent>(cur);
+            mr && mr->MeshPtr) {
+            const glm::mat4 w = scene.WorldMatrix(cur);
+            const glm::vec3 lo = mr->MeshPtr->BoundsMin(), hi = mr->MeshPtr->BoundsMax();
+            for (int c = 0; c < 8; ++c) {
+                const glm::vec3 p((c & 1) ? hi.x : lo.x, (c & 2) ? hi.y : lo.y, (c & 4) ? hi.z : lo.z);
+                lowest = std::min(lowest, (w * glm::vec4(p, 1.0f)).y);
+            }
+        }
+        if (const HierarchyComponent* h = scene.Registry().try_get<HierarchyComponent>(cur))
+            for (entt::entity child : h->Children) stack.push_back(child);
+    }
+    return lowest == std::numeric_limits<float>::max() ? scene.WorldMatrix(e)[3].y : lowest;
+}
+} // namespace
 
 bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& proj, float u,
                                       float v, const fs::path& asset) {
@@ -512,6 +546,17 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
         if (newId < 0) {
             SetStatusMessage(T("The prefab could not be placed: ") + asset.filename().string());
             return true;
+        }
+    } else if (sage::editor::modelhierarchy::PlacesAsHierarchy(ref)) {
+        // Деревом объектов (ModelHierarchy.h): корень — в точку броска, на
+        // поверхность — по габаритам модели целиком.
+        ModelMaterialImportResult report;
+        newId = sage::editor::modelhierarchy::Place(m_project, *m_scene, ref, asset.stem().string(), report);
+        ReportModelMaterials(report);
+        GameObject root = m_scene->Get(newId);
+        if (root.Valid()) {
+            root.GetTransform().Position = point;
+            if (onSurface || onGround) root.GetTransform().Position.y += point.y - LowestPointOf(*m_scene, root.Entity());
         }
     } else {
         GameObject obj = m_scene->CreateObject(asset.stem().string());

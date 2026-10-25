@@ -12,6 +12,7 @@
 #include <stb_image.h> // реализация STB_IMAGE_IMPLEMENTATION живёт в Texture.cpp
 
 #include <algorithm>
+#include <cstdlib>
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -211,6 +212,43 @@ long long FileStamp(const std::string& path) {
 }
 } // namespace
 
+namespace {
+// Ключ части модели: «полный путь␟номер». Разделитель — символ, которого не
+// бывает в путях, чтобы ключ разбирался обратно однозначно (перечитывание).
+constexpr char kPartSep = '\x1f';
+std::string FileOfKey(const std::string& key) {
+    const size_t at = key.find(kPartSep);
+    return at == std::string::npos ? key : key.substr(0, at);
+}
+int PartOfKey(const std::string& key) {
+    const size_t at = key.find(kPartSep);
+    return at == std::string::npos ? -1 : std::atoi(key.c_str() + at + 1);
+}
+} // namespace
+
+std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path, int part) {
+    if (part < 0) return GetModel(path);
+    const std::string key = CacheKey(path) + kPartSep + std::to_string(part);
+    auto it = m_models.find(key);
+    if (it != m_models.end()) return it->second;
+    std::shared_ptr<Mesh> mesh;
+    if (sage::assets::quarantine::Blocked(path)) {
+        LOG_ERROR("Resources") << "Модель «" << path << "» в карантине: на ней оборвался прошлый запуск.";
+    } else {
+        sage::assets::quarantine::Begin(path);
+        try {
+            mesh = ModelLoader::LoadMeshPart(Locate(path), part, m_keepMeshCpu);
+        } catch (const std::exception& e) {
+            LOG_ERROR("Resources") << "Часть модели не загрузилась (" << path << ", №" << part
+                                   << "): " << e.what();
+        }
+        sage::assets::quarantine::End();
+    }
+    m_models[key] = mesh;
+    m_modelStamps[key] = FileStamp(Locate(path));
+    return mesh;
+}
+
 std::shared_ptr<Mesh> ResourceManager::GetModel(const std::string& path) {
     const std::string key = CacheKey(path);
     auto it = m_models.find(key);
@@ -307,7 +345,7 @@ int ResourceManager::ReloadChangedAssets(size_t budget) {
     // недействительному итератору.
     std::vector<std::string> staleModels;
     for (const auto& [path, stamp] : m_modelStamps) {
-        if (inWindow() && FileStamp(Locate(path)) != stamp) staleModels.push_back(path);
+        if (inWindow() && FileStamp(Locate(FileOfKey(path))) != stamp) staleModels.push_back(path);
     }
     std::vector<std::string> staleMaterials;
     for (const auto& [path, stamp] : m_materialStamps) {
@@ -338,7 +376,7 @@ int ResourceManager::ReloadChangedAssets(size_t budget) {
         std::shared_ptr<Mesh> existing = m_models[path];
         m_models.erase(path);
         m_modelStamps.erase(path);
-        std::shared_ptr<Mesh> fresh = GetModel(path);
+        std::shared_ptr<Mesh> fresh = GetModel(FileOfKey(path), PartOfKey(path));
         if (existing && fresh && existing != fresh) {
             *existing = std::move(*fresh);
             m_models[path] = existing;

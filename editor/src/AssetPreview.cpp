@@ -408,7 +408,7 @@ uint64_t AssetPreview::RenderPrefab(const std::string& path, int size, const std
         [&](entt::entity e, MeshRendererComponent& mr) {
             if (!mr.MeshPtr) {
                 if (mr.Ref.type == MeshRef::Type::Model && !mr.Ref.path.empty())
-                    mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path);
+                    mr.MeshPtr = ResourceManager::Instance().GetModel(mr.Ref.path, mr.Ref.part);
                 else if (mr.Ref.type != MeshRef::Type::None)
                     mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type);
             }

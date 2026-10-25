@@ -70,6 +70,7 @@ fs::path EnsureMaterialFile(const Project& project, const fs::path& path,
     // поверхность, сквозь которую светит солнце (см. MaterialRender::Translucency).
     if (ex.AlphaMode == 1 && ex.DoubleSided) mat.Render.Translucency = 0.5f;
     mat.Render.Unlit = ex.Unlit;
+    if (ex.NearestFilter) mat.Render.Filter = MaterialRender::Filtering::Nearest;
     mat.Render.UVScaleX = ex.UVScale.x;
     mat.Render.UVScaleY = ex.UVScale.y;
     // Пути карт — относительно проекта: материал переживёт сборку игры и переезд
@@ -323,10 +324,11 @@ namespace {
 ModelMaterialImportResult SetEntityMeshImpl(const Project& project, entt::registry& registry,
                                             entt::entity entity, MeshRendererComponent& mr,
                                             MeshRef::Type type, const std::string& path,
-                                            std::shared_ptr<Mesh> mesh) {
-    const bool sameModel = mr.Ref.type == type && mr.Ref.path == path;
+                                            std::shared_ptr<Mesh> mesh, int part) {
+    const bool sameModel = mr.Ref.type == type && mr.Ref.path == path && mr.Ref.part == part;
     mr.Ref.type = type;
     mr.Ref.path = path;
+    mr.Ref.part = type == MeshRef::Type::Model ? part : -1;
     mr.MeshPtr = std::move(mesh);
     // Слоты — это материалы частей ЭТОЙ модели. Другая модель — другие части, и
     // старые слоты покрасили бы их наугад.
@@ -340,7 +342,9 @@ ModelMaterialImportResult SetEntityMeshImpl(const Project& project, entt::regist
     // назначенного слотом инспектора, статического меша не будет НИКОГДА: его
     // рисует скелетный проход. Стой эта настройка ниже, ровно у этого пути
     // персонаж так и оставался бы статуей.
-    SetupModelAnimation(project, registry, entity, path, result);
+    // Часть модели (объект её иерархии) — неподвижная деталь: скелет и клипы
+    // остаются у модели целиком.
+    if (part < 0) SetupModelAnimation(project, registry, entity, path, result);
 
     // Материалы — только когда меш УЖЕ загружен: по нему берётся разметка
     // частей. Модель без меша получит их вместе с загрузкой.
@@ -360,9 +364,9 @@ ModelMaterialImportResult SetEntityMeshImpl(const Project& project, entt::regist
 
 ModelMaterialImportResult SetEntityMesh(const Project& project, entt::registry& registry,
                                         entt::entity entity, MeshRef::Type type,
-                                        const std::string& path, std::shared_ptr<Mesh> mesh) {
+                                        const std::string& path, std::shared_ptr<Mesh> mesh, int part) {
     MeshRendererComponent& mr = registry.get_or_emplace<MeshRendererComponent>(entity);
-    return SetEntityMeshImpl(project, registry, entity, mr, type, path, std::move(mesh));
+    return SetEntityMeshImpl(project, registry, entity, mr, type, path, std::move(mesh), part);
 }
 
 // ============================================================================
