@@ -510,6 +510,13 @@ private:
     ImVec2 m_mousePin{0.0f, 0.0f};
     bool m_mousePinned = false;
     int m_cursorProbeStep = 0;
+    // Самопроверка ввода из окна панели, вытащенной из дока (DETACHED_INPUT).
+    void CheckDetachedWindowInput(void* handle);
+    void* m_detachedProbeWindow = nullptr;
+    bool m_detachedKeySeen = false;
+    bool m_detachedKeyHooked = false;
+    bool m_cursorLookOk = false;
+    sage::CursorLockMode m_probeLockRestore = sage::CursorLockMode::Auto;
     // Какое окно выводить вперёд по «Играть» (см. EditorLayer_Play.cpp).
     void FocusPlayTarget();
     int m_probeStep = -1;     // -1 — не запущена

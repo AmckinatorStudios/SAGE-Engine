@@ -22,6 +22,23 @@ namespace sage {
 // Режим окна.
 enum class WindowMode { Windowed, Borderless, Fullscreen };
 
+// Как держать захваченный курсор (обзор от первого лица, облёт камеры).
+//   System   — режим «отключённого» курсора оконной системы (GLFW_CURSOR_DISABLED):
+//              без границ и с сырым вводом мыши. Лучший, когда он держится.
+//   Software — курсор прячется, а движок сам возвращает его в центр окна каждый
+//              кадр и считает смещение. Грубее (упирается в край, если за кадр
+//              уехать дальше половины окна), зато не зависит от того, как
+//              система и её окна обращаются с захватом.
+//   Auto     — System, а если система раз за разом сбрасывает захват у окна в
+//              фокусе — сам переходит на Software до конца захвата.
+// Отдельная настройка, а не «починить и забыть»: захват живёт в разном коде
+// GLFW на Windows, macOS и X11, и проверить все сочетания систем, оконных
+// менеджеров и удалённых рабочих столов нельзя. Игроку нужен выход, не ждущий
+// новой версии игры.
+enum class CursorLockMode { Auto, System, Software };
+const char* CursorLockToStr(CursorLockMode m);
+CursorLockMode CursorLockFromStr(const std::string& s);
+
 // Фиксация соотношения сторон кадра (letterbox/pillarbox чёрными полосами).
 // Free — кадр занимает всё окно (соотношение = размер окна).
 enum class AspectMode { Free, R16x9, R16x10, R4x3, R21x9 };
@@ -58,6 +75,7 @@ struct EngineConfig {
     bool VSync = true;
     int FrameCap = 0;     // максимум кадров/с (0 — без ограничения; при VSync обычно 0)
     int Msaa = 0;         // сглаживание экранного буфера: 0/2/4/8 (GLFW_SAMPLES)
+    CursorLockMode CursorLock = CursorLockMode::Auto; // способ захвата курсора (см. CursorLockMode)
 
     // --- Дисплей ---
     AspectMode Aspect = AspectMode::Free;

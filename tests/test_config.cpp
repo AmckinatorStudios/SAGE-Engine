@@ -504,3 +504,42 @@ TEST(Scene_keeps_shadow_distance_and_renderer_flags) {
     }
     CHECK_TRUE(found);
 }
+
+// --- Способ захвата курсора ---------------------------------------------------
+//
+// Выход для машины, где системный захват не держится: настройка доживает до
+// sage.cfg и обратно, а Auto сам переходит на программный, только когда
+// система сбрасывает захват у окна В ФОКУСЕ раз за разом — не от одного alt-tab.
+#include "sage/core/Window.h"
+
+TEST(Config_cursor_lock_mode_survives_sage_cfg) {
+    const std::filesystem::path p = std::filesystem::temp_directory_path() / "sage_cursorlock_test.cfg";
+    sage::EngineConfig a;
+    CHECK_TRUE(a.CursorLock == sage::CursorLockMode::Auto);
+    a.CursorLock = sage::CursorLockMode::Software;
+    CHECK_TRUE(a.SaveFile(p.string()));
+    sage::EngineConfig b;
+    CHECK_TRUE(b.LoadFile(p.string()));
+    CHECK_TRUE(b.CursorLock == sage::CursorLockMode::Software);
+    std::filesystem::remove(p);
+    CHECK_TRUE(sage::CursorLockFromStr("system") == sage::CursorLockMode::System);
+    CHECK_TRUE(sage::CursorLockFromStr("ерунда") == sage::CursorLockMode::Auto);
+}
+
+TEST(CursorLock_auto_switches_to_software_only_after_repeated_losses) {
+    sage::CursorLockWatch w;
+    CHECK_TRUE(!w.UseSoftware(sage::CursorLockMode::Auto));
+    CHECK_TRUE(w.UseSoftware(sage::CursorLockMode::Software));
+    for (int i = 1; i < sage::CursorLockWatch::kLossLimit; ++i) w.LostWhileFocused();
+    CHECK_TRUE(!w.UseSoftware(sage::CursorLockMode::Auto));   // единичные сбросы — норма
+    w.BeginCapture();                                          // новый захват — счёт заново
+    for (int i = 1; i < sage::CursorLockWatch::kLossLimit; ++i) w.LostWhileFocused();
+    CHECK_TRUE(!w.UseSoftware(sage::CursorLockMode::Auto));
+    w.LostWhileFocused();
+    CHECK_TRUE(w.UseSoftware(sage::CursorLockMode::Auto));
+    CHECK_TRUE(!w.UseSoftware(sage::CursorLockMode::System)); // System — всегда системный
+    w.BeginCapture();
+    CHECK_TRUE(w.UseSoftware(sage::CursorLockMode::Auto));    // вердикт держится
+    w.Reset();
+    CHECK_TRUE(!w.UseSoftware(sage::CursorLockMode::Auto));
+}

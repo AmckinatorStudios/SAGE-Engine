@@ -680,6 +680,34 @@ void MigrateV16toV17(json& root) {
     }
 }
 
+// v17 -> v18: твины поворота — в том же соглашении, что и сам поворот
+// (v16 -> v17 перевёл Transform, а цели твинов остались в старых углах). Цель
+// ставится ближайшей записью к повороту самого объекта: твин «от текущего»
+// не должен проворачивать объект через полный оборот.
+void MigrateV17toV18(json& root) {
+    for (json& obj : root["objects"]) {
+        if (!obj.contains("tweens") || !obj["tweens"].is_array()) continue;
+        const glm::vec3 own = obj.contains("rotation") ? Vec3FromJson(obj["rotation"]) : glm::vec3(0.0f);
+        for (json& clip : obj["tweens"]) {
+            if (!clip.contains("tracks") || !clip["tracks"].is_array()) continue;
+            for (json& t : clip["tracks"]) {
+                if (t.value("property", std::string()) != "object.rotation") continue;
+                for (const char* key : {"from", "to"}) {
+                    if (!t.contains(key) || !t[key].is_object()) continue;
+                    json& v = t[key];
+                    const glm::vec3 legacy(v.value("x", 0.0f), v.value("y", 0.0f), v.value("z", 0.0f));
+                    if (legacy == glm::vec3(0.0f)) continue;
+                    const glm::vec3 now =
+                        sage::ClosestEquivalentEuler(sage::EulerDegreesFromLegacyXYZ(legacy), own);
+                    v["x"] = now.x;
+                    v["y"] = now.y;
+                    v["z"] = now.z;
+                }
+            }
+        }
+    }
+}
+
 const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
     &MigrateV2toV3,
@@ -697,6 +725,7 @@ const MigrationFn kMigrations[] = {
     &MigrateV14toV15,
     &MigrateV15toV16,
     &MigrateV16toV17,
+    &MigrateV17toV18,
 };
 
 } // namespace

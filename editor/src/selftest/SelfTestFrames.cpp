@@ -65,6 +65,8 @@ void EditorLayer::CheckMultiWindowFrame() {
     const ImGuiWindow* back = ImGui::FindWindowByName("##redock_Profiler");
     const bool wayBack = back != nullptr && back->WasActive && back->Viewport != nullptr &&
                          back->Viewport->ID == ui->Viewport->ID;
+    // Пока окно панели живо — ввод и захват в нём (см. CheckDetachedWindowInput).
+    if (real) CheckDetachedWindowInput(ui->Viewport->PlatformHandle);
     // Убираем за собой: панель закрывается и возвращается в док, чтобы на
     // экране после проверки не осталось плавающего окна поверх вьюпорта.
     panelwindows::SetDetached("Profiler", false);

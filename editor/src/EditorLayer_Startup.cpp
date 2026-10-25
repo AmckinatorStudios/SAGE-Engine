@@ -1,6 +1,7 @@
 #include "sage/core/Problems.h"
 #include "sage/app/CoreSystems.h"
 #include "EditorLayer.h"
+#include "CursorCapture.h"
 #include "LuaPlugins.h"
 #include "PluginsWindow.h"
 #include "sage/scene/Signals.h"
@@ -173,6 +174,7 @@ void EditorLayer::InitImGui() {
     // применяет ту, что человек выбрал в прошлый раз, вместе с масштабом.
     EditorTheme::Init();
     ImGui_ImplGlfw_InitForOpenGL(app.GetWindow().Handle(), true);
+    cursorcapture::InstallViewportInput();
     ImGui_ImplOpenGL3_Init("#version 330");
     m_imguiReady = true;
 }

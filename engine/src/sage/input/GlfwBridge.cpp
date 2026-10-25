@@ -142,6 +142,13 @@ void GlfwBridge::Attach(Window& window, InputSystem& input) {
         m_input->Push(InputEvent::MouseMove(pos, delta));
     });
 
+    // Программный захват вернул курсор в центр: это не движение мыши, а
+    // новая точка отсчёта (см. Window::WarpToCentre).
+    window.SetCursorWarpCallback([this](double x, double y) {
+        m_lastCursor = glm::vec2((float)x, (float)y);
+        m_firstCursorEvent = false;
+    });
+
     window.SetScrollCallback([this](double, double yoffset) {
         m_input->Push(InputEvent::Wheeled((float)yoffset));
     });

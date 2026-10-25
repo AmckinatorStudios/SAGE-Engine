@@ -25,6 +25,7 @@
 #include "../Localization.h"
 #include "EditorIcons.h"
 #include "../EditorPrefs.h"
+#include "../CursorCapture.h"
 
 namespace {
 
@@ -386,13 +387,14 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     ImGuiIO& io = ImGui::GetIO();
     float dt = sage::Application::Get().DeltaTime();
     Camera& camera = host.EditorCamera();
+    const ImVec2 look = LookMouseDelta();   // в захвате io.MouseDelta — ноль (см. CursorCapture.h)
 
     // --- Камера: ПКМ — осмотр, ПКМ+WASDQE — полёт, Shift — ускорение ---
     bool rmb = ImGui::IsMouseDown(ImGuiMouseButton_Right);
     const bool wasDriving = m_cameraDriving;
     if (perspective && (hovered || m_cameraDriving) && rmb) {
         m_cameraDriving = true;
-        camera.ProcessMouse(io.MouseDelta.x, -io.MouseDelta.y);
+        camera.ProcessMouse(look.x, -look.y);
         float speed = camera.MovementSpeed * (io.KeyShift ? 3.0f : 1.0f) * dt;
         if (ImGui::IsKeyDown(ImGuiKey_W)) camera.Position += camera.Front * speed;
         if (ImGui::IsKeyDown(ImGuiKey_S)) camera.Position -= camera.Front * speed;
@@ -425,11 +427,11 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         m_cameraOrbiting = true;
         if (io.KeyShift) {
             const float perPixel = glm::length(camera.Position - m_orbitPivot) * 0.0015f;
-            const glm::vec3 shift = (-camera.Right * io.MouseDelta.x + camera.Up * io.MouseDelta.y) * perPixel;
+            const glm::vec3 shift = (-camera.Right * look.x + camera.Up * look.y) * perPixel;
             camera.Position += shift;
             m_orbitPivot += shift;
         } else {
-            camera.Orbit(m_orbitPivot, io.MouseDelta.x, -io.MouseDelta.y);
+            camera.Orbit(m_orbitPivot, look.x, -look.y);
         }
     } else {
         m_cameraOrbiting = false;
@@ -444,12 +446,9 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // монитора и камера просто перестаёт вращаться, хотя кнопка ещё зажата.
     // Развернуться на 360° приходилось в несколько приёмов. В захвате курсор
     // прячется и не имеет границ — движение мыши приходит как чистое смещение,
-    // и обзор становится непрерывным.
-    //
-    // Переключаем ТОЛЬКО на фронте, а не каждый кадр: SetCursorCaptured сам
-    // отсекает повтор, но и лишний вызов в кадре тут ни к чему.
+    // и обзор становится непрерывным. Переключаем только на фронте.
     if (cameraHeld != wasHeld) {
-        sage::Application::Get().GetWindow().SetCursorCaptured(cameraHeld);
+        cursorcapture::CaptureForCurrentWindow(cameraHeld);
         // Курсор возвращается ТУДА, ОТКУДА начали смотреть: иначе он всплывает
         // в центре экрана, и следующий клик уходит не по тому объекту.
         if (cameraHeld) m_captureReturnPos = ImGui::GetMousePos();

@@ -6,6 +6,30 @@
 
 #include "sage/core/Config.h"
 
+namespace sage {
+// КОГДА СИСТЕМНЫЙ ЗАХВАТ ПРИЗНАТЬ НЕРАБОЧИМ (режим CursorLockMode::Auto).
+//
+// Сброс захвата со стороны — обычное дело: alt-tab, потеря фокуса. Окно
+// возвращает его само (Window::PollEvents). Но если система сбрасывает его
+// снова и снова, пока окно В ФОКУСЕ, — она его не держит, и курсор гуляет
+// при спрятанной стрелке. Тогда до конца этого захвата берётся программный.
+// Отдельно от Window, чтобы правило проверялось тестом без окна.
+struct CursorLockWatch {
+    static constexpr int kLossLimit = 5;
+    int Losses = 0;
+    bool Tripped = false;
+    // Новый захват: счёт сбросов заново. Вердикт «система не держит» остаётся
+    // до смены настройки — на этой машине он не изменится от следующего клика.
+    void BeginCapture() { Losses = 0; }
+    void Reset() { Losses = 0; Tripped = false; }
+    // Кадр, в котором окно в фокусе нашло свой захват сброшенным.
+    void LostWhileFocused() { if (++Losses >= kLossLimit) Tripped = true; }
+    bool UseSoftware(CursorLockMode mode) const {
+        return mode == CursorLockMode::Software || (mode == CursorLockMode::Auto && Tripped);
+    }
+};
+} // namespace sage
+
 // Обёртка над GLFW-окном + графическим контекстом. Само окно — чисто оконная
 // система (GLFW): создание окна и контекста, обмен буферов, события. За загрузку
 // драйвера и любое состояние конвейера отвечает rhi::GraphicsDevice, а не Window
@@ -109,8 +133,47 @@ public:
     void SetCursorCaptured(bool captured);
     bool CursorCaptured() const { return m_cursorCaptured; }
 
+    // Способ захвата (см. sage::CursorLockMode). Меняется на лету: идущий
+    // захват переставляется сразу.
+    void SetCursorLockMode(sage::CursorLockMode mode);
+    sage::CursorLockMode CursorLockSetting() const { return m_lockMode; }
+    // Захват сейчас программный (режим Software или сработавший Auto).
+    bool SoftwareCursorLock() const { return m_lockWatch.UseSoftware(m_lockMode); }
+
+    // ОКНО, КОТОРОЕ ЗАХВАТЫВАЕТ КУРСОР. По умолчанию — своё (nullptr). Редактору
+    // нужно другое: панель Game или вьюпорт, вытащенные отдельным окном
+    // системы, живут в чужом GLFW-окне, и захват своего окна ничего не давал —
+    // мышь гуляла по окну панели. Окно должно быть живым; уничтожаемое
+    // сообщается через ForgetWindow ДО уничтожения.
+    void SetCursorCaptureTarget(GLFWwindow* target);
+    GLFWwindow* CursorCaptureTarget() const { return m_captureTarget ? m_captureTarget : m_handle; }
+    // Окно системы вот-вот уничтожат (закрылся вьюпорт интерфейса): забыть его.
+    void ForgetWindow(GLFWwindow* handle);
+
+    // СМЕЩЕНИЕ КУРСОРА ЗА КАДР (с последнего PollEvents), в пикселях окна, Y вниз.
+    // Пока курсор захвачен, это единственное честное смещение: положение мыши
+    // интерфейса редактора в захвате держится на месте (см.
+    // EditorLayer::PinMouseWhileCaptured), и его разница — ноль.
+    double FrameCursorDeltaX() const { return m_frameDx; }
+    double FrameCursorDeltaY() const { return m_frameDy; }
+
+    // Курсор вернули в точку (x, y) — программный захват. Подписчик, считающий
+    // смещение по разнице положений (GlfwBridge), обязан взять её точкой отсчёта:
+    // иначе возврат в центр пришёл бы ему рывком обзора назад.
+    using CursorWarpFn = std::function<void(double x, double y)>;
+    void SetCursorWarpCallback(CursorWarpFn fn) { m_cursorWarpFn = std::move(fn); }
+
+    // События, пришедшие от ДРУГИХ окон системы этого приложения (окна
+    // панелей редактора), доставляются подписчикам этого окна, как свои.
+    // Поэтому они публичны: их зовёт и статический переходник GLFW, и проверка.
+    void EmitCursorPos(double x, double y);
+    void EmitKey(int key, int action, int mods);
+
 private:
     void ApplyCursorMode();
+    void ApplyCursorModeTo(GLFWwindow* target, bool captured);
+    void WarpToCentre();
+    static Window* Owner(GLFWwindow* handle);
     static void ForwardCursorPos(GLFWwindow* handle, double x, double y);
     static void ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset);
     static void ForwardChar(GLFWwindow* handle, unsigned int codepoint);
@@ -130,4 +193,12 @@ private:
     FileDropFn m_fileDropFn;
     CursorEnterFn m_cursorEnterFn;
     bool m_cursorCaptured = false;
+    sage::CursorLockMode m_lockMode = sage::CursorLockMode::Auto;
+    sage::CursorLockWatch m_lockWatch;
+    GLFWwindow* m_captureTarget = nullptr;
+    CursorWarpFn m_cursorWarpFn;
+    // Смещение за кадр: последнее положение и накопленное с PollEvents.
+    double m_lastX = 0.0, m_lastY = 0.0;
+    bool m_haveLast = false;
+    double m_frameDx = 0.0, m_frameDy = 0.0;
 };
