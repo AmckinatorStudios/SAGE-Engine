@@ -1138,7 +1138,8 @@ void PlayerLayer::OnRender() {
             // Число сэмплов — по конфигу и той же функцией, что у редактора:
             // MSAA работает на буфере СЦЕНЫ (в нём растеризуется геометрия), а
             // не на экранном, куда уходит уже готовая картинка.
-            EnsureFramebuffer(m_sceneFbo, vpW, vpH, sage::render::SceneSamples(cfg));
+            EnsureFramebuffer(m_sceneFbo, vpW, vpH, sage::render::SceneSamples(cfg),
+                              sage::render::SceneWantsGBuffer(cfg));
             m_sceneFbo->Bind();
             device.SetViewport(0, 0, vpW, vpH);
         } else if (vpX != 0 || vpY != 0) {
@@ -1237,6 +1238,7 @@ void PlayerLayer::OnRender() {
             device.Clear();
             // Солнце — звену «Lens Flare» (блик — часть тракта камеры).
             m_postfx->SetLighting(&env);
+            m_postfx->SetGBuffer(m_sceneFbo->AlbedoTexture(), m_sceneFbo->NormalTexture());
             m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
                              m_sceneFbo->Width(), m_sceneFbo->Height(), proj, view,
                              cameraChain,

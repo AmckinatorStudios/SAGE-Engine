@@ -12,6 +12,7 @@
 #include "sage/render/LodGroup.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/Reflection.h"
+#include "sage/render/LightClusters.h"
 
 class Scene;
 struct LightingEnvironment;
@@ -104,6 +105,9 @@ public:
     // Статистика последнего кадра. Возвращаемое значение RenderColor снимается
     // ДО прохода проверки перекрытия и поэтому не содержит его счётчиков.
     const RenderStats& Stats() const { return m_stats; }
+    // Кластерный свет последнего RenderColor — его же получают скелетные
+    // модели того же вида (ScenePasses::RenderSceneColor).
+    const sage::render::LightClusters& Clusters() const { return m_clusters; }
 
     // Включить/выключить проверку перекрытия. Выключенная не стоит ничего:
     // запросы не создаются, коробки не рисуются.
@@ -368,6 +372,8 @@ private:
     unsigned long long m_frameIndex = 0;
 
     RenderStats m_stats;
+    // Источники последнего цветного прохода по ячейкам его вида.
+    sage::render::LightClusters m_clusters;
 };
 
 } // namespace sage::ecs

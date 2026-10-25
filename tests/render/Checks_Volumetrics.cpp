@@ -283,6 +283,123 @@ void TestHistoryIsPerView(sage::render::Volumetrics& vol, Scene& scene) {
           "история принадлежит виду: чужое накопление в новое окно не течёт");
 }
 
+// Кадр объёма в своём буфере заданного размера — для проверок, где сцена не
+// нужна (дымка до дальней плоскости, облака в небе).
+Image RenderEmptyVolume(sage::render::Volumetrics& vol, const LightingEnvironment& env,
+                        const sage::render::VolumetricSettings& s, int w, int h,
+                        const glm::mat4& view, const glm::mat4& proj, const glm::vec3& eye,
+                        int viewId, int frames = 1) {
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    Framebuffer fbo(w, h);
+    Image last;
+    for (int f = 0; f < frames; ++f) {
+        fbo.Bind();
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear(true, true);
+        vol.Render(fbo, fbo.DepthTexture(), w, h, proj, view, eye, env, ShadowBinding(), s, 0.0f, viewId);
+        fbo.Bind();
+        last = Capture(w, h);
+    }
+    return last;
+}
+
+// Окна РАЗНОГО размера в одном кадре — как вьюпорт и панель Game. Раньше
+// буферы прохода были общими, смена размера сбрасывала историю всех окон, и
+// накопление не доживало ни до одного смешивания.
+void TestHistorySurvivesOtherWindowSize(sage::render::Volumetrics& vol, Scene& scene) {
+    const LightingEnvironment env = sage::ecs::CollectLighting(scene);
+    sage::render::VolumetricSettings s = ShaftSettings();
+    vol.ResetHistory();
+    RenderEmptyVolume(vol, env, s, 96, 64, TestView(), PerspectiveProj(), kEye, /*viewId=*/11);
+    RenderEmptyVolume(vol, env, s, 64, 40, TestView(), PerspectiveProj(), kEye, /*viewId=*/12);
+    const bool survived = vol.HistoryValid(11);
+    std::printf("    история окна 96x64 после окна 64x40: %s\n", survived ? "цела" : "сброшена");
+    Check(survived, "накопление окна переживает кадр другого окна другого размера");
+}
+
+// Ортокамера смотрит на плоскость отвесно: путь каждого луча до неё одинаков,
+// и дымка обязана лечь РОВНО. Пока лучи шли из точки камеры веером, у края
+// кадра они шли наискось и набирали больше дымки — кадр светлел к краям.
+void TestOrthoHazeIsEven(sage::render::Volumetrics& vol) {
+    Scene scene("OrthoHaze");
+    scene.Lighting.Sun.Direction = glm::normalize(glm::vec3(0.0f, -1.0f, 0.0f));
+    scene.Lighting.Sun.Intensity = 4.0f;
+    // Пол обязателен: без него луч любого пикселя идёт до дальности марша, и
+    // разница «из камеры / с ближней плоскости» в длине пути не видна.
+    GameObject ground = scene.CreateObject("Ground");
+    ground.GetTransform().Position = {0.0f, -0.5f, 0.0f};
+    ground.GetTransform().Scale = {200.0f, 1.0f, 200.0f};
+    ground.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+    ground.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+    const LightingEnvironment env = sage::ecs::CollectLighting(scene);
+    sage::render::VolumetricSettings s = ShaftSettings();
+    s.Temporal = false;
+    s.Steps = 64;
+    s.HeightFalloff = 0.0f;
+    s.Density = 0.03f;
+    s.Intensity = 3.0f;
+    s.MaxDistance = 40.0f;
+    const int w = 96, h = 64;
+    const glm::vec3 eye(0.0f, 20.0f, 0.0f);
+    const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.0f), glm::vec3(0, 0, -1));
+    const glm::mat4 proj = glm::ortho(-30.0f, 30.0f, -20.0f, 20.0f, 0.5f, 20.0f);
+    vol.ResetHistory();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    Framebuffer fbo(w, h);
+    fbo.Bind();
+    device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    device.Clear(true, true);
+    sage::ecs::RenderBatch batch;
+    batch.RenderColor(scene, view, proj, eye, env, ShadowBinding(), 0);
+    fbo.Bind();
+    device.Clear(true, false);   // цвет гасим, глубину пола оставляем
+    vol.Render(fbo, fbo.DepthTexture(), w, h, proj, view, eye, env, ShadowBinding(), s, 0.0f, 13);
+    fbo.Bind();
+    const Image img = Capture(w, h);
+    auto column = [&](int x0) {
+        double sum = 0.0;
+        for (int y = 0; y < h; ++y)
+            for (int x = x0; x < x0 + 8; ++x) sum += img.Pixels[((size_t)y * w + x) * 3 + 1];
+        return sum / (h * 8.0);
+    };
+    const double edge = column(0), centre = column(w / 2 - 4);
+    std::printf("    дымка в ортографии: у края %.1f, в центре %.1f\n", edge, centre);
+    Check(centre > 2.0 && std::abs(edge - centre) < centre * 0.1,
+          "в ортографии дымка ложится ровно (лучи параллельны, а не веером из камеры)");
+}
+
+// Ночью облака не светятся днём: их подсвечивает небо ТЕКУЩЕГО часа. Раньше
+// бралось дневное «Sky Color» из настроек окружения и цвет тумана — и облака
+// сияли голубым поверх чёрного ночного неба.
+void TestNightCloudsAreDark(sage::render::Volumetrics& vol) {
+    LightingEnvironment env;
+    env.Sun.Intensity = 0.0f;
+    env.SkyColor = {1.0f, 1.0f, 1.0f};
+    env.Fog.Color = {1.0f, 1.0f, 1.0f};
+    env.SkyResolved = true;
+    env.SkyTopNow = {0.0f, 0.0f, 0.0f};
+    env.SkyHorizonNow = {0.0f, 0.0f, 0.0f};
+    sage::render::VolumetricSettings s;
+    s.Enabled = true;
+    s.LightShafts = false;
+    s.Clouds = true;
+    s.Coverage = 0.9f;
+    s.Temporal = false;
+    const int w = 96, h = 64;
+    const glm::vec3 eye(0.0f, 2.0f, 0.0f);
+    const glm::mat4 view = glm::lookAt(eye, eye + glm::vec3(0.0f, 1.0f, -0.4f), glm::vec3(0, 0, -1));
+    const glm::mat4 proj = glm::perspective(glm::radians(70.0f), (float)w / (float)h, 0.1f, 5000.0f);
+    vol.ResetHistory();
+    const Image night = RenderEmptyVolume(vol, env, s, w, h, view, proj, eye, /*viewId=*/14);
+    env.SkyTopNow = {0.4f, 0.6f, 1.0f};
+    env.SkyHorizonNow = {0.7f, 0.8f, 1.0f};
+    vol.ResetHistory();
+    const Image day = RenderEmptyVolume(vol, env, s, w, h, view, proj, eye, /*viewId=*/14);
+    const double n = MeanBrightness(night, 0, h), d = MeanBrightness(day, 0, h);
+    std::printf("    облака под ночным небом %.1f, под дневным %.1f\n", n, d);
+    Check(d > 3.0 && n < d * 0.2, "ночью облака не подсвечены дневным небом");
+}
+
 } // namespace
 
 void RunVolumetricChecks() {
@@ -294,6 +411,9 @@ void RunVolumetricChecks() {
     TestTemporalRemovesGrain(vol, *scene);
     TestFullResIsSharp(vol, *scene);
     TestHistoryIsPerView(vol, *scene);
+    TestHistorySurvivesOtherWindowSize(vol, *scene);
+    TestOrthoHazeIsEven(vol);
+    TestNightCloudsAreDark(vol);
 }
 
 } // namespace sage::rendertest

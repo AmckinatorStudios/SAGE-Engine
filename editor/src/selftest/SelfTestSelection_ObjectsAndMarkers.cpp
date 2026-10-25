@@ -316,20 +316,23 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
             }
         }
 
-        // Три типа света — ТРИ РАЗНЫХ значка.
+        // Четыре типа света — ЧЕТЫРЕ РАЗНЫХ значка.
         if (ok) {
-            std::string sun, point, spot;
-            for (const char* id : {"light.sun", "light.point", "light.spot"}) {
+            std::string sun, point, spot, area;
+            for (const char* id : {"light.sun", "light.point", "light.spot", "light.area"}) {
                 GameObject light = m_scene->Get(CreateCatalogObject(id));
                 if (!light.Valid()) { ok = false; break; }
                 const std::string icon = iconOf(light);
                 if (std::string(id) == "light.sun") sun = icon;
                 else if (std::string(id) == "light.point") point = icon;
-                else spot = icon;
+                else if (std::string(id) == "light.spot") spot = icon;
+                else area = icon;
             }
-            if (ok && (sun == point || point == spot || sun == spot)) {
+            const std::set<std::string> distinct{sun, point, spot, area};
+            if (ok && distinct.size() != 4) {
                 LOG_ERROR("Editor") << "SELFTEST: типы света неразличимы по значку: солнце '" << sun
-                                    << "', точечный '" << point << "', прожектор '" << spot << "'";
+                                    << "', точечный '" << point << "', прожектор '" << spot
+                                    << "', площадной '" << area << "'";
                 ok = false;
             }
             // И камера — своим значком, а не общим.

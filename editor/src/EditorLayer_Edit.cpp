@@ -331,6 +331,9 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
          {0.0f, 5.0f, 0.0f}, {-90.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}, 4.0f},
         {"light.sun", "Sun", LightComponent::Type::Directional,
          {0.0f, 10.0f, 0.0f}, {-55.0f, -25.0f, 0.0f}, {1.0f, 0.95f, 0.85f}, 1.0f},
+        // Панель над полом лицом вниз — как светильник на потолке.
+        {"light.area", "Area Light", LightComponent::Type::Area,
+         {0.0f, 3.0f, 0.0f}, {-90.0f, 0.0f, 0.0f}, {1.0f, 0.97f, 0.92f}, 4.0f},
     };
     for (const LightEntry& l : kLights) {
         if (id != l.Id) continue;

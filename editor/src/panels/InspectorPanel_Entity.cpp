@@ -382,9 +382,9 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     if (reg.all_of<LightComponent>(obj.Entity()) && EditorTheme::SectionHeader("light", T("Light" "###Light"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Light)) {
         if (LightComponent* light = reg.try_get<LightComponent>(obj.Entity())) {
-            const char* types[] = {T("Point"), T("Spot"), T("Directional (sun)")};
+            const char* types[] = {T("Point"), T("Spot"), T("Directional (sun)"), T("Area (panel)")};
             int kind = (int)light->Kind;
-            if (ImGui::Combo(T("Type"), &kind, types, 3)) {
+            if (ImGui::Combo(T("Type"), &kind, types, IM_ARRAYSIZE(types))) {
                 host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
                 light->Kind = (LightComponent::Type)kind;
             }
@@ -405,9 +405,19 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 // «выворачивается»): подтягиваем внешний до внутреннего.
                 if (light->OuterConeDeg < light->InnerConeDeg) light->OuterConeDeg = light->InnerConeDeg;
             }
-            if (ImGui::Checkbox(T("Casts shadows"), &light->CastShadows)) host.PushUndoSnapshot();
+            const bool area = light->Kind == LightComponent::Type::Area;
+            if (area) {
+                ImGui::DragFloat(T("Width"), &light->AreaWidth, 0.02f, 0.05f, 50.0f); host.TrackLastImGuiItem();
+                ImGui::DragFloat(T("Height"), &light->AreaHeight, 0.02f, 0.05f, 50.0f); host.TrackLastImGuiItem();
+            } else {
+                // Тени у площадного нет — и галочки нет: она бы ничего не делала.
+                if (ImGui::Checkbox(T("Casts shadows"), &light->CastShadows)) host.PushUndoSnapshot();
+            }
             if (directional) {
                 DrawSunSection(host, obj);
+            } else if (area) {
+                HintWrapped(T("A glowing panel facing the object's forward (-Z): window, screen, softbox. "
+                              "Highlights on glossy surfaces take its shape. It casts no shadow."));
             } else if (light->Kind == LightComponent::Type::Spot) {
                 HintWrapped(T("The cone shines along the object's forward (-Z of its rotation). "
                               "Its shadow is a separate map in the atlas: there are few, and they "

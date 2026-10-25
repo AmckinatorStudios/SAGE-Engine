@@ -543,3 +543,13 @@ TEST(CursorLock_auto_switches_to_software_only_after_repeated_losses) {
     w.Reset();
     CHECK_TRUE(!w.UseSoftware(sage::CursorLockMode::Auto));
 }
+
+TEST(CursorLock_software_recentres_only_when_the_cursor_wandered_far) {
+    // Неизвестное положение — сразу в центр; рядом с центром — не трогать
+    // (возврат — обращение к системе); дальше четверти окна — вернуть.
+    CHECK_TRUE(sage::CursorNeedsRecentre(false, 0, 0, 800, 600));
+    CHECK_TRUE(!sage::CursorNeedsRecentre(true, 400, 300, 800, 600));
+    CHECK_TRUE(!sage::CursorNeedsRecentre(true, 400 + 140, 300, 800, 600));
+    CHECK_TRUE(sage::CursorNeedsRecentre(true, 400 + 160, 300, 800, 600));
+    CHECK_TRUE(!sage::CursorNeedsRecentre(true, 5, 5, 0, 0));   // свёрнутое окно
+}

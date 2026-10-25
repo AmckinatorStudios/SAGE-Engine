@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2816.
+// Язык: Русский. Строк: 2820.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -192,6 +192,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Папка с шестью гранями px/nx/py/ny/pz/nz"},
     {"A full-screen backing: a menu, a pause, a dimmer",
      "Подложка во весь экран: меню, пауза, затемнение"},
+    {"A glowing panel facing the object's forward (-Z): window, screen, softbox. Highlights on glossy surfaces take its shape. It casts no shadow.",
+     "Светящаяся панель, обращённая туда, куда смотрит объект (-Z): окно, экран, софтбокс. Блик на глянце повторяет её форму. Тени не отбрасывает."},
     {"A gradient with sun, moon, stars and clouds — no files",
      "Градиент с солнцем, луной, звёздами и облаками — без файлов"},
     {"A group of actions that work at the same time: the game, the inventory, a dialogue.",
@@ -500,6 +502,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Применить к выбранному"},
     {"Arc",
      "Дуга"},
+    {"Area (panel)",
+     "Площадной (панель)"},
+    {"Area light",
+     "Площадной свет"},
     {"Argument",
      "Аргумент"},
     {"Around the element centre. The handle above the top edge\ndoes the same with the mouse.",
@@ -2148,6 +2154,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Глобальное освещение (экранное)"},
     {"Glow",
      "Ореол"},
+    {"Glowing panel: window, screen, softbox — soft light and shaped highlights",
+     "Светящаяся панель: окно, экран, софтбокс — мягкий свет и блик её формы"},
     {"Glows in all directions: lamp, fire, torch",
      "Светит во все стороны: лампа, костёр, факел"},
     {"Gradient",

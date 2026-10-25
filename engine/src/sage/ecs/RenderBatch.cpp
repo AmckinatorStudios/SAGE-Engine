@@ -92,7 +92,10 @@ in float vRoughness;
 in vec2 vUV2;
 in float vAlpha;
 in float vPlanar;
-out vec4 FragColor;
+layout(location = 0) out vec4 FragColor;
+// Тонкий G-буфер (см. rhi::RenderTargetDesc::GBuffer) — экранному GI.
+layout(location = 1) out vec4 oGAlbedo;
+layout(location = 2) out vec4 oGNormal;
 
 // Лайтмапа GI текущей группы (uLightmapEnabled — группа запечена).
 uniform bool uLightmapEnabled;
@@ -100,6 +103,8 @@ uniform sampler2D uLightmap;
 )") + kPbrSharedGlsl + R"(
 void main() {
     vec3 N = normalize(Normal);
+    oGAlbedo = vec4(clamp(vColor, 0.0, 1.0), 1.0);
+    oGNormal = vec4(N * 0.5 + 0.5, 1.0);
     if (uShadingMode != 0) {
         vec4 dbg;
         if (DebugShade(uShadingMode, N, FragPos, vColor, vMetallic, vRoughness, 1.0, vEmissive,
@@ -480,6 +485,11 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     sage::gi::GIState* gi = scene.GI && scene.GI->Baked ? scene.GI.get() : nullptr;
     sage::gi::GIState* giVolume = scene.GI ? scene.GI.get() : nullptr; // объём проб живёт и без лайтмап
 
+    // Источники кадра — по ячейкам ЭТОГО вида (render/LightClusters.h).
+    // Строится на каждый цветной проход: у куба отражений, зеркала и панели
+    // Game своя пирамида взгляда.
+    m_clusters.Build(env, view, proj);
+
     auto setupCommon = [&](Shader& sh) {
         sh.Use();
         sh.SetMat4("uView", view);
@@ -487,6 +497,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         sh.SetVec3("uViewPos", viewPos);
         sh.SetInt("uShadingMode", shadingMode);
         UploadLighting(sh, env);
+        m_clusters.Upload(sh);
         // GI-объём проб (или выключение) + юниты сэмплеров GI (обязательны
         // всегда — см. SetGISamplerUnits).
         sage::gi::UploadGIVolume(sh, giVolume);
@@ -599,6 +610,11 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     // поднимает смешивание сам и сам же его снимает.
     device.SetBlend(false);
 
+    // Проходы 1–2 пишут и тонкий G-буфер (альбедо, нормаль) — если он есть у
+    // буфера кадра. Только они: свой шейдер материала (3) и полупрозрачные (4)
+    // G-буфер не пишут, и включённая запись оставила бы в нём мусор.
+    device.SetGBufferWrites(true);
+
     // 1. Flat-инстансный проход.
     Shader& lit = LitShader();
     setupCommon(lit);
@@ -673,6 +689,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     // стандартных юниформ, что и штатный путь (камера, свет, тени, GI), плюс
     // uTime и свои параметры — контракт описан в docs/custom_shaders.md.
     // Непрозрачные — здесь; полупрозрачные ждут прохода 4 (см. ниже).
+    device.SetGBufferWrites(false);
     for (auto& kv : m_custom) {
         if (kv.second.Instances.empty() || kv.second.Transparent) continue;
         drawCustom(*kv.first.Program, *kv.first.Mesh_, kv.first.Submesh, kv.first.Probe, kv.second);

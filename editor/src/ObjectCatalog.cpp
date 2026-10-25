@@ -35,6 +35,7 @@ Group Catalog() {
              {"light.point", T("Point light"), T("Glows in all directions: lamp, fire, torch")},
              {"light.spot",  T("Spotlight"),   T("Cone of light: flashlight, street lamp")},
              {"light.sun",   T("Sun"),         T("Parallel light for the whole scene, casts the main shadows")},
+             {"light.area",  T("Area light"),  T("Glowing panel: window, screen, softbox — soft light and shaped highlights")},
          },
          {}},
 
@@ -129,6 +130,7 @@ const char* IconForId(const char* id) {
     static const Row kExact[] = {
         {"shape.sphere", "sphere"},   {"shape.cone", "cone"},
         {"light.sun", "sun"},         {"light.point", "light"}, {"light.spot", "cone"},
+        {"light.area", "ui-panel"},
         {"fx.probe", "probe"},        {"fx.decal", "texture"},
         {"ui.Panel", "ui-panel"},     {"ui.Button", "ui-button"},
         {"ui.Label", "ui-text"},      {"ui.Image", "ui-image"},

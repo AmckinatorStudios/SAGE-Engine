@@ -457,7 +457,7 @@ bool EditorLayer::SelfTestSceneBasics() {
             // Оба GI-объекта видимы и нарисованы уникальными мешами с UV2;
             // GPU-ресурсы (страница атласа, 3D-объём) создались лениво.
             bool giDrawn = st.Drawn >= 2;
-            bool giGpu = giState->Pages[0].Gpu != nullptr && giState->Probes.GpuR != nullptr;
+            bool giGpu = giState->Pages[0].Gpu != nullptr && giState->Probes.Gpu != nullptr;
             if (!giDrawn || !giGpu) {
                 LOG_ERROR("Editor") << "SELFTEST: GI render failed (drawn " << st.Drawn
                                     << ", gpu " << giGpu << ")";

@@ -18,6 +18,7 @@ public:
     void SetClearColor(float r, float g, float b, float a) override;
     void Clear(bool color = true, bool depth = true) override;
     void BindDefaultFramebuffer() override;
+    void SetGBufferWrites(bool on) override;
 
     void SetBlend(bool enabled) override;
     bool BlendEnabled() const override;

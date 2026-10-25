@@ -11,11 +11,11 @@
 // и пр.); сам бейк и сериализация к GPU не прикасаются.
 //
 // Юниты текстур GI фиксированы и не пересекаются с материальными (0..5 у
-// текстурного PBR-пути): 6/7/8 — 3D-объём проб (R/G/B), 9 — лайтмапа.
+// текстурного PBR-пути): 6 — 3D-объём проб (три канала слоями), 9 — лайтмапа.
 // ---------------------------------------------------------------------------
 namespace sage::gi {
 
-constexpr int kGIVolumeUnitR = 6; // затем G=7, B=8
+constexpr int kGIVolumeUnit = 6;
 constexpr int kLightmapUnit = 9;
 
 // GPU-меш сущности с лайтмап-UV (создаётся при первом рендере после бейка).
@@ -42,23 +42,22 @@ inline void EnsureLightmapGpu(LightmapPage& p) {
     p.Gpu = sage::rhi::GraphicsDevice::Get().CreateTexture2D(d, p.Texels.data());
 }
 
-// 3D-текстуры объёма проб (три канала по vec4 гармоник).
+// 3D-текстура объёма проб: по глубине три слоя — R, G, B (каждый Dims.z
+// срезов, в текселе vec4 гармоник канала). Слои не смешиваются при выборке:
+// шейдер берёт z строго между центрами крайних срезов слоя (EvalGIVolume).
 inline void EnsureVolumeGpu(ProbeVolume& v) {
-    if (v.GpuR || !v.Valid() || v.Probes.empty()) return;
+    if (v.Gpu || !v.Valid() || v.Probes.empty()) return;
     const size_t n = v.Probes.size();
-    std::vector<glm::vec4> r(n), g(n), b(n);
+    std::vector<glm::vec4> rgb(n * 3);
     for (size_t i = 0; i < n; ++i) {
-        r[i] = v.Probes[i].R;
-        g[i] = v.Probes[i].G;
-        b[i] = v.Probes[i].B;
+        rgb[i] = v.Probes[i].R;
+        rgb[n + i] = v.Probes[i].G;
+        rgb[2 * n + i] = v.Probes[i].B;
     }
     sage::rhi::Texture3DDesc d;
-    d.Width = v.Dims.x; d.Height = v.Dims.y; d.Depth = v.Dims.z;
+    d.Width = v.Dims.x; d.Height = v.Dims.y; d.Depth = v.Dims.z * 3;
     d.Channels = 4;
-    auto& dev = sage::rhi::GraphicsDevice::Get();
-    v.GpuR = dev.CreateTexture3D(d, (const float*)r.data());
-    v.GpuG = dev.CreateTexture3D(d, (const float*)g.data());
-    v.GpuB = dev.CreateTexture3D(d, (const float*)b.data());
+    v.Gpu = sage::rhi::GraphicsDevice::Get().CreateTexture3D(d, (const float*)rgb.data());
 }
 
 // Назначает шейдеру юниты сэмплеров GI. ОБЯЗАТЕЛЬНО для каждого шейдера с
@@ -66,9 +65,7 @@ inline void EnsureVolumeGpu(ProbeVolume& v) {
 // юните 0 вместе с sampler2D материала — конфликт типов на одном юните
 // (GL_INVALID_OPERATION на части драйверов).
 inline void SetGISamplerUnits(Shader& sh) {
-    sh.SetInt("uGIVolR", kGIVolumeUnitR);
-    sh.SetInt("uGIVolG", kGIVolumeUnitR + 1);
-    sh.SetInt("uGIVolB", kGIVolumeUnitR + 2);
+    sh.SetInt("uGIVol", kGIVolumeUnit);
     sh.SetInt("uLightmap", kLightmapUnit);
 }
 
@@ -78,13 +75,11 @@ inline void UploadGIVolume(Shader& sh, GIState* gi) {
     SetGISamplerUnits(sh);
     ProbeVolume* vol = (gi && gi->Probes.Valid() && !gi->Probes.Probes.empty()) ? &gi->Probes : nullptr;
     if (vol) EnsureVolumeGpu(*vol);
-    if (!vol || !vol->GpuR) {
+    if (!vol || !vol->Gpu) {
         sh.SetInt("uGIVolumeEnabled", 0);
         return;
     }
-    vol->GpuR->Bind(kGIVolumeUnitR);
-    vol->GpuG->Bind(kGIVolumeUnitR + 1);
-    vol->GpuB->Bind(kGIVolumeUnitR + 2);
+    vol->Gpu->Bind(kGIVolumeUnit);
     sh.SetInt("uGIVolumeEnabled", 1);
     sh.SetVec3("uGIVolMin", vol->Min);
     glm::vec3 extent = vol->CellSize * glm::vec3(vol->Dims - glm::ivec3(1));

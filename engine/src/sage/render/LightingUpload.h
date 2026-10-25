@@ -19,6 +19,12 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
     shader.SetVec3("uAmbientGround", ambientGround);
     shader.SetFloat("uAmbientStrength", env.AmbientStrength);
 
+    // Кластерный список включает тот, кто его построил для своего вида
+    // (render/LightClusters.h); по умолчанию — массивы ниже. Юнит сэмплера
+    // ставится всегда: иначе он остался бы на нулевом, вместе с albedo.
+    shader.SetInt("uClustered", 0);
+    shader.SetInt("uLightGrid", 7);   // sage::render::kLightClusterUnit
+
     shader.SetVec3("uSunDir", env.Sun.Direction);
     shader.SetVec3("uSunColor", env.Sun.Color);
     shader.SetFloat("uSunIntensity", env.Sun.Intensity);

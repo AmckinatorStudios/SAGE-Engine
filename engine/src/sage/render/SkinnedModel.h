@@ -12,6 +12,8 @@
 #include "sage/rhi/Resources.h"
 
 struct LightingEnvironment; // sage/scene/Light.h — вперёд, чтобы не тянуть весь заголовок
+namespace sage::render { class LightClusters; }
+namespace sage::gi { struct GIState; }
 
 // ---------------------------------------------------------------------------
 // SkinnedModel — анимируемая скелетная модель: геометрия с весами костей +
@@ -208,7 +210,9 @@ public:
               const ShadowBinding& shadows,
               const sage::render::ReflectionBinding* reflections = nullptr,
               const std::vector<float>* morphWeights = nullptr,
-              int shadingMode = 0) const;
+              int shadingMode = 0,
+              const sage::render::LightClusters* clusters = nullptr,
+              sage::gi::GIState* gi = nullptr) const;
 
     // Рисует геометрию ТОЛЬКО в глубину для карты теней, со скиннингом в текущей
     // позе — чтобы анимированная модель ОТБРАСЫВАЛА тень. Вызывается внутри

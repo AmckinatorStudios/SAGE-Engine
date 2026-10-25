@@ -398,9 +398,12 @@ void RegisterObject(Backend& backend) {
             LightComponent& l = reg.get_or_emplace<LightComponent>(e);
             const std::string type = str("type", "point");
             l.Kind = type == "spot" ? LightComponent::Type::Spot
-                   : type == "directional" ? LightComponent::Type::Directional : LightComponent::Type::Point;
+                   : type == "directional" ? LightComponent::Type::Directional
+                   : type == "area" ? LightComponent::Type::Area : LightComponent::Type::Point;
             l.Intensity = num("intensity", l.Intensity);
             l.Range = num("range", l.Range);
+            l.AreaWidth = num("width", l.AreaWidth);
+            l.AreaHeight = num("height", l.AreaHeight);
             if (opts) {
                 sol::object c = (*opts)["color"];
                 if (c.is<glm::vec3>()) l.Color = c.as<glm::vec3>();

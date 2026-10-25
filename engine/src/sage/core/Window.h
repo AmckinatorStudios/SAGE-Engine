@@ -28,6 +28,20 @@ struct CursorLockWatch {
         return mode == CursorLockMode::Software || (mode == CursorLockMode::Auto && Tripped);
     }
 };
+
+// ВЕРНУТЬ ЛИ КУРСОР В ЦЕНТР (программный захват). Не каждый кадр: возврат —
+// обращение к оконной системе, а нужен он только тогда, когда курсор отъехал
+// настолько, что следующий рывок мыши мог бы вынести его за край окна. Порог —
+// четверть меньшей стороны окна: за кадр (16 мс) так далеко мышь не уезжает
+// даже при резком развороте. Неизвестное положение (только что захватили,
+// курсор вошёл в окно) — возвращаем сразу.
+inline bool CursorNeedsRecentre(bool known, double x, double y, int w, int h) {
+    if (w <= 0 || h <= 0) return false;
+    if (!known) return true;
+    const double limit = 0.25 * (w < h ? w : h);
+    const double dx = x - w * 0.5, dy = y - h * 0.5;
+    return dx * dx + dy * dy > limit * limit;
+}
 } // namespace sage
 
 // Обёртка над GLFW-окном + графическим контекстом. Само окно — чисто оконная
@@ -173,6 +187,7 @@ private:
     void ApplyCursorMode();
     void ApplyCursorModeTo(GLFWwindow* target, bool captured);
     void WarpToCentre();
+    void TargetWindowSize(GLFWwindow* target, int* w, int* h) const;
     static Window* Owner(GLFWwindow* handle);
     static void ForwardCursorPos(GLFWwindow* handle, double x, double y);
     static void ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset);
@@ -201,4 +216,5 @@ private:
     double m_lastX = 0.0, m_lastY = 0.0;
     bool m_haveLast = false;
     double m_frameDx = 0.0, m_frameDy = 0.0;
+    int m_winW = 0, m_winH = 0;   // размер окна в координатах курсора
 };

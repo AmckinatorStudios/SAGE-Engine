@@ -467,6 +467,7 @@ static const char* LightTypeToString(LightComponent::Type kind) {
     switch (kind) {
         case LightComponent::Type::Spot: return "spot";
         case LightComponent::Type::Directional: return "directional";
+        case LightComponent::Type::Area: return "area";
         default: return "point";
     }
 }
@@ -474,6 +475,7 @@ static const char* LightTypeToString(LightComponent::Type kind) {
 static LightComponent::Type LightTypeFromString(const std::string& text) {
     if (text == "spot") return LightComponent::Type::Spot;
     if (text == "directional") return LightComponent::Type::Directional;
+    if (text == "area") return LightComponent::Type::Area;
     return LightComponent::Type::Point;
 }
 
@@ -504,6 +506,10 @@ static void SaveLight(json& j, const LightComponent& light) {
     j["light"]["innerCone"] = light.InnerConeDeg;
     j["light"]["outerCone"] = light.OuterConeDeg;
     j["light"]["castShadows"] = light.CastShadows;
+    if (light.Kind == LightComponent::Type::Area) {
+        j["light"]["width"] = light.AreaWidth;
+        j["light"]["height"] = light.AreaHeight;
+    }
 }
 
 static LightComponent ParseLight(const json& lj) {
@@ -515,6 +521,8 @@ static LightComponent ParseLight(const json& lj) {
     light.InnerConeDeg = lj.value("innerCone", light.InnerConeDeg);
     light.OuterConeDeg = lj.value("outerCone", light.OuterConeDeg);
     light.CastShadows = lj.value("castShadows", light.CastShadows);
+    light.AreaWidth = lj.value("width", light.AreaWidth);
+    light.AreaHeight = lj.value("height", light.AreaHeight);
     return light;
 }
 

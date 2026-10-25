@@ -65,11 +65,14 @@ public:
     ~GLTexture2D() override;
 
     void Bind(int unit) const override;
+    bool Update(const void* pixels) override;
     sage::rhi::TextureHandle Handle() const override { return {m_id}; }
     uint64_t NativeHandle() const override { return m_id; }
 
 private:
     unsigned int m_id = 0;
+    int m_width = 0, m_height = 0;
+    unsigned int m_format = 0, m_type = 0;   // как заливались пиксели (для Update)
 };
 
 class GLTexture3D : public Texture3D {
@@ -129,7 +132,15 @@ public:
     int Height() const override { return m_height; }
     sage::rhi::TextureHandle ColorTextureHandle() const override { return {m_colorTex}; }
     sage::rhi::TextureHandle DepthTextureHandle() const override { return {m_depthTex}; }
+    sage::rhi::TextureHandle AlbedoTextureHandle() const override { return {m_albedoTex}; }
+    sage::rhi::TextureHandle NormalTextureHandle() const override { return {m_normalTex}; }
     uint64_t NativeColorHandle() const override { return m_colorTex; }
+    // Таргет с G-буфером, привязанный сейчас (nullptr — другой или экран):
+    // по нему SetGBufferWrites и Clear понимают, есть ли что включать и чистить.
+    static const GLRenderTarget* Current();
+    static void ResetCurrent();
+    void SetGBufferWrites(bool on) const;
+    void ClearGBuffer() const;
     void Resolve() override;
     int Samples() const override { return m_samples; }
 
@@ -151,6 +162,9 @@ private:
     unsigned int m_msFbo = 0;
     unsigned int m_msColor = 0;   // многосэмпловый renderbuffer цвета
     unsigned int m_msDepth = 0;   // многосэмпловый renderbuffer глубины
+    bool m_gbuffer = false;
+    unsigned int m_albedoTex = 0, m_normalTex = 0;   // G-буфер (обычные текстуры)
+    unsigned int m_msAlbedo = 0, m_msNormal = 0;     // G-буфер при MSAA
 };
 
 } // namespace sage::rhi

@@ -362,14 +362,16 @@ void UpdateAnimators(Scene& scene, float dt) {
 void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
                         const glm::vec3& viewPos, const LightingEnvironment& env,
                         const ShadowBinding& shadows,
-                        const sage::render::ReflectionBinding* reflections, int shadingMode) {
+                        const sage::render::ReflectionBinding* reflections, int shadingMode,
+                        const sage::render::LightClusters* clusters) {
     SAGE_PROFILE("Скиннинг");
+    sage::gi::GIState* gi = scene.GI ? scene.GI.get() : nullptr;
     auto v = scene.Registry().view<AnimationComponent, Transform>();
     for (auto e : v) {
         AnimationComponent& am = v.get<AnimationComponent>(e);
         if (!am.Model) continue;
         am.Model->Draw(scene.WorldMatrix(e), view, proj, viewPos, env, am.Anim.BoneMatrices(),
-                       shadows, reflections, &am.MorphWeights, shadingMode);
+                       shadows, reflections, &am.MorphWeights, shadingMode, clusters, gi);
     }
 }
 

@@ -27,12 +27,16 @@ public:
     // samples > 1 — сглаживание кромок средствами растеризатора (MSAA). Рисовать
     // в такой буфер можно как обычно, но ПЕРЕД чтением ColorTexture/DepthTexture
     // надо вызвать Resolve: наружу отдаются обычные текстуры, а не многосэмпловые.
-    explicit Framebuffer(int width, int height, int samples = 1) {
+    // gbuffer — альбедо и нормаль рядом с цветом (экранному GI, см.
+    // rhi::RenderTargetDesc::GBuffer). Нужен только буферу СЦЕНЫ.
+    explicit Framebuffer(int width, int height, int samples = 1, bool gbuffer = false) {
         sage::rhi::RenderTargetDesc desc;
         desc.Width = width;
         desc.Height = height;
         desc.Kind = sage::rhi::RenderTargetKind::ColorHDRWithDepth;
         desc.Samples = samples;
+        desc.GBuffer = gbuffer;
+        m_gbuffer = gbuffer;
         m_target = sage::rhi::GraphicsDevice::Get().CreateRenderTarget(desc);
     }
 
@@ -59,6 +63,10 @@ public:
     sage::rhi::TextureHandle ColorTexture() const { return m_target->ColorTextureHandle(); }
     // Хендл depth-текстуры сцены — для SSAO/пост-эффектов, читающих глубину.
     sage::rhi::TextureHandle DepthTexture() const { return m_target->DepthTextureHandle(); }
+    // G-буфер (невалидные хендлы — буфер без него).
+    sage::rhi::TextureHandle AlbedoTexture() const { return m_target->AlbedoTextureHandle(); }
+    sage::rhi::TextureHandle NormalTexture() const { return m_target->NormalTextureHandle(); }
+    bool HasGBuffer() const { return m_gbuffer; }
     // Сырое число для ImGui (viewport редактора) — см. Texture2D::NativeHandle.
     uint64_t NativeColorTexture() const { return m_target->NativeColorHandle(); }
     int Width() const { return m_target->Width(); }
@@ -66,6 +74,7 @@ public:
 
 private:
     std::unique_ptr<sage::rhi::RenderTarget> m_target;
+    bool m_gbuffer = false;
 };
 
 // Приводит буфер к нужным размеру И числу сэмплов.
@@ -76,11 +85,12 @@ private:
 // настройках редактора), и без пересоздания она молча не действовала бы до
 // перезапуска. Пересоздание происходит только когда число сэмплов реально
 // изменилось: это не покадровая операция.
+// То же с G-буфером: его наличие тоже задаётся при создании.
 inline void EnsureFramebuffer(std::optional<Framebuffer>& fbo, int width, int height,
-                              int samples = 1) {
+                              int samples = 1, bool gbuffer = false) {
     if (width <= 0 || height <= 0) return;
     samples = std::max(samples, 1);
-    if (fbo && fbo->Samples() != samples) fbo.reset();
-    if (!fbo) fbo.emplace(width, height, samples);
+    if (fbo && (fbo->Samples() != samples || fbo->HasGBuffer() != gbuffer)) fbo.reset();
+    if (!fbo) fbo.emplace(width, height, samples, gbuffer);
     else fbo->Resize(width, height);
 }

@@ -123,6 +123,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/ParticleEffectIO.cpp
     src/sage/render/DebugView.cpp
     src/sage/render/LensFlare.cpp
+    src/sage/render/LightClusters.cpp
     src/sage/render/PostProcessComponent.cpp
     src/sage/render/PostChainIO.cpp
     src/sage/render/PostEffect.cpp

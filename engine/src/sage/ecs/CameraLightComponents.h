@@ -92,7 +92,9 @@ struct CameraComponent {
 // Рендер собирает итоговое освещение кадра через sage::ecs::CollectLighting:
 // окружение сцены + света-сущности.
 struct LightComponent {
-    enum class Type { Point, Spot, Directional };
+    // Area — в конце: номер типа пишется в сцену числом в старых файлах, и
+    // вставка в середину перенумеровала бы прожекторы в солнца.
+    enum class Type { Point, Spot, Directional, Area };
 
     Type Kind = Type::Point;
     glm::vec3 Color{1.0f, 0.9f, 0.7f};
@@ -100,6 +102,8 @@ struct LightComponent {
     float Range = 12.0f;         // дистанция затухания, единицы мира
     float InnerConeDeg = 20.0f;  // Spot: полная яркость внутри этого полуугла
     float OuterConeDeg = 30.0f;  // Spot: край конуса (яркость -> 0)
+    float AreaWidth = 2.0f;      // Area: ширина панели (локальная ось X), м
+    float AreaHeight = 1.0f;     // Area: высота панели (локальная ось Y), м
 
     // Отбрасывает ли свет тени. Раньше этого поля не было, потому что тени
     // умело только солнце: у точечных и прожекторов свет проходил СКВОЗЬ

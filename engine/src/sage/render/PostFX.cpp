@@ -20,6 +20,12 @@ using namespace sage::rhi;
 
 namespace sage::render {
 
+bool SceneWantsGBuffer(const sage::EngineConfig& cfg) {
+    // Сейчас G-буфер читает только экранный GI: без него платить за два
+    // лишних вложения (и за их перенос при MSAA) незачем.
+    return cfg.ScreenSpaceGI;
+}
+
 int SceneSamples(const sage::EngineConfig& cfg) {
     // Ступени растеризатора: всё, что между ними, округляем ВНИЗ — обещать
     // человеку 8x и молча дать 4x хуже, чем дать ровно то, что он выбрал из
@@ -243,13 +249,28 @@ uniform float uRadius;     // как далеко ищется отражающ�
 uniform float uThickness;  // за сколько метров за поверхностью луч ещё считается попавшим
 uniform int uRays;
 uniform int uSteps;
+// Тонкий G-буфер кадра (rhi::RenderTargetDesc::GBuffer): нормаль поверхности
+// в мире, упакованная в [0,1]; альфа 1 — поверхность записана. Есть он — нормаль
+// берётся оттуда: из глубины она на краях и на мелкой геометрии угадывалась
+// с ошибкой, и GI шёл пятнами по швам.
+uniform bool uHasGBuffer;
+uniform sampler2D uGNormal;
+uniform mat4 uViewRot;     // мир -> вид (берётся поворот)
 
 vec3 ViewPos(vec2 uv) {
     float d = texture(uDepth, uv).r;
     vec4 c = uInvProj * vec4(uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0);
     return c.xyz / c.w;
 }
+vec3 NormalFromDepthOnly(vec2 uv, vec3 P);
 vec3 NormalFromDepth(vec2 uv, vec3 P) {
+    if (uHasGBuffer) {
+        vec4 g = texture(uGNormal, uv);
+        if (g.a > 0.5) return normalize(mat3(uViewRot) * (g.xyz * 2.0 - 1.0));
+    }
+    return NormalFromDepthOnly(uv, P);
+}
+vec3 NormalFromDepthOnly(vec2 uv, vec3 P) {
     vec3 l = ViewPos(uv - vec2(uTexel.x, 0.0));
     vec3 r = ViewPos(uv + vec2(uTexel.x, 0.0));
     vec3 d = ViewPos(uv - vec2(0.0, uTexel.y));
@@ -341,11 +362,12 @@ void main() {
 
 // Подмешивание: отражённый свет падает на поверхность и отражается ЕЁ цветом.
 //
-// Отдельного буфера альбедо у кадра нет, поэтому цвет поверхности оценивается
+// Цвет поверхности — из G-буфера, где он записан (альбедо материала как есть).
+// Где не записан (свой шейдер материала, кадр без G-буфера), он оценивается
 // по самому кадру: оттенок — нормированный цвет пикселя, светлота — его
-// яркость, сжатая к единице (белая стена отражает больше, тёмный пол меньше).
-// Это приближение, но оно держит главное: красное подкрашивает соседей
-// красным, а чёрное почти не светится.
+// яркость, сжатая к единице. Оценка путала освещённость с цветом: тёмный угол
+// белой комнаты считался тёмной поверхностью и почти не получал отражённого
+// света — ровно там, где его больше всего видно.
 const char* kSsgiApplyFrag = R"(#version 330 core
 in vec2 vUV;
 out vec4 FragColor;
@@ -353,14 +375,22 @@ uniform sampler2D uScene;
 uniform sampler2D uGI;
 uniform float uIntensity;
 uniform float uSaturation;   // насколько отражённый свет сохраняет цвет поверхности-источника
+uniform bool uHasGBuffer;
+uniform sampler2D uGAlbedo;
 void main() {
     vec3 c = max(texture(uScene, vUV).rgb, vec3(0.0));
     vec3 gi = texture(uGI, vUV).rgb;
     float giLuma = dot(gi, vec3(0.2126, 0.7152, 0.0722));
     gi = max(mix(vec3(giLuma), gi, uSaturation), vec3(0.0));
-    float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-    float peak = max(max(c.r, c.g), max(c.b, 1e-4));
-    vec3 albedo = (c / peak) * (l / (l + 0.2));
+    vec3 albedo;
+    vec4 g = uHasGBuffer ? texture(uGAlbedo, vUV) : vec4(0.0);
+    if (g.a > 0.5) {
+        albedo = g.rgb;
+    } else {
+        float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+        float peak = max(max(c.r, c.g), max(c.b, 1e-4));
+        albedo = (c / peak) * (l / (l + 0.2));
+    }
     FragColor = vec4(c + gi * albedo * uIntensity, 1.0);
 }
 )";
@@ -1453,6 +1483,11 @@ void RunScreenSpaceGI(PostContext& ctx, const PostEffect& e) {
     gi.SetFloat("uThickness", glm::max(e.Float("thickness", 0.5f), 0.01f));
     gi.SetInt("uRays", kRays[q]);
     gi.SetInt("uSteps", kSteps[q]);
+    const bool hasG = ctx.SceneAlbedo.Valid() && ctx.SceneNormal.Valid();
+    gi.SetInt("uHasGBuffer", hasG ? 1 : 0);
+    gi.SetInt("uGNormal", 2);
+    gi.SetMat4("uViewRot", ctx.View);
+    if (hasG) device.BindTexture2D(2, ctx.SceneNormal);
     DrawFullscreen(ctx);
 
     Shader& b = SsgiBlurShader();
@@ -1476,8 +1511,11 @@ void RunScreenSpaceGI(PostContext& ctx, const PostEffect& e) {
     apply.SetInt("uGI", 1);
     apply.SetFloat("uIntensity", glm::max(e.Float("intensity", 1.0f), 0.0f));
     apply.SetFloat("uSaturation", glm::clamp(e.Float("saturation", 1.0f), 0.0f, 2.0f));
+    apply.SetInt("uHasGBuffer", hasG ? 1 : 0);
+    apply.SetInt("uGAlbedo", 2);
     device.BindTexture2D(0, ctx.Color);
     device.BindTexture2D(1, trace->ColorTextureHandle());
+    if (hasG) device.BindTexture2D(2, ctx.SceneAlbedo);
     DrawFullscreen(ctx);
     PostSetColor(ctx, out->ColorTextureHandle(), ctx.ColorIsLdr);
 }
@@ -2367,6 +2405,8 @@ void PostFX::Render(sage::rhi::TextureHandle sceneColor, sage::rhi::TextureHandl
     ctx.View = view;
     ctx.SceneColor = sceneColor;
     ctx.SceneDepth = sceneDepth;
+    ctx.SceneAlbedo = m_gAlbedo;
+    ctx.SceneNormal = m_gNormal;
     ctx.Velocity = velocityTexture;
     ctx.Color = sceneColor;
     ctx.ColorIsLdr = false;

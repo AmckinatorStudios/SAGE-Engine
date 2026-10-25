@@ -430,7 +430,8 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     //
     // Буферы пост-обработки остаются односэмпловыми: у них нет геометрии.
     const int samples = sage::render::SceneSamples(cfg);
-    EnsureFramebuffer(primary ? m_sceneFbo : m_extraFbo[slot], w, h, samples);
+    EnsureFramebuffer(primary ? m_sceneFbo : m_extraFbo[slot], w, h, samples,
+                      sage::render::SceneWantsGBuffer(cfg));
     EnsureFramebuffer(primary ? m_postFbo : m_extraPostFbo[slot], w, h);
     Framebuffer& sceneFbo = primary ? *m_sceneFbo : *m_extraFbo[slot];
     Framebuffer& postFbo = primary ? *m_postFbo : *m_extraPostFbo[slot];
@@ -530,6 +531,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     if (mode == EditorRenderMode::Shaded && !viewOverride.Use && PostWorks()) {
         postFbo.Resize(w, h);
         m_postfx->SetLighting(&env);   // солнце — звену «Lens Flare»
+        m_postfx->SetGBuffer(sceneFbo.AlbedoTexture(), sceneFbo.NormalTexture());
         m_postfx->Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), sceneFbo.Width(),
                          sceneFbo.Height(), outProj, outView, viewportChain,
                          /*output=*/&postFbo, 0, 0, w, h, viewportVelocity);
@@ -640,6 +642,15 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
             if (light->Kind == LightComponent::Type::Spot) {
                 glm::vec3 dir = glm::normalize(glm::vec3(world * glm::vec4(0, 0, -1, 0)));
                 m_debugDraw->WireCone(wpos, dir, light->Range, light->OuterConeDeg, lightColor);
+            } else if (light->Kind == LightComponent::Type::Area) {
+                // Сама панель и короткий штрих лицевой стороны: светит она
+                // одной стороной, и без штриха не видно, какой.
+                const glm::vec3 r = glm::normalize(glm::vec3(world[0])) * (light->AreaWidth * 0.5f);
+                const glm::vec3 u = glm::normalize(glm::vec3(world[1])) * (light->AreaHeight * 0.5f);
+                const glm::vec3 f = glm::normalize(glm::vec3(world * glm::vec4(0, 0, -1, 0)));
+                const glm::vec3 c[4] = {wpos + r + u, wpos - r + u, wpos - r - u, wpos + r - u};
+                for (int i = 0; i < 4; ++i) m_debugDraw->Line(c[i], c[(i + 1) % 4], lightColor);
+                m_debugDraw->Line(wpos, wpos + f * std::min(light->Range, 1.0f), lightColor);
             } else {
                 m_debugDraw->WireSphere(wpos, light->Range, lightColor);
             }
