@@ -327,6 +327,7 @@ struct JoltWorld::CharacterEntry {
     // этом месте стояла константа 0.35, и поле CharacterDesc::StepHeight не
     // читал никто: игра выставляла ступеньку, движок её молча игнорировал.
     float StepHeight = 0.35f;
+    float Mass = 70.0f;   // вес на опору (см. ApplyCharacterWeight)
 };
 
 struct JoltWorld::CachedShape {
@@ -446,12 +447,27 @@ CharacterHandle JoltWorld::CreateCharacter(const CharacterDesc& desc) {
     // Плоскость опоры чуть ниже подошвы: без неё контроллер «не видит» пол,
     // когда стоит на нём вплотную, и считает себя в воздухе через кадр.
     settings->mSupportingVolume = JPH::Plane(JPH::Vec3(0, 1, 0), -desc.Radius);
+    // ВНУТРЕННЕЕ ТЕЛО. Виртуальный контроллер сам сталкивается с миром, но мир
+    // о нём не знает: ящик, упавший на персонажа, и шар, катящийся в него,
+    // проходили НАСКВОЗЬ — для физики там было пусто. Кинематическая капсула
+    // чуть меньше внешней (чтобы не мешать контроллеру считать свои контакты)
+    // ездит вместе с ним, и тела упираются в персонажа. Лучи, зоны и события
+    // контактов её не видят: у неё нет нашего дескриптора тела (HandleOf).
+    const float innerRadius = std::max(0.05f, desc.Radius * 0.9f);
+    const float innerHalf = std::max(0.05f, desc.Height * 0.5f - desc.Radius);
+    settings->mInnerBodyShape =
+        JPH::RotatedTranslatedShapeSettings(JPH::Vec3(0, halfCyl + desc.Radius, 0), JPH::Quat::sIdentity(),
+                                            new JPH::CapsuleShape(innerHalf, innerRadius))
+            .Create()
+            .Get();
+    settings->mInnerBodyLayer = ObjectLayers::MOVING;
 
     auto entry = std::make_unique<CharacterEntry>();
     entry->CollidesWith = desc.CollidesWith;
     // Не выше девяти десятых роста: ступенька в собственный рост — это уже не
     // шаг, а перепрыгивание препятствия целиком, и лечится оно прыжком.
     entry->StepHeight = std::clamp(desc.StepHeight, 0.0f, desc.Height * 0.9f);
+    entry->Mass = desc.Mass;
     entry->Ptr = new JPH::CharacterVirtual(
         settings, JPH::RVec3(desc.Position.x, desc.Position.y, desc.Position.z),
         JPH::Quat::sIdentity(), m_system.get());
@@ -467,7 +483,20 @@ void JoltWorld::MoveCharacter(CharacterHandle character, const glm::vec3& veloci
     auto it = m_characters.find(character);
     if (it == m_characters.end() || !m_system || dt <= 0.0f) return;
     JPH::CharacterVirtual* ch = it->second->Ptr;
-    ch->SetLinearVelocity(JPH::Vec3(velocity.x, velocity.y, velocity.z));
+    // ОПОРА НЕСЁТ ПЕРСОНАЖА. На земле вертикаль задаёт сама опора, а не
+    // «прижимающая» скорость: −2 м/с вниз каждый кадр вжимали контроллер в
+    // ящик под ногами, тот отвечал толчком, и персонаж на нём дрожал. К земле
+    // держит прилипание (ExtendedUpdate, mStickToFloorStepDown). Движущаяся
+    // опора (ящик, который толкнули, платформа) везёт персонажа с собой.
+    // Прыжок (вертикаль вверх) — как просили.
+    ch->UpdateGroundVelocity();
+    glm::vec3 v = velocity;
+    if (ch->GetGroundState() == JPH::CharacterBase::EGroundState::OnGround && v.y <= 0.0f) {
+        const JPH::Vec3 g = ch->GetGroundVelocity();
+        v += glm::vec3(g.GetX(), 0.0f, g.GetZ());
+        v.y = g.GetY();
+    }
+    ch->SetLinearVelocity(JPH::Vec3(v.x, v.y, v.z));
 
     JPH::CharacterVirtual::ExtendedUpdateSettings upd;
     // Шаг вверх/вниз — то, чем контроллер отличается от капсулы на пружине:
@@ -479,19 +508,57 @@ void JoltWorld::MoveCharacter(CharacterHandle character, const glm::vec3& veloci
     // но в шаг не передавалось: персонаж сталкивался со всеми слоями, что бы
     // ни стояло в настройках. Всё-слои — без фильтра: так шаг не платит
     // поиском по карте слоёв за каждое тело рядом.
+    // ВЕС — САМИ. Jolt давит весом персонажа на опору в ТОЧКЕ КОНТАКТА, а это
+    // обычно ребро ящика: семьдесят килограммов в край лёгкого ящика давали
+    // ему такой момент, что он выстреливал из-под ног, а персонаж падал.
+    // Поэтому Jolt получает нулевое тяготение (вес не прикладывает), а вес
+    // прикладывается здесь — под центром персонажа, где он и стоит.
+    const JPH::Vec3 noWeight = JPH::Vec3::sZero();
     const LayerMask mask = it->second->CollidesWith;
     if (mask == kAllLayers) {
-        ch->ExtendedUpdate(dt, m_system->GetGravity(), upd,
+        ch->ExtendedUpdate(dt, noWeight, upd,
                            m_system->GetDefaultBroadPhaseLayerFilter(ObjectLayers::MOVING),
                            m_system->GetDefaultLayerFilter(ObjectLayers::MOVING), {}, {},
                            *m_tempAllocator);
     } else {
         const MaskBodyFilter filter(this, mask);
-        ch->ExtendedUpdate(dt, m_system->GetGravity(), upd,
+        ch->ExtendedUpdate(dt, noWeight, upd,
                            m_system->GetDefaultBroadPhaseLayerFilter(ObjectLayers::MOVING),
                            m_system->GetDefaultLayerFilter(ObjectLayers::MOVING), filter, {},
                            *m_tempAllocator);
     }
+    ApplyCharacterWeight(*it->second, dt);
+}
+
+void JoltWorld::ApplyCharacterWeight(CharacterEntry& entry, float dt) {
+    JPH::CharacterVirtual* ch = entry.Ptr;
+    if (entry.Mass <= 0.0f || ch->GetGroundState() != JPH::CharacterBase::EGroundState::OnGround) return;
+    const JPH::BodyID ground = ch->GetGroundBodyID();
+    if (ground.IsInvalid()) return;
+    JPH::BodyInterface& bodies = m_system->GetBodyInterface();
+    if (bodies.GetMotionType(ground) != JPH::EMotionType::Dynamic) return;
+    const JPH::Vec3 gravity = m_system->GetGravity();
+    const float down = -ch->GetGroundNormal().Dot(gravity.NormalizedOr(JPH::Vec3(0, -1, 0)));
+    if (down <= 0.0f) return;
+    // Точка — под центром капсулы на высоте опоры: стоит посередине ящика —
+    // давит в середину и не крутит его; стоит на краю — ящик честно кренится.
+    const JPH::RVec3 feet = ch->GetPosition();
+    const JPH::RVec3 at(feet.GetX(), ch->GetGroundPosition().GetY(), feet.GetZ());
+    // НЕ БОЛЬШЕ ЧЕТЫРЁХ МАСС САМОЙ ОПОРЫ. Решатель контактов держит устойчиво
+    // только умеренную разницу масс: семьдесят килограммов на ящике в десять
+    // уже дают дрожь, на ящике в килограмм — выстрел из-под ног (проверено
+    // tests/test_character_bodies.cpp). Опора от 17.5 кг (плита, качели,
+    // платформа) получает полный вес; лёгкий предмет — вес, который держит.
+    float mass = entry.Mass;
+    {
+        JPH::BodyLockRead lock(m_system->GetBodyLockInterface(), ground);
+        if (lock.Succeeded()) {
+            const float inv = lock.GetBody().GetMotionProperties()->GetInverseMass();
+            constexpr float kMaxSupportRatio = 4.0f;
+            if (inv > 0.0f) mass = std::min(mass, kMaxSupportRatio / inv);
+        }
+    }
+    bodies.AddImpulse(ground, gravity * (mass * down * dt), at);
 }
 
 void JoltWorld::SetCharacterCollidesWith(CharacterHandle character, LayerMask mask) {
