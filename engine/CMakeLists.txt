@@ -164,6 +164,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/SceneFlow.cpp
     src/sage/scene/ComponentRegistry.cpp
     src/sage/scene/SceneSerializer.cpp
+    src/sage/scene/SceneSerializer_Components.cpp
+    src/sage/scene/SceneSerializer_Environment.cpp
     src/sage/scene/SceneMigrations.cpp
     src/sage/scene/SceneValueJson.cpp
     src/sage/scene/Signals.cpp
