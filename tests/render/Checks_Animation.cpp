@@ -609,7 +609,9 @@ void TestRigidPartsOnBones(FrameRenderer& r) {
     // Три части: скиновое тело, жёсткий кубик на кости, пластинка с альфой.
     // Отбор «только с JOINTS_0» оставил бы одну.
     Check(am.Model->SubMeshCount() == 3, "в модель попали и скиновые части, и жёсткие");
-    Check(am.Model->GetSkeleton().Count() == 2, "кости оснастки разобраны");
+    // Две кости скина и их предок SceneRoot (разворот на 180°): узел над
+    // костями стал костью скелета (см. SkinnedModel.cpp).
+    Check(am.Model->GetSkeleton().Count() == 3, "кости оснастки разобраны");
 
     const glm::mat4 proj = PerspectiveProj();
     const Image bind = RenderFrame(r, *scene, proj, BaseChain(), kW, kH);
