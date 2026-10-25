@@ -356,10 +356,8 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
         // координат, она чаще всего оказывалась внутри пола, и панель Game
         // показывала темноту — «камера не работает».
         obj.GetTransform().Position = m_camera.Position;
-        const glm::vec3 f = m_camera.Front;
-        obj.GetTransform().Rotation =
-            glm::vec3(glm::degrees(std::asin(glm::clamp(-f.y, -1.0f, 1.0f))),
-                      glm::degrees(std::atan2(-f.x, -f.z)), 0.0f);
+        // Углы — общей функцией движка (соглашение об осях — в Transform.h).
+        obj.GetTransform().Rotation = sage::ecs::EulerFromForward(m_camera.Front);
         reg.emplace<CameraComponent>(obj.Entity());
         return done(obj);
     }
@@ -443,10 +441,8 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
         d.GetTransform().Position = m_camera.Position + m_camera.Front * 4.0f;
         // Ось Z наклейки — навстречу камере: проекция идёт вдоль -Z, то есть
         // от зрителя вглубь сцены, как и смотрит человек.
-        const glm::vec3 f = -m_camera.Front;
-        d.GetTransform().Rotation =
-            glm::vec3(glm::degrees(std::asin(glm::clamp(f.y, -1.0f, 1.0f))),
-                      glm::degrees(std::atan2(f.x, f.z)), 0.0f);
+        // «Вперёд» объекта (-Z) — туда же, куда смотрит камера: тогда +Z навстречу ей.
+        d.GetTransform().Rotation = sage::ecs::EulerFromForward(m_camera.Front);
         d.GetTransform().Scale = glm::vec3(1.0f);
         reg.emplace<DecalComponent>(d.Entity());
         return done(d);

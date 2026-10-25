@@ -70,6 +70,21 @@ struct LensFlareSettings {
     // Яркость (в HDR), начиная с которой пиксель у солнца считается «солнцем».
     // По ней же отличают закрытое облаком солнце от открытого.
     float Threshold = 1.1f;
+
+    // --- Блики ламп ------------------------------------------------------------
+    // Свечение и звезда у КАЖДОГО точечного света и прожектора в кадре, как у
+    // солнца: лампа, на которую смотрят, «горит» в объективе. Заслонённая
+    // предметом — гаснет (видимость по глубине, как у солнца).
+    float Lights = 1.0f;        // сила (0 — нет)
+    float LightSize = 0.03f;    // размер свечения лампы в метре от камеры (доля кадра)
+
+    // --- Экранные блики (как в Unreal) ------------------------------------------
+    // Призраки и ореол от ВСЕГО яркого в кадре, а не только от источников
+    // света: самосвечение, раскалённый металл, блик на воде, фары. Считаются
+    // по самому кадру — отражением ярких пикселей через центр.
+    float Screen = 0.6f;        // сила (0 — нет)
+    float ScreenThreshold = 1.5f;   // яркость (HDR), с которой пиксель даёт блик
+    int ScreenGhosts = 5;
 };
 
 
@@ -100,9 +115,25 @@ private:
                     sage::rhi::TextureHandle sceneDepth, int w, int h, const glm::mat4& proj,
                     const glm::mat4& view, const LightingEnvironment& env,
                     const LensFlareSettings& s);
+    void RenderSun(const std::function<void()>& bindTarget, sage::rhi::TextureHandle sceneColor,
+                   sage::rhi::TextureHandle sceneDepth, int w, int h, const glm::mat4& proj,
+                   const glm::mat4& view, const LightingEnvironment& env, const LensFlareSettings& s);
+    void RenderLights(const std::function<void()>& bindTarget, sage::rhi::TextureHandle sceneDepth,
+                      int w, int h, const glm::mat4& proj, const glm::mat4& view,
+                      const LightingEnvironment& env, const LensFlareSettings& s);
+    void RenderScreen(const std::function<void()>& bindTarget, sage::rhi::TextureHandle sceneColor,
+                      int w, int h, const LensFlareSettings& s);
 
     std::unique_ptr<sage::rhi::Geometry> m_fsTri;
-    std::unique_ptr<sage::rhi::RenderTarget> m_visible;   // 1x1: доля видимого солнца
+    std::unique_ptr<sage::rhi::RenderTarget> m_visible;      // 1x1: доля видимого солнца
+    std::unique_ptr<sage::rhi::RenderTarget> m_lightVisible; // kMaxLights x 1: видимость ламп
+    // Экранные блики — в четверти разрешения: призраки и ореол размыты по
+    // самой своей природе, а полное разрешение стоило бы вшестнадцатеро дороже.
+    std::unique_ptr<sage::rhi::RenderTarget> m_ssBright, m_ssGhost, m_ssBlur;
+    int m_ssW = 0, m_ssH = 0;
+
+public:
+    static constexpr int kMaxLights = 16;
 };
 
 } // namespace sage::render

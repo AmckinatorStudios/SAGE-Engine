@@ -227,10 +227,10 @@ void RegisterMath(Backend& backend) {
     quat["Identity"] = []() { return glm::quat(1.0f, 0.0f, 0.0f, 0.0f); };
     // Углы — В ГРАДУСАХ, как Transform.rotation: вторая единица измерения рядом
     // с первой означает, что однажды их перепутают.
-    quat["Euler"] = [](float x, float y, float z) {
-        return glm::quat(glm::radians(glm::vec3(x, y, z)));
-    };
-    quat["ToEuler"] = [](const glm::quat& q) { return glm::degrees(glm::eulerAngles(q)); };
+    // Порядок осей — тот же, что у Transform.rotation (Transform.h): иначе
+    // transform.rotation = q:ToEuler() поворачивал бы объект не туда.
+    quat["Euler"] = [](float x, float y, float z) { return sage::QuatFromEulerDegrees(glm::vec3(x, y, z)); };
+    quat["ToEuler"] = [](const glm::quat& q) { return sage::EulerDegreesFromQuat(q); };
     quat["Slerp"] = [](const glm::quat& a, const glm::quat& b, float t) {
         return glm::slerp(a, b, std::clamp(t, 0.0f, 1.0f));
     };

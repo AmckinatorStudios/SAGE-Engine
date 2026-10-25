@@ -758,6 +758,105 @@ void TestLensFlare(FrameRenderer& r) {
     Check(std::abs(chainBlocked - lumaBlockedOff) < 0.35f, "звено гасит блик закрытого солнца");
 }
 
+// --- Блики ламп и экранные блики ---------------------------------------------
+//
+// Блик был только у солнца: лампа, на которую смотрит камера, в объективе не
+// «горела» вовсе. Теперь светится каждая точечная лампа и прожектор в кадре —
+// и гаснет, если её закрыл предмет. Экранные блики (призраки и ореол от всего
+// яркого) добавляют свет и там, где ламп нет: от самосвечения.
+float FlareAround(FrameRenderer& r, bool lamp, bool blocker, bool emissive, float lights, float screen,
+                  float& wholeMean) {
+    constexpr int w = 256, h = 192;
+    Framebuffer sceneFbo(w, h);
+    Scene scene("LampFlare");
+    scene.Lighting.Sun.Intensity = 0.0f;
+    scene.Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+    scene.Lighting.AmbientStrength = 0.02f;
+    scene.Lighting.Skybox.Enabled = false;
+    LightingEnvironment env = sage::ecs::CollectLighting(scene);
+    env.Sun.Intensity = 0.0f;
+    env.Sun.Direction = glm::vec3(0.0f, 1.0f, 0.0f);   // солнце под землёй — своего блика нет
+    const glm::vec3 lampPos(1.2f, 0.6f, -6.0f);
+    if (lamp) {
+        PointLight p;
+        p.Position = lampPos;
+        p.Color = {1.0f, 0.85f, 0.6f};
+        p.Intensity = 3.0f;
+        p.Range = 10.0f;
+        env.PointLights.push_back(p);
+    }
+    if (blocker) {
+        GameObject wall = scene.CreateObject("Blocker");
+        wall.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+        wall.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+        wall.Renderer().Color = {0.1f, 0.1f, 0.1f};
+        wall.GetTransform().Position = {1.0f, 0.6f, -3.0f};
+        wall.GetTransform().Scale = {3.0f, 3.0f, 0.2f};
+    }
+    if (emissive) {
+        GameObject glow = scene.CreateObject("Glow");
+        glow.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+        glow.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+        glow.Renderer().Color = {0.0f, 0.0f, 0.0f};
+        auto mat = std::make_shared<Material>();
+        mat->Albedo = glm::vec3(0.0f);
+        mat->Emissive = glm::vec3(1.0f, 0.85f, 0.5f);
+        mat->EmissiveStrength = 12.0f;
+        glow.Renderer().MaterialPtr = mat;
+        glow.GetTransform().Position = lampPos;
+        glow.GetTransform().Scale = {0.3f, 0.3f, 0.3f};
+    }
+    const glm::vec3 eye(0.0f, 0.5f, 0.0f);
+    const glm::mat4 view = glm::lookAt(eye, glm::vec3(0.0f, 0.5f, -1.0f), glm::vec3(0, 1, 0));
+    const glm::mat4 proj = glm::perspective(glm::radians(60.0f), (float)w / (float)h, 0.1f, 100.0f);
+    sceneFbo.Bind();
+    auto& device = sage::rhi::GraphicsDevice::Get();
+    device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    device.Clear(true, true);
+    r.Batch.RenderColor(scene, view, proj, eye, env, ShadowBinding(r.Shadow, false), 0);
+    sage::render::LensFlareSettings s;
+    s.Enabled = true;
+    s.Lights = lights;
+    s.Screen = screen;
+    sage::render::LensFlare flare;
+    flare.Render(sceneFbo, sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), w, h, proj, view, env, s);
+    sceneFbo.Bind();
+    const Image img = Capture(w, h);
+    // Яркость пятна вокруг лампы на экране.
+    const glm::vec4 clip = proj * view * glm::vec4(lampPos, 1.0f);
+    const glm::vec2 uv = glm::vec2(clip) / clip.w * 0.5f + 0.5f;
+    const int cx = (int)(uv.x * w), cy = h - 1 - (int)(uv.y * h);
+    double sum = 0.0, all = 0.0;
+    int n = 0;
+    for (int y = 0; y < h; ++y)
+        for (int x = 0; x < w; ++x) {
+            const size_t i = ((size_t)y * w + x) * 3;
+            const double l = 0.2126 * img.Pixels[i] + 0.7152 * img.Pixels[i + 1] + 0.0722 * img.Pixels[i + 2];
+            all += l;
+            if (std::abs(x - cx) <= 6 && std::abs(y - cy) <= 6) { sum += l; ++n; }
+        }
+    wholeMean = (float)(all / (double)(w * h));
+    return n ? (float)(sum / n) : 0.0f;
+}
+
+void TestLampAndScreenFlares(FrameRenderer& r) {
+    std::printf("=== Блики ламп и экранные блики ===\n");
+    float m0 = 0, m1 = 0, m2 = 0, m3 = 0, m4 = 0, m5 = 0;
+    const float off = FlareAround(r, true, false, false, 0.0f, 0.0f, m0);
+    const float on = FlareAround(r, true, false, false, 1.0f, 0.0f, m1);
+    const float blockedOff = FlareAround(r, true, true, false, 0.0f, 0.0f, m2);
+    const float blockedOn = FlareAround(r, true, true, false, 1.0f, 0.0f, m3);
+    std::printf("       у лампы: без блика %.1f, с бликом %.1f; за стеной %.1f / %.1f\n", off, on,
+                blockedOff, blockedOn);
+    Check(on > off + 20.0f, "лампа в кадре горит в объективе");
+    Check(std::abs(blockedOn - blockedOff) < 1.0f, "лампа за стеной блика не даёт");
+    // Экранные блики: самосвечение без ламп даёт свет по ту сторону центра.
+    FlareAround(r, false, false, true, 0.0f, 0.0f, m4);
+    FlareAround(r, false, false, true, 0.0f, 2.0f, m5);
+    std::printf("       самосвечение: кадр без экранных бликов %.2f, с ними %.2f\n", m4, m5);
+    Check(m5 > m4 + 0.05f, "экранные блики добавляют свет от яркого в кадре");
+}
+
 // Швы куба — главный артефакт карт окружения. Грани снимаются по отдельности, и
 // на стыке фильтрация не может дотянуться до соседней грани: получается светлая
 // или тёмная линия, тем толще, чем размытее мип. Проверяем ЧИСЛЕННО: читаем
@@ -988,6 +1087,7 @@ void TestPlanarReflectionMath() {
 
 void RunReflectionChecks(FrameRenderer& r) {
     TestLensFlare(r);
+    TestLampAndScreenFlares(r);
     TestReflections(r);
     TestReflectionFollowsTimeOfDay(r);
     TestReflectionProbe(r);

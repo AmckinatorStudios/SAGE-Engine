@@ -181,17 +181,33 @@ void Window::SwapBuffers() {
 
 void Window::PollEvents() {
     glfwPollEvents();
+    // ЗАХВАТ ДЕРЖИТСЯ, А НЕ СТАВИТСЯ ОДИН РАЗ. Режим курсора окна могут
+    // сбросить со стороны: потеря и возврат фокуса, alt-tab, бэкенд интерфейса,
+    // который сам ставит вид курсора. Раньше окно верило своему флагу «уже
+    // захвачен» и повторно режим не ставило — курсор оставался спрятанным, но
+    // свободно гулял по экрану, и обзор упирался в край. Теперь фактический
+    // режим сверяется с желаемым каждый кадр.
+    if (m_handle && m_cursorCaptured && glfwGetInputMode(m_handle, GLFW_CURSOR) != GLFW_CURSOR_DISABLED)
+        ApplyCursorMode();
 }
 
 void Window::SetCursorCaptured(bool captured) {
-    if (!m_handle || captured == m_cursorCaptured) return;
+    if (!m_handle) return;
+    const bool changed = captured != m_cursorCaptured;
     m_cursorCaptured = captured;
-    glfwSetInputMode(m_handle, GLFW_CURSOR, captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+    // Флаг совпал — но режим окна мог уйти сам (см. PollEvents): ставим, если
+    // он не тот, а не «раз флаг тот, значит и окно в порядке».
+    const int want = captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL;
+    if (changed || (captured && glfwGetInputMode(m_handle, GLFW_CURSOR) != want)) ApplyCursorMode();
+}
+
+void Window::ApplyCursorMode() {
+    glfwSetInputMode(m_handle, GLFW_CURSOR, m_cursorCaptured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
     // Сырой ввод мыши, если драйвер умеет: в захвате нам нужно физическое
     // смещение, а не ускорение/масштабирование рабочего стола — иначе
     // чувствительность обзора зависит от настроек ОС, а не от игры.
     if (glfwRawMouseMotionSupported())
-        glfwSetInputMode(m_handle, GLFW_RAW_MOUSE_MOTION, captured ? GLFW_TRUE : GLFW_FALSE);
+        glfwSetInputMode(m_handle, GLFW_RAW_MOUSE_MOTION, m_cursorCaptured ? GLFW_TRUE : GLFW_FALSE);
 }
 
 void Window::OnResize(int width, int height) {

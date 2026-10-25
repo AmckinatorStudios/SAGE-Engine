@@ -3,6 +3,8 @@
 // цикл без потерь. Сцена собирается из сущностей БЕЗ GPU-мешей
 // (MeshRef::Type::None), поэтому загрузка не трогает графический бэкенд.
 #include "TestFramework.h"
+#include "sage/scene/Transform.h"
+#include <glm/gtc/matrix_transform.hpp>
 
 #include <cstdio>
 #include <filesystem>
@@ -483,6 +485,41 @@ TEST(Scene_migration_upgrades_an_old_file) {
     // Что было — обязано уцелеть: миграция ДОБАВЛЯЕТ, а не переписывает.
     CHECK_NEAR(rb["mass"].get<float>(), 2.0f, 1e-6);
     CHECK_TRUE(j["objects"][0]["name"] == "Box");
+}
+
+TEST(Scene_v16_rotations_keep_their_orientation) {
+    // До v17 углы Эйлера значили R = Rx*Ry*Rz. Повороты старой сцены обязаны
+    // остаться ТЕМИ ЖЕ поворотами — в том числе у частей составного коллайдера.
+    const std::string oldScene = R"({
+      "name": "Old", "sage_scene_version": 16,
+      "objects": [
+        {"id": 1, "name": "Tilted",
+         "position": {"x": 0, "y": 0, "z": 0},
+         "rotation": {"x": 30, "y": 60, "z": 15},
+         "scale": {"x": 1, "y": 1, "z": 1},
+         "mesh": {"type": "cube", "path": ""},
+         "collider": {"shape": "box", "parts": [
+            {"shape": "box", "halfExtents": {"x": 0.5, "y": 0.5, "z": 0.5}, "radius": 0.5,
+             "halfHeight": 0.5, "offset": {"x": 0, "y": 0, "z": 0}, "euler": {"x": 20, "y": -40, "z": 0}}]}}
+      ]
+    })";
+    auto legacy = [](glm::vec3 a) {
+        glm::mat4 m = glm::rotate(glm::mat4(1.0f), glm::radians(a.x), glm::vec3(1, 0, 0));
+        m = glm::rotate(m, glm::radians(a.y), glm::vec3(0, 1, 0));
+        return glm::rotate(m, glm::radians(a.z), glm::vec3(0, 0, 1));
+    };
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(oldScene));
+    const nlohmann::json& o = j["objects"][0];
+    auto vec = [](const nlohmann::json& v) { return glm::vec3(v["x"].get<float>(), v["y"].get<float>(), v["z"].get<float>()); };
+    const glm::mat4 now = sage::RotationMatrixFromEulerDegrees(vec(o["rotation"]));
+    const glm::mat4 was = legacy({30.0f, 60.0f, 15.0f});
+    const glm::mat4 partNow = sage::RotationMatrixFromEulerDegrees(vec(o["collider"]["parts"][0]["euler"]));
+    const glm::mat4 partWas = legacy({20.0f, -40.0f, 0.0f});
+    for (int c = 0; c < 3; ++c)
+        for (int r = 0; r < 3; ++r) {
+            CHECK_NEAR(now[c][r], was[c][r], 1e-4);
+            CHECK_NEAR(partNow[c][r], partWas[c][r], 1e-4);
+        }
 }
 
 TEST(Scene_without_version_is_treated_as_the_first_one) {

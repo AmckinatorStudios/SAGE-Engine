@@ -75,6 +75,9 @@ const Listing& List(const fs::path& dir, double maxAge) {
         // Сайдкары .meta — служебная запись движка на каждый файл (GUID), их не
         // показывают и за содержимое не считают.
         if (!isDir && entry.path().extension() == ".meta") continue;
+        // Служебные файлы с точки в начале имени (индекс общих картинок
+        // импорта, .gitignore) — тоже не ассеты.
+        if (!isDir && entry.path().filename().string().rfind('.', 0) == 0) continue;
         (isDir ? e.Data.Dirs : e.Data.Files).push_back(entry.path());
     }
     auto byName = [](const fs::path& a, const fs::path& b) { return a.filename() < b.filename(); };

@@ -567,7 +567,10 @@ void EditorLayer::OnRender() {
     // ПОСЛЕ бэкенда и ДО NewFrame: бэкенд в своём NewFrame тоже трогает
     // положение курсора, и синтетические события обязаны прийти последними.
     TickInputProbe();
+    TickCursorLockProbe();
+    PinMouseWhileCaptured();
     ImGui::NewFrame();
+    if (!app.GetWindow().CursorCaptured()) m_freeMousePos = ImGui::GetIO().MousePos;
     ImGuizmo::BeginFrame();
     EditorTheme::ApplyGizmoColors();
 
@@ -725,6 +728,32 @@ void EditorLayer::CloseGhostPopups() {
         ImGui::ClosePopupToLevel(i, false);
         return;   // по одному за кадр: стек после закрытия перестроен
     }
+}
+
+// ПОКА КУРСОР ЗАХВАЧЕН, МЫШЬ ИНТЕРФЕЙСА СТОИТ НА МЕСТЕ.
+//
+// В захвате GLFW отдаёт «виртуальное» положение курсора, которое уезжает
+// сколько угодно далеко — за край панели, за край окна. Интерфейс принимал
+// его за настоящее: при облёте камеры правой кнопкой «мышь» уходила с
+// вьюпорта на соседнюю панель, и облёт срывался; в игре от первого лица
+// щелчок (выстрел) приходился по Inspector или пустому месту, панель Game
+// теряла фокус, и захват отпускался. Снаружи это выглядело как «курсор
+// спрятан, но гуляет и не держится».
+//
+// Поэтому на время захвата положение мыши интерфейса держится там, где захват
+// начался: наведение и фокус остаются у той панели, которая курсор захватила.
+// Само смещение мыши игра и камера берут не отсюда, а из событий окна.
+void EditorLayer::PinMouseWhileCaptured() {
+    const bool captured = sage::Application::Get().GetWindow().CursorCaptured();
+    if (!captured) {
+        m_mousePinned = false;
+        return;
+    }
+    if (!m_mousePinned) {
+        m_mousePin = m_freeMousePos;
+        m_mousePinned = true;
+    }
+    ImGui::GetIO().AddMousePosEvent(m_mousePin.x, m_mousePin.y);
 }
 
 void EditorLayer::PresentExtraViewports() {

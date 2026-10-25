@@ -23,22 +23,10 @@ using namespace sage::physics;
 
 namespace {
 
-// Transform хранит поворот углами Эйлера (градусы, порядок XYZ — как в
-// Transform::GetMatrix). Физика работает с кватернионами — конвертируем через
-// матрицу, чтобы порядок совпадал везде в движке.
-glm::quat EulerToQuat(const glm::vec3& eulerDeg) {
-    glm::mat4 m = glm::eulerAngleXYZ(glm::radians(eulerDeg.x),
-                                     glm::radians(eulerDeg.y),
-                                     glm::radians(eulerDeg.z));
-    return glm::quat_cast(m);
-}
-
-glm::vec3 QuatToEuler(const glm::quat& q) {
-    glm::mat4 m = glm::mat4_cast(q);
-    float x, y, z;
-    glm::extractEulerAngleXYZ(m, x, y, z);
-    return glm::degrees(glm::vec3(x, y, z));
-}
+// Transform хранит поворот углами Эйлера, физика — кватернионами. Перевод —
+// общими функциями движка (Transform.h): порядок осей один на всех.
+glm::quat EulerToQuat(const glm::vec3& eulerDeg) { return sage::QuatFromEulerDegrees(eulerDeg); }
+glm::vec3 QuatToEuler(const glm::quat& q) { return sage::EulerDegreesFromQuat(q); }
 
 // Мировой Transform сущности: позиция, поворот и масштаб, УЖЕ учитывающие
 // родителей.
@@ -745,6 +733,23 @@ void PhysicsScene::StepCharacters(Scene& scene, float dt) {
         if (!cc.Managed) continue;
         const bool ownWorld = (bool)cc.Solid && cc.Motor;
         if (!ownWorld && cc.Runtime == sage::physics::kInvalidCharacter) continue;
+
+        // ТЕЛО ПЕРСОНАЖА СТОИТ ПРЯМО. Капсула контроллера всегда вертикальна, и
+        // наклон X/Z у её объекта — это не поза, а ошибка: так бывает, когда
+        // скрипт ставит телу наклон взгляда (камера на самом теле) или гизмо
+        // качнуло объект. Тогда вместе со взглядом заваливалась вся модель.
+        // Рыскание (Y) — поворот тела, оно остаётся; наклоняется камера —
+        // дочерний объект (см. player_fps.lua).
+        if (tr.Rotation.x != 0.0f || tr.Rotation.z != 0.0f) {
+            static bool told = false;
+            if (!told) {
+                told = true;
+                LOG_WARN("Physics") << "Объект с контроллером персонажа не наклоняется — наклон X/Z снят. "
+                                       "Смотреть вверх-вниз должна дочерняя камера, а не тело";
+            }
+            tr.Rotation.x = 0.0f;
+            tr.Rotation.z = 0.0f;
+        }
 
         // --- Вертикаль -------------------------------------------------------
         if (cc.Grounded && cc.VerticalVelocity <= 0.0f) {

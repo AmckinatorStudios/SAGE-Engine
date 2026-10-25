@@ -5,6 +5,10 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/euler_angles.hpp>
+#include <algorithm>
+#include <cmath>
 
 #include "sage/render/Frustum.h"
 #include "sage/scene/Transform.h"
@@ -157,14 +161,14 @@ TEST(Config_letterbox_letterbox_when_window_too_tall) {
 // объекты просто окажутся повёрнуты «не так», и виноватым будет казаться
 // импорт, гизмо или экспортёр.
 //
-// Поэтому здесь стоит ровно то произведение, которое было в коде до правки, и
+// Поэтому здесь стоит произведение соглашения (T*Ry*Rx*Rz*S, Transform.h) и
 // сверяется поэлементно — на углах, где перепутанный порядок обязан разойтись
 // (три разных ненулевых угла), и на неравномерном масштабе.
 namespace {
 glm::mat4 ReferenceMatrix(const Transform& t) {
     glm::mat4 m = glm::translate(glm::mat4(1.0f), t.Position);
-    m = glm::rotate(m, glm::radians(t.Rotation.x), glm::vec3(1, 0, 0));
     m = glm::rotate(m, glm::radians(t.Rotation.y), glm::vec3(0, 1, 0));
+    m = glm::rotate(m, glm::radians(t.Rotation.x), glm::vec3(1, 0, 0));
     m = glm::rotate(m, glm::radians(t.Rotation.z), glm::vec3(0, 0, 1));
     m = glm::scale(m, t.Scale);
     return m;
@@ -290,4 +294,64 @@ TEST(Transform_set_from_matrix_survives_straight_down) {
     CHECK_NEAR(got.x, 0.0f, 1e-3);
     CHECK_NEAR(got.y, -1.0f, 1e-3);
     CHECK_NEAR(got.z, 0.0f, 1e-3);
+}
+
+// --- Наклон — вокруг СОБСТВЕННОЙ оси, рыскание — вокруг мировой ---------------
+//
+// Ради этого соглашение и сменилось. При R = Rx*Ry*Rz наклон X шёл вокруг
+// ГЛОБАЛЬНОЙ оси: камера, повёрнутая на 90° по Y, при «посмотреть вниз»
+// заваливалась набок, а персонаж с камерой на теле клонился вместе со
+// взглядом. Теперь (наклон, рыскание, 0) — ровно «повернуть голову и
+// посмотреть»: правая рука остаётся горизонтальной, горизонт не валится.
+TEST(Math_euler_pitch_is_local_yaw_is_global) {
+    for (float yaw : {0.0f, 37.0f, 90.0f, -135.0f, 180.0f}) {
+        for (float pitch : {-60.0f, -20.0f, 25.0f, 70.0f}) {
+            Transform t;
+            t.Rotation = glm::vec3(pitch, yaw, 0.0f);
+            const glm::mat4 m = t.GetMatrix();
+            const glm::vec3 right = glm::vec3(m[0]);
+            const glm::vec3 fwd = -glm::vec3(m[2]);
+            CHECK_NEAR(right.y, 0.0f, 1e-5);                                // крена нет
+            CHECK_NEAR(fwd.y, std::sin(glm::radians(pitch)), 1e-5);        // наклон — высота взгляда
+            // Азимут взгляда — ровно рыскание, при любом наклоне.
+            const float az = glm::degrees(std::atan2(-fwd.x, -fwd.z));
+            float d = std::fmod(std::abs(az - yaw), 360.0f);
+            d = std::min(d, 360.0f - d);
+            CHECK_TRUE(d < 1e-2f);
+        }
+    }
+}
+
+TEST(Math_euler_matches_glm_yxz_and_round_trips) {
+    const glm::vec3 angles[] = {{12.0f, 34.0f, 56.0f}, {-80.0f, 170.0f, 25.0f}, {45.0f, -45.0f, 90.0f},
+                                {89.9f, 10.0f, 0.0f}, {-90.0f, 33.0f, 0.0f}};
+    for (const glm::vec3& a : angles) {
+        const glm::mat4 got = sage::RotationMatrixFromEulerDegrees(a);
+        const glm::mat4 want = glm::eulerAngleYXZ(glm::radians(a.y), glm::radians(a.x), glm::radians(a.z));
+        for (int c = 0; c < 3; ++c)
+            for (int r = 0; r < 3; ++r) CHECK_NEAR(got[c][r], want[c][r], 1e-5);
+        // Кватернион и обратно — тот же поворот.
+        const glm::mat4 back = sage::RotationMatrixFromEulerDegrees(
+            sage::EulerDegreesFromQuat(sage::QuatFromEulerDegrees(a)));
+        for (int c = 0; c < 3; ++c)
+            for (int r = 0; r < 3; ++r) CHECK_NEAR(back[c][r], want[c][r], 1e-3);
+    }
+}
+
+TEST(Math_legacy_euler_converts_to_the_same_rotation) {
+    // Старое соглашение (Rx*Ry*Rz) -> новые углы: ТОТ ЖЕ поворот (миграция v16 -> v17).
+    const glm::vec3 legacy[] = {{30.0f, 0.0f, 0.0f}, {0.0f, 45.0f, 0.0f}, {23.0f, -47.0f, 111.0f},
+                                {-70.0f, 120.0f, 10.0f}};
+    for (const glm::vec3& a : legacy) {
+        glm::mat4 old = glm::rotate(glm::mat4(1.0f), glm::radians(a.x), glm::vec3(1, 0, 0));
+        old = glm::rotate(old, glm::radians(a.y), glm::vec3(0, 1, 0));
+        old = glm::rotate(old, glm::radians(a.z), glm::vec3(0, 0, 1));
+        const glm::mat4 now = sage::RotationMatrixFromEulerDegrees(sage::EulerDegreesFromLegacyXYZ(a));
+        for (int c = 0; c < 3; ++c)
+            for (int r = 0; r < 3; ++r) CHECK_NEAR(now[c][r], old[c][r], 1e-4);
+    }
+    // Поворот вокруг одной оси в обоих соглашениях один — числа не меняются.
+    const glm::vec3 single = sage::EulerDegreesFromLegacyXYZ({0.0f, 45.0f, 0.0f});
+    CHECK_NEAR(single.y, 45.0f, 1e-3);
+    CHECK_NEAR(single.x, 0.0f, 1e-3);
 }

@@ -65,6 +65,7 @@ set(SAGE_ENGINE_SOURCES
     src/rhi/null/NullDevice.cpp
     src/sage/assets/AssetCache.cpp
     src/sage/assets/AssetDatabase.cpp
+    src/sage/assets/ModelData.cpp
     src/sage/assets/Pack.cpp
     src/sage/assets/VfsImage.cpp
     src/sage/assets/Zip.cpp

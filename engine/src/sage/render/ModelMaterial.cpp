@@ -2,6 +2,7 @@
 // (второе разворачивание дало бы дублирующиеся символы на линковке).
 #define TINYGLTF_NO_STB_IMAGE
 #define TINYGLTF_NO_STB_IMAGE_WRITE
+#include "sage/assets/ModelData.h"
 #include "sage/assets/Pack.h"
 #include <tiny_gltf.h>
 
@@ -173,12 +174,16 @@ std::string FileSafe(const std::string& name) {
 // всё — то есть ровно тот симптом, за которым сюда и пришли.
 struct TextureSink {
     fs::path Dir;
+    // Где такие карты лежали раньше (рядом с моделью). Уже лежащая там карта
+    // используется как есть: на неё ссылаются материалы старых проектов.
+    fs::path LegacyDir;
     std::string Stem;
     std::string Slot;
 
-    fs::path PathFor(const char* usage) const {
-        return Dir / (Stem + (Slot.empty() ? "" : "_" + Slot) + "_" + usage + ".png");
+    std::string FileName(const char* usage) const {
+        return Stem + (Slot.empty() ? "" : "_" + Slot) + "_" + usage + ".png";
     }
+    fs::path PathFor(const char* usage) const { return Dir / FileName(usage); }
 };
 
 // Записывает картинку, если её ещё нет. Возвращает путь или пустую строку.
@@ -189,15 +194,26 @@ struct TextureSink {
 std::string WritePng(const TextureSink& sink, const char* usage, const unsigned char* pixels,
                      int w, int h, int channels, std::vector<std::string>& warnings) {
     if (!pixels || w <= 0 || h <= 0) return {};
-    const fs::path out = sink.PathFor(usage);
     std::error_code ec;
+    if (!sink.LegacyDir.empty()) {
+        const fs::path legacy = sink.LegacyDir / sink.FileName(usage);
+        if (fs::exists(legacy, ec)) return legacy.generic_string();
+    }
+    const fs::path out = sink.PathFor(usage);
     if (fs::exists(out, ec)) return out.generic_string();
+    // ТА ЖЕ КАРТИНКА — ТОТ ЖЕ ФАЙЛ. Модели одного набора несут одни и те же
+    // встроенные карты (общий атлас, палитра); копия на каждую модель только
+    // раздувает проект и путает, какую из одинаковых править.
+    const uint64_t hash = sage::assets::PixelHash(pixels, w, h, channels);
+    if (const fs::path shared = sage::assets::FindSharedImage(sink.Dir, hash); !shared.empty())
+        return shared.generic_string();
     fs::create_directories(out.parent_path(), ec);
     if (!stbi_write_png(out.string().c_str(), w, h, channels, pixels, w * channels)) {
         warnings.push_back(std::string("не удалось записать карту ") + usage + ": " +
                            out.string());
         return {};
     }
+    sage::assets::RememberSharedImage(sink.Dir, hash, out);
     return out.generic_string();
 }
 
@@ -581,7 +597,13 @@ ExtractedMaterialSet ExtractMaterials(const std::string& ref, const std::string&
 
     const fs::path model(modelPath);
     TextureSink sink;
-    sink.Dir = textureDir.empty() ? model.parent_path() : fs::path(textureDir);
+    // Карты — в общий каталог текстур папки модели (см. sage/assets/ModelData.h).
+    if (textureDir.empty()) {
+        sink.Dir = sage::assets::ModelDataDir(model, sage::assets::ModelData::Textures);
+        sink.LegacyDir = model.parent_path();
+    } else {
+        sink.Dir = fs::path(textureDir);
+    }
     sink.Stem = model.stem().string();
 
     const std::string ext = ExtLower(modelPath);

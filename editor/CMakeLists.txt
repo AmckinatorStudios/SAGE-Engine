@@ -42,6 +42,7 @@ add_executable(SageEditor WIN32
     src/selftest/SelfTestPlugins.cpp
     src/selftest/SelfTestPanels.cpp
     src/selftest/SelfTestGIBake.cpp
+    src/selftest/SelfTestCursorLock.cpp
     src/selftest/SelfTestProjectAndAssets.cpp
     src/selftest/SelfTestRenderStability.cpp
     src/selftest/SelfTestRun.cpp

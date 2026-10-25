@@ -84,7 +84,7 @@ void ScriptEngine::RegisterAnimationApi() {
         sage::anim::JointPose& p = am->PoseOverrides[(size_t)joint];
         p.HasRotation = true;
         p.Rotation = sk.Joints[(size_t)joint].Rotation *
-                     glm::quat(glm::radians(glm::vec3(rx, ry, rz)));
+                     sage::QuatFromEulerDegrees(glm::vec3(rx, ry, rz));
     });
     Bind("anim", "ClearJointPoses", "ClearJointPoses", [](GameObject obj) {
         if (!obj.Valid()) return;

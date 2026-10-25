@@ -198,8 +198,7 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
         for (const ColliderComponent::Part& p : col.Parts) {
             const glm::mat4 partWorld =
                 rot * glm::translate(glm::mat4(1.0f), p.Offset * scale) *
-                glm::eulerAngleXYZ(glm::radians(p.EulerDeg.x), glm::radians(p.EulerDeg.y),
-                                   glm::radians(p.EulerDeg.z));
+                sage::RotationMatrixFromEulerDegrees(p.EulerDeg);   // как у физики (EulerToQuat)
             shape(p.Shape, partWorld, p.HalfExtents * scale, p.Radius * uniform,
                   p.HalfHeight * scale.y, color * 0.8f, selected ? 1.0f : 0.7f);
         }

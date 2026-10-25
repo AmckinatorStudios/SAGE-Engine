@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2806.
+// Язык: Русский. Строк: 2811.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -2550,6 +2550,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Потеря жизни при ударе"},
     {"Light",
      "Свет"},
+    {"Light Flare Size",
+     "Размер блика лампы"},
+    {"Light Flares",
+     "Блики ламп"},
     {"Light Shafts",
      "Лучи света"},
     {"Light brightness",
@@ -2566,6 +2570,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Плотность лайтмапы относительно сцены: больше — чётче, но дольше печь"},
     {"Lightmapped",
      "С лайтмапой"},
+    {"Lights",
+     "Лампы"},
     {"Line",
      "Строка"},
     {"Line %d, column %d  |  lines: %zu  |  %s  |  %s",
@@ -4136,6 +4142,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сцены, скрипты, модели, текстуры, звуки, материалы, интерфейсы"},
     {"Screen",
      "Экран"},
+    {"Screen Flares",
+     "Экранные блики"},
+    {"Screen Threshold",
+     "Порог экранных бликов"},
     {"Screen centre",
      "По центру кадра"},
     {"Screen:",

@@ -163,13 +163,13 @@ void ScriptEngine::RegisterMathTypes() {
     // результат смешивания X/Y/Z, кватернион просто вращает и гладко
     // интерполируется (Slerp). Через Euler()/FromEuler() он читается в ТЕ ЖЕ
     // градусы XYZ, что и Transform.Rotation — общая формула с движком (см.
-    // sage::EulerXYZDegreesFromRotationMatrix в Transform.h), поэтому
+    // sage::EulerDegreesFromRotationMatrix в Transform.h), поэтому
     // `entity.Transform.Rotation = q:Euler()` — законный, предсказуемый мост
     // между «посчитать поворот кватернионом» и «применить его к объекту».
     //
-    // ПОЧЕМУ FromEuler СОБИРАЕТ ИМЕННО qx*qy*qz. Кватернионы, как и матрицы,
+    // ПОЧЕМУ FromEuler — ОБЩЕЙ ФУНКЦИЕЙ ДВИЖКА. Кватернионы, как и матрицы,
     // не коммутируют: порядок обязан совпадать с Transform::GetMatrix
-    // (R = Rx*Ry*Rz), иначе один и тот же Vec3(pitch,yaw,roll) даст РАЗНЫЙ
+    // (R = Ry*Rx*Rz), иначе один и тот же Vec3(pitch,yaw,roll) даст РАЗНЫЙ
     // фактический поворот в зависимости от того, собрала его матрица или
     // кватернион — расхождение, которое не отловить взглядом, пока кто-то не
     // сравнит Transform.Rotation и Quat:Euler() на одном и том же объекте.
@@ -201,15 +201,8 @@ void ScriptEngine::RegisterMathTypes() {
             const float len = glm::length(axis);
             return len > 1e-6f ? glm::angleAxis(glm::radians(deg), axis / len) : glm::quat(1, 0, 0, 0);
         },
-        "FromEuler", [](const glm::vec3& degrees) {
-            const glm::quat qx = glm::angleAxis(glm::radians(degrees.x), glm::vec3(1, 0, 0));
-            const glm::quat qy = glm::angleAxis(glm::radians(degrees.y), glm::vec3(0, 1, 0));
-            const glm::quat qz = glm::angleAxis(glm::radians(degrees.z), glm::vec3(0, 0, 1));
-            return qx * qy * qz;
-        },
-        "Euler", [](const glm::quat& q) {
-            return sage::EulerXYZDegreesFromRotationMatrix(glm::mat4_cast(q));
-        },
+        "FromEuler", [](const glm::vec3& degrees) { return sage::QuatFromEulerDegrees(degrees); },
+        "Euler", [](const glm::quat& q) { return sage::EulerDegreesFromQuat(q); },
         "Rotate", [](const glm::quat& q, const glm::vec3& v) { return q * v; },
         "Inverse", [](const glm::quat& q) { return glm::inverse(q); },
         "Normalized", [](const glm::quat& q) { return glm::normalize(q); },

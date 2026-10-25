@@ -4,32 +4,91 @@
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 namespace sage {
-// Углы Эйлера XYZ (Rx*Ry*Rz, градусы) из ЧИСТОЙ матрицы поворота — столбцы
-// единичные, масштаб уже снят. Общая точка для Transform::SetFromMatrix (там
-// матрица приходит со масштабом, и его снимают перед вызовом) и для
-// scripting Quat:Euler() (кватернион — уже чистый поворот, снимать нечего).
-// Одна формула на оба случая: порядок осей завязан на GetMatrix ниже, и
-// вторая независимая реализация рано или поздно разошлась бы с ней на
-// gimbal lock или знаке угла.
-inline glm::vec3 EulerXYZDegreesFromRotationMatrix(const glm::mat4& rot) {
+
+// ---------------------------------------------------------------------------
+// СОГЛАШЕНИЕ ОБ УГЛАХ ЭЙЛЕРА: R = Ry * Rx * Rz (градусы).
+//
+// Рыскание (Y) — вокруг МИРОВОЙ вертикали, наклон (X) — вокруг СОБСТВЕННОЙ оси
+// объекта уже после рыскания, крен (Z) — вокруг его взгляда. Так устроены
+// Unity и любой контроллер от первого лица: «повернуть голову и посмотреть
+// вниз» — это ровно (наклон, рыскание, 0), и наклон не заваливает горизонт.
+//
+// Раньше было R = Rx*Ry*Rz: наклон применялся ПОСЛЕДНИМ, то есть вокруг
+// ГЛОБАЛЬНОЙ X. Камера, повёрнутая на 90° по Y и наклонённая по X, вместо
+// «посмотреть вниз» заваливалась набок, а тело персонажа с камерой на себе
+// клонилось вместе со взглядом. Старые сцены переводятся миграцией формата
+// (v16 -> v17, EulerDegreesFromLegacyXYZ): тот же поворот, новые числа.
+//
+// ВСЕ преобразования «углы <-> матрица/кватернион» движка — здесь. Своя копия
+// где-то ещё однажды разошлась бы по порядку осей, и объект прыгал бы при
+// переходе из одной системы в другую (физика, гизмо, скрипты).
+// ---------------------------------------------------------------------------
+inline glm::mat4 RotationMatrixFromEulerDegrees(const glm::vec3& e) {
+    constexpr float kDeg2Rad = 0.01745329251994329577f;
+    const float cx = std::cos(e.x * kDeg2Rad), sx = std::sin(e.x * kDeg2Rad);
+    const float cy = std::cos(e.y * kDeg2Rad), sy = std::sin(e.y * kDeg2Rad);
+    const float cz = std::cos(e.z * kDeg2Rad), sz = std::sin(e.z * kDeg2Rad);
+    // Строки R = Ry*Rx*Rz; glm хранит по столбцам (m[col][row]).
+    glm::mat4 m(1.0f);
+    m[0][0] = cy * cz + sy * sx * sz;
+    m[0][1] = cx * sz;
+    m[0][2] = -sy * cz + cy * sx * sz;
+    m[1][0] = -cy * sz + sy * sx * cz;
+    m[1][1] = cx * cz;
+    m[1][2] = sy * sz + cy * sx * cz;
+    m[2][0] = sy * cx;
+    m[2][1] = -sx;
+    m[2][2] = cy * cx;
+    return m;
+}
+
+// Углы (градусы) из ЧИСТОЙ матрицы поворота — столбцы единичные, масштаб уже
+// снят. Обратное RotationMatrixFromEulerDegrees.
+inline glm::vec3 EulerDegreesFromRotationMatrix(const glm::mat4& rot) {
     constexpr float kRad2Deg = 57.29577951308232087680f;
-    const float sy = std::min(std::max(rot[2][0], -1.0f), 1.0f);
-    const float cy = std::sqrt(std::max(0.0f, 1.0f - sy * sy));
-    float rx, ry, rz;
-    ry = std::asin(sy);
-    if (cy > 1e-6f) {
-        rx = std::atan2(-rot[2][1], rot[2][2]);
-        rz = std::atan2(-rot[1][0], rot[0][0]);
+    const float sx = std::min(std::max(-rot[2][1], -1.0f), 1.0f);
+    const float cx = std::sqrt(std::max(0.0f, 1.0f - sx * sx));
+    float rx = std::asin(sx), ry, rz;
+    if (cx > 1e-6f) {
+        ry = std::atan2(rot[2][0], rot[2][2]);
+        rz = std::atan2(rot[0][1], rot[1][1]);
     } else {
-        // Взгляд строго вдоль оси: поворот вокруг X и Z становится одним и тем
-        // же движением (gimbal lock). Отдаём весь поворот X, иначе atan2 от
-        // нулей вернул бы произвольные углы.
-        rx = std::atan2(rot[1][2], rot[1][1]);
+        // Взгляд строго вверх или вниз: рыскание и крен становятся одним и тем
+        // же движением (gimbal lock). Отдаём всё рысканию — горизонт не валится.
+        ry = std::atan2(-rot[0][2], rot[0][0]);
         rz = 0.0f;
     }
     return glm::vec3(rx, ry, rz) * kRad2Deg;
+}
+
+inline glm::quat QuatFromEulerDegrees(const glm::vec3& e) {
+    return glm::normalize(glm::quat_cast(RotationMatrixFromEulerDegrees(e)));
+}
+inline glm::vec3 EulerDegreesFromQuat(const glm::quat& q) {
+    return EulerDegreesFromRotationMatrix(glm::mat4_cast(glm::normalize(q)));
+}
+
+// Углы прежнего соглашения (R = Rx*Ry*Rz) -> углы нынешнего, ТОТ ЖЕ поворот.
+// Только для миграции старых файлов.
+inline glm::vec3 EulerDegreesFromLegacyXYZ(const glm::vec3& legacy) {
+    constexpr float kDeg2Rad = 0.01745329251994329577f;
+    const float cx = std::cos(legacy.x * kDeg2Rad), sx = std::sin(legacy.x * kDeg2Rad);
+    const float cy = std::cos(legacy.y * kDeg2Rad), sy = std::sin(legacy.y * kDeg2Rad);
+    const float cz = std::cos(legacy.z * kDeg2Rad), sz = std::sin(legacy.z * kDeg2Rad);
+    glm::mat4 m(1.0f);
+    m[0][0] = cy * cz;
+    m[0][1] = cx * sz + sx * sy * cz;
+    m[0][2] = sx * sz - cx * sy * cz;
+    m[1][0] = -cy * sz;
+    m[1][1] = cx * cz - sx * sy * sz;
+    m[1][2] = sx * cz + cx * sy * sz;
+    m[2][0] = sy;
+    m[2][1] = -sx * cy;
+    m[2][2] = cx * cy;
+    return EulerDegreesFromRotationMatrix(m);
 }
 } // namespace sage
 
@@ -38,55 +97,18 @@ struct Transform {
     glm::vec3 Rotation{0.0f}; // в градусах, углы Эйлера
     glm::vec3 Scale{1.0f};
 
-    // Матрица объекта: T * Rx * Ry * Rz * S.
+    // Матрица объекта: T * Ry * Rx * Rz * S (соглашение об углах — выше).
     //
-    // СОБРАНА ВРУЧНУЮ, и это не микрооптимизация ради красоты. Это самая
-    // горячая функция движка: её зовут на каждую сущность в каждом проходе
-    // кадра (тени по каскадам, шесть граней куба отражений, зеркальный проход,
-    // сам кадр), плюс физика и скрипты. На сцене в двадцать тысяч объектов
-    // разница видна в миллисекундах кадра, а не в наносекундах замера.
-    //
-    // Что было: четыре вызова glm (translate + три rotate) + scale. Каждый
-    // rotate — это НОРМАЛИЗАЦИЯ оси (которая здесь всегда единичный орт), пара
-    // sin/cos и полное перемножение матриц 4x4, то есть шестьдесят четыре
-    // умножения ради поворота вокруг одной оси. Итого около двух сотен операций
-    // и три нормализации там, где хватает трёх пар sin/cos и десятка умножений.
-    //
-    // Формула развёрнута из того же произведения, что стояло здесь раньше, и
-    // порядок множителей сохранён в точности — иначе сменилось бы соглашение об
-    // углах Эйлера, а на нём стоят и сцены, и гизмо редактора, и скрипты.
-    // Совпадение со старым путём проверяется тестом (Math_transform_matrix_*).
+    // Самая горячая функция движка: её зовут на каждую сущность в каждом
+    // проходе кадра, плюс физика и скрипты, поэтому поворот собирается
+    // формулой (RotationMatrixFromEulerDegrees), а не тремя glm::rotate с
+    // нормализацией осей и перемножением матриц 4x4.
     glm::mat4 GetMatrix() const {
-        constexpr float kDeg2Rad = 0.01745329251994329577f;
-        const float rx = Rotation.x * kDeg2Rad;
-        const float ry = Rotation.y * kDeg2Rad;
-        const float rz = Rotation.z * kDeg2Rad;
-        const float cx = std::cos(rx), sx = std::sin(rx);
-        const float cy = std::cos(ry), sy = std::sin(ry);
-        const float cz = std::cos(rz), sz = std::sin(rz);
-
-        // Строки поворота R = Rx*Ry*Rz. glm хранит по столбцам (m[col][row]),
-        // поэтому ниже элементы разложены транспонированно.
-        glm::mat4 m;
-        m[0][0] = (cy * cz) * Scale.x;
-        m[0][1] = (cx * sz + sx * sy * cz) * Scale.x;
-        m[0][2] = (sx * sz - cx * sy * cz) * Scale.x;
-        m[0][3] = 0.0f;
-
-        m[1][0] = (-cy * sz) * Scale.y;
-        m[1][1] = (cx * cz - sx * sy * sz) * Scale.y;
-        m[1][2] = (sx * cz + cx * sy * sz) * Scale.y;
-        m[1][3] = 0.0f;
-
-        m[2][0] = (sy) * Scale.z;
-        m[2][1] = (-sx * cy) * Scale.z;
-        m[2][2] = (cx * cy) * Scale.z;
-        m[2][3] = 0.0f;
-
-        m[3][0] = Position.x;
-        m[3][1] = Position.y;
-        m[3][2] = Position.z;
-        m[3][3] = 1.0f;
+        glm::mat4 m = sage::RotationMatrixFromEulerDegrees(Rotation);
+        m[0] *= Scale.x;
+        m[1] *= Scale.y;
+        m[2] *= Scale.z;
+        m[3] = glm::vec4(Position, 1.0f);
         return m;
     }
 
@@ -96,7 +118,7 @@ struct Transform {
     // всюду, где положение приходит НЕ из полей: гизмо тянет мировую матрицу,
     // управление камерой от её лица ставит объект по базису вида, физика
     // возвращает тело после симуляции. Порядок углов обязан совпадать с
-    // GetMatrix (T*Rx*Ry*Rz*S) — разложение «вообще» (например, декомпозиция
+    // GetMatrix (T*Ry*Rx*Rz*S) — разложение «вообще» (например, декомпозиция
     // ImGuizmo, у неё другой порядок) даёт ДРУГИЕ углы, и объект прыгает при
     // первом же касании. Один раз здесь, рядом со сборкой матрицы, — и спорить
     // двум реализациям не о чем.
@@ -113,8 +135,7 @@ struct Transform {
         rot[1] = glm::vec4(glm::vec3(m[1]) / scale.y, 0.0f);
         rot[2] = glm::vec4(glm::vec3(m[2]) / scale.z, 0.0f);
 
-        // Углы Эйлера XYZ из матрицы поворота — ровно то разложение, из которого
-        // GetMatrix соберёт ту же матрицу обратно (см. EulerXYZDegreesFromRotationMatrix).
-        Rotation = sage::EulerXYZDegreesFromRotationMatrix(rot);
+        // Ровно то разложение, из которого GetMatrix соберёт ту же матрицу обратно.
+        Rotation = sage::EulerDegreesFromRotationMatrix(rot);
     }
 };
