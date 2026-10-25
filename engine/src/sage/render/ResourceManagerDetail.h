@@ -131,7 +131,7 @@ inline std::string Locate(const std::string& path) {
 // объекту, а не в кадре — в кадре материалы и текстуры уже разобраны в
 // shared_ptr. Таблица же добавила бы устаревание, привязанное к текущему
 // каталогу процесса и к корню проекта: файл при этом существует, просто не тот.
-std::string SamplingSuffix(TextureFilter filter, bool mipmaps, bool bleed = false,
+inline std::string SamplingSuffix(TextureFilter filter, bool mipmaps, bool bleed = false,
                            bool srgb = false) {
     return std::string("|f") + std::to_string((int)filter) + (mipmaps ? "m" : "") +
            (bleed ? "b" : "") + (srgb ? "s" : "");
