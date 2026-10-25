@@ -2,6 +2,7 @@
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Pack.h"
 #include "sage/core/Log.h"
+#include "sage/scripting/ScriptModules.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/physics/Ragdoll.h"
@@ -129,35 +130,51 @@ sol::table ScriptEngine::Module(const char* name) {
 }
 
 void ScriptEngine::RegisterEngineApi() {
-    // Тонкий диспетчер: по одному вызову на связную группу привязок. Порядок —
-    // как в прежней монолитной функции (типы прежде их потребителей), поэтому
-    // поведение идентично, но каждую область теперь видно/править отдельно.
-    RegisterMathTypes();
-    RegisterComponentTypes();
-    RegisterUIApi();
-    RegisterTweenApi();
-    RegisterAnimationApi();
-    RegisterGameObject();
-    RegisterSceneApi();
-    RegisterMeshApi();
-    RegisterProceduralApi();
-    RegisterInputApi();
-    RegisterCameraApi();
-    RegisterParticleApi();
-    RegisterBillboardApi();
-    RegisterAudioApi();
-    RegisterSaveApi();
-    RegisterTimerApi();
-    RegisterMessagingApi();
-    RegisterLaunchArgsApi();
-    RegisterGameFlowApi();
-    RegisterMathHelpers();
-    RegisterLightingApi();
-    RegisterPhysicsApi();
-    RegisterEventsApi();
-    RegisterVarsApi();
-    RegisterRenderTextureApi();
-    RegisterNetApi();
+    // Области API — модули с зависимостями (sage/scripting/ScriptModules.h), а
+    // не цепочка вызовов: порядок записан в Requires, сбой одной области не
+    // оставляет игру без скриптов, а свои модули игры и плагинов ставятся тем
+    // же установщиком следом за встроенными. Порядок записи — прежний, и
+    // зависимости смотрят только назад, так что ставится всё как раньше.
+    using sage::scripting::ScriptModule;
+    using sage::scripting::ScriptModuleContext;
+    auto mod = [this](const char* name, const char* summary, std::vector<std::string> deps,
+                      bool optional, void (ScriptEngine::*fn)()) {
+        return ScriptModule{name, summary, std::move(deps), optional,
+                            [this, fn](ScriptModuleContext&) { (this->*fn)(); }};
+    };
+    const std::vector<ScriptModule> builtins = {
+        // Типы, на которых стоит всё остальное, выключить нельзя.
+        mod("math", "Vec2/Vec3/Vec4/Quat, Transform", {}, false, &ScriptEngine::RegisterMathTypes),
+        mod("components", "типы компонентов ECS", {"math"}, false, &ScriptEngine::RegisterComponentTypes),
+        mod("ui", "элементы интерфейса, sage.ui", {"components"}, false, &ScriptEngine::RegisterUIApi),
+        mod("tween", "Ease, sage.tween", {"math"}, true, &ScriptEngine::RegisterTweenApi),
+        mod("anim", "sage.anim, sage.ik", {"components"}, true, &ScriptEngine::RegisterAnimationApi),
+        mod("object", "GameObject и доступ к компонентам", {"components", "ui"}, false,
+            &ScriptEngine::RegisterGameObject),
+        mod("scene", "log, Spawn/Find/Destroy", {"object"}, false, &ScriptEngine::RegisterSceneApi),
+        mod("mesh", "меш объекта: примитивы и модели", {"object"}, true, &ScriptEngine::RegisterMeshApi),
+        mod("procedural", "шумы, формулы, меш/материал/текстура кодом", {"object"}, true,
+            &ScriptEngine::RegisterProceduralApi),
+        mod("input", "действия и клавиши", {"math"}, true, &ScriptEngine::RegisterInputApi),
+        mod("camera", "камера сцены", {"math"}, true, &ScriptEngine::RegisterCameraApi),
+        mod("particles", "частицы", {"object"}, true, &ScriptEngine::RegisterParticleApi),
+        mod("billboards", "спрайты-билборды", {"math"}, true, &ScriptEngine::RegisterBillboardApi),
+        mod("audio", "звук и музыка", {"object"}, true, &ScriptEngine::RegisterAudioApi),
+        mod("save", "сохранение прогресса", {}, true, &ScriptEngine::RegisterSaveApi),
+        mod("timers", "Schedule/Repeat, корутины", {}, false, &ScriptEngine::RegisterTimerApi),
+        mod("messaging", "SendMessage/Broadcast", {"object"}, true, &ScriptEngine::RegisterMessagingApi),
+        mod("args", "параметры запуска", {}, true, &ScriptEngine::RegisterLaunchArgsApi),
+        mod("game", "сцены, пауза, время, выход", {}, false, &ScriptEngine::RegisterGameFlowApi),
+        mod("mathx", "Lerp/Clamp и прочие помощники", {"math"}, false, &ScriptEngine::RegisterMathHelpers),
+        mod("lighting", "освещение и окружение", {"components"}, true, &ScriptEngine::RegisterLightingApi),
+        mod("physics", "скорость, гравитация, лучи", {"object"}, true, &ScriptEngine::RegisterPhysicsApi),
+        mod("events", "sage.events: шина событий", {}, false, &ScriptEngine::RegisterEventsApi),
+        mod("vars", "публичные переменные объектов", {"object"}, true, &ScriptEngine::RegisterVarsApi),
+        mod("rt", "съёмка сцены в картинку", {"object"}, true, &ScriptEngine::RegisterRenderTextureApi),
+        mod("net", "мультиплеер", {}, true, &ScriptEngine::RegisterNetApi),
+    };
+    ScriptModuleContext ctx{m_lua, this, nullptr};
+    sage::scripting::InstallScriptModules(ctx, builtins, true);
     // Короткие имена — ПОСЛЕДНИМИ: они раздают псевдонимы уже собранным модулям.
     RegisterShortNames();
 }

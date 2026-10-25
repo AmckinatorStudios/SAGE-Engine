@@ -230,6 +230,12 @@ public:
     // свою собственную API-функцию/тип в дополнение к базовой
     sol::state& Lua() { return m_lua; }
 
+    // Короткие имена модулей в глобальных: game.Quit() == sage.game.Quit().
+    // Псевдоним, а не копия; занятое имя не трогается. Подробности — в .cpp.
+    // Открыт, потому что модули, доустановленные позже (их зависимость дал
+    // бэкенд нового API), тоже должны получить короткое имя.
+    void RegisterShortNames();
+
     // --- МОСТ К СКРИПТАМ ОБЪЕКТОВ --------------------------------------------
     //
     // Поведение объектов ведёт система скриптинга (sage/scripting/
@@ -382,9 +388,6 @@ private:
     // Искатель модулей для require: читает .lua через vfs (пакет или диск).
     void RegisterModuleLoader();
     void RegisterEngineApi();
-    // Короткие имена модулей в глобальных: game.Quit() == sage.game.Quit().
-    // Псевдоним, а не копия; занятое имя не трогается. Подробности — в .cpp.
-    void RegisterShortNames();
     void RegisterMathTypes();     // Vec2/Vec3/Vec4/Transform + арифметика
     void RegisterComponentTypes();// enum'ы и usertype'ы компонентов ECS
     void RegisterUIApi();         // элемент интерфейса + sage.ui.*

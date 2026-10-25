@@ -8,6 +8,7 @@
 #include "sage/lang/SageCompiler.h"
 #include "sage/scene/Components.h"
 #include "sage/scripting/ScriptEngine.h"
+#include "sage/scripting/ScriptModules.h"
 #include "sage/scripting/ScriptFields.h"
 
 namespace sage::scripting::lua {
@@ -132,14 +133,29 @@ Backend::Backend(const LuaBackendConfig& config) : m_interop(config.Interop) {
     InstallWatchdog();
 
     m_base = m_lua->create_table();
-    RegisterMath(*this);
-    RegisterObject(*this);
-    RegisterComponents(*this);
-    RegisterGlobals(*this);
-    RegisterSignals(*this);
-    RegisterTest(*this);
-    RegisterTweens(*this);
-    RegisterFields(*this);
+    // Новый API — те же модули, что у прежнего движка (ScriptModules.h), с
+    // именами его глобальных таблиц. Следом — модули игры и плагинов, которые
+    // ждали этих: например, модулю с Requires = {"Scene"} нужен этот бэкенд.
+    {
+        auto mod = [](const char* name, const char* summary, std::vector<std::string> deps,
+                      void (*fn)(Backend&)) {
+            return ScriptModule{name, summary, std::move(deps), false,
+                                [fn](ScriptModuleContext& c) { fn(*c.Backend); }};
+        };
+        const std::vector<ScriptModule> builtins = {
+            mod("Math", "Vector3, Quaternion, Mathf", {}, &RegisterMath),
+            mod("Scene", "объекты, Transform, Scene.*", {"Math"}, &RegisterObject),
+            mod("Components", "компоненты объекта", {"Scene"}, &RegisterComponents),
+            mod("Globals", "Time, Input, Debug, Physics…", {"Scene"}, &RegisterGlobals),
+            mod("Events", "сигналы объектов и Events.*", {"Scene"}, &RegisterSignals),
+            mod("Test", "тесты на Lua в Play", {"Scene"}, &RegisterTest),
+            mod("Tween", "Tween.to и цепочки", {"Scene"}, &RegisterTweens),
+            mod("Fields", "публичные поля скрипта", {"Scene"}, &RegisterFields),
+        };
+        ScriptModuleContext ctx{*m_lua, m_interop, this};
+        InstallScriptModules(ctx, builtins, true);
+        if (m_interop) m_interop->RegisterShortNames();
+    }
 
     // Мост из прежнего движка: сообщения и выход обязаны доходить и до
     // скриптов объектов — их ведёт уже не он (см. ScriptEngine::SetMessageSink).

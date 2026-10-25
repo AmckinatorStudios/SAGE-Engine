@@ -165,6 +165,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/Signals.cpp
     src/sage/scene/EnvironmentSchema.cpp
     src/sage/scripting/ScriptEngine.cpp
+    src/sage/scripting/ScriptModules.cpp
     src/sage/lang/SageLexer.cpp
     src/sage/lang/SageParser.cpp
     src/sage/lang/SageCheck.cpp
