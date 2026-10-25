@@ -107,6 +107,9 @@ set(SAGE_ENGINE_SOURCES
     src/sage/assets/import/FbxImporter.cpp
     src/sage/assets/import/FbxTree.cpp
     src/sage/assets/import/FbxAscii.cpp
+    src/sage/core/Noise.cpp
+    src/sage/render/MeshBuilder.cpp
+    src/sage/scripting/ScriptApi_Procedural.cpp
     src/sage/assets/import/FbxSkin.cpp
     src/sage/assets/Quarantine.cpp
     src/sage/assets/import/GltfAccessor.cpp

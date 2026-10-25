@@ -408,6 +408,8 @@ private:
     void RegisterGameObject();    // GameObject + аксессоры компонентов + иерархия
     void RegisterSceneApi();      // log, Spawn/Find/DestroyObject
     void RegisterMeshApi();       // SetMeshCube/Sphere/…/Model/None
+    // Шумы, формулы, меши/материалы/текстуры, собранные кодом (ScriptApi_Procedural.cpp).
+    void RegisterProceduralApi();
     void RegisterInputApi();      // IsActionDown/WasActionPressed/…
     void RegisterCameraApi();     // Camera usertype + GetCamera
     void RegisterParticleApi();   // ParticleEffect, LoadEffect, Emit/Stream, эмиттер объекта

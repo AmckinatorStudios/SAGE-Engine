@@ -205,16 +205,6 @@ private:
     Camera m_fallbackCamera; // когда в сцене нет CameraComponent
     bool m_warnedNoCamera = false; // предупреждение «нет Primary-камеры» — один раз
 
-    // ESC удерживается несколько кадров — чтобы одно нажатие не «отпустило
-    // курсор и тут же закрыло игру», ждём отпускания клавиши (см. OnUpdate).
-    bool m_escLatched = false;
-    // Пауза рантайма: мир не тикает, курсор свободен, поверх кадра — меню.
-    bool m_paused = false;
-    bool m_pauseClickLatched = false;
-    void DrawPauseMenu(int vpW, int vpH);
-    // Показывать ли ВСТРОЕННОЕ меню паузы: игра со своим меню его выключает
-    // (sage.game.SetPauseMenu(false)) и забирает ESC себе.
-    bool PauseMenuWanted() const;
     // Единственный путь закрытия игры: сперва OnQuit скриптам, потом окно.
     void QuitGame();
 

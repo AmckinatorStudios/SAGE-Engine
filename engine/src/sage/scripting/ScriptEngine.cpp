@@ -140,6 +140,7 @@ void ScriptEngine::RegisterEngineApi() {
     RegisterGameObject();
     RegisterSceneApi();
     RegisterMeshApi();
+    RegisterProceduralApi();
     RegisterInputApi();
     RegisterCameraApi();
     RegisterParticleApi();

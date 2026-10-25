@@ -184,6 +184,9 @@ public:
     // ровно затем, чтобы заменить прежнюю (сменился размер клетки, цвет,
     // разрешение), и молча оставить старую значило бы «правка не применилась».
     void RegisterTexture(const std::string& name, std::shared_ptr<Texture> texture);
+    // Материал, собранный кодом (sage.material.Create), — под именем, как файл:
+    // GetMaterial(name) отдаёт его, а с диска он не перечитывается.
+    void RegisterMaterial(const std::string& name, std::shared_ptr<Material> material);
 
     std::shared_ptr<Material> GetMaterial(const std::string& path);
 
