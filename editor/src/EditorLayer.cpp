@@ -1,6 +1,7 @@
 #include "sage/core/Problems.h"
 #include "sage/app/CoreSystems.h"
 #include "EditorLayer.h"
+#include "CursorCapture.h"
 #include "LuaPlugins.h"
 #include "PluginsWindow.h"
 #include "sage/scene/Signals.h"
@@ -253,6 +254,9 @@ void EditorLayer::OnUpdate(float dt) {
     // «Управление» живые события: назначить клавишу можно только поймав её.
     m_playInputBridge.PollGamepads();
     m_play.Input().BeginFrame();
+    // Способ захвата курсора — настройка игрока из sage.cfg проекта: в Play
+    // редактора курсор держится так же, как в собранной игре.
+    sage::Application::Get().GetWindow().SetCursorLockMode(Settings().CursorLock);
 
     if (m_play.Playing()) {
         // Ввод игре — только пока в фокусе панель Game (см. EditorPlayInput).
@@ -264,6 +268,10 @@ void EditorLayer::OnUpdate(float dt) {
         // кадр, то есть тест проверял бы не игру, а окно редактора.
         const bool gameFocused = m_game.Focused() || m_luaTests.Running;
         m_play.Cursor().SetGameFocused(gameFocused);
+        // Захват — окну, в котором панель Game: вытащенная из дока, она живёт
+        // в своём окне системы, и захват главного мышь в ней не держал.
+        if (gameFocused && m_play.Cursor().CursorCaptured())
+            sage::Application::Get().GetWindow().SetCursorCaptureTarget((GLFWwindow*)m_game.PlatformWindow());
         m_play.Cursor().SyncCapture();
         if (gameFocused) {
             // Тот же порядок, что в собранной игре: устройства -> интерфейс
@@ -562,6 +570,7 @@ void EditorLayer::OnRender() {
     app.Device().Clear();
 
     ImGui_ImplOpenGL3_NewFrame();
+    cursorcapture::BeforeImGuiFrame();
     ImGui_ImplGlfw_NewFrame();
     // Проверка мыши В ЖИВОМ КАДРЕ (SAGE_EDITOR_SELFTEST) кладёт свои события
     // ПОСЛЕ бэкенда и ДО NewFrame: бэкенд в своём NewFrame тоже трогает
@@ -776,6 +785,8 @@ void EditorLayer::PresentExtraViewports() {
             if (!vp->PlatformHandle) continue;
             GLFWwindow* w = (GLFWwindow*)vp->PlatformHandle;
             if (m_dropWindows.insert(w).second) {
+                // Своя копия приёма файлов поверх бэкенда ImGui: тот drop не
+                // ставит, так что цепочку здесь продолжать не с чем.
                 glfwSetDropCallback(w, [](GLFWwindow*, int count, const char** paths) {
                     if (!s_dropSink || count <= 0 || !paths) return;
                     std::vector<std::string> list;
@@ -805,7 +816,7 @@ void EditorLayer::TakeAutoScreenshot(sage::Application& app) {
     // вердикта вовсе — провал Lua-теста проходил сборку молча. Ждём конца
     // последней в цепочке, но не вечно: зависшая проверка не должна вешать CI,
     // её отсутствие в логе поймает сам smoke-тест.
-    if (std::getenv("SAGE_EDITOR_SELFTEST") && m_luaSelfTestStep >= 0) {
+    if (std::getenv("SAGE_EDITOR_SELFTEST") && (m_luaSelfTestStep >= 0 || m_cursorProbeStep >= 0)) {
         using Clock = std::chrono::steady_clock;
         if (!m_shotWaitStarted) { m_shotWaitStart = Clock::now(); m_shotWaitStarted = true; }
         if (Clock::now() - m_shotWaitStart < std::chrono::minutes(5)) return;

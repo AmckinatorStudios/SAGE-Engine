@@ -90,6 +90,28 @@ inline glm::vec3 EulerDegreesFromLegacyXYZ(const glm::vec3& legacy) {
     m[2][2] = cx * cy;
     return EulerDegreesFromRotationMatrix(m);
 }
+// Из равнозначных наборов углов того же поворота — ближайший к ref.
+//
+// Один поворот записывается многими тройками: (x, y, z) и (180−x, y+180, z+180)
+// дают одну матрицу, а любой угол можно сдвинуть на 360°. Анимация между двумя
+// ключами интерполирует ЧИСЛА, поэтому ключи, переведённые независимо, могли
+// бы оказаться «по разные стороны» — и объект провернулся бы через полный
+// оборот там, где в исходнике было движение на пару градусов. Миграции
+// анимаций ставят каждый ключ ближе всего к предыдущему.
+inline glm::vec3 ClosestEquivalentEuler(const glm::vec3& e, const glm::vec3& ref) {
+    auto unwrap = [](float a, float r) {
+        while (a - r > 180.0f) a -= 360.0f;
+        while (a - r < -180.0f) a += 360.0f;
+        return a;
+    };
+    auto closest = [&](const glm::vec3& c) {
+        return glm::vec3(unwrap(c.x, ref.x), unwrap(c.y, ref.y), unwrap(c.z, ref.z));
+    };
+    const glm::vec3 a = closest(e);
+    const glm::vec3 b = closest(glm::vec3(180.0f - e.x, e.y + 180.0f, e.z + 180.0f));
+    const glm::vec3 da = glm::abs(a - ref), db = glm::abs(b - ref);
+    return (da.x + da.y + da.z) <= (db.x + db.y + db.z) ? a : b;
+}
 } // namespace sage
 
 struct Transform {

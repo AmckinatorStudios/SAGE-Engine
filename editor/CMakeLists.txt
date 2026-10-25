@@ -32,6 +32,7 @@ add_executable(SageEditor WIN32
     src/EditorTools.cpp
     src/EditorLayer_Assets.cpp
     src/EditorLayer_Ui.cpp
+    src/CursorCapture.cpp
     src/EditorLayer_Panels.cpp
     src/PanelRegistry.cpp
     src/EditorLayer_StatusBar.cpp

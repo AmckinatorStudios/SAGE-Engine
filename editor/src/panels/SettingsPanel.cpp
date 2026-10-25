@@ -80,6 +80,15 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         int msaaIdx = c.Msaa >= 8 ? 3 : c.Msaa >= 4 ? 2 : c.Msaa >= 2 ? 1 : 0;
         if (ImGui::Combo(T("MSAA"), &msaaIdx, msaa, IM_ARRAYSIZE(msaa)))
             c.Msaa = kMsaaVals[msaaIdx];
+        // Способ захвата курсора — выход для машины, где системный захват не
+        // держится (курсор спрятан, но гуляет): см. sage::CursorLockMode.
+        const char* locks[] = {T("Auto"), T("System"), T("Software")};
+        int lock = (int)c.CursorLock;
+        if (ImGui::Combo(T("Cursor Lock"), &lock, locks, IM_ARRAYSIZE(locks)))
+            c.CursorLock = (sage::CursorLockMode)lock;
+        EditorTheme::Hint(T("How a captured cursor is held. Software: the engine returns it to the window "
+                            "centre every frame — use it if the hidden cursor drifts. Auto switches to "
+                            "Software by itself when the system keeps dropping the capture"));
     }
 
     // ГРАФИЧЕСКИЙ API. Список — у RHI (GraphicsDevice::Catalog) вместе с

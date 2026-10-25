@@ -100,6 +100,7 @@ Application::Application(const AppConfig& config) : m_config(config) {
     wp.VSync = config.VSync;
     wp.Msaa = config.Msaa;
     m_window = std::make_unique<Window>(config.Width, config.Height, config.Title, wp);
+    m_window->SetCursorLockMode(config.CursorLock);
 
     m_device = rhi::GraphicsDevice::Create(ChooseBackend(config.Backend));
     // Шаги запуска отмечаются в логе НЕ ради болтливости. Когда на чужой машине

@@ -124,3 +124,73 @@ TEST(FormatVersion_every_engine_format_refuses_a_future_file) {
     }
     fs::remove_all(dir);
 }
+
+// --- Повороты в анимациях переводятся вместе с самим поворотом ----------------
+//
+// Соглашение об углах сменилось (R = Ry*Rx*Rz, Transform.h). Сцены перевела
+// миграция v16 -> v17, но клип свойств и твин хранят ПОВОРОТ ЧИСЛАМИ — без
+// перевода объект, повёрнутый по двум осям, играл бы не ту позу, а соседние
+// ключи, переведённые независимо, давали бы проворот через полный оборот.
+#include "sage/scene/Transform.h"
+#include "sage/scene/SceneSerializer.h"
+#include <glm/gtc/matrix_transform.hpp>
+
+namespace {
+glm::mat4 LegacyRotation(const glm::vec3& a) {
+    glm::mat4 m = glm::rotate(glm::mat4(1.0f), glm::radians(a.x), glm::vec3(1, 0, 0));
+    m = glm::rotate(m, glm::radians(a.y), glm::vec3(0, 1, 0));
+    return glm::rotate(m, glm::radians(a.z), glm::vec3(0, 0, 1));
+}
+bool SameRotation(const glm::mat4& a, const glm::mat4& b) {
+    for (int c = 0; c < 3; ++c)
+        for (int r = 0; r < 3; ++r)
+            if (std::abs(a[c][r] - b[c][r]) > 1e-3f) return false;
+    return true;
+}
+} // namespace
+
+TEST(PropertyClip_v1_rotation_keys_keep_their_pose_and_path) {
+    const char* old = R"({"sage_clip_version": 1, "name": "spin", "duration": 2,
+      "tracks": [{"target": "", "property": "object.rotation", "keys": [
+        {"time": 0, "value": [30, 40, 0, 0]},
+        {"time": 1, "value": [35, 120, 0, 0]},
+        {"time": 2, "value": [40, 200, 10, 0]}]},
+       {"target": "", "property": "object.position", "keys": [{"time": 0, "value": [30, 40, 0, 0]}]}]})";
+    sage::anim::PropertyClip clip;
+    std::string err;
+    CHECK_TRUE(sage::anim::FromJsonString(old, clip, err));
+    CHECK_EQ(clip.Tracks.size(), (size_t)2);
+    const glm::vec3 legacy[] = {{30, 40, 0}, {35, 120, 0}, {40, 200, 10}};
+    const auto& keys = clip.Tracks[0].Keys;
+    for (size_t i = 0; i < keys.size(); ++i) {
+        const glm::vec3 now(keys[i].Value);
+        CHECK_TRUE(SameRotation(sage::RotationMatrixFromEulerDegrees(now), LegacyRotation(legacy[i])));
+        // Соседние ключи не разбегаются на полный оборот.
+        if (i > 0) {
+            const glm::vec3 d = glm::abs(now - glm::vec3(keys[i - 1].Value));
+            CHECK_TRUE(d.x < 180.0f && d.y < 180.0f && d.z < 180.0f);
+        }
+    }
+    // Не поворот — не трогается.
+    CHECK_NEAR(clip.Tracks[1].Keys[0].Value.x, 30.0f, 1e-5f);
+}
+
+TEST(Scene_v17_rotation_tweens_aim_at_the_same_pose) {
+    const std::string old = R"({"name": "T", "sage_scene_version": 17, "objects": [
+      {"id": 1, "name": "Door", "position": {"x":0,"y":0,"z":0}, "rotation": {"x": 0, "y": 0, "z": 0},
+       "scale": {"x":1,"y":1,"z":1}, "mesh": {"type": "cube", "path": ""},
+       "tweens": [{"name": "Open", "tracks": [
+          {"property": "object.rotation", "start": 0, "duration": 1,
+           "to": {"x": 20, "y": 90, "z": 0, "w": 0}, "ease": "linear"}]}]}]})";
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::MigrateSceneJson(old));
+    const nlohmann::json& to = j["objects"][0]["tweens"][0]["tracks"][0]["to"];
+    const glm::vec3 now(to["x"].get<float>(), to["y"].get<float>(), to["z"].get<float>());
+    CHECK_TRUE(SameRotation(sage::RotationMatrixFromEulerDegrees(now), LegacyRotation({20, 90, 0})));
+}
+
+TEST(Euler_equivalent_triples_are_the_same_rotation) {
+    const glm::vec3 a(25.0f, 70.0f, -40.0f);
+    const glm::vec3 b = sage::ClosestEquivalentEuler(a, glm::vec3(160.0f, 250.0f, 140.0f));
+    CHECK_TRUE(SameRotation(sage::RotationMatrixFromEulerDegrees(a), sage::RotationMatrixFromEulerDegrees(b)));
+    CHECK_TRUE(std::abs(b.x - 155.0f) < 1e-3f);   // выбрана вторая запись, ближняя к ref
+}

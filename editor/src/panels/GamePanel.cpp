@@ -26,6 +26,7 @@ void GamePanel::Draw(EditorHost& host, bool* open) {
     // RootAndChildWindows — чтобы клик по изображению внутри панели считался
     // фокусом самой панели.
     m_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
+    m_platformWindow = ImGui::GetWindowViewport() ? ImGui::GetWindowViewport()->PlatformHandle : nullptr;
 
     ImVec2 avail = ImGui::GetContentRegionAvail();
     if (!host.HasPrimaryCamera()) {

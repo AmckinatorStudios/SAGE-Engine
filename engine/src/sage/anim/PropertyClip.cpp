@@ -1,5 +1,6 @@
 #include "sage/anim/PropertyClip.h"
 #include "sage/core/FormatVersion.h"
+#include "sage/scene/Transform.h"
 #include "sage/assets/Pack.h"
 
 #include <algorithm>
@@ -147,7 +148,33 @@ bool RemoveKey(Track& track, int index) {
 
 namespace {
 const sage::format::Spec& PropertyClipFormat() {
-    static const sage::format::Spec spec{"sage_clip_version", 1, "клип свойств", {}};
+    // v1 -> v2: повороты объекта — в соглашении R = Ry*Rx*Rz (Transform.h). Ключ
+    // хранит все три угла, поэтому переводится точно; каждый следующий —
+    // ближайшей к предыдущему записью того же поворота, чтобы между ключами
+    // объект не проворачивался длинным путём.
+    static const sage::format::Spec spec{
+        "sage_clip_version", 2, "клип свойств",
+        {{1, [](json& doc) {
+              if (!doc.contains("tracks") || !doc["tracks"].is_array()) return;
+              for (json& t : doc["tracks"]) {
+                  if (t.value("property", std::string()) != "object.rotation") continue;
+                  if (!t.contains("keys") || !t["keys"].is_array()) continue;
+                  bool first = true;
+                  glm::vec3 prev(0.0f);
+                  for (json& k : t["keys"]) {
+                      if (!k.contains("value") || !k["value"].is_array() || k["value"].size() < 3) continue;
+                      json& v = k["value"];
+                      const glm::vec3 legacy(v[0].get<float>(), v[1].get<float>(), v[2].get<float>());
+                      glm::vec3 now = sage::EulerDegreesFromLegacyXYZ(legacy);
+                      now = sage::ClosestEquivalentEuler(now, first ? legacy : prev);
+                      v[0] = now.x;
+                      v[1] = now.y;
+                      v[2] = now.z;
+                      prev = now;
+                      first = false;
+                  }
+              }
+          }}}};
     return spec;
 }
 } // namespace
