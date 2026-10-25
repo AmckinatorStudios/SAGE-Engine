@@ -215,6 +215,9 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_Events.cpp
     src/sage/scripting/ScriptApi_Physics.cpp
     src/sage/ui/UIParts.cpp
+    src/sage/ui/UIParts_Input.cpp
+    src/sage/ui/UIParts_Look.cpp
+    src/sage/ui/UIParts_Visual.cpp
     src/sage/ui/NineSlice.cpp
     src/sage/ui/UISerialize.cpp
     src/sage/ui/Interface.cpp

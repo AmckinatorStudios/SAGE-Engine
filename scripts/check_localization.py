@@ -31,6 +31,7 @@
     python3 scripts/check_localization.py
 """
 import json
+import glob
 import os
 import re
 import sys
@@ -96,10 +97,12 @@ def source_files():
 # рантайме через T(), поэтому сюда их приносит не вызов T("..."), а пометка
 # SAGE_UI_TEXT в движке — без этого списка «Panel» и «Controls» оставались
 # по-английски посреди русского редактора, и проверка об этом молчала.
-ENGINE_TEXT_FILES = [
-    os.path.join(REPO, 'engine', 'src', 'sage', 'ui', 'UIParts.cpp'),
-    os.path.join(REPO, 'engine', 'src', 'sage', 'ui', 'UI.cpp'),
-]
+# Части интерфейса разложены по файлам UIParts*.cpp и UIPartsDetail.h — берём
+# все, чтобы разделение файла не выключало проверку его строк молча.
+ENGINE_TEXT_FILES = sorted(
+    glob.glob(os.path.join(REPO, 'engine', 'src', 'sage', 'ui', 'UIParts*.cpp')) +
+    [os.path.join(REPO, 'engine', 'src', 'sage', 'ui', 'UIPartsDetail.h'),
+     os.path.join(REPO, 'engine', 'src', 'sage', 'ui', 'UI.cpp')])
 ENGINE_TEXT = re.compile(r'SAGE_UI_TEXT\(\s*"((?:[^"\\]|\\.)*)"\s*\)')
 
 
