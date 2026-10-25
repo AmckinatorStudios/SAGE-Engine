@@ -178,10 +178,12 @@ bool EditorLayer::SelfTestCatalogAndLiveFiles() {
                 if (ok) {
                     sage::anim::UpdateAnimators(*m_scene, 0.016f);
                     const AnimationComponent& live = reg.get<AnimationComponent>(e);
-                    if (!live.Model || live.Model->GetSkeleton().Count() != 2) {
+                    // Три: две кости скина и их предок-узел (он двигает их своим
+                    // трансформом и тоже стал костью, см. SkinnedModel.cpp).
+                    if (!live.Model || live.Model->GetSkeleton().Count() != 3) {
                         LOG_ERROR("Editor") << "SELFTEST: скелет не поднялся (костей "
                                             << (live.Model ? live.Model->GetSkeleton().Count() : -1)
-                                            << ", ожидалось 2)";
+                                            << ", ожидалось 3)";
                         ok = false;
                     } else if (live.OwnClips.empty() || live.MissingBones != 0) {
                         LOG_ERROR("Editor") << "SELFTEST: клип не лёг на скелет (клипов "

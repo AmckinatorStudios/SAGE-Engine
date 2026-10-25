@@ -682,6 +682,10 @@ void EditorLayer::OnRender() {
     CheckTweenFrame();
     CheckCreateDialogFrame();
     CheckLuaTestsFrame();
+    if (m_focusInspectorFrames > 0) {
+        --m_focusInspectorFrames;
+        if (ImGuiWindow* w = ImGui::FindWindowByID(ImHashStr("Inspector"))) ImGui::FocusWindow(w);
+    }
 
     TakeAutoScreenshot(app);
 }

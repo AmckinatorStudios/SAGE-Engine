@@ -282,10 +282,14 @@ void EditorLayer::ApplyStartupHooks() {
         GameObject obj = m_scene->FindByName(name);
         if (obj.Valid()) m_selection.SetPrimary(obj.Id());
         else LOG_WARN("Editor") << "SAGE_EDITOR_SELECT_ENTITY: нет сущности с именем " << name;
+        // Снимают ИНСПЕКТОР выбранного: вкладкой поверх у него по умолчанию
+        // стоит Environment, и скриншот показывал бы не то.
+        m_focusInspectorFrames = 3;
     }
     if (const char* a = std::getenv("SAGE_EDITOR_SELECT_ASSET")) {
         m_headlessProject = true;
         m_assets.Select(a);
+        m_focusInspectorFrames = 3;
     }
     // Закрыть все панели — состояние, в которое человек попадал крестиками и из
     // которого раньше не было выхода. Проверять его иначе нечем: кликать по

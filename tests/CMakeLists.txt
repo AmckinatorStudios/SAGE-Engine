@@ -8,6 +8,7 @@ add_executable(sage_tests
     main.cpp
     test_math.cpp
     test_blockbench_formats.cpp
+    test_reset_default.cpp
     test_serialization.cpp
     test_zip.cpp
     test_animation.cpp

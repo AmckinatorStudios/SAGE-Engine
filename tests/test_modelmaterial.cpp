@@ -851,13 +851,13 @@ TEST(model_material_gltf_unlit_reaches_the_material) {
     CHECK_TRUE(Material::LoadFromFile((dir / "toon.sagemat").string()).Render.Unlit);
 }
 
-// --- Данные моделей — по общим папкам, без копий ------------------------------
+// --- Данные моделей — в своей папке у каждой модели ---------------------------
 //
 // Карты, которые импорт создаёт сам (распакованные из ORM, встроенные в .glb),
-// ложились плоско рядом с моделью: у десятка моделей в одной папке их карты
-// перемешивались, а одна и та же картинка набора лежала десятью копиями. Теперь
-// они — в одной на всю папку Textures/, и одинаковая картинка пишется один раз.
-TEST(model_material_generated_maps_go_to_one_shared_textures_folder) {
+// ложились плоско рядом с моделью, потом — в общую на каталог Textures/, где
+// карты десятка моделей перемешивались. Теперь у каждой модели своя папка
+// (<модель>/Textures), и чьё что — видно по папке, а не по имени файла.
+TEST(model_material_generated_maps_go_to_the_models_own_folder) {
     const fs::path dir = TempDir("sage_test_modelmat_shared");
     WriteGeomBin(dir / "geom.bin");
     WritePixelPng(dir / "base.png", 200, 100, 50);
@@ -869,19 +869,18 @@ TEST(model_material_generated_maps_go_to_one_shared_textures_folder) {
     const ModelLoader::ExtractedMaterial b = ModelLoader::ExtractMaterial((dir / "barrel.gltf").string());
     CHECK_FALSE(a.MetallicMap.empty());
     CHECK_TRUE(fs::path(a.MetallicMap).parent_path().filename() == "Textures");
-    // Та же картинка — тот же файл, а не копия под именем второй модели.
-    CHECK_EQ(b.MetallicMap, a.MetallicMap);
-    CHECK_EQ(b.AOMap, a.AOMap);
+    CHECK_TRUE(fs::path(a.MetallicMap).parent_path().parent_path().filename() == "crate");
+    CHECK_TRUE(fs::path(b.MetallicMap).parent_path().parent_path().filename() == "barrel");
     // Рядом с моделями — только то, что положил человек.
     int pngNextToModels = 0;
     for (const auto& e : fs::directory_iterator(dir))
         if (e.path().extension() == ".png") ++pngNextToModels;
     CHECK_EQ(pngNextToModels, 2);   // base.png и orm.png
-    // Папка карт одна на всех.
+    // У каждой модели — своя папка карт.
     int textureDirs = 0;
     for (const auto& e : fs::recursive_directory_iterator(dir))
         if (e.is_directory() && e.path().filename() == "Textures") ++textureDirs;
-    CHECK_EQ(textureDirs, 1);
+    CHECK_EQ(textureDirs, 2);
 }
 
 TEST(model_material_old_maps_next_to_the_model_stay_in_use) {

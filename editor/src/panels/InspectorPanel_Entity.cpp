@@ -9,6 +9,7 @@
 // только тела. Разбит потому, что дорос до двух тысяч строк, в которых рядом
 // лежали редактор материала, якоря интерфейса и список компонентов.
 // ---------------------------------------------------------------------------
+#include "../ResetDefault.h"
 #include <cctype>
 #include <cstdarg>
 #include "sage/scene/CharacterFit.h"
@@ -274,7 +275,18 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // который прямо сейчас рисует его поля.
     EntityRemovals rm;   // что снять — снимается после всех секций
 
-    if (EditorTheme::SectionHeader("move", T("Transform" "###Transform"), ImGuiTreeNodeFlags_DefaultOpen)) {
+    bool resetTransform = false;
+    const bool transformOpen = EditorTheme::SectionHeader("move", T("Transform" "###Transform"),
+                                                          ImGuiTreeNodeFlags_DefaultOpen, nullptr, nullptr,
+                                                          &resetTransform);
+    if (resetTransform) {
+        host.PushUndoSnapshot();
+        Transform& tr = obj.GetTransform();
+        tr.Position = glm::vec3(0.0f);
+        tr.Rotation = glm::vec3(0.0f);
+        tr.Scale = glm::vec3(1.0f);
+    }
+    if (transformOpen) {
         // СЕТКА СВОЙСТВ, а не DragFloat3 с подписью.
         //
         // У ImGui подпись стоит СПРАВА от поля, и инспектор читался задом
@@ -287,9 +299,12 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         // на одной координате во ВСЕХ строках и всех разделах (см. ui/UI.h).
         Transform& tr = obj.GetTransform();
         Sage::UI::BeginProperties("transform");
+        // Сброс одной строки — правым щелчком по её подписи (ResetDefault.h).
         Sage::UI::PropertyLabel(T("Position"));
+        sage::editor::ResetField(&host, tr, tr.Position);
         Sage::UI::PropertyVec3("pos", &tr.Position.x, 0.05f); host.TrackLastImGuiItem();
         Sage::UI::PropertyLabel(T("Rotation"));
+        sage::editor::ResetField(&host, tr, tr.Rotation);
         Sage::UI::PropertyVec3("rot", &tr.Rotation.x, 0.5f, "%.1f"); host.TrackLastImGuiItem();
         // --- МАСШТАБ СО СВЯЗЬЮ ОСЕЙ ------------------------------------
         //
@@ -307,6 +322,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             m_uniformScale = sage::editor::prefs::GetBool("inspector.uniform_scale", true);
         }
         Sage::UI::PropertyLabel(T("Scale"));
+        sage::editor::ResetField(&host, tr, tr.Scale);
         const float lockW = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x;
         const glm::vec3 before = tr.Scale;
         // У камеры, света, звука масштаба нет (sage/scene/ScaleLock.h): поле
@@ -368,11 +384,25 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     }
 
     // --- Камера (игровая): панель Game рендерит от первой Primary-камеры ---
-    if (reg.all_of<CameraComponent>(obj.Entity()) && EditorTheme::SectionHeader("camera", T("Camera" "###Camera"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Camera)) {
+    bool resetCamera = false;
+    if (reg.all_of<CameraComponent>(obj.Entity()) &&
+        EditorTheme::SectionHeader("camera", T("Camera" "###Camera"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Camera,
+                                   nullptr, &resetCamera)) {
         if (CameraComponent* cam = reg.try_get<CameraComponent>(obj.Entity())) {
+            if (resetCamera) {
+                // «Главная» — не настройка вида, а выбор, с какой камеры играть:
+                // сброс её не трогает, иначе игра молча начиналась бы с другой.
+                host.PushUndoSnapshot();
+                const bool primary = cam->Primary;
+                *cam = CameraComponent{};
+                cam->Primary = primary;
+            }
             ImGui::DragFloat(T("FOV"), &cam->Fov, 0.5f, 10.0f, 140.0f); host.TrackLastImGuiItem();
+            sage::editor::ResetField(&host, *cam, cam->Fov);
             ImGui::DragFloat(T("Near"), &cam->NearClip, 0.01f, 0.001f, 10.0f); host.TrackLastImGuiItem();
+            sage::editor::ResetField(&host, *cam, cam->NearClip);
             ImGui::DragFloat(T("Far"), &cam->FarClip, 1.0f, 1.0f, 5000.0f); host.TrackLastImGuiItem();
+            sage::editor::ResetField(&host, *cam, cam->FarClip);
             if (ImGui::Checkbox(T("Primary"), &cam->Primary)) host.PushUndoSnapshot();
             EditorTheme::Hint(T("Game panel renders from the first Primary camera"));
         }
@@ -380,8 +410,19 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     // --- Свет (позиция — Transform сущности; тип: точечный / прожектор / солнце) ---
 
-    if (reg.all_of<LightComponent>(obj.Entity()) && EditorTheme::SectionHeader("light", T("Light" "###Light"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Light)) {
+    bool resetLight = false;
+    if (reg.all_of<LightComponent>(obj.Entity()) &&
+        EditorTheme::SectionHeader("light", T("Light" "###Light"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Light,
+                                   nullptr, &resetLight)) {
         if (LightComponent* light = reg.try_get<LightComponent>(obj.Entity())) {
+            if (resetLight) {
+                // Тип остаётся: сброс возвращает настройки ЭТОГО света, а не
+                // превращает прожектор в лампочку.
+                host.PushUndoSnapshot();
+                const LightComponent::Type kind = light->Kind;
+                *light = LightComponent{};
+                light->Kind = kind;
+            }
             const char* types[] = {T("Point"), T("Spot"), T("Directional (sun)"), T("Area (panel)")};
             int kind = (int)light->Kind;
             if (ImGui::Combo(T("Type"), &kind, types, IM_ARRAYSIZE(types))) {
@@ -407,7 +448,9 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 default: break;
             }
             Sage::UI::ColorField3(T("Colour"), &light->Color.x); host.TrackLastImGuiItem();
+            sage::editor::ResetField(&host, *light, light->Color);
             ImGui::DragFloat(T("Intensity"), &light->Intensity, 0.02f, 0.0f, 10.0f); host.TrackLastImGuiItem();
+            sage::editor::ResetField(&host, *light, light->Intensity);
             // Дальность и углы конуса у направленного света не значат ничего:
             // он светит из бесконечности. Показывать поля, которые ни на что не
             // влияют, — обманывать; поэтому их тут просто нет.
@@ -415,10 +458,13 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             if (!directional) {
                 ImGui::DragFloat(T("Range"), &light->Range, 0.1f, 0.5f, 100.0f);
                 host.TrackLastImGuiItem();
+                sage::editor::ResetField(&host, *light, light->Range);
             }
             if (light->Kind == LightComponent::Type::Spot) {
                 ImGui::DragFloat(T("Inner Cone"), &light->InnerConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
+                sage::editor::ResetField(&host, *light, light->InnerConeDeg);
                 ImGui::DragFloat(T("Outer Cone"), &light->OuterConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
+                sage::editor::ResetField(&host, *light, light->OuterConeDeg);
                 // Внешний угол не должен быть уже внутреннего (иначе конус
                 // «выворачивается»): подтягиваем внешний до внутреннего.
                 if (light->OuterConeDeg < light->InnerConeDeg) light->OuterConeDeg = light->InnerConeDeg;
@@ -426,7 +472,9 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             const bool area = light->Kind == LightComponent::Type::Area;
             if (area) {
                 ImGui::DragFloat(T("Width"), &light->AreaWidth, 0.02f, 0.05f, 50.0f); host.TrackLastImGuiItem();
+                sage::editor::ResetField(&host, *light, light->AreaWidth);
                 ImGui::DragFloat(T("Height"), &light->AreaHeight, 0.02f, 0.05f, 50.0f); host.TrackLastImGuiItem();
+                sage::editor::ResetField(&host, *light, light->AreaHeight);
             } else {
                 // Тени у площадного нет — и галочки нет: она бы ничего не делала.
                 if (ImGui::Checkbox(T("Casts shadows"), &light->CastShadows)) host.PushUndoSnapshot();

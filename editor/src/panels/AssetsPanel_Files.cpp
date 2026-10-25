@@ -36,6 +36,8 @@
 #include "../AssetCovers.h"
 
 #include "sage/assets/import/Convert.h"
+#include "sage/assets/import/Importer.h"
+#include "sage/render/ModelLoader.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Zip.h"
@@ -255,9 +257,22 @@ void AssetsPanel::DeleteAsset(const fs::path& path) {
 // Копирование БЕЗ базы ассетов (см. AssetsPanel.h): всё, что здесь делается, —
 // работа файловой системы, и её ведёт фоновый поток.
 AssetsPanel::ImportReport AssetsPanel::CopyIntoProject(
-    const fs::path& source, const fs::path& destDir,
+    const fs::path& source, const fs::path& requestedDir,
     const std::function<void(float, const std::string&)>& tell) {
     ImportReport report;
+    // МОДЕЛЬ — В СВОЮ ПАПКУ. Модель приезжает со спутниками (.mtl, .bin,
+    // текстуры), а потом импорт достаёт из неё материалы, карты и клипы. В
+    // открытой папке проекта всё это перемешивалось с соседями; в папке с
+    // именем модели оно лежит вместе и переносится одной папкой (раскладка
+    // данных — sage/assets/ModelData.h). Уже названная её именем папка второй
+    // раз не вкладывается.
+    fs::path destDir = requestedDir;
+    {
+        std::error_code mec;
+        if (!fs::is_directory(source, mec) && !sage::assets::IsZip(source) &&
+            ModelLoader::IsSupportedModel(source.string()) && requestedDir.filename() != source.stem())
+            destDir = requestedDir / source.stem();
+    }
     std::error_code ec;
     auto say = [&](float fraction, const std::string& what) {
         if (tell) tell(fraction, what);
@@ -373,6 +388,23 @@ AssetsPanel::ImportReport AssetsPanel::CopyIntoProject(
         companions.push_back(source.stem().string() + ".mtl");
     } else if (ext == ".gltf") {
         companions = GltfExternalUris(source);
+    } else if (ext == ".fbx") {
+        // Текстуры FBX пишутся путями машины, где модель делали («C:\Users\…»)
+        // — берётся имя файла, а сам файл ищется рядом с моделью.
+        sage::assets::ImportedScene scene;
+        std::string err;
+        if (sage::assets::ImporterRegistry::Instance().Import(source.string(), scene, err)) {
+            for (const sage::assets::ImportedMaterial& m : scene.Materials)
+                for (const std::string* t : {&m.AlbedoTexture, &m.NormalTexture, &m.MetallicTexture,
+                                             &m.RoughnessTexture, &m.AOTexture, &m.EmissiveTexture}) {
+                    if (t->empty()) continue;
+                    std::string name = *t;
+                    const size_t slash = name.find_last_of("/\\");
+                    if (slash != std::string::npos) name = name.substr(slash + 1);
+                    if (std::find(companions.begin(), companions.end(), name) == companions.end())
+                        companions.push_back(name);
+                }
+        }
     }
 
     // Картинки, на которые ссылаются найденные .mtl — второй уровень.

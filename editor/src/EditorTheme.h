@@ -178,8 +178,11 @@ ImVec4 AxisColor(int axis);
 bool BeginMore(const char* id);
 void EndMore();
 
+// resetClicked — значок ↺ «сбросить компонент к значениям по умолчанию»
+// (рядом с корзиной); nullptr — значка нет (см. ResetDefault.h).
 bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen,
-                   bool* removeClicked = nullptr, const char* hint = nullptr);
+                   bool* removeClicked = nullptr, const char* hint = nullptr,
+                   bool* resetClicked = nullptr);
 
 // ТО ЖЕ СО ЗНАЧКОМ СЛЕВА ОТ ПОДПИСИ.
 //
@@ -195,7 +198,8 @@ bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags = ImGuiTreeNodeFl
 // на ней держится состояние «свёрнут/раскрыт» и удаление компонента.
 bool SectionHeader(const char* icon, const char* label,
                    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_DefaultOpen,
-                   bool* removeClicked = nullptr, const char* hint = nullptr);
+                   bool* removeClicked = nullptr, const char* hint = nullptr,
+                   bool* resetClicked = nullptr);
 
 // ПОЯСНЕНИЕ К ПОСЛЕДНЕМУ ЭЛЕМЕНТУ — всплывающей подсказкой, а не строкой под ним.
 //

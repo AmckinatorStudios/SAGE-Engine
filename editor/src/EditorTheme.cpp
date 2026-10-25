@@ -680,22 +680,21 @@ bool BeginMore(const char* id) {
 void EndMore() { ImGui::TreePop(); }
 
 bool SectionHeader(const char* icon, const char* label, ImGuiTreeNodeFlags flags,
-                   bool* removeClicked, const char* hint) {
+                   bool* removeClicked, const char* hint, bool* resetClicked) {
     const std::string glyph = EditorIcons::GlyphUtf8(icon);
-    if (glyph.empty()) return SectionHeader(label, flags, removeClicked, hint);
+    if (glyph.empty()) return SectionHeader(label, flags, removeClicked, hint, resetClicked);
     const std::string full = glyph + "  " + label;
-    return SectionHeader(full.c_str(), flags, removeClicked, hint);
+    return SectionHeader(full.c_str(), flags, removeClicked, hint, resetClicked);
 }
 
 bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags, bool* removeClicked,
-                   const char* hint) {
+                   const char* hint, bool* resetClicked) {
     // AllowOverlap — чтобы кнопка в правом углу принимала нажатие, а не
     // проваливалась в заголовок: CollapsingHeader занимает всю ширину строки, и
     // без этого флага он перехватывал бы клик по всему, что на нём нарисовано.
-    if (removeClicked) {
-        *removeClicked = false;
-        flags |= ImGuiTreeNodeFlags_AllowOverlap;
-    }
+    if (removeClicked) *removeClicked = false;
+    if (resetClicked) *resetClicked = false;
+    if (removeClicked || resetClicked) flags |= ImGuiTreeNodeFlags_AllowOverlap;
     ImGui::PushStyleColor(ImGuiCol_Header, Color(Role::SurfaceAlt));
     ImGui::PushStyleColor(ImGuiCol_HeaderHovered, Color(Role::Elevated));
     ImGui::PushStyleColor(ImGuiCol_HeaderActive, Color(Role::Elevated));
@@ -705,6 +704,23 @@ bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags, bool* removeClic
     // «последним элементом» для ImGui станет кнопка, и пояснение к секции
     // всплывало бы над корзиной.
     Hint(hint);
+
+    // СБРОС — слева от корзины: действие частое и безопасное (отменяется
+    // Ctrl+Z), и прятать его в меню незачем. Сбрасывает компонент целиком;
+    // одно поле — правым щелчком по нему (ResetDefault.h).
+    if (resetClicked) {
+        const ImGuiStyle& style = ImGui::GetStyle();
+        const float side = ImGui::GetFrameHeight();
+        const float slots = removeClicked ? 2.0f : 1.0f;
+        ImGui::SameLine(ImGui::GetContentRegionMax().x - side * slots - style.FramePadding.x -
+                        (removeClicked ? style.ItemSpacing.x : 0.0f));
+        ImGui::PushID(label);
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        *resetClicked = EditorIcons::IconOnlyButton(
+            "refresh", T("Reset to default values (a single field: right-click it)"));
+        ImGui::PopStyleColor();
+        ImGui::PopID();
+    }
 
     if (removeClicked) {
         const ImGuiStyle& style = ImGui::GetStyle();

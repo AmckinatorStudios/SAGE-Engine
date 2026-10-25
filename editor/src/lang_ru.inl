@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2834.
+// Язык: Русский. Строк: 2840.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -362,6 +362,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сопротивление воздуха или воды: доля скорости, теряемая за секунду"},
     {"Albedo",
      "Альбедо"},
+    {"Albedo, normal, metallic, roughness, emissive and AO maps of the material",
+     "Карты материала: альбедо, нормали, металличность, шероховатость, свечение и затенение"},
     {"Align",
      "Выравнивание"},
     {"Align Normal",
@@ -1614,6 +1616,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Каждая грань папки px/nx/py/ny/pz/nz встанет в свой слот"},
     {"Each icon at the sizes it is actually used at.",
      "Каждая иконка на тех размерах, на которых она и работает."},
+    {"Each node of the file becomes its own object in the scene (head, arms, legs),\nwith its name, place and material. Off: the model is one object.\nModels with a skeleton are always placed whole.",
+     "Каждый узел файла становится своим объектом сцены (голова, руки, ноги)\nсо своим именем, местом и материалом. Выключено — модель одним объектом.\nМодели со скелетом всегда ставятся целиком."},
     {"Each part of the model has its own material. Empty means the object material above.",
      "У каждой части модели свой материал. Пусто — красится материалом объекта выше."},
     {"Each particle picks a colour between A and B.",
@@ -3514,6 +3518,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Масштаб пикселя"},
     {"Pixels",
      "Пиксели"},
+    {"Place as a hierarchy of objects",
+     "Ставить иерархией объектов"},
     {"Place by own anchor",
      "Стоять по своему якорю"},
     {"Place in scene",
@@ -3978,6 +3984,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сбросить масштаб на 1: у этого объекта он ничего не значит"},
     {"Reset to Defaults",
      "Вернуть значения по умолчанию"},
+    {"Reset to default",
+     "Сбросить к значению по умолчанию"},
+    {"Reset to default values (a single field: right-click it)",
+     "Сбросить к значениям по умолчанию (одно поле — правый щелчок по нему)"},
     {"Reset: put the object back as it was",
      "Сброс: вернуть объект как был"},
     {"Resizable",
@@ -4812,6 +4822,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Текстура или спрайт с листа"},
     {"Texture: ",
      "Текстура: "},
+    {"Textures",
+     "Текстуры"},
     {"That folder already exists and is not empty",
      "Такая папка уже есть и не пуста"},
     {"That folder already exists: ",

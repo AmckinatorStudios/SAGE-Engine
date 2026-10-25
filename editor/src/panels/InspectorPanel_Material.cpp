@@ -10,6 +10,7 @@
 // только тела. Разбит потому, что дорос до двух тысяч строк, в которых рядом
 // лежали редактор материала, якоря интерфейса и список компонентов.
 // ---------------------------------------------------------------------------
+#include "../ResetDefault.h"
 #include <cstdarg>
 #include "InspectorPanel.h"
 #include "../ModelImportDialog.h"
@@ -223,12 +224,15 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     // (Albedo и Opacity), но смотрят на них как на один цвет «какой он и
     // насколько просвечивает». Ползунок «Непрозрачность» ниже правит то же число.
     Sage::UI::ColorFieldAlpha(T("Albedo"), &material->Albedo.x, &material->Opacity);
+    sage::editor::ResetField(&host, *material, material->Albedo);
     Sage::UI::ColorField3(T("Emissive"), &material->Emissive.x);
+    sage::editor::ResetField(&host, *material, material->Emissive);
     // Сила свечения отдельным ползунком, и его предел заметно больше единицы:
     // bloom срабатывает от яркости ВЫШЕ 1 (EngineConfig::BloomThreshold), а цвет
     // в редакторе зажат в 0..1. Без множителя «свечение» оставалось бы просто
     // светлым цветом без ореола.
     ImGui::DragFloat(T("Emissive Strength"), &material->EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
+    sage::editor::ResetField(&host, *material, material->EmissiveStrength);
     // Рамка элемента включает подпись: вышла за край — подпись обрезана.
     m_materialLabelsFit = ImGui::GetItemRectMax().x <=
                           ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x + 0.5f;
@@ -243,38 +247,56 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     EditorTheme::Hint(T("Map value multiplies the factor above; Enter applies the path."));
     EditorTheme::Hint(T("Edits apply live to every entity using this material."));
     ImGui::SliderFloat(T("Metallic"), &material->Metallic, 0.0f, 1.0f);
+    sage::editor::ResetField(&host, *material, material->Metallic);
     ImGui::SliderFloat(T("Roughness"), &material->Roughness, 0.0f, 1.0f);
+    sage::editor::ResetField(&host, *material, material->Roughness);
 
-    // Карты: путь правится вручную; по Enter/потере фокуса перезагружаем текстуры
-    // материала (albedo/normal), чтобы вьюпорт сразу показал результат.
-        // Слоты текстур: превью, путь, «Обзор…», «Из Assets», «Очистить».
+    // Слоты текстур: превью, путь, «Обзор…», «Из Assets», «Очистить».
     //
     // Раньше здесь стояли пять голых полей ввода, применявшихся по Enter: путь
     // к текстуре надо было ЗНАТЬ и напечатать без опечатки, а единственной
     // обратной связью была строчка в консоли. Слот показывает саму картинку —
     // назначено ли что-то и то ли это, что хотели, видно сразу.
-    DrawTextureSlot(host, "Albedo", material->TexturePath, material->AlbedoTex,
-                    T("Base colour. Multiplied by the Albedo above."), *material);
-    DrawTextureSlot(host, "Normal", material->NormalMapPath, material->NormalTex,
-                    T("Normal map, tangent space (OpenGL: green is up)."), *material);
-    DrawTextureSlot(host, "Metallic", material->MetallicMapPath, material->MetallicTex,
-                    T("Channel R. Multiplied by the Metallic factor above."), *material);
-    DrawTextureSlot(host, "Roughness", material->RoughnessMapPath, material->RoughnessTex,
-                    T("Channel R. Multiplied by the Roughness factor above."), *material);
-    DrawTextureSlot(host, "Emissive", material->EmissiveMap, material->EmissiveTex,
-                    T("Where it glows and where it does not. Multiplied by the emissive colour and strength."), *material);
-    DrawTextureSlot(host, "AO", material->AOMapPath, material->AOTex,
-                    T("Ambient occlusion, channel R. Empty means AO = 1."), *material);
+    //
+    // ОДНИМ СВОРАЧИВАЕМЫМ СПИСКОМ. Шесть слотов по высоте обложки занимали
+    // полтора экрана инспектора, и до прозрачности и рендера приходилось
+    // листать мимо карт, которых у материала чаще всего две. В заголовке —
+    // сколько карт назначено: свёрнутый список всё равно говорит, что внутри.
+    int maps = 0;
+    for (const std::string* p : {&material->TexturePath, &material->NormalMapPath, &material->MetallicMapPath,
+                                 &material->RoughnessMapPath, &material->EmissiveMap, &material->AOMapPath})
+        if (!p->empty()) ++maps;
+    char texturesLabel[96];
+    std::snprintf(texturesLabel, sizeof(texturesLabel), "%s (%d / 6)###MaterialTextures", T("Textures"), maps);
+    const bool texturesOpen =
+        ImGui::TreeNodeEx(texturesLabel, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Framed |
+                                             ImGuiTreeNodeFlags_SpanAvailWidth);
+    EditorTheme::Hint(T("Albedo, normal, metallic, roughness, emissive and AO maps of the material"));
+    if (texturesOpen) {
+        DrawTextureSlot(host, "Albedo", material->TexturePath, material->AlbedoTex,
+                        T("Base colour. Multiplied by the Albedo above."), *material);
+        DrawTextureSlot(host, "Normal", material->NormalMapPath, material->NormalTex,
+                        T("Normal map, tangent space (OpenGL: green is up)."), *material);
+        DrawTextureSlot(host, "Metallic", material->MetallicMapPath, material->MetallicTex,
+                        T("Channel R. Multiplied by the Metallic factor above."), *material);
+        DrawTextureSlot(host, "Roughness", material->RoughnessMapPath, material->RoughnessTex,
+                        T("Channel R. Multiplied by the Roughness factor above."), *material);
+        DrawTextureSlot(host, "Emissive", material->EmissiveMap, material->EmissiveTex,
+                        T("Where it glows and where it does not. Multiplied by the emissive colour and strength."), *material);
+        DrawTextureSlot(host, "AO", material->AOMapPath, material->AOTex,
+                        T("Ambient occlusion, channel R. Empty means AO = 1."), *material);
 
-    // ФИЛЬТРАЦИЯ — сразу под картами: решают её, глядя на картинку (чёткие
-    // пиксели или сглаживание), а не на поведение рендера. Подписи и ключи —
-    // из той же таблицы, что пишет файл (MaterialRenderFields).
-    for (const MaterialRenderField& f : MaterialRenderFields()) {
-        if (std::strcmp(f.Key, "filtering") != 0 || !f.GetEnum || !f.SetEnum) continue;
-        int value = f.GetEnum(material->Render);
-        if (ImGui::Combo(T("Filtering"), &value, f.EnumLabels, f.EnumCount))
-            f.SetEnum(material->Render, value);
-        if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
+        // ФИЛЬТРАЦИЯ — сразу под картами: решают её, глядя на картинку (чёткие
+        // пиксели или сглаживание), а не на поведение рендера. Подписи и ключи —
+        // из той же таблицы, что пишет файл (MaterialRenderFields).
+        for (const MaterialRenderField& f : MaterialRenderFields()) {
+            if (std::strcmp(f.Key, "filtering") != 0 || !f.GetEnum || !f.SetEnum) continue;
+            int value = f.GetEnum(material->Render);
+            if (ImGui::Combo(T("Filtering"), &value, f.EnumLabels, f.EnumCount))
+                f.SetEnum(material->Render, value);
+            if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
+        }
+        ImGui::TreePop();
     }
 
     // ПОВТОР ТЕКСТУРЫ («тайлинг») — ЗДЕСЬ, среди карт, а не в поведении рендера.
@@ -333,6 +355,7 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
 
     ImGui::SeparatorText(T("Transparency"));
     ImGui::SliderFloat(T("Opacity"), &material->Opacity, 0.0f, 1.0f);
+    sage::editor::ResetField(&host, *material, material->Opacity);
 
     // Свой шейдер материала: пара .vert/.frag (см. docs/custom_shaders.md).
     // Правка файлов подхватывается на лету — ReloadChangedShaders в EditorLayer.

@@ -469,6 +469,7 @@ private:
     bool m_createDialogChecked = false;
     int m_createDialogStep = 0;
     float m_createDialogWidth = 0.0f;
+    int m_focusInspectorFrames = 0;   // хуки скриншотов: вывести Инспектор поверх Environment
     double m_tweenSelfTestAt = 0.0;
     int m_tweenSelfTestErrors = 0;
     int m_luaSelfTestStep = 0;
