@@ -199,7 +199,7 @@ bool EditorLayer::SelfTestToolsAssetsAndPanels() {
     // некому: вьюпорт и иерархия целей не имели вовсе, а окно не слышало
     // проводник системы.
     if (ok) {
-        const fs::path modelPath = m_project.AssetsDir() / "selftest_import" / "crate.obj";
+        const fs::path modelPath = m_project.AssetsDir() / "selftest_import" / "crate" / "crate.obj";   // импорт кладёт модель в свою папку
         const fs::path matPath = m_assetsCwd / "selftest_mat.sagemat";
 
         // 1. Бросок модели в СПИСОК сцены: появляется новая сущность с этим мешем.
