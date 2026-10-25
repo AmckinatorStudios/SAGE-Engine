@@ -388,6 +388,24 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
                 light->Kind = (LightComponent::Type)kind;
             }
+            // Что это за свет — при наведении на тип, а не абзацем под полями.
+            switch (light->Kind) {
+                case LightComponent::Type::Area:
+                    EditorTheme::Hint(T("A glowing panel facing the object's forward (-Z): window, screen, softbox. "
+                                        "Highlights on glossy surfaces take its shape. It casts no shadow."));
+                    break;
+                case LightComponent::Type::Spot:
+                    EditorTheme::Hint(T("The cone shines along the object's forward (-Z of its rotation). "
+                                        "Its shadow is a separate map in the atlas: there are few, and they "
+                                        "go to the brightest sources."));
+                    break;
+                case LightComponent::Type::Point:
+                    EditorTheme::Hint(T("A point light at the object's position. Its shadow costs six passes "
+                                        "of geometry (one per cube face), so it is best left only to "
+                                        "the lamps that have something to occlude."));
+                    break;
+                default: break;
+            }
             Sage::UI::ColorField3(T("Colour"), &light->Color.x); host.TrackLastImGuiItem();
             ImGui::DragFloat(T("Intensity"), &light->Intensity, 0.02f, 0.0f, 10.0f); host.TrackLastImGuiItem();
             // Дальность и углы конуса у направленного света не значат ничего:
@@ -413,20 +431,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 // Тени у площадного нет — и галочки нет: она бы ничего не делала.
                 if (ImGui::Checkbox(T("Casts shadows"), &light->CastShadows)) host.PushUndoSnapshot();
             }
-            if (directional) {
-                DrawSunSection(host, obj);
-            } else if (area) {
-                HintWrapped(T("A glowing panel facing the object's forward (-Z): window, screen, softbox. "
-                              "Highlights on glossy surfaces take its shape. It casts no shadow."));
-            } else if (light->Kind == LightComponent::Type::Spot) {
-                HintWrapped(T("The cone shines along the object's forward (-Z of its rotation). "
-                              "Its shadow is a separate map in the atlas: there are few, and they "
-                              "go to the brightest sources."));
-            } else {
-                HintWrapped(T("A point light at the object's position. Its shadow costs six passes "
-                              "of geometry (one per cube face), so it is best left only to "
-                              "the lamps that have something to occlude."));
-            }
+            if (directional) DrawSunSection(host, obj);
         }
     }
 

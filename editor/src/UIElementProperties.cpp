@@ -58,15 +58,17 @@ using namespace uiprops_detail;
 
 namespace {
 
-// Серое пояснение, КОТОРОЕ ПЕРЕНОСИТСЯ: панель узкая, а TextDisabled не
-// переносит — пояснения обрезались по краю прямо посередине слова.
 void HintWrapped(const char* fmt, ...) {
+    // ПОЯСНЕНИЕ — ВСПЛЫВАЮЩЕЕ, А НЕ ТЕКСТОМ В ПАНЕЛИ. Серые абзацы под каждым
+    // полем превращали инспектор в справочник: нужное поле терялось среди
+    // объяснений. Теперь пояснение появляется при наведении на тот элемент,
+    // к которому относится (стоящий перед вызовом).
+    char buf[1024];
     va_list args;
     va_start(args, fmt);
-    ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-    ImGui::TextWrappedV(fmt, args);
-    ImGui::PopStyleColor();
+    std::vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
+    EditorTheme::Hint(buf);
 }
 
 } // namespace
