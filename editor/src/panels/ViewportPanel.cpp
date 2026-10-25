@@ -32,7 +32,7 @@ namespace {
 //
 // Тонкая обёртка над Transform::SetFromMatrix: разложение живёт РЯДОМ со
 // сборкой матрицы (engine/src/sage/scene/Transform.h), потому что обязано
-// совпадать с ней по порядку углов (T*Rx*Ry*Rz*S). Своя копия здесь однажды
+// совпадать с ней по порядку углов (T*Ry*Rx*Rz*S). Своя копия здесь однажды
 // разошлась бы с движком, и объект прыгал бы при первом касании гизмо.
 void DecomposeToTransform(const glm::mat4& m, Transform& out) { out.SetFromMatrix(m); }
 

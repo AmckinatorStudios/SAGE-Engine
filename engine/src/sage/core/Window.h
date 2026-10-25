@@ -110,6 +110,7 @@ public:
     bool CursorCaptured() const { return m_cursorCaptured; }
 
 private:
+    void ApplyCursorMode();
     static void ForwardCursorPos(GLFWwindow* handle, double x, double y);
     static void ForwardScroll(GLFWwindow* handle, double xoffset, double yoffset);
     static void ForwardChar(GLFWwindow* handle, unsigned int codepoint);

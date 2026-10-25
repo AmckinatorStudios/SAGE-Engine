@@ -6,6 +6,7 @@
 
 #include "Project.h"
 #include "sage/assets/AssetDatabase.h"
+#include "sage/assets/ModelData.h"
 #include "sage/core/Log.h"
 #include "sage/render/Material.h"
 #include "sage/anim/ClipFile.h"
@@ -26,7 +27,11 @@ namespace {
 // файл, и остался бы последний.
 fs::path MaterialFileFor(const fs::path& modelPath, const ModelLoader::ExtractedMaterial& material,
                          size_t index, size_t total) {
-    if (total <= 1) return fs::path(modelPath).replace_extension(".sagemat");
+    // Файлы — в общий каталог материалов папки модели (sage/assets/ModelData.h);
+    // уже лежащий по-старому рядом с моделью остаётся на месте.
+    namespace sa = sage::assets;
+    if (total <= 1)
+        return sa::ModelDataPath(modelPath, sa::ModelData::Materials, modelPath.stem().string() + ".sagemat");
 
     std::string name;
     for (unsigned char c : material.Name) {
@@ -35,7 +40,8 @@ fs::path MaterialFileFor(const fs::path& modelPath, const ModelLoader::Extracted
         name.push_back(ok ? (char)c : '_');
     }
     if (name.empty()) name = "mat" + std::to_string(index);
-    return modelPath.parent_path() / (modelPath.stem().string() + "_" + name + ".sagemat");
+    return sa::ModelDataPath(modelPath, sa::ModelData::Materials,
+                             modelPath.stem().string() + "_" + name + ".sagemat");
 }
 
 // Записывает .sagemat, если его ещё нет. Возвращает путь к файлу (существующему
@@ -45,6 +51,7 @@ fs::path EnsureMaterialFile(const Project& project, const fs::path& path,
                             std::string& firstWarning) {
     std::error_code ec;
     if (fs::exists(path, ec)) return path;
+    fs::create_directories(path.parent_path(), ec);
 
     Material mat;
     mat.Albedo = ex.Albedo;
@@ -392,14 +399,17 @@ ClipImportResult ImportModelClips(const Project& project, const std::string& mod
         return result;
     }
 
-    const fs::path dir = fs::path(modelPath).parent_path();
     const std::string stem = fs::path(modelPath).stem().string();
     result.Refs.reserve(clips.size());
 
     for (const sage::anim::AnimationClip& clip : clips) {
-        const fs::path file = dir / sage::anim::ClipFileName(stem, clip.Name);
+        // Клипы — в общий каталог анимаций папки модели: у персонажа их
+        // десятки, и рядом с моделью они хоронили её саму (sage/assets/ModelData.h).
+        const fs::path file = sage::assets::ModelDataPath(
+            modelPath, sage::assets::ModelData::Animations, sage::anim::ClipFileName(stem, clip.Name));
         result.Refs.push_back(project.AssetRef(file));
         if (fs::exists(file, ec)) continue;     // правку руками не стираем
+        fs::create_directories(file.parent_path(), ec);
         try {
             sage::anim::SaveClip(sage::anim::ToAsset(clip, model->GetSkeleton()), file.string());
             sage::AssetDatabase::Instance().Register(file.string(), "animation");

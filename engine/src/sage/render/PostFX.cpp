@@ -1653,6 +1653,10 @@ void RunLensFlare(PostContext& ctx, const PostEffect& e) {
     s.Glare = e.Float("glare", 0.45f);
     s.Chroma = e.Float("chroma", 0.55f);
     s.Threshold = e.Float("threshold", 1.1f);
+    s.Lights = std::max(e.Float("lights", 1.0f), 0.0f);
+    s.LightSize = std::max(e.Float("lightSize", 0.03f), 0.001f);
+    s.Screen = std::max(e.Float("screen", 0.6f), 0.0f);
+    s.ScreenThreshold = std::max(e.Float("screenThreshold", 1.5f), 0.01f);
     // Видимость солнца — по кадру СЦЕНЫ, а не по уже обработанному: порог
     // «это солнце» задан в яркости сцены, до экспозиции.
     sc.Flare->Render(*out, ctx.SceneColor, ctx.SceneDepth, ctx.Width, ctx.Height, ctx.Proj,
@@ -2055,8 +2059,8 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
         PostEffectKind k;
         k.Id = "lensflare";
         k.Label = "Lens Flare";
-        k.Hint = "Блик солнца в объективе: призраки, ореол, лучи. Гаснет, когда солнце\n"
-                 "закрыто предметом или ушло за кадр";
+        k.Hint = "Блики в объективе: солнце (призраки, ореол, лучи), каждая лампа и прожектор\n"
+                 "в кадре и всё яркое на экране. Гаснут, когда источник закрыт предметом";
         k.Needs = PostNeeds::HdrColor | PostNeeds::Depth;
         k.Stage = PostStage::Depth;
         k.Params = {Param("intensity", "Intensity", 1.0f, 0.0f, 4.0f, "Сила блика"),
@@ -2072,7 +2076,17 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
                     Param("glare", "Glare", 0.45f, 0.0f, 2.0f, "Мягкое свечение вокруг солнца"),
                     Param("chroma", "Chroma", 0.55f, 0.0f, 2.0f, "Радужность призраков"),
                     Param("threshold", "Threshold", 1.1f, 0.0f, 16.0f,
-                          "Яркость, начиная с которой пиксель — это солнце")};
+                          "Яркость, начиная с которой пиксель — это солнце"),
+                    Heading("Lights"),
+                    Param("lights", "Light Flares", 1.0f, 0.0f, 4.0f,
+                          "Свечение и звезда у точечных ламп и прожекторов в кадре"),
+                    Param("lightSize", "Light Flare Size", 0.03f, 0.005f, 0.2f,
+                          "Размер свечения лампы в метре от камеры"),
+                    Heading("Screen"),
+                    Param("screen", "Screen Flares", 0.6f, 0.0f, 4.0f,
+                          "Призраки и ореол от всего яркого в кадре (самосвечение, блики)"),
+                    Param("screenThreshold", "Screen Threshold", 1.5f, 0.1f, 16.0f,
+                          "Яркость (HDR), с которой пиксель даёт экранный блик")};
         k.Run = RunLensFlare;
         catalog.Register(std::move(k));
     }
@@ -2213,6 +2227,9 @@ PostChain PostChain::Default() {
     chain.Effects.push_back(MakePostEffect("exposure"));
     chain.Effects.push_back(MakePostEffect("autoexposure"));
     chain.Effects.push_back(MakePostEffect("ssgi"));
+    // Блики в объективе — у новой камеры сразу: солнце, лампы и всё яркое
+    // «горят» в кадре, как в Unreal. Убрать — одна галочка.
+    chain.Effects.push_back(MakePostEffect("lensflare"));
     chain.Effects.push_back(MakePostEffect("bloom"));
     chain.Effects.push_back(MakePostEffect("color"));
     PostEffect tonemap = MakePostEffect("tonemap");

@@ -338,6 +338,15 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
                 if (!cam.Valid() || iconOf(cam) != "camera") {
                     LOG_ERROR("Editor") << "SELFTEST: у камеры не её значок";
                     ok = false;
+                } else {
+                    // Новая камера смотрит туда же, куда вид редактора: и в
+                    // сторону, и вверх-вниз (знак наклона здесь уже путался).
+                    const glm::mat4 w = m_scene->WorldMatrix(cam.Entity());
+                    const glm::vec3 fwd = glm::normalize(-glm::vec3(w[2]));
+                    if (glm::dot(fwd, glm::normalize(m_camera.Front)) < 0.999f) {
+                        LOG_ERROR("Editor") << "SELFTEST: новая камера смотрит не туда, куда вид редактора";
+                        ok = false;
+                    }
                 }
             }
         }

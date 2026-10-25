@@ -1,5 +1,6 @@
 #include "sage/scene/SceneMigrations.h"
 
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <algorithm>
@@ -14,6 +15,7 @@
 #include "sage/render/PostProcessComponent.h"
 #include "sage/scene/Light.h"
 #include "sage/scene/SceneJson.h"
+#include "sage/scene/Transform.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ui/UIAnchor.h"
 #include "sage/scene/SceneLegacyUI.h"
@@ -129,6 +131,15 @@ void MigrateV3toV4(json& root) {
 // Переносит солнце из НАСТРОЕК СЦЕНЫ в объект и гасит поле. Зовут дважды:
 // миграцией v4->v5 (переезд) и v10->v11 (уборка тех сцен, где поле осталось
 // гореть и после переезда — их писал код мимо редактора).
+// EulerFromForward в соглашении до v17 (R = Rx*Ry*Rz) — для миграций, которые
+// пишут поворот в файл старого формата.
+glm::vec3 LegacyEulerFromForward(const glm::vec3& dir) {
+    const float len = glm::length(dir);
+    if (len < 1e-6f) return glm::vec3(0.0f);
+    const glm::vec3 f = dir / len;
+    return glm::degrees(glm::vec3(std::atan2(f.y, -f.z), std::atan2(-f.x, std::sqrt(f.y * f.y + f.z * f.z)), 0.0f));
+}
+
 void SunFieldToEntity(json& root) {
     json sun = json::object();
     if (root.contains("lighting") && root["lighting"].contains("sun")) sun = root["lighting"]["sun"];
@@ -157,7 +168,9 @@ void SunFieldToEntity(json& root) {
     // Позиция ни на что не влияет (свет из бесконечности), но объект без
     // позиции неудобно найти в сцене — ставим его над началом мира.
     entity["position"] = Vec3ToJson(glm::vec3(0.0f, 10.0f, 0.0f));
-    entity["rotation"] = Vec3ToJson(sage::ecs::EulerFromForward(direction));
+    // Углы — в соглашении ТОГО формата (R = Rx*Ry*Rz): дальше по цепочке их
+    // переведёт v16 -> v17, как и все остальные повороты старых сцен.
+    entity["rotation"] = Vec3ToJson(LegacyEulerFromForward(direction));
     entity["scale"] = Vec3ToJson(glm::vec3(1.0f));
     // БЕЗ КОМПОНЕНТА МЕША ВОВСЕ, а не с мешем «none»: у света нет ни модели, ни
     // цвета, ни теней-от-себя, и секция «Меш» в инспекторе лампы обещает
@@ -647,6 +660,26 @@ void MigrateV15toV16(json& root) {
     }
 }
 
+// v16 -> v17: углы Эйлера — в соглашении R = Ry*Rx*Rz (см. Transform.h).
+//
+// Было R = Rx*Ry*Rz: наклон X шёл вокруг ГЛОБАЛЬНОЙ оси, и камера, повёрнутая
+// по Y, при наклоне заваливалась набок. Поворот каждого объекта и каждой части
+// составного коллайдера пересчитывается в новые углы — ТОТ ЖЕ поворот, другие
+// числа; у поворота только вокруг одной оси числа не меняются вовсе.
+void MigrateV16toV17(json& root) {
+    auto convert = [](json& holder, const char* key) {
+        if (!holder.contains(key) || !(holder[key].is_object() || holder[key].is_array())) return;
+        const glm::vec3 legacy = Vec3FromJson(holder[key]);
+        if (legacy == glm::vec3(0.0f)) return;
+        holder[key] = Vec3ToJson(sage::EulerDegreesFromLegacyXYZ(legacy));
+    };
+    for (json& obj : root["objects"]) {
+        convert(obj, "rotation");
+        if (obj.contains("collider") && obj["collider"].contains("parts") && obj["collider"]["parts"].is_array())
+            for (json& part : obj["collider"]["parts"]) convert(part, "euler");
+    }
+}
+
 const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
     &MigrateV2toV3,
@@ -663,6 +696,7 @@ const MigrationFn kMigrations[] = {
     &MigrateV13toV14,
     &MigrateV14toV15,
     &MigrateV15toV16,
+    &MigrateV16toV17,
 };
 
 } // namespace

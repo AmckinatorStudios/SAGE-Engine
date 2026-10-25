@@ -15,6 +15,9 @@ bool EditorLayer::SelfTestToolsAssetsAndPanels() {
 #ifdef SAGE_TEST_MODEL
     if (ok) {
         const fs::path animDir = m_project.AssetsDir() / "selftest_anim";
+        // С чистого листа: клипы прошлого прогона, лежащие по-старому рядом с
+        // моделью, были бы взяты как есть, и проверка раскладки ничего бы не проверяла.
+        fs::remove_all(animDir, ec);
         fs::create_directories(animDir, ec);
         const fs::path modelCopy = animDir / "hero.glb";
         fs::copy_file(SAGE_TEST_MODEL, modelCopy, fs::copy_options::overwrite_existing, ec);
@@ -36,6 +39,13 @@ bool EditorLayer::SelfTestToolsAssetsAndPanels() {
                 // сказал, что записал» — это не то же самое, что «файл есть».
                 for (const std::string& ref : r.Refs) {
                     const std::string full = sage::AssetDatabase::Instance().LocatePath(ref);
+                    // Клипы — в общей папке Animations/ рядом с моделью, а не
+                    // россыпью возле неё (sage/assets/ModelData.h).
+                    if (fs::path(full).parent_path().filename() != "Animations") {
+                        LOG_ERROR("Editor") << "SELFTEST: клип лежит не в Animations/: " << full;
+                        ok = false;
+                        break;
+                    }
                     if (!fs::exists(full, ec)) {
                         LOG_ERROR("Editor") << "SELFTEST: файла клипа нет: " << full;
                         ok = false;

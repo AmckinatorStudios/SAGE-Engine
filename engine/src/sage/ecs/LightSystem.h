@@ -23,13 +23,11 @@
 // пришёл свет: из настроек сцены или из сущности.
 namespace sage::ecs {
 
-// «Вперёд» сущности из углов Эйлера Transform (градусы, порядок XYZ — как в
-// Transform::GetMatrix и в камере): локальный -Z, повёрнутый ориентацией.
-// Общая точка для направления прожекторов и камеры.
+// «Вперёд» сущности из углов Эйлера Transform (градусы, соглашение — в
+// Transform.h): локальный -Z, повёрнутый ориентацией. Общая точка для
+// направления прожекторов и камеры.
 inline glm::vec3 ForwardFromEuler(const glm::vec3& eulerDeg) {
-    glm::mat4 rot = glm::eulerAngleXYZ(glm::radians(eulerDeg.x),
-                                       glm::radians(eulerDeg.y),
-                                       glm::radians(eulerDeg.z));
+    const glm::mat4 rot = sage::RotationMatrixFromEulerDegrees(eulerDeg);
     return glm::normalize(glm::vec3(rot * glm::vec4(0.0f, 0.0f, -1.0f, 0.0f)));
 }
 
@@ -45,10 +43,10 @@ inline glm::vec3 EulerFromForward(const glm::vec3& dir) {
     const float len = glm::length(dir);
     if (len < 1e-6f) return glm::vec3(0.0f);
     const glm::vec3 f = dir / len;
-    // ForwardFromEuler даёт f = (-sin y, sin x * cos y, -cos x * cos y).
-    // Отсюда: x = atan2(f.y, -f.z), y = atan2(-f.x, sqrt(f.y^2 + f.z^2)).
-    const float pitch = std::atan2(f.y, -f.z);
-    const float yaw = std::atan2(-f.x, std::sqrt(f.y * f.y + f.z * f.z));
+    // ForwardFromEuler даёт f = (-sin y * cos x, sin x, -cos y * cos x):
+    // наклон — высота взгляда над горизонтом, рыскание — его азимут.
+    const float pitch = std::asin(std::min(std::max(f.y, -1.0f), 1.0f));
+    const float yaw = std::atan2(-f.x, -f.z);
     return glm::degrees(glm::vec3(pitch, yaw, 0.0f));
 }
 

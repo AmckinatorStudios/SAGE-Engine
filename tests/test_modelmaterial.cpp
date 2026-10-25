@@ -850,3 +850,50 @@ TEST(model_material_gltf_unlit_reaches_the_material) {
     mat.SaveToFile((dir / "toon.sagemat").string());
     CHECK_TRUE(Material::LoadFromFile((dir / "toon.sagemat").string()).Render.Unlit);
 }
+
+// --- Данные моделей — по общим папкам, без копий ------------------------------
+//
+// Карты, которые импорт создаёт сам (распакованные из ORM, встроенные в .glb),
+// ложились плоско рядом с моделью: у десятка моделей в одной папке их карты
+// перемешивались, а одна и та же картинка набора лежала десятью копиями. Теперь
+// они — в одной на всю папку Textures/, и одинаковая картинка пишется один раз.
+TEST(model_material_generated_maps_go_to_one_shared_textures_folder) {
+    const fs::path dir = TempDir("sage_test_modelmat_shared");
+    WriteGeomBin(dir / "geom.bin");
+    WritePixelPng(dir / "base.png", 200, 100, 50);
+    WritePixelPng(dir / "orm.png", 10, 120, 240);
+    WriteText(dir / "crate.gltf", kGltfTemplate);
+    WriteText(dir / "barrel.gltf", kGltfTemplate);   // другой ассет набора с той же ORM
+
+    const ModelLoader::ExtractedMaterial a = ModelLoader::ExtractMaterial((dir / "crate.gltf").string());
+    const ModelLoader::ExtractedMaterial b = ModelLoader::ExtractMaterial((dir / "barrel.gltf").string());
+    CHECK_FALSE(a.MetallicMap.empty());
+    CHECK_TRUE(fs::path(a.MetallicMap).parent_path().filename() == "Textures");
+    // Та же картинка — тот же файл, а не копия под именем второй модели.
+    CHECK_EQ(b.MetallicMap, a.MetallicMap);
+    CHECK_EQ(b.AOMap, a.AOMap);
+    // Рядом с моделями — только то, что положил человек.
+    int pngNextToModels = 0;
+    for (const auto& e : fs::directory_iterator(dir))
+        if (e.path().extension() == ".png") ++pngNextToModels;
+    CHECK_EQ(pngNextToModels, 2);   // base.png и orm.png
+    // Папка карт одна на всех.
+    int textureDirs = 0;
+    for (const auto& e : fs::recursive_directory_iterator(dir))
+        if (e.is_directory() && e.path().filename() == "Textures") ++textureDirs;
+    CHECK_EQ(textureDirs, 1);
+}
+
+TEST(model_material_old_maps_next_to_the_model_stay_in_use) {
+    // Проект, импортированный до раскладки: карта уже лежит рядом с моделью, на
+    // неё ссылается материал. Повторный импорт берёт её, а не пишет новую.
+    const fs::path dir = TempDir("sage_test_modelmat_legacy");
+    WriteGeomBin(dir / "geom.bin");
+    WritePixelPng(dir / "base.png", 200, 100, 50);
+    WritePixelPng(dir / "orm.png", 10, 120, 240);
+    WriteText(dir / "iron.gltf", kGltfTemplate);
+    WritePixelPng(dir / "iron_metallic.png", 1, 1, 1);
+    const ModelLoader::ExtractedMaterial m = ModelLoader::ExtractMaterial((dir / "iron.gltf").string());
+    CHECK_TRUE(fs::path(m.MetallicMap).filename() == "iron_metallic.png");
+    CHECK_TRUE(fs::path(m.MetallicMap).parent_path().filename() != "Textures");
+}

@@ -2806,6 +2806,11 @@
     "Probe Spacing": "Шаг проб",
     "Static geometry for baked lighting": "Статичная геометрия для запечённого освещения",
     "Static objects: %d": "Статичных объектов: %d",
-    "The scene changed while baking — bake again": "Сцена изменилась во время запекания — запеките заново"
+    "The scene changed while baking — bake again": "Сцена изменилась во время запекания — запеките заново",
+    "Lights": "Лампы",
+    "Light Flares": "Блики ламп",
+    "Light Flare Size": "Размер блика лампы",
+    "Screen Flares": "Экранные блики",
+    "Screen Threshold": "Порог экранных бликов"
   }
 }

@@ -504,6 +504,12 @@ private:
     // Шаги разнесены по кадрам, потому что нажатие и отпускание — это разные
     // кадры и для ImGui, и для редактора (выбор происходит на отпускании).
     void TickInputProbe();
+    void TickCursorLockProbe();        // самопроверка: захват держится, мышь интерфейса стоит
+    void PinMouseWhileCaptured();      // мышь интерфейса — на месте, пока курсор захвачен
+    ImVec2 m_freeMousePos{0.0f, 0.0f};
+    ImVec2 m_mousePin{0.0f, 0.0f};
+    bool m_mousePinned = false;
+    int m_cursorProbeStep = 0;
     // Какое окно выводить вперёд по «Играть» (см. EditorLayer_Play.cpp).
     void FocusPlayTarget();
     int m_probeStep = -1;     // -1 — не запущена

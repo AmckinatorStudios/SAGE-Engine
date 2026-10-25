@@ -767,3 +767,31 @@ TEST(PhysicsScene_character_with_a_rigidbody_stays_upright) {
     CHECK_NEAR(rot.y, 30.0f, 1e-3f);   // рыскание — остаётся
     CHECK_TRUE(scene.Registry().get<RigidBodyComponent>(hero.Entity()).RuntimeBody == kInvalidBody);
 }
+
+// Скрипт ставит телу персонажа наклон взгляда КАЖДЫЙ кадр (камера на самом
+// теле) — капсула не заваливается: наклон снимается на каждом шаге, а
+// рыскание остаётся. Прежде он снимался только раз, при заведении контроллера,
+// и тело клонилось вместе со взглядом.
+TEST(PhysicsScene_character_body_never_pitches_while_running) {
+    if (!PhysicsWorld::HasJolt()) return;
+    Scene scene("PitchScene");
+    GameObject floor = scene.CreateObject("Floor");
+    floor.GetTransform().Position = {0.0f, -0.5f, 0.0f};
+    floor.GetTransform().Scale = {40.0f, 1.0f, 40.0f};
+    scene.Registry().emplace<RigidBodyComponent>(floor.Entity(), RigidBodyComponent{BodyType::Static});
+    scene.Registry().emplace<ColliderComponent>(floor.Entity());
+    GameObject hero = scene.CreateObject("Hero");
+    hero.GetTransform().Position = {0.0f, 0.2f, 0.0f};
+    scene.Registry().emplace<CharacterControllerComponent>(hero.Entity());
+    PhysicsScene physics(PhysicsWorld::DefaultBackend(), scene);
+    if (!physics.SupportsCharacters()) return;
+    physics.Step(scene, 1.0f / 60.0f);
+    for (int i = 0; i < 30; ++i) {
+        hero.GetTransform().Rotation = {-35.0f, 70.0f, 4.0f};   // «посмотреть вниз» телом
+        physics.Step(scene, 1.0f / 60.0f);
+        const glm::vec3 rot = hero.GetTransform().Rotation;
+        CHECK_NEAR(rot.x, 0.0f, 1e-4f);
+        CHECK_NEAR(rot.z, 0.0f, 1e-4f);
+        CHECK_NEAR(rot.y, 70.0f, 1e-4f);
+    }
+}

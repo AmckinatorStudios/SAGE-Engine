@@ -348,7 +348,7 @@ void UpdateAnimators(Scene& scene, float dt) {
             const glm::vec3 delta = am.Anim.ConsumeRootDelta();
             if (glm::dot(delta, delta) > 0.0f) {
                 Transform& tr = scene.Registry().get<Transform>(e);
-                const glm::mat4 rot = glm::mat4_cast(glm::quat(glm::radians(tr.Rotation)));
+                const glm::mat4 rot = sage::RotationMatrixFromEulerDegrees(tr.Rotation);
                 tr.Position += glm::vec3(rot * glm::vec4(delta * tr.Scale, 0.0f));
             }
         }
