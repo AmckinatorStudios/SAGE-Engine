@@ -173,6 +173,10 @@ set(SAGE_ENGINE_SOURCES
     src/sage/lang/SageLexer.cpp
     src/sage/lang/SageParser.cpp
     src/sage/lang/SageCheck.cpp
+    src/sage/lang/SageCheck_Body.cpp
+    src/sage/lang/SageCheck_Decls.cpp
+    src/sage/lang/SageCheck_Expr.cpp
+    src/sage/lang/SageCheck_Types.cpp
     src/sage/lang/SageCodegen.cpp
     src/sage/lang/SageCompiler.cpp
     src/sage/lang/SagePrelude.cpp
