@@ -636,25 +636,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     if (selectedObj.Valid()) {
         glm::mat4 world = scene.WorldMatrix(selectedObj.Entity());
         m_debugDraw->Axes(world, 1.4f);
-        if (const LightComponent* light = scene.Registry().try_get<LightComponent>(selectedObj.Entity())) {
-            glm::vec3 wpos = glm::vec3(world[3]);
-            glm::vec3 lightColor = glm::vec3(light->Color) * 0.9f;
-            if (light->Kind == LightComponent::Type::Spot) {
-                glm::vec3 dir = glm::normalize(glm::vec3(world * glm::vec4(0, 0, -1, 0)));
-                m_debugDraw->WireCone(wpos, dir, light->Range, light->OuterConeDeg, lightColor);
-            } else if (light->Kind == LightComponent::Type::Area) {
-                // Сама панель и короткий штрих лицевой стороны: светит она
-                // одной стороной, и без штриха не видно, какой.
-                const glm::vec3 r = glm::normalize(glm::vec3(world[0])) * (light->AreaWidth * 0.5f);
-                const glm::vec3 u = glm::normalize(glm::vec3(world[1])) * (light->AreaHeight * 0.5f);
-                const glm::vec3 f = glm::normalize(glm::vec3(world * glm::vec4(0, 0, -1, 0)));
-                const glm::vec3 c[4] = {wpos + r + u, wpos - r + u, wpos - r - u, wpos + r - u};
-                for (int i = 0; i < 4; ++i) m_debugDraw->Line(c[i], c[(i + 1) % 4], lightColor);
-                m_debugDraw->Line(wpos, wpos + f * std::min(light->Range, 1.0f), lightColor);
-            } else {
-                m_debugDraw->WireSphere(wpos, light->Range, lightColor);
-            }
-        }
+        // Свет выделенного — его значком целиком (DrawEntityGizmos выше).
     }
     // Габариты выделенного — ровно та коробка, по которой считается попадание
     // мышью (sage::render::RayMesh). Показывать её незачем всегда, но когда

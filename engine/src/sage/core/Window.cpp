@@ -1,5 +1,6 @@
 #include "Window.h"
 #include "Log.h"
+#include "sage/core/Display.h"
 #include <stdexcept>
 
 static void FramebufferSizeCallback(GLFWwindow* handle, int width, int height) {
@@ -97,6 +98,14 @@ void Window::ForwardFileDrop(GLFWwindow* handle, int count, const char** paths) 
 // «не найден OpenGL». Именно этот текст и отвечает на вопрос, почему на одном
 // ПК запускается, а на другом нет; без него разбор упирается в переписку.
 static void GlfwErrorCallback(int code, const char* description) {
+    // Неответ монитора на запрос масштаба или режима — не поломка: и ImGui, и
+    // движок пропускают такой монитор и берут запасное значение (см.
+    // sage/core/Display.h). Ошибкой он выглядел как сбой редактора — три
+    // красные строки при каждом опросе мониторов.
+    if (sage::display::IsMonitorQueryError(code, description)) {
+        sage::display::NoteMonitorQueryError(description);
+        return;
+    }
     LOG_ERROR("Window") << "GLFW " << code << ": " << (description ? description : "(без текста)");
 }
 
@@ -191,6 +200,17 @@ Window::Window(int width, int height, const std::string& title, Params params)
     // этом каждый кадр на X11 значит обмен с сервером на каждый вопрос.
     glfwSetWindowIconifyCallback(m_handle, [](GLFWwindow* h, int iconified) {
         if (auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h))) win->m_iconified = iconified != 0;
+    });
+    // МАСШТАБ — ИЗ СОБЫТИЯ, а не вопросом каждый кадр: в Windows вопрос идёт к
+    // монитору (GetDpiForMonitor), и монитор, который не отвечает, превращал бы
+    // каждый кадр в ошибку. Событие приносит масштаб в самом сообщении о смене
+    // DPI (окно перетащили на другой монитор, поменяли «Масштаб» в Windows).
+    m_contentScale = QueryContentScale();
+    glfwSetWindowContentScaleCallback(m_handle, [](GLFWwindow* h, float sx, float) {
+        auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h));
+        if (!win || sx <= 0.01f) return;
+        win->m_contentScale = sx;
+        for (const ScaleFn& fn : win->m_scaleFns) fn(sx);
     });
     glfwSetWindowFocusCallback(m_handle, [](GLFWwindow* h, int focused) {
         if (auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h))) win->EmitFocus(focused != 0);
@@ -314,4 +334,22 @@ void Window::OnResize(int width, int height) {
     // экранного буфера через rhi::GraphicsDevice), окно к GL не обращается.
     m_width = width;
     m_height = height;
+}
+
+float Window::QueryContentScale() const {
+#if defined(__APPLE__)
+    // На Mac плотность пикселей уже в размере кадрового буфера (Retina = 2),
+    // и интерфейс масштабирует ImGui через FramebufferScale — второй раз не надо.
+    return 1.0f;
+#else
+    float sx = 0.0f, sy = 0.0f;
+    glfwGetWindowContentScale(m_handle, &sx, &sy);
+    if (sx > 0.01f) return sx;
+    // Монитор окна не ответил — масштаб главного монитора, затем 100%.
+    if (GLFWmonitor* m = glfwGetPrimaryMonitor()) {
+        glfwGetMonitorContentScale(m, &sx, &sy);
+        if (sx > 0.01f) return sx;
+    }
+    return 1.0f;
+#endif
 }

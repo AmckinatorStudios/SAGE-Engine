@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2838.
+// Язык: Русский. Строк: 2847.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1074,6 +1074,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Коллайдер (C): тянуть форму столкновения"},
     {"Collider display",
      "Вид коллайдеров"},
+    {"Collider handles use the move step",
+     "Ручки коллайдера идут шагом переноса"},
     {"Collides With",
      "Сталкивается со слоями"},
     {"Collision",
@@ -2086,6 +2088,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Полное"},
     {"Fullscreen",
      "Полноэкранный"},
+    {"G — on/off, Ctrl — invert while dragging",
+     "G — вкл/выкл, Ctrl — наоборот на время жеста"},
     {"GB",
      "ГБ"},
     {"GI Static",
@@ -2886,6 +2890,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Перенос"},
     {"Move (W)",
      "Перенос (W)"},
+    {"Move X / Y / Z",
+     "Перенос X / Y / Z"},
     {"Move down",
      "Ниже"},
     {"Move the centre to the origin",
@@ -4098,6 +4104,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Безопасная область"},
     {"SagePlayer not found. Put it next to the editor, build the SagePlayer target, or set SAGE_PLAYER_PATH. Looked in:",
      "SagePlayer не найден. Положите его рядом с редактором, соберите цель SagePlayer или задайте SAGE_PLAYER_PATH. Искали:"},
+    {"Same as X",
+     "Как у X"},
     {"Sample",
      "Пример"},
     {"Samples",
@@ -4464,10 +4472,14 @@ constexpr TranslationPair kRussianStrings[] = {
      "Мягкость"},
     {"Snap",
      "Привязка"},
+    {"Snap is on",
+     "Привязка включена"},
     {"Snap radius",
      "Радиус привязки"},
     {"Snap step for the current mode.\nWhen building from blocks, set it to the block size.",
      "Шаг привязки для текущего режима.\nДля постройки из блоков ставьте его равным размеру блока."},
+    {"Snap steps: move per axis, rotation, scale",
+     "Шаги привязки: перенос по осям, поворот, масштаб"},
     {"Snap to edges and centers",
      "Привязка к краям и центрам"},
     {"Snap to edges and centers of neighbours",
@@ -4476,6 +4488,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Привязка к ней"},
     {"Snap to step",
      "Привязка к шагу"},
+    {"Snap to step (G; hold Ctrl to invert while dragging)",
+     "Привязка к шагу (G; Ctrl — наоборот на время жеста)"},
     {"Snap to the grid",
      "Привязка к сетке"},
     {"Snapping and its step",
@@ -4740,6 +4754,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Нужен свет без неба — переключите на «Свои значения»"},
     {"Switch to layout and open this interface",
      "Перейти к вёрстке и открыть этот интерфейс"},
+    {"System scale %d%% is applied on top",
+     "Масштаб системы %d%% уже учтён сверху"},
     {"Tag",
      "Тег"},
     {"Take the end from the object: move/rotate/paint the object in the scene, then click",
@@ -5402,6 +5418,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Выполняется ли проход вообще и в каком разрешении. А какой источник отбрасывает тени — свойство самого объекта-света."},
     {"Which axes the gizmo works in",
      "В каких осях работает гизмо"},
+    {"Which axes the gizmo works in (X)",
+     "В каких осях работает гизмо (X)"},
     {"Which half of the vector this source feeds",
      "Какую половину вектора питает этот источник"},
     {"Which point of the element lands on the anchor",

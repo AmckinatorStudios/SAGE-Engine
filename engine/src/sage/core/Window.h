@@ -137,6 +137,18 @@ public:
     // Фокус окна. Подписчики, считающие смещение мыши по разнице положений
     // (GlfwBridge), начинают отсчёт заново: смещение «до» и «после» alt-tab —
     // не движение мыши в игре, а скачок обзора.
+    // Масштаб системы для этого окна (Windows: 1.25 при 125%). Не 0 никогда:
+    // не ответивший монитор даёт масштаб главного или 1.0 (sage/core/Display.h).
+    float ContentScale() const {
+#if defined(__APPLE__)
+        return 1.0f;
+#else
+        return m_contentScale;
+#endif
+    }
+    using ScaleFn = std::function<void(float scale)>;
+    void AddContentScaleCallback(ScaleFn fn) { m_scaleFns.push_back(std::move(fn)); }
+
     using FocusFn = std::function<void(bool focused)>;
     void AddFocusCallback(FocusFn fn) { m_focusFns.push_back(std::move(fn)); }
 
@@ -194,6 +206,9 @@ private:
     bool m_haveLast = false;
     double m_frameDx = 0.0, m_frameDy = 0.0;
     bool m_iconified = false;
+    float m_contentScale = 1.0f;
+    std::vector<ScaleFn> m_scaleFns;
+    float QueryContentScale() const;
     bool m_focused = true;
     double m_lastInput = 0.0;     // glfwGetTime() последнего события ввода
     void TouchInput();

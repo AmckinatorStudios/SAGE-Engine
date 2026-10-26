@@ -2,6 +2,7 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #endif
 #include "EditorSceneRenderer.h"
+#include "gizmo/LightGizmo.h"
 
 #include "sage/anim/AnimationComponents.h"
 #include "sage/render/SkinnedModel.h"
@@ -55,14 +56,13 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
         const CameraComponent& cam = camView.get<CameraComponent>(e);
         m_debugDraw->WireFrustum(wpos, fwd, cam.Fov, gameAspect, 0.3f, 2.2f, color, up);
     }
-    // Свет-сущности: маркер-сфера в позиции (у выбранного — ярче; крупная зона
-    // выбранного примитива рисуется в RenderViewport поверх).
+    // Свет-сущности: значок по виду света (gizmo/LightGizmo.h) — солнце лучами,
+    // лампа звёздочкой, прожектор конусом, панель рамкой; у выделенного — его
+    // дальность и форма целиком.
     auto lightView = reg.view<LightComponent, Transform, IdComponent>();
     for (auto e : lightView) {
-        bool selected = isSel(lightView.get<IdComponent>(e).Id);
-        const LightComponent& lc = lightView.get<LightComponent>(e);
-        glm::vec3 wpos = glm::vec3(scene.WorldMatrix(e)[3]);
-        m_debugDraw->WireSphere(wpos, selected ? 0.30f : 0.25f, glm::vec3(lc.Color) * (selected ? 1.2f : 0.9f), 10);
+        const bool selected = isSel(lightView.get<IdComponent>(e).Id);
+        sage::editor::DrawLightGizmo(*m_debugDraw, lightView.get<LightComponent>(e), scene.WorldMatrix(e), selected);
     }
     // Эмиттеры частиц: маркер в позиции.
     auto fxView = reg.view<ParticleEmitterComponent, Transform, IdComponent>();

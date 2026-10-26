@@ -479,6 +479,19 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         if (ImGui::IsKeyPressed(ImGuiKey_R)) host.Tools().GizmoOp = (int)ImGuizmo::SCALE;
         if (ImGui::IsKeyPressed(ImGuiKey_T)) host.Tools().GizmoOp = (int)ImGuizmo::UNIVERSAL;
         if (ImGui::IsKeyPressed(ImGuiKey_Y)) host.Tools().GizmoOp = (int)ImGuizmo::BOUNDS;
+        // X — оси гизмо: мира или объекта (как в Unity); G — привязка к шагу.
+        // Ctrl не трогаем: Ctrl+D, Ctrl+Z — команды, а Ctrl во время жеста —
+        // привязка «наоборот» (EditorTools::SnapActive).
+        if (!io.KeyCtrl && !io.KeyAlt && !io.KeyShift) {
+            if (ImGui::IsKeyPressed(ImGuiKey_X))
+                host.Tools().GizmoSpace = host.Tools().GizmoSpace == EditorGizmoSpace::World
+                                              ? EditorGizmoSpace::Local
+                                              : EditorGizmoSpace::World;
+            if (ImGui::IsKeyPressed(ImGuiKey_G)) {
+                host.Tools().Snap = !host.Tools().Snap;
+                host.Tools().SaveSnap();
+            }
+        }
         // C — правка коллайдера. Рядом с остальными инструментами: это такой же
         // режим гизмо, только тянет он форму столкновения.
         if (ImGui::IsKeyPressed(ImGuiKey_C) && !ImGui::GetIO().KeyCtrl)
@@ -530,88 +543,52 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // к полю. Здесь тот же масштаб, но тянет он ФОРМУ, а не объект — путать их
     // нельзя: масштаб объекта растягивает и картинку, и коллайдер вместе с ней.
     bool colliderGizmo = false;
+    m_colliderMouse = false;
     if (selected.Valid() && host.ColliderEditMode()) {
         Scene& scene = host.CurrentScene();
-        const glm::mat4 model = scene.WorldMatrix(selected.Entity());
-        ColliderComponent* col =
-            scene.Registry().try_get<ColliderComponent>(selected.Entity());
+        ColliderComponent* col = scene.Registry().try_get<ColliderComponent>(selected.Entity());
         // Форму по мешу тянуть нечем: её размер — это размер модели, и
         // меняется он масштабом объекта, а не ручками коллайдера.
-        if (col && (col->Shape == sage::physics::ShapeType::ConvexHull ||
-                    col->Shape == sage::physics::ShapeType::Mesh))
-            col = nullptr;
-        if (col) {
-            const glm::vec3 wpos = glm::vec3(model[3]);
-            const glm::vec3 sc(glm::length(glm::vec3(model[0])),
-                               glm::length(glm::vec3(model[1])),
-                               glm::length(glm::vec3(model[2])));
-            const float uniform = glm::max(sc.x, glm::max(sc.y, sc.z));
-            // Поворот без масштаба: масштаб уже сидит в размерах формы, и
-            // умножать на него второй раз — раздувать каркас квадратично.
-            glm::mat4 rot = model;
-            for (int k = 0; k < 3; ++k) {
-                const float len = sc[k] > 1e-6f ? sc[k] : 1.0f;
-                rot[k] /= len;
-            }
-            rot[3] = glm::vec4(wpos, 1.0f);
-
-            glm::vec3 size(1.0f);
-            switch (col->Shape) {
-                case sage::physics::ShapeType::Box:
-                    size = col->HalfExtents * sc * 2.0f;
-                    break;
-                case sage::physics::ShapeType::Sphere:
-                    size = glm::vec3(col->Radius * uniform * 2.0f);
-                    break;
-                case sage::physics::ShapeType::Capsule:
-                    size = glm::vec3(col->Radius * uniform * 2.0f,
-                                     (col->HalfHeight * sc.y + col->Radius * uniform) * 2.0f,
-                                     col->Radius * uniform * 2.0f);
-                    break;
-                default:
-                    break;
-            }
-            size = glm::max(size, glm::vec3(1e-3f));
-            glm::mat4 shape = rot * glm::scale(glm::mat4(1.0f), size);
-
-            if (!ImGuizmo::IsUsing() && ImGuizmo::IsOver() && !host.InPlayMode()) {
-                host.History().CapturePending();
-            }
-            const float step = host.Tools().SnapStepForCurrentOp();
-            const float colliderSnap[3] = {step, step, step};
-            const bool changed = ImGuizmo::Manipulate(
-                glm::value_ptr(activeView), glm::value_ptr(activeProj), ImGuizmo::SCALE,
-                ImGuizmo::LOCAL, glm::value_ptr(shape), nullptr,
-                host.Tools().Snap ? colliderSnap : nullptr);
-            if (changed && !host.InPlayMode()) {
-                const glm::vec3 out(glm::length(glm::vec3(shape[0])),
-                                    glm::length(glm::vec3(shape[1])),
-                                    glm::length(glm::vec3(shape[2])));
-                // Обратно в ЛОКАЛЬНЫЕ размеры: делим на масштаб объекта,
-                // иначе коллайдер у растянутого родителя рос бы вдвое.
-                const glm::vec3 safe = glm::max(sc, glm::vec3(1e-4f));
-                const float safeU = glm::max(uniform, 1e-4f);
-                switch (col->Shape) {
-                    case sage::physics::ShapeType::Box:
-                        col->HalfExtents = glm::max(out / safe * 0.5f, glm::vec3(1e-3f));
-                        break;
-                    case sage::physics::ShapeType::Sphere:
-                        col->Radius = glm::max(out.x / safeU * 0.5f, 1e-3f);
-                        break;
-                    case sage::physics::ShapeType::Capsule: {
-                        col->Radius = glm::max(out.x / safeU * 0.5f, 1e-3f);
-                        const float half = out.y * 0.5f - col->Radius * safeU;
-                        col->HalfHeight = glm::max(half / safe.y, 0.0f);
-                        break;
-                    }
-                    default:
-                        break;
-                }
-            }
-            if (m_gizmoWasUsing && !ImGuizmo::IsUsing()) host.History().CommitPending();
-            m_gizmoWasUsing = ImGuizmo::IsUsing();
-            // Гизмо объекта в этом кадре уже не нужно: тянут форму, а не объект.
+        if (col && sage::editor::collideredit::Editable(*col)) {
+            sage::editor::handles::View hv;
+            hv.ViewM = activeView;
+            hv.Proj = activeProj;
+            hv.Min = imgPos;
+            hv.Size = avail;
+            hv.Draw = slotDrawList[m_activeSlot] ? slotDrawList[m_activeSlot] : ImGui::GetWindowDrawList();
+            hv.Eye = glm::vec3(glm::inverse(activeView)[3]);
+            hv.Ortho = !perspective;
+            const bool input = hovered && !toolsBlock && !m_cameraDriving && !m_cameraOrbiting && !host.InPlayMode();
+            const glm::vec3 snap = host.Tools().SnapActive(ImGui::GetIO().KeyCtrl) ? host.Tools().SnapMove : glm::vec3(0.0f);
+            const auto r = m_colliderHandles.Update(*col, scene.WorldMatrix(selected.Entity()), hv, input, snap);
+            if (r.Began) host.History().CapturePending();
+            if (r.Ended) host.History().CommitPending();
+            m_colliderMouse = r.WantMouse;
+            // Гизмо объекта в этом кадре не нужно: тянут форму, а не объект.
             colliderGizmo = true;
+        }
+    }
+    // Ручки света (дальность, угол, размер панели) — рядом с обычным гизмо:
+    // свет двигают и поворачивают им, а форму света — ручками. Наведённая
+    // ручка забирает мышь у гизмо, чтобы не тянуть две вещи сразу.
+    if (selected.Valid() && !colliderGizmo) {
+        Scene& scene = host.CurrentScene();
+        if (LightComponent* light = scene.Registry().try_get<LightComponent>(selected.Entity())) {
+            sage::editor::handles::View hv;
+            hv.ViewM = activeView;
+            hv.Proj = activeProj;
+            hv.Min = imgPos;
+            hv.Size = avail;
+            hv.Draw = slotDrawList[m_activeSlot] ? slotDrawList[m_activeSlot] : ImGui::GetWindowDrawList();
+            hv.Eye = glm::vec3(glm::inverse(activeView)[3]);
+            hv.Ortho = !perspective;
+            const bool input = hovered && !toolsBlock && !m_cameraDriving && !m_cameraOrbiting &&
+                               !host.InPlayMode() && !ImGuizmo::IsUsing();
+            const auto r = m_lightHandles.Update(*light, scene.WorldMatrix(selected.Entity()), hv, input);
+            if (r.Began) host.History().CapturePending();
+            if (r.Ended) host.History().CommitPending();
+            m_colliderMouse = r.WantMouse;
+            if (r.WantMouse) ImGuizmo::Enable(false);
         }
     }
     // Гизмо объекта. В режиме «только выбор» его нет вовсе: ни ручек на экране,
@@ -667,9 +644,15 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                                    host.Tools().GizmoOp == (int)ImGuizmo::BOUNDS;
             if (scaleTool) m_scaleLockHint = sage::scene::ScaleLockOf(scene.Registry(), selected.Entity());
         }
+        // Шаг привязки: перенос — свой по каждой оси, поворот и масштаб — один.
         float snapValues[3];
         const float snapUnit = host.Tools().SnapStepForCurrentOp();
         snapValues[0] = snapValues[1] = snapValues[2] = snapUnit;
+        if ((ImGuizmo::OPERATION)host.Tools().GizmoOp == ImGuizmo::TRANSLATE)
+            for (int k = 0; k < 3; ++k) snapValues[k] = host.Tools().SnapMove[k];
+        // Ctrl — привязка наоборот на время жеста (как в Unity): без похода к
+        // кнопке, когда нужен один ровный шаг.
+        const bool snapNow = host.Tools().SnapActive(io.KeyCtrl);
 
         // Scale всегда в локальном пространстве (ImGuizmo игнорит WORLD для scale);
         // Move/Rotate — по выбору пользователя (тулбар: Local/World).
@@ -717,8 +700,8 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                 }
             }
             boundsPtr = localBounds;
-            if (host.Tools().Snap) {
-                boundsSnap[0] = boundsSnap[1] = boundsSnap[2] = host.Tools().SnapMove;
+            if (snapNow) {
+                for (int k = 0; k < 3; ++k) boundsSnap[k] = host.Tools().SnapMove[k];
                 boundsSnapPtr = boundsSnap;
             }
 
@@ -755,7 +738,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         const bool manipulated =
             ImGuizmo::Manipulate(glm::value_ptr(activeView), glm::value_ptr(activeProj),
                                  op, mode, glm::value_ptr(model),
-                                 nullptr, host.Tools().Snap ? snapValues : nullptr,
+                                 nullptr, snapNow ? snapValues : nullptr,
                                  boundsPtr, boundsSnapPtr);
 
         if (manipulated) {
@@ -998,7 +981,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
             if (rectselect::Meaningful(m_rect)) {
                 host.SelectInViewportRect(activeView, activeProj, a.x, a.y, b.x, b.y,
                                           m_rect.Additive);
-            } else if (!gizmoBusy && b.x >= 0.0f && b.x <= 1.0f && b.y >= 0.0f && b.y <= 1.0f) {
+            } else if (!gizmoBusy && !m_colliderMouse && b.x >= 0.0f && b.x <= 1.0f && b.y >= 0.0f && b.y <= 1.0f) {
                 // Теми же матрицами, что и гизмо: иначе в ортогональном виде
                 // или в неглавном слоте луч строился бы по камере другого окна
                 // и выбирал бы объекты «не там, куда щёлкнули».
@@ -1011,7 +994,8 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         const ImVec2 uv = toUv(mp);
         const bool insideImage = uv.x >= 0.0f && uv.x <= 1.0f && uv.y >= 0.0f && uv.y <= 1.0f;
         rectselect::End(m_rect, hovered && insideImage && !ImGuizmo::IsOver() &&
-                                    !ImGuizmo::IsUsing() && !m_cameraDriving && !m_cameraOrbiting && !gizmoBusy);
+                                    !ImGuizmo::IsUsing() && !m_cameraDriving && !m_cameraOrbiting && !gizmoBusy &&
+                                    !m_colliderMouse);
         rectselect::Draw(m_rect);
     }
 

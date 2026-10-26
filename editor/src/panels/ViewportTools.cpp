@@ -39,7 +39,8 @@
 // одна кнопка на видном месте — это и есть «спрятано, но найдётся».
 //
 // Хоткеи работают независимо от строки: Q/W/E/R — инструменты, T/Y/C —
-// редкие гизмо, F/End — кадрировать и посадить.
+// редкие гизмо, X — оси мира/объекта, G — привязка (Ctrl — наоборот на время
+// жеста), F/End — кадрировать и посадить.
 //
 // Пока курсор над виджетом, вьюпорт не отдаёт ему ни клик выбора, ни гизмо
 // (см. ViewportPanel::Draw).
@@ -113,6 +114,41 @@ void ViewportPanel::DrawSpaceMenu(EditorHost& host) {
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, Sage::UI::Get().SpacingXS));
     Sage::UI::TextSecondary("%s", T("Scale always works in the object's own axes"));
+    ImGui::EndPopup();
+}
+
+// --- Привязка к шагу --------------------------------------------------------
+//
+// Шаг переноса — по каждой оси (плита 2×1×0.25 ставится своим шагом), поворот
+// и масштаб — одним числом. Всё сохраняется в настройках редактора.
+void ViewportPanel::DrawSnapMenu(EditorHost& host) {
+    Sage::UI::MenuScope menu;
+    if (!ImGui::BeginPopup("##snap_menu")) return;
+    EditorTools& t = host.Tools();
+    bool changed = false;
+    Sage::UI::MenuSection(T("Snap to step"), true);
+    changed |= ImGui::Checkbox(T("Snap is on"), &t.Snap);
+    ImGui::SameLine();
+    ImGui::TextDisabled("%s", T("G — on/off, Ctrl — invert while dragging"));
+    ImGui::Dummy(ImVec2(0.0f, Sage::UI::Get().SpacingXS));
+    const float w = 190.0f;
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::DragFloat3(T("Move X / Y / Z"), &t.SnapMove.x, 0.05f, 0.001f, 1000.0f, "%.3g");
+    ImGui::SameLine();
+    if (ImGui::Button(T("Same as X"))) {
+        t.SnapMove.y = t.SnapMove.z = t.SnapMove.x;
+        changed = true;
+    }
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::DragFloat(T("Rotate"), &t.SnapRotate, 0.5f, 0.1f, 180.0f, "%.3g°");
+    ImGui::SetNextItemWidth(w);
+    changed |= ImGui::DragFloat(T("Scale"), &t.SnapScale, 0.01f, 0.001f, 10.0f, "%.3g");
+    ImGui::Dummy(ImVec2(0.0f, Sage::UI::Get().SpacingXS));
+    Sage::UI::TextSecondary("%s", T("Collider handles use the move step"));
+    if (changed) {
+        t.SnapMove = glm::clamp(t.SnapMove, glm::vec3(0.001f), glm::vec3(1000.0f));
+        t.SaveSnap();
+    }
     ImGui::EndPopup();
 }
 
@@ -278,30 +314,33 @@ void ViewportPanel::DrawToolsOverlay(EditorHost& host, ImVec2 origin) {
     gap();
     const bool world = host.Tools().GizmoSpace == EditorGizmoSpace::World;
     if (DropdownButton(world ? "world" : "cube", world ? T("Global") : T("Local"),
-                       T("Which axes the gizmo works in")))
+                       T("Which axes the gizmo works in (X)")))
         ImGui::OpenPopup("##space_menu");
     DrawSpaceMenu(host);
 
     // --- 3. Что помогает ----------------------------------------------------
     gap();
-    if (EditorIcons::IconOnlyButton("magnet", T("Snap to step"), host.Tools().Snap))
+    if (EditorIcons::IconOnlyButton("magnet", T("Snap to step (G; hold Ctrl to invert while dragging)"),
+                                    host.Tools().Snap)) {
         host.Tools().Snap = !host.Tools().Snap;
-    // Поле шага — ТОЛЬКО при включённой привязке. Серое неактивное поле занимает
-    // столько же места, сколько рабочее, а сказать ему нечего.
-    if (host.Tools().Snap) {
-        ImGui::SameLine();
-        const auto op = (ImGuizmo::OPERATION)host.Tools().GizmoOp;
-        float* step = (op == ImGuizmo::ROTATE)  ? &host.Tools().SnapRotate
-                      : (op == ImGuizmo::SCALE) ? &host.Tools().SnapScale
-                                                : &host.Tools().SnapMove;
-        const char* fmt = (op == ImGuizmo::ROTATE) ? "%.0f°" : "%.2f";
-        ImGui::SetNextItemWidth(56.0f);
-        ImGui::DragFloat("##snapstep", step, 0.05f, 0.01f, 360.0f, fmt);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", T("Snap step for the current mode.\n"
-              "When building from blocks, set it to the block size."));
-        }
+        host.Tools().SaveSnap();
     }
+    // ШАГ ВИДЕН ВСЕГДА — подписью кнопки списка: «шаг 1 · 15° · 0.1» сразу
+    // говорит, на сколько прыгнет объект, а сами шаги правятся в списке.
+    ImGui::SameLine();
+    {
+        const EditorTools& t = host.Tools();
+        char label[64];
+        const bool same = t.SnapMove.x == t.SnapMove.y && t.SnapMove.y == t.SnapMove.z;
+        if (same) std::snprintf(label, sizeof(label), "%g · %g° · %g", t.SnapMove.x, t.SnapRotate, t.SnapScale);
+        else std::snprintf(label, sizeof(label), "%g/%g/%g · %g° · %g", t.SnapMove.x, t.SnapMove.y, t.SnapMove.z,
+                           t.SnapRotate, t.SnapScale);
+        if (!t.Snap) ImGui::PushStyleVar(ImGuiStyleVar_Alpha, ImGui::GetStyle().Alpha * 0.55f);
+        if (DropdownButton("magnet", label, T("Snap steps: move per axis, rotation, scale")))
+            ImGui::OpenPopup("##snap_menu");
+        if (!t.Snap) ImGui::PopStyleVar();
+    }
+    DrawSnapMenu(host);
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("grid", T("Viewport grid"), host.Tools().ShowGrid))
         host.Tools().ShowGrid = !host.Tools().ShowGrid;

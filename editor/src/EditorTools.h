@@ -1,4 +1,6 @@
 #pragma once
+#include <glm/glm.hpp>
+
 #include "EditorTypes.h"
 #include "UIToolSettings.h"
 
@@ -53,10 +55,19 @@ struct EditorTools {
     bool Snap = false;
     // Шаг привязки переноса — 1.0: движок строит примитивы размером в единицу,
     // и для постройки из блоков это единственный шаг, при котором блоки встают
-    // вплотную без щелей и нахлёстов.
-    float SnapMove = 1.0f;
+    // вплотную без щелей и нахлёстов. СВОЙ ПО КАЖДОЙ ОСИ: стена из плит 2×1×0.25
+    // ставится шагом плиты, а не общим кубом.
+    glm::vec3 SnapMove{1.0f};
     float SnapRotate = 15.0f;
     float SnapScale = 0.1f;
+
+    // Привязка в этом жесте: Ctrl её инвертирует (включает при выключенной и
+    // наоборот), как в Unity, — один ровный шаг без похода к кнопке.
+    bool SnapActive(bool ctrlHeld) const { return Snap != ctrlHeld; }
+    // Включена ли привязка и её шаги — настройки редактора, а не сессии: шаг
+    // постройки уровня не должен сбрасываться каждый запуск.
+    void LoadSnap();
+    void SaveSnap() const;
 
     bool ShowGrid = true;
     bool ShowBounds = false;

@@ -49,6 +49,10 @@ public:
 
     // Каркасная сфера: три больших круга (XY/XZ/YZ).
     void WireSphere(glm::vec3 center, float radius, glm::vec3 color, int segments = 32);
+    // Окружность в плоскости с нормалью normal.
+    void Circle(glm::vec3 center, glm::vec3 normal, float radius, glm::vec3 color, int segments = 32);
+    // Стрелка from -> to с наконечником (длина наконечника — head).
+    void Arrow(glm::vec3 from, glm::vec3 to, glm::vec3 color, float head = 0.15f);
     // Капсула в произвольном повороте: цилиндр высотой 2*halfHeight вдоль
     // локальной оси Y плюс полусферы на торцах.
     //

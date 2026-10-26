@@ -15,6 +15,8 @@ add_executable(sage_tests
     test_script_typing.cpp
     test_mesh_colliders.cpp
     test_character_level.cpp
+    test_collider_edit.cpp
+    test_display.cpp
     test_serialization.cpp
     test_zip.cpp
     test_animation.cpp
@@ -114,6 +116,11 @@ add_executable(sage_tests
     ../editor/src/LuaPlugins.cpp
     ../editor/src/LuaPluginsFiles.cpp
     ../editor/src/ObjectCatalog.cpp
+    ../editor/src/gizmo/ColliderEdit.cpp
+    ../editor/src/EditorTools.cpp
+    ../editor/src/gizmo/Handles.cpp
+    ../editor/src/gizmo/ColliderHandles.cpp
+    ../editor/src/gizmo/LightGizmo.cpp
     # Реестр панелей: регистрация, порядок меню, раскладка, сброс.
     ../editor/src/PanelRegistry.cpp
     ../editor/src/PanelWindows.cpp

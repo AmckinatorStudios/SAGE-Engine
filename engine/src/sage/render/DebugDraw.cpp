@@ -313,6 +313,34 @@ void DebugDraw::WireCone(glm::vec3 apex, glm::vec3 dir, float length, float half
     }
 }
 
+void DebugDraw::Circle(glm::vec3 center, glm::vec3 normal, float radius, glm::vec3 color, int segments) {
+    if (segments < 3) segments = 3;
+    glm::vec3 n = glm::length(normal) > 1e-6f ? glm::normalize(normal) : glm::vec3(0.0f, 1.0f, 0.0f);
+    glm::vec3 a = glm::abs(n.y) > 0.99f ? glm::vec3(1.0f, 0.0f, 0.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    const glm::vec3 u = glm::normalize(glm::cross(n, a));
+    const glm::vec3 v = glm::cross(n, u);
+    glm::vec3 prev = center + u * radius;
+    for (int i = 1; i <= segments; ++i) {
+        const float t = glm::two_pi<float>() * (float)i / (float)segments;
+        const glm::vec3 p = center + (u * std::cos(t) + v * std::sin(t)) * radius;
+        Line(prev, p, color);
+        prev = p;
+    }
+}
+
+void DebugDraw::Arrow(glm::vec3 from, glm::vec3 to, glm::vec3 color, float head) {
+    Line(from, to, color);
+    const glm::vec3 d = to - from;
+    const float len = glm::length(d);
+    if (len < 1e-5f) return;
+    const glm::vec3 f = d / len;
+    glm::vec3 a = glm::abs(f.y) > 0.99f ? glm::vec3(1.0f, 0.0f, 0.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+    const glm::vec3 u = glm::normalize(glm::cross(f, a));
+    const glm::vec3 v = glm::cross(f, u);
+    const float h = std::min(head, len * 0.5f);
+    for (const glm::vec3& side : {u, -u, v, -v}) Line(to, to - f * h + side * (h * 0.45f), color);
+}
+
 void DebugDraw::FrustumBasis(glm::vec3 dir, glm::vec3 upAxis, glm::vec3& right, glm::vec3& up) {
     dir = glm::normalize(dir);
     glm::vec3 upHint = (glm::abs(dir.y) > 0.99f) ? glm::vec3(0.0f, 0.0f, 1.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
