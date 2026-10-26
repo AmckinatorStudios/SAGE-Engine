@@ -1,4 +1,5 @@
 #pragma once
+#include "../ui/TreeLines.h"
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -192,12 +193,7 @@ private:
     // Строки дерева папок этого кадра — по ним рисуются линии связи (см.
     // DrawFolderNode): у встроенных в ImGui горизонталь обрывается далеко от
     // значка.
-    struct TreeRow {
-        float Y = 0.0f;
-        float IconX = 0.0f;
-        int Depth = 0;
-    };
-    std::vector<TreeRow> m_treeRows;
+    sage::editor::treelines::Lines m_treeLines;   // связи папок дерева (ui/TreeLines.h)
     void DrawFolderNode(EditorHost& host, const std::filesystem::path& dir, int depth);
     void DrawTile(EditorHost& host, const std::filesystem::path& path, bool isDir);
     void DrawModals(EditorHost& host);

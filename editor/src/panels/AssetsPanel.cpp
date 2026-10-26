@@ -4,6 +4,7 @@
 #include "../PanelWindowId.h"
 #include "../PanelWindows.h"
 #include "AssetsPanel.h"
+#include "../ui/TreeLines.h"
 #include "FsCache.h"
 #include "ModelImportDialog.h"
 #include "../Progress.h"
@@ -175,7 +176,10 @@ void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int dept
     ImGui::PushID(dir.string().c_str());
     const ImVec2 rowPos = ImGui::GetCursorScreenPos();
     const float indent = ImGui::GetTreeNodeToLabelSpacing();
-    m_treeRows.push_back({rowPos.y, rowPos.x + indent, depth});
+    // Строка — в общие линии дерева (ui/TreeLines.h): у папки с подпапками
+    // горизонталь от родителя кончается ДО стрелки, а не перечёркивает её.
+    m_treeLines.Row(rowPos.y, depth, rowPos.x + ImGui::GetStyle().FramePadding.x, rowPos.x + indent,
+                    !subdirs.empty());
     const bool open = ImGui::TreeNodeEx("##folder", flags, "%s", "");
     // Значок и цвет — ТЕ ЖЕ, что в сетке, и из того же источника.
     //
@@ -220,29 +224,10 @@ void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int dept
     }
     if (open && !subdirs.empty()) {
         for (const fs::path& sub : subdirs) DrawFolderNode(host, sub, depth + 1);
-        // Линии связи — свои, по той же причине, что и в иерархии: встроенная в
-        // ImGui горизонталь обрывается далеко от значка папки.
-        {
-            const float line = ImGui::GetTextLineHeight();
-            const float spineX = std::floor(rowPos.x + indent * 0.5f);
-            const ImU32 col = ImGui::GetColorU32(ImGuiCol_TreeLines);
-            const float thickness = std::max(1.0f, ImGui::GetStyle().TreeLinesSize);
-            ImDrawList* dl = ImGui::GetWindowDrawList();
-            float lastMid = 0.0f;
-            for (const TreeRow& r : m_treeRows) {
-                if (r.Depth != depth + 1) continue;
-                const float mid = std::floor(r.Y + line * 0.5f);
-                lastMid = mid;
-                dl->AddLine(ImVec2(spineX, mid),
-                            ImVec2(r.IconX - EditorIcons::TextGap() * 0.5f, mid), col, thickness);
-            }
-            if (lastMid > 0.0f)
-                dl->AddLine(ImVec2(spineX, std::floor(rowPos.y + line)), ImVec2(spineX, lastMid),
-                            col, thickness);
-            m_treeRows.erase(std::remove_if(m_treeRows.begin(), m_treeRows.end(),
-                                            [depth](const TreeRow& r) { return r.Depth > depth; }),
-                             m_treeRows.end());
-        }
+        // Линии связи — те же, что в иерархии (ui/TreeLines.h): встроенная в
+        // ImGui горизонталь обрывается далеко от значка папки, а своя копия здесь
+        // вела линию сквозь стрелку раскрытия.
+        m_treeLines.Draw(rowPos, indent, depth + 1);
         ImGui::TreePop();
     }
     ImGui::PopID();
@@ -250,7 +235,7 @@ void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int dept
 
 void AssetsPanel::DrawFolderTree(EditorHost& host) {
     ImGui::BeginChild("##assets_tree", ImVec2(m_treeWidth, 0), ImGuiChildFlags_Borders);
-    m_treeRows.clear();
+    m_treeLines.Clear();
     // Корень дерева — assets/, а не папка проекта: см. AssetsRoot().
     DrawFolderNode(host, AssetsRoot(host), 0);
     ImGui::EndChild();
