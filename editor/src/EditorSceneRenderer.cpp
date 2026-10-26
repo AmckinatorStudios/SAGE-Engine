@@ -679,7 +679,9 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     // Отладочная графика игры — вместе с гизмо редактора: и то и другое линии
     // с тестом глубины, и рисовать их двумя разными способами незачем.
     DrawScriptDebug();
-    m_debugDraw->Flush(outView, outProj);
+    // Вид редактора показывает и заслонённую часть гизмо — бледно (см. DebugDraw).
+    m_debugDraw->SetHiddenLineAlpha(0.22f);
+    m_debugDraw->Flush(outView, outProj, h);
 
     // Кайма выделения — поверх ИТОГОВОГО кадра (постоянная ширина в пикселях,
     // читаемая независимо от размера объекта и дистанции).

@@ -123,6 +123,7 @@ uint32_t VulkanDevice::PackState() const {
     bits |= (uint32_t)m_state.Cull << 5;                  // 2 бита
     bits |= (uint32_t)(m_state.Front == FrontFace::Clockwise) << 7;
     bits |= (uint32_t)(m_state.Polygon == PolygonMode::Line) << 8;
+    bits |= (uint32_t)(m_state.Depth == DepthFunc::Greater) << 9;
     return bits;
 }
 
@@ -186,6 +187,7 @@ VkPipeline VulkanDevice::PipelineFor(const PipelineKey& key, const VulkanGeometr
     const bool depthWrite = (key.StateBits >> 2) & 1;
     const bool colorWrite = (key.StateBits >> 3) & 1;
     const bool lessEqual = (key.StateBits >> 4) & 1;
+    const bool greater = (key.StateBits >> 9) & 1;
     const CullMode cull = (CullMode)((key.StateBits >> 5) & 3);
     const bool clockwise = (key.StateBits >> 7) & 1;
     const bool wireframe = (key.StateBits >> 8) & 1;
@@ -209,7 +211,9 @@ VkPipeline VulkanDevice::PipelineFor(const PipelineKey& key, const VulkanGeometr
         VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
     depth.depthTestEnable = depthTest ? VK_TRUE : VK_FALSE;
     depth.depthWriteEnable = depthWrite ? VK_TRUE : VK_FALSE;
-    depth.depthCompareOp = lessEqual ? VK_COMPARE_OP_LESS_OR_EQUAL : VK_COMPARE_OP_LESS;
+    depth.depthCompareOp = greater     ? VK_COMPARE_OP_GREATER
+                           : lessEqual ? VK_COMPARE_OP_LESS_OR_EQUAL
+                                       : VK_COMPARE_OP_LESS;
     depth.maxDepthBounds = 1.0f;
 
     VkPipelineColorBlendAttachmentState blendAttachment{};

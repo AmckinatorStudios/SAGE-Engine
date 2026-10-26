@@ -126,7 +126,7 @@ void OpenGLDevice::SetDepthWrite(bool enabled) {
 }
 
 void OpenGLDevice::SetDepthFunc(DepthFunc func) {
-    glDepthFunc(func == DepthFunc::LessEqual ? GL_LEQUAL : GL_LESS);
+    glDepthFunc(func == DepthFunc::LessEqual ? GL_LEQUAL : func == DepthFunc::Greater ? GL_GREATER : GL_LESS);
 }
 
 void OpenGLDevice::SetCullMode(CullMode mode) {

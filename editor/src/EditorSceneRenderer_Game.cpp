@@ -163,7 +163,8 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
     // показывает игру, а отладочные линии рисуют, чтобы понять игру.
     if (m_scriptDebug && !m_scriptDebug->Empty()) {
         DrawScriptDebug();
-        m_debugDraw->Flush(view, proj);
+        m_debugDraw->SetHiddenLineAlpha(0.0f);   // в кадре игры — как в собранной игре
+        m_debugDraw->Flush(view, proj, m_gameH);
     }
 
     // Объём и блик — ТЕ ЖЕ ДВА ПРОХОДА, что у собранной игры (см. PlayerLayer),

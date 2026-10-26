@@ -16,19 +16,29 @@ layout (location = 0) in vec3 aPos;
 layout (location = 1) in vec3 aColor;
 uniform mat4 uView;
 uniform mat4 uProjection;
+uniform float uDepthPull;
 out vec3 vColor;
 void main() {
     vColor = aColor;
-    gl_Position = uProjection * uView * vec4(aPos, 1.0);
+    // ЛИНИЯ НА ПОВЕРХНОСТИ НЕ МЕРЦАЕТ. Каркас коллайдера и рёбра меша лежат
+    // ровно на гранях модели, и тест глубины решал «линия или грань» шумом
+    // округления — линия рябила и пропадала пятнами. Точка подтягивается к
+    // глазу ВДОЛЬ луча взгляда: на экране она там же (проекция луча — одна
+    // точка), меняется только глубина, и на долю расстояния — у ног это
+    // миллиметры, вдали дециметры, как и шаг самого буфера глубины.
+    vec4 v = uView * vec4(aPos, 1.0);
+    v.xyz *= 1.0 - uDepthPull;
+    gl_Position = uProjection * v;
 }
 )GLSL";
 
 const char* kFragmentSrc = R"GLSL(
 #version 330 core
 in vec3 vColor;
+uniform float uAlpha;
 out vec4 FragColor;
 void main() {
-    FragColor = vec4(vColor, 1.0);
+    FragColor = vec4(vColor, uAlpha);
 }
 )GLSL";
 
@@ -42,6 +52,7 @@ layout (location = 1) in vec3 aNormal;
 layout (location = 2) in vec4 aColor;
 uniform mat4 uView;
 uniform mat4 uProjection;
+uniform float uDepthPull;
 out vec3 vWorld;
 out vec3 vNormal;
 out vec4 vColor;
@@ -49,7 +60,11 @@ void main() {
     vWorld = aPos;
     vNormal = aNormal;
     vColor = aColor;
-    gl_Position = uProjection * uView * vec4(aPos, 1.0);
+    // Та же подтяжка, что у линий: заливка коробки-коллайдера, совпавшей с
+    // кубом, иначе грызла его грань полосами.
+    vec4 v = uView * vec4(aPos, 1.0);
+    v.xyz *= 1.0 - uDepthPull;
+    gl_Position = uProjection * v;
 }
 )GLSL";
 
@@ -353,8 +368,14 @@ void DebugDraw::Axes(const glm::mat4& transform, float size) {
     Line(origin, origin + axis(2) * size, {0.22f, 0.46f, 1.0f});
 }
 
-void DebugDraw::Flush(const glm::mat4& view, const glm::mat4& proj) {
+void DebugDraw::Flush(const glm::mat4& view, const glm::mat4& proj, int viewportHeight) {
     if (m_vertices.empty() && m_solid.empty()) return;
+    // Угловой размер пикселя: 2·tg(fov/2) / высота. proj[1][1] = ctg(fov/2);
+    // у ортографической проекции подтяжка вдоль луча глубину почти не меняет —
+    // там и мерцать нечему иначе, чем в перспективе, и порог тот же.
+    const float height = (float)(viewportHeight > 0 ? viewportHeight : 1080);
+    const float pixelAngle = 2.0f / (std::max(std::abs(proj[1][1]), 1e-4f) * height);
+    const float pull = glm::clamp(kDepthPullPixels * pixelAngle, 1.0e-4f, 2.0e-2f);
 
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
 
@@ -367,6 +388,7 @@ void DebugDraw::Flush(const glm::mat4& view, const glm::mat4& proj) {
         m_solidShader->SetMat4("uView", view);
         m_solidShader->SetMat4("uProjection", proj);
         m_solidShader->SetVec3("uCameraPos", glm::vec3(glm::inverse(view)[3]));
+        m_solidShader->SetFloat("uDepthPull", pull);
         m_solidGeometry->SetVertexData(m_solid.data(), m_solid.size() * sizeof(SolidVertex), true);
         device.SetBlend(true);
         device.SetDepthWrite(false);
@@ -381,13 +403,27 @@ void DebugDraw::Flush(const glm::mat4& view, const glm::mat4& proj) {
     m_shader->SetMat4("uView", view);
     m_shader->SetMat4("uProjection", proj);
 
+    m_shader->SetFloat("uDepthPull", pull);
+
     m_geometry->SetVertexData(m_vertices.data(), m_vertices.size() * sizeof(LineVertex), /*dynamic=*/true);
 
     // Тест глубины оставляем ВКЛЮЧЁННЫМ (объекты сцены заслоняют линии — в
     // этом весь смысл), но запись глубины выключаем: гизмо не должны
     // заслонять то, что рисуется после них.
     device.SetDepthWrite(false);
+    if (m_hiddenAlpha > 0.0f) {
+        // Скрытая часть — бледно: коллайдер, ушедший в стену, и конус света за
+        // колонной видны целиком, но не спорят с тем, что перед глазами.
+        device.SetDepthFunc(sage::rhi::DepthFunc::Greater);
+        device.SetBlend(true);
+        m_shader->SetFloat("uAlpha", m_hiddenAlpha);
+        m_geometry->DrawLines(m_vertices.size());
+        device.SetBlend(false);
+    }
+    device.SetDepthFunc(sage::rhi::DepthFunc::LessEqual);
+    m_shader->SetFloat("uAlpha", 1.0f);
     m_geometry->DrawLines(m_vertices.size());
+    device.SetDepthFunc(sage::rhi::DepthFunc::Less);
     device.SetDepthWrite(true);
 
     m_vertices.clear();
