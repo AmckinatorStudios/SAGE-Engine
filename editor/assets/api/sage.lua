@@ -1388,12 +1388,12 @@ function sage.anim.JointNames(entity) end
 function sage.anim.Names(entity) end
 ---@param entity Entity
 ---@param clip number
----@param blend number
+---@param blend? number
 ---@return boolean
 function sage.anim.Play(entity, clip, blend) end
 ---@param entity Entity
 ---@param name string
----@param blend number
+---@param blend? number
 ---@return boolean
 function sage.anim.PlayNamed(entity, name, blend) end
 ---@param entity Entity
@@ -1451,14 +1451,14 @@ function sage.audio.IsPlaying(entity) end
 ---@param entity Entity
 function sage.audio.Play(entity) end
 ---@param path string
----@param volume number
+---@param volume? number
 function sage.audio.PlayMusic(path, volume) end
 ---@param path string
----@param volume number
+---@param volume? number
 function sage.audio.PlaySound(path, volume) end
 ---@param path string
 ---@param pos Vec3
----@param volume number
+---@param volume? number
 function sage.audio.PlaySound3D(path, pos, volume) end
 ---@param entity Entity
 ---@param clip string
@@ -1523,9 +1523,9 @@ events = nil
 ---@return number
 function sage.events.Count(name) end
 ---@param name string
----@param payload any
+---@param payload? any
 function sage.events.Emit(name, payload) end
----@param arg any
+---@param arg? any
 function sage.events.Off(arg) end
 ---@param name string
 ---@param fn function
@@ -1547,7 +1547,7 @@ fx = nil
 
 ---@param pos Vec3
 ---@param size Vec2
----@param texturePath string
+---@param texturePath? string
 ---@return number
 function sage.fx.AddBillboard(pos, size, texturePath) end
 ---@param id string
@@ -1585,7 +1585,7 @@ function sage.fx.SetStreamActive(id, active) end
 ---@param pos Vec3
 function sage.fx.SetStreamPosition(id, pos) end
 ---@param entity Entity
----@param clear boolean
+---@param clear? boolean
 function sage.fx.Stop(entity, clear) end
 
 ---@class sage.game
@@ -1617,7 +1617,7 @@ ik = nil
 
 ---@param entity Entity
 ---@param bone string
----@param chainLength number
+---@param chainLength? number
 ---@return number
 function sage.ik.AddGoal(entity, bone, chainLength) end
 ---@param entity Entity
@@ -1627,7 +1627,7 @@ function sage.ik.Locked(entity, goal) end
 ---@param entity Entity
 ---@param goal number
 ---@param axis Vec3
----@param maxAngle number
+---@param maxAngle? number
 function sage.ik.SetAim(entity, goal, axis, maxAngle) end
 ---@param entity Entity
 ---@param goal number
@@ -1639,8 +1639,8 @@ function sage.ik.SetEnabled(entity, on) end
 ---@param entity Entity
 ---@param goal number
 ---@param on boolean
----@param plantHeight number
----@param releaseTime number
+---@param plantHeight? number
+---@param releaseTime? number
 function sage.ik.SetFootLock(entity, goal, on, plantHeight, releaseTime) end
 ---@param entity Entity
 ---@param goal number
@@ -1674,7 +1674,7 @@ function sage.input.AnyPressedSource() end
 ---@return number
 function sage.input.Axis(name) end
 ---@param action string
----@param keys any
+---@param keys? any
 ---@return number
 function sage.input.Bind(action, keys) end
 ---@param action string
@@ -1684,7 +1684,7 @@ function sage.input.Bind(action, keys) end
 function sage.input.BindAxis(action, positive, negative) end
 ---@param context string
 ---@param action string
----@param keys any
+---@param keys? any
 ---@return number
 function sage.input.BindIn(context, action, keys) end
 ---@param action string
@@ -1705,10 +1705,10 @@ function sage.input.CreateContext(name, priority) end
 ---@param source string
 ---@return any
 function sage.input.FindConflict(source) end
----@param index number
+---@param index? number
 ---@return boolean
 function sage.input.GamepadConnected(index) end
----@param index number
+---@param index? number
 ---@return string
 function sage.input.GamepadName(index) end
 ---@param name string
@@ -1815,14 +1815,14 @@ sage.material = {}
 material = nil
 
 ---@param name string
----@param props table
+---@param props? table
 function sage.material.Create(name, props) end
 ---@param name string
 ---@param path string
 function sage.material.Save(name, path) end
 ---@param name string
----@param propsOrKey any
----@param value any
+---@param propsOrKey? any
+---@param value? any
 function sage.material.Set(name, propsOrKey, value) end
 
 ---@class sage.math
@@ -1846,9 +1846,9 @@ function sage.math.Degrees(rad) end
 ---@param x number
 function sage.math.Fract(x) end
 ---@param x number
----@param y number
----@param z number
----@param seed number
+---@param y? number
+---@param z? number
+---@param seed? number
 function sage.math.Hash(x, y, z, seed) end
 ---@param origin Vec3
 ---@param dir Vec3
@@ -1886,7 +1886,7 @@ function sage.math.RandomRange(lo, hi) end
 ---@param b0 number
 ---@param b1 number
 function sage.math.Remap(v, a0, a1, b0, b1) end
----@param seed number
+---@param seed? number
 function sage.math.Rng(seed) end
 ---@param a Vec3
 ---@param b Vec3
@@ -1918,23 +1918,23 @@ sage.mesh = {}
 ---@type sage.mesh
 mesh = nil
 
----@param size any
+---@param size? any
 function sage.mesh.Box(size) end
 ---@param r number
 ---@param h number
----@param seg number
----@param caps boolean
+---@param seg? number
+---@param caps? boolean
 function sage.mesh.Cylinder(r, h, seg, caps) end
 ---@param sx number
 ---@param sz number
 ---@param rx number
 ---@param rz number
----@param h function
+---@param h? function
 function sage.mesh.Grid(sx, sz, rx, rz, h) end
 function sage.mesh.New() end
 ---@param r number
----@param seg number
----@param rings number
+---@param seg? number
+---@param rings? number
 function sage.mesh.Sphere(r, seg, rings) end
 
 ---@class sage.msg
@@ -1947,16 +1947,16 @@ sage.msg = {}
 msg = nil
 
 ---@param name string
----@param data any
+---@param data? any
 function sage.msg.Broadcast(name, data) end
----@param target any
+---@param target? any
 ---@param name string
----@param args any
+---@param ...? ...
 ---@return any
-function sage.msg.Call(target, name, args) end
----@param target any
+function sage.msg.Call(target, name, ...) end
+---@param target? any
 ---@param name string
----@param data any
+---@param data? any
 function sage.msg.Send(target, name, data) end
 
 ---@class sage.noise
@@ -1968,29 +1968,29 @@ sage.noise = {}
 ---@type sage.noise
 noise = nil
 
----@param opts table
+---@param opts? table
 function sage.noise.New(opts) end
 ---@param x number
 ---@param y number
----@param z number
+---@param z? number
 function sage.noise.Perlin(x, y, z) end
 ---@param seed number
 function sage.noise.Seed(seed) end
 ---@param x number
 ---@param y number
----@param z number
+---@param z? number
 function sage.noise.Simplex(x, y, z) end
 ---@param x number
 ---@param y number
----@param z number
+---@param z? number
 function sage.noise.Value(x, y, z) end
 ---@param p Vec3
 ---@param strength number
----@param opts table
+---@param opts? table
 function sage.noise.Warp(p, strength, opts) end
 ---@param x number
 ---@param y number
----@param z number
+---@param z? number
 function sage.noise.Worley(x, y, z) end
 
 ---@class sage.physics
@@ -2006,12 +2006,12 @@ physics = nil
 ---@param impulse Vec3
 function sage.physics.AddAngularImpulse(entity, impulse) end
 ---@param entity Entity
----@param radius number
----@param height number
+---@param radius? number
+---@param height? number
 function sage.physics.AddCharacter(entity, radius, height) end
 ---@param entity Entity
 ---@param force Vec3
----@param point Vec3
+---@param point? Vec3
 function sage.physics.AddForce(entity, force, point) end
 ---@param entity Entity
 ---@param impulse Vec3
@@ -2060,13 +2060,13 @@ function sage.physics.MoveCharacter(entity, velocity, dt) end
 function sage.physics.ObjectsInTrigger(zone) end
 ---@param center Vec3
 ---@param radius number
----@param mask number
+---@param mask? number
 ---@return table
 function sage.physics.OverlapSphere(center, radius, mask) end
 ---@param origin Vec3
 ---@param dir Vec3
 ---@param maxDistance number
----@param mask number
+---@param mask? number
 ---@return any
 function sage.physics.Raycast(origin, dir, maxDistance, mask) end
 ---@param entity Entity
@@ -2079,7 +2079,7 @@ function sage.physics.SetCharacterPosition(entity, pos) end
 ---@param t table
 function sage.physics.SetCharacterShape(entity, t) end
 ---@param entity Entity
----@param fn any
+---@param fn? any
 function sage.physics.SetCharacterWorld(entity, fn) end
 ---@param g Vec3
 function sage.physics.SetGravity(g) end
@@ -2166,7 +2166,7 @@ function sage.render.SetDebugView(name) end
 function sage.render.SetMaterial(entity, path) end
 ---@param path string
 ---@param name string
----@param value any
+---@param value? any
 function sage.render.SetMaterialParam(path, name, value) end
 ---@param mat any
 ---@param vertexPath string
@@ -2191,7 +2191,7 @@ function sage.render.SetMeshPlane(entity) end
 function sage.render.SetMeshSphere(entity) end
 ---@param entity Entity
 ---@param name string
----@param value any
+---@param value? any
 function sage.render.SetShaderParam(entity, name, value) end
 ---@param entity Entity
 ---@param part number
@@ -2250,7 +2250,7 @@ function sage.save.Slots() end
 function sage.save.Version(slot) end
 ---@param slot string
 ---@param data table
----@param options any
+---@param options? any
 ---@return boolean
 function sage.save.Write(slot, data, options) end
 
@@ -2263,7 +2263,7 @@ sage.scene = {}
 ---@type sage.scene
 scene = nil
 
----@param target any
+---@param target? any
 function sage.scene.Destroy(target) end
 ---@param name string
 ---@return Entity
@@ -2281,11 +2281,11 @@ function sage.scene.SavePrefab(id, path) end
 ---@return Entity
 function sage.scene.Spawn(name) end
 ---@param path string
----@param at Vec3
+---@param at? Vec3
 ---@return number
 function sage.scene.SpawnPrefab(path, at) end
 ---@param pos Vec3
----@param scale number
+---@param scale? number
 ---@return number
 function sage.scene.SpawnRagdoll(pos, scale) end
 
@@ -2348,27 +2348,27 @@ function sage.tween.CancelAll() end
 ---@param entity Entity
 ---@param to Vec3
 ---@param dur number
----@param ease any
+---@param ease? any
 function sage.tween.Color(entity, to, dur, ease) end
 ---@param entity Entity
 ---@param to Vec3
 ---@param dur number
----@param ease any
+---@param ease? any
 function sage.tween.Move(entity, to, dur, ease) end
 ---@param entity Entity
 ---@param toEulerDeg Vec3
 ---@param dur number
----@param ease any
+---@param ease? any
 function sage.tween.Rotate(entity, toEulerDeg, dur, ease) end
 ---@param entity Entity
 ---@param to Vec3
 ---@param dur number
----@param ease any
+---@param ease? any
 function sage.tween.Scale(entity, to, dur, ease) end
 ---@param entity Entity
 ---@param to number
 ---@param dur number
----@param ease any
+---@param ease? any
 function sage.tween.UIValue(entity, to, dur, ease) end
 
 ---@class sage.ui
@@ -2423,7 +2423,7 @@ function sage.ui.ScreenSize() end
 function sage.ui.SetCanvas(entity, opts) end
 ---@param entity Entity
 ---@param path string
----@param sharp boolean
+---@param sharp? boolean
 function sage.ui.SetImage(entity, path, sharp) end
 ---@param entity Entity
 ---@param opts table
@@ -2433,7 +2433,7 @@ function sage.ui.SetLayout(entity, opts) end
 ---@param t number
 ---@param r number
 ---@param b number
----@param scale number
+---@param scale? number
 function sage.ui.SetSlice(entity, l, t, r, b, scale) end
 ---@param entity Entity
 ---@param draw boolean

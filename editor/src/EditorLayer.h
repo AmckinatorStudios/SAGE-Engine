@@ -245,6 +245,9 @@ public:
     // (см. sage/scripting/ScriptTests.h). Итог — в консоль; Play, запущенный
     // ради тестов, останавливается сам, и сцена возвращается как была.
     bool RunLuaTests(const std::vector<std::string>& files = {});
+    // «Проверить скрипты»: типы и опечатки во всех скриптах проекта, без
+    // запуска; находки — во вкладке «Проблемы» (sage/scripting/ScriptLint.h).
+    void CheckScripts();
     bool LuaTestsRunning() const { return m_luaTests.Running; }
     struct LuaTestRun {
         bool Running = false;

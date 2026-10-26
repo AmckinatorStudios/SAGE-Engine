@@ -73,8 +73,10 @@ std::string TypeName(const TypeRef& t) {
     return "any";
 }
 
-ProgramInfo Check(const BlockPtr& ast, const std::string& path, DiagnosticSink& diag, ModuleCache& modules) {
+ProgramInfo Check(const BlockPtr& ast, const std::string& path, DiagnosticSink& diag, ModuleCache& modules,
+                  bool lint) {
     Checker c(path, diag, modules, false);
+    c.SetLint(lint);
     return c.Run(ast, nullptr);
 }
 

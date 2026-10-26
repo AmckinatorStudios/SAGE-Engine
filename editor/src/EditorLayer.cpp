@@ -140,6 +140,8 @@ void EditorLayer::RegisterCommands() {
     m_commands.Add({"play.luaTests", T("Run Lua Tests"), scene, "", "script",
                     [this] { return m_project.Loaded() && !m_luaTests.Running; },
                     [this] { RunLuaTests(); }});
+    m_commands.Add({"play.checkScripts", T("Check Scripts"), scene, "", "script", hasProject,
+                    [this] { CheckScripts(); }});
 
     m_commands.Add({"object.duplicate", T("Duplicate"), object, "Ctrl+D", "cube",
                     hasSelection, [this] { DuplicateSelected(); }});

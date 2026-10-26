@@ -7,6 +7,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <set>
+#include "sage/lang/SageApi.h"
 #include "sage/lang/SageParser.h"
 
 // ---------------------------------------------------------------------------
@@ -20,6 +21,8 @@
 //                         и импорт;
 //   SageCheck_Body.cpp  — проход 4: тела функций и операторы;
 //   SageCheck_Expr.cpp  — выражения;
+//   SageCheck_Api.cpp   — функции API движка (таблица SageApi.h) и
+//                         предупреждения об именах, которых нигде нет;
 //   SageCheck.cpp       — вход (Check) и общедоступные помощники.
 // ---------------------------------------------------------------------------
 namespace sage::lang::check {
@@ -329,6 +332,10 @@ public:
         : m_path(path), d(diag), m_mods(mods), m_headerOnly(headerOnly) {}
 
     ProgramInfo Run(const BlockPtr& ast, std::map<std::string, Symbol>* exportsOut);
+    // Строгая проверка: ещё и предупреждения об именах, которых нет ни в
+    // скрипте, ни в API движка (опечатки). Только по просьбе — инструмент
+    // «Проверить скрипты» и тесты; загрузка игры её не включает.
+    void SetLint(bool on) { m_lint = on; }
 
 private:
     std::string m_path;
@@ -354,6 +361,21 @@ private:
     // --- Области видимости ---------------------------------------------------
     void PushScope() { m_scopes.emplace_back(); }
     void PopScope() { m_scopes.pop_back(); }
+
+    // --- API движка (SageCheck_Api.cpp) ---------------------------------------
+    bool m_lint = false;
+    // Глобальные, которые скрипт задаёт сам (function Update, score = 0): им
+    // не навязывается сигнатура API с тем же именем, и они не «неизвестны».
+    std::set<std::string> m_scriptGlobals;
+    std::set<std::string> m_warnedNames;   // одно предупреждение на имя
+    std::map<std::string, TypeRef> m_apiTypes;
+    void CollectScriptGlobals(const BlockPtr& b);
+    // a.b.c из цепочки полей с корнем-глобальной; false — не такая цепочка.
+    bool GlobalPath(const ExprPtr& e, std::string& out);
+    // Тип функции API (с сигнатурой) или nullptr.
+    TypeRef ApiType(const std::string& dotted);
+    // Имя верхнего уровня, которого нет нигде: предупредить (в строгом режиме).
+    void UnknownGlobal(const ExprPtr& e);
     std::map<std::string, Symbol>& Top() { return m_scopes.back(); }
     std::map<std::string, Symbol>& Module() { return m_scopes.front(); }
     Symbol* Lookup(const std::string& name);

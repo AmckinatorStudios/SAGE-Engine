@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 2840.
+// Язык: Русский. Строк: 2837.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -550,8 +550,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Автор"},
     {"Author:",
      "Автор:"},
-    {"Auto",
-     "Авто"},
     {"Auto Exposure",
      "Автоэкспозиция"},
     {"Auto Play",
@@ -898,6 +896,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Персонаж"},
     {"Character Controller",
      "Контроллер персонажа"},
+    {"Check Scripts",
+     "Проверить скрипты"},
     {"Check mark",
      "Отметка"},
     {"Checkbox",
@@ -1360,8 +1360,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Папка с кубической картой (прежний тип)"},
     {"Cursor",
      "Курсор"},
-    {"Cursor Lock",
-     "Захват курсора"},
     {"Curve:",
      "Кривая:"},
     {"Curve: how the speed changes on the way from Start to End. Click to choose.",
@@ -2316,8 +2314,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Наведение, нажатие, щелчок и имя действия для игры"},
     {"Hover, press, click, looks for each state and what the element does",
      "Наведение, нажатие, щелчок, вид каждого состояния и что делает элемент"},
-    {"How a captured cursor is held. Software: the engine returns it to the window centre every frame — use it if the hidden cursor drifts. Auto switches to Software by itself when the system keeps dropping the capture",
-     "Как держится захваченный курсор. Программный: движок каждый кадр возвращает его в центр окна — выберите, если спрятанный курсор гуляет. Авто сам переходит на программный, если система раз за разом сбрасывает захват"},
     {"How a tween works:\n• each card is one property that changes from Start to End;\n• the bar on the right is when it happens: drag the middle to move it,\n  the dots to change when it starts and how long it lasts;\n• the curve says how the speed changes along the way;\n• Play shows it on the object, the round arrow next to it puts the object back.",
      "Как устроен твин:\n• каждая карточка — одно свойство, которое меняется от «Начала» к «Концу»;\n• полоса справа — когда это происходит: тяните середину, чтобы сдвинуть,\n  точки — чтобы изменить начало и длительность;\n• кривая — как меняется скорость по пути;\n• Play показывает твин на объекте, круглая стрелка рядом возвращает объект как был."},
     {"How far from the camera shadows reach. 0 — from Game Settings",
@@ -4212,6 +4208,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Скрипт…"},
     {"Scripts (*.lua, *.slua)",
      "Скрипты (*.lua, *.slua)"},
+    {"Scripts are clean",
+     "Скрипты в порядке"},
     {"Scripts get OnCollisionEnter / Exit when the character touches something",
      "Скрипты получают OnCollisionEnter / Exit, когда персонаж чего-то касается"},
     {"Scripts reloaded: ",
@@ -4488,8 +4486,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сильное замедление"},
     {"Soft light from all around: from the sky or your own colours",
      "Мягкий свет со всех сторон: от неба или своими цветами"},
-    {"Software",
-     "Программный"},
     {"Solid (shaded)",
      "Заливка (по нормалям)"},
     {"Solid + lines",
@@ -4742,8 +4738,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Нужен свет без неба — переключите на «Свои значения»"},
     {"Switch to layout and open this interface",
      "Перейти к вёрстке и открыть этот интерфейс"},
-    {"System",
-     "Системный"},
     {"Tag",
      "Тег"},
     {"Take the end from the object: move/rotate/paint the object in the scene, then click",

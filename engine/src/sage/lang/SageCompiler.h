@@ -24,6 +24,7 @@ namespace sage::lang {
 
 struct CompileOptions {
     ModuleLoader Loader;   // import из других файлов; пусто — только модули SAGE/*
+    bool Lint = false;     // строгая проверка: предупреждения об опечатках в именах
 };
 
 struct CompileResult {

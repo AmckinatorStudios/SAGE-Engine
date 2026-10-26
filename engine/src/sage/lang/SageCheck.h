@@ -248,7 +248,9 @@ struct ProgramInfo {
 };
 
 // Проверяет файл. Ошибки и предупреждения — в diag.
-ProgramInfo Check(const BlockPtr& ast, const std::string& path, DiagnosticSink& diag, ModuleCache& modules);
+// lint — строгий режим: ещё и предупреждения об опечатках в именах.
+ProgramInfo Check(const BlockPtr& ast, const std::string& path, DiagnosticSink& diag, ModuleCache& modules,
+                  bool lint = false);
 
 // Текст типа для сообщений: number, Entity?, map<string, number>.
 std::string TypeName(const TypeRef& t);

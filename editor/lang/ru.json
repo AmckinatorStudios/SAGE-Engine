@@ -2442,6 +2442,8 @@
     "Lua tests passed: ": "Lua-тесты пройдены: ",
     "No Lua tests: add files named *.test.lua to the project": "Lua-тестов нет: добавьте в проект файлы *.test.lua",
     "Run Lua Tests": "Запустить Lua-тесты",
+    "Check Scripts": "Проверить скрипты",
+    "Scripts are clean": "Скрипты в порядке",
     "Running Lua tests…": "Идут Lua-тесты…",
     "An older sky type: a folder with faces px/nx/py/ny/pz/nz. Convert it to six files": "Прежний тип неба: папка с гранями px/nx/py/ny/pz/nz. Переведите его в шесть файлов",
     "Back: what is seen looking along -Z, behind the front": "Зад: что видно, если смотреть вдоль -Z — за спиной у переда",

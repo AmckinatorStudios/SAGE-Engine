@@ -12,6 +12,7 @@ add_executable(sage_tests
     test_procedural.cpp
     test_script_modules.cpp
     test_character_bodies.cpp
+    test_script_typing.cpp
     test_serialization.cpp
     test_zip.cpp
     test_animation.cpp

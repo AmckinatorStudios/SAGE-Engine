@@ -17,6 +17,7 @@ ProgramInfo Checker::Run(const BlockPtr& ast, std::map<std::string, Symbol>* exp
         for (const StmtPtr& s : ast->Stmts) ResolvePass(s);
         for (const auto& c : m_prog.Classes) ValidateClass(*c);
         if (!m_headerOnly) {
+            CollectScriptGlobals(ast);
             for (const StmtPtr& s : ast->Stmts) CheckStmt(s, true);
         } else {
             for (const StmtPtr& s : ast->Stmts) DeclareExportedValue(s);
