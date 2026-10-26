@@ -714,7 +714,21 @@ BodyHandle JoltWorld::CreateBody(const BodyDesc& desc) {
     // Форма коллайдера: одиночная или СОСТАВНАЯ (StaticCompoundShape из
     // дочерних форм с локальными смещениями — «молоток», кластер примитивов).
     JPH::ShapeRefC shape;
-    if (!desc.Children.empty()) {
+    if (desc.Children.size() == 1) {
+        // Одна часть со смещением (центр коллайдера сдвинут) — повёрнутая и
+        // сдвинутая форма, а не составная из двух копий: у копий вдвое больше
+        // объёма, и инерция с центром масс считались бы от удвоенной формы.
+        const ChildShape& c = desc.Children.front();
+        JPH::ShapeRefC child = MakeShape(c.Shape, c.HalfExtents, c.Radius, c.HalfHeight);
+        if (!child) return kInvalidBody;
+        JPH::Shape::ShapeResult res = JPH::RotatedTranslatedShapeSettings(
+            JPH::Vec3(c.Position.x, c.Position.y, c.Position.z), ToJoltQuat(c.Rotation), child).Create();
+        if (res.HasError()) {
+            LOG_ERROR("Jolt") << "Смещённая форма не создана: " << res.GetError().c_str();
+            return kInvalidBody;
+        }
+        shape = res.Get();
+    } else if (!desc.Children.empty()) {
         JPH::StaticCompoundShapeSettings compound;
         // Держим ссылки на дочерние формы живыми до Create() (компаунду нужен ≥1
         // валидный подшейп; StaticCompoundShape требует минимум 2 — при одной

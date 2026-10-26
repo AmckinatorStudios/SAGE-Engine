@@ -189,8 +189,8 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
         // Одиночная форма — только без частей: с частями физика её поля не
         // читает, и рисовать её значит показывать форму, которой нет.
         if (col.Parts.empty() && !meshShape)
-            shape(col.Shape, rot, col.HalfExtents * scale, col.Radius * uniform,
-                  col.HalfHeight * scale.y, color, selected ? 1.0f : 0.7f);
+            shape(col.Shape, rot * glm::translate(glm::mat4(1.0f), col.Center * scale), col.HalfExtents * scale,
+                  col.Radius * uniform, col.HalfHeight * scale.y, color, selected ? 1.0f : 0.7f);
 
         // Составная форма: каждая часть в своём локальном смещении и повороте.
         // Без этого у молотка или Т-образной детали гизмо показывало ОДИН ящик

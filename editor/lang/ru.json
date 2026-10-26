@@ -2442,6 +2442,7 @@
     "Lua tests passed: ": "Lua-тесты пройдены: ",
     "No Lua tests: add files named *.test.lua to the project": "Lua-тестов нет: добавьте в проект файлы *.test.lua",
     "Run Lua Tests": "Запустить Lua-тесты",
+    "Shape Center": "Центр формы",
     "Check Scripts": "Проверить скрипты",
     "Scripts are clean": "Скрипты в порядке",
     "Running Lua tests…": "Идут Lua-тесты…",

@@ -113,6 +113,16 @@ BodyDesc DescFromEntity(const RigidBodyComponent& rb, const ColliderComponent* c
         d.Shape = col->Shape;
         d.Geometry = std::move(geometry);
         d.HalfExtents = col->HalfExtents * scale;
+    } else if (col && col->Center != glm::vec3(0.0f)) {
+        // Смещённый центр — та же форма одной частью со смещением: у
+        // бэкендов уже есть путь «часть внутри тела», второй не нужен.
+        ChildShape cs;
+        cs.Shape = col->Shape;
+        cs.HalfExtents = col->HalfExtents * scale;
+        cs.Radius = col->Radius * uniform;
+        cs.HalfHeight = col->HalfHeight * scale.y;
+        cs.Position = col->Center * scale;
+        d.Children.push_back(cs);
     } else if (col) {
         d.Shape = col->Shape;
         d.HalfExtents = col->HalfExtents * scale;              // Box масштабируется по осям
@@ -205,6 +215,7 @@ std::string SettingsKey(const RigidBodyComponent& rb, const ColliderComponent* c
     PutRaw(k, scale);
     if (!col) return k;
     PutRaw(k, col->Shape); PutRaw(k, col->HalfExtents); PutRaw(k, col->Radius); PutRaw(k, col->HalfHeight);
+    PutRaw(k, col->Center);
     for (const ColliderComponent::Part& p : col->Parts) {
         PutRaw(k, p.Shape); PutRaw(k, p.HalfExtents); PutRaw(k, p.Radius); PutRaw(k, p.HalfHeight);
         PutRaw(k, p.Offset); PutRaw(k, p.EulerDeg);
@@ -215,6 +226,7 @@ std::string SettingsKey(const RigidBodyComponent& rb, const ColliderComponent* c
         // Меш самого объекта сменили (другая модель) — форма тоже другая.
         if (col->MeshPath.empty() && mr) {
             PutRaw(k, mr->Ref.type);
+            PutRaw(k, mr->Ref.part);
             k += mr->Ref.path;
         }
     }
@@ -270,14 +282,21 @@ sage::physics::MeshGeometryPtr PhysicsScene::ColliderGeometry(Scene& scene, entt
     // Откуда геометрия: своя модель коллайдера или меш объекта.
     MeshRef::Type type = MeshRef::Type::Model;
     std::string path = col->MeshPath;
+    int part = -1;   // своя модель коллайдера — целиком
     const Mesh* gpu = nullptr;
     if (path.empty()) {
         if (!mr || mr->Ref.type == MeshRef::Type::None) return nullptr;
         type = mr->Ref.type;
         path = mr->Ref.path;
+        part = mr->Ref.part;
         gpu = mr->MeshPtr.get();
     }
-    const std::string sourceKey = std::to_string((int)type) + "|" + path;
+    // НОМЕР ЧАСТИ — В КЛЮЧЕ. Модель, поставленная иерархией, — это объекты
+    // одного файла, каждый со своим узлом (стена, пол, колонна). Ключ без
+    // части отдавал ВСЕМ им геометрию того узла, что попал в кэш первым:
+    // коллайдер по мешу «работал» у одного объекта, а остальные сталкивались
+    // его формой в своих местах — то есть не там, где нарисованы.
+    const std::string sourceKey = std::to_string((int)type) + "|" + std::to_string(part) + "|" + path;
 
     std::shared_ptr<const MeshGeometry>& source = m_meshSources[sourceKey];
     if (!source) {
@@ -296,9 +315,16 @@ sage::physics::MeshGeometryPtr PhysicsScene::ColliderGeometry(Scene& scene, entt
                 if (gpu && gpu->CpuVertices() && gpu->CpuIndices()) {
                     built = Weld(*gpu->CpuVertices(), *gpu->CpuIndices());
                 } else if (!path.empty()) {
-                    const sage::render::MeshData d =
-                        ModelLoader::LoadMeshData(sage::AssetDatabase::Instance().LocatePath(path));
-                    built = Weld(d.Vertices, d.Indices);
+                    const std::string file = sage::AssetDatabase::Instance().LocatePath(path);
+                    try {
+                        const sage::render::MeshData d = part >= 0 ? ModelLoader::LoadMeshPartData(file, part)
+                                                                   : ModelLoader::LoadMeshData(file);
+                        built = Weld(d.Vertices, d.Indices);
+                    } catch (const std::exception& ex) {
+                        // Узла нет (модель переэкспортировали) — коробка ниже, с сообщением.
+                        LOG_WARN("Physics") << "Коллайдер по мешу: часть №" << part << " модели «" << path
+                                            << "» не прочитана: " << ex.what();
+                    }
                 }
                 break;
             }
@@ -380,10 +406,20 @@ void PhysicsScene::SyncBodies(Scene& scene) {
         desc.AngularVelocity = angular;
         return m_world->CreateBody(desc);
     };
+    // МАСШТАБ — МИРОВОЙ, как и тот, из которого строится форма (build выше).
+    // Ключ по локальному не замечал растянутого РОДИТЕЛЯ: пол в группе, которую
+    // увеличили вдвое, рисовался большим, а сталкивался прежним.
     auto settingsOf = [&](entt::entity e, const RigidBodyComponent& rb) {
-        const Transform* t = reg.try_get<Transform>(e);
-        return SettingsKey(rb, reg.try_get<ColliderComponent>(e), t ? t->Scale : glm::vec3(1.0f),
+        return SettingsKey(rb, reg.try_get<ColliderComponent>(e), DecomposeWorld(scene.WorldMatrix(e)).Scale,
                            reg.try_get<MeshRendererComponent>(e));
+    };
+    // Тело сущности: своё (RigidBodyComponent) или неявное статическое.
+    auto bodyOf = [&](entt::entity e, bool implicit) -> RigidBodyComponent* {
+        if (!reg.valid(e)) return nullptr;
+        if (!implicit) return reg.try_get<RigidBodyComponent>(e);
+        if (!NeedsImplicitBody(scene, e)) return nullptr;
+        auto it = m_implicit.find(e);
+        return it == m_implicit.end() ? nullptr : &it->second;
     };
 
     // 1. Осиротевшие тела (сущность уничтожена или с неё сняли компонент) и
@@ -394,14 +430,15 @@ void PhysicsScene::SyncBodies(Scene& scene) {
     size_t alive = 0;
     for (size_t i = 0; i < m_tracked.size(); ++i) {
         Tracked& t = m_tracked[i];
-        RigidBodyComponent* rb = reg.valid(t.Entity) ? reg.try_get<RigidBodyComponent>(t.Entity) : nullptr;
+        RigidBodyComponent* rb = bodyOf(t.Entity, t.Implicit);
         // Контроллер персонажа, добавленный скриптом в Start(), приходит
         // ПОСЛЕ тела — тело снимается тут же (см. OwnedByCharacter ниже).
-        const bool character = rb && OwnedByCharacter(reg, t.Entity);
+        const bool character = rb && !t.Implicit && OwnedByCharacter(reg, t.Entity);
         if (character) rb->RuntimeBody = kInvalidBody;
         if (!rb || character || rb->RuntimeBody != t.Body) {
             m_world->RemoveBody(t.Body);
             m_bodyToEntity.erase(t.Body);
+            if (t.Implicit) m_implicit.erase(t.Entity);
             --m_bodyCount;
             continue;
         }
@@ -416,12 +453,25 @@ void PhysicsScene::SyncBodies(Scene& scene) {
             const BodyHandle fresh = build(t.Entity, *rb, v, w);
             rb->RuntimeBody = fresh;
             if (fresh == kInvalidBody) {
+                if (t.Implicit) m_implicit.erase(t.Entity);
                 --m_bodyCount;
                 continue;
             }
             t.Body = fresh;
             t.Settings = std::move(now);
+            t.Pose = scene.WorldMatrix(t.Entity);
             m_bodyToEntity[fresh] = t.Entity;
+        } else if (rb->Type == BodyType::Static) {
+            // НЕПОДВИЖНОЕ ТЕЛО ИДЁТ ЗА ОБЪЕКТОМ, если объект переставили
+            // (скрипт, редактор во время Play): иначе стена уезжала на экране,
+            // а сталкивались со старым местом. Только при смене позы — тело,
+            // которое не трогают, не будит соседей каждый кадр.
+            const glm::mat4 pose = scene.WorldMatrix(t.Entity);
+            if (pose != t.Pose) {
+                const WorldTransform tr = DecomposeWorld(pose);
+                m_world->SetBodyTransform(t.Body, tr.Position, tr.Rotation);
+                t.Pose = pose;
+            }
         }
         if (alive != i) m_tracked[alive] = std::move(t);
         ++alive;
@@ -431,6 +481,14 @@ void PhysicsScene::SyncBodies(Scene& scene) {
     // 2. Новые сущности с RigidBodyComponent, но без тела. Признак «нет тела» —
     // сам RuntimeBody: сущность, пришедшая из сериализатора или порождённая
     // скриптом, несёт kInvalidBody, и другого маркера не требуется.
+    auto add = [&](entt::entity e, RigidBodyComponent& rb, bool implicit) {
+        rb.RuntimeBody = build(e, rb, glm::vec3(0.0f), glm::vec3(0.0f));
+        if (rb.RuntimeBody == kInvalidBody) return false; // Null-бэкенд: тел не бывает
+        m_tracked.push_back(Tracked{e, rb.RuntimeBody, settingsOf(e, rb), implicit, scene.WorldMatrix(e)});
+        m_bodyToEntity[rb.RuntimeBody] = e;
+        ++m_bodyCount;
+        return true;
+    };
     auto view = reg.view<RigidBodyComponent, Transform>();
     for (auto e : view) {
         RigidBodyComponent& rb = view.get<RigidBodyComponent>(e);
@@ -441,12 +499,38 @@ void PhysicsScene::SyncBodies(Scene& scene) {
         // Transform — капсула заваливалась, дочерняя камера получала крен, а
         // контроллер упирался в собственное тело.
         if (OwnedByCharacter(reg, e)) continue;
-        rb.RuntimeBody = build(e, rb, glm::vec3(0.0f), glm::vec3(0.0f));
-        if (rb.RuntimeBody == kInvalidBody) continue; // Null-бэкенд: тел не бывает
-        m_tracked.push_back(Tracked{e, rb.RuntimeBody, settingsOf(e, rb)});
-        m_bodyToEntity[rb.RuntimeBody] = e;
-        ++m_bodyCount;
+        add(e, rb, false);
     }
+
+    // 3. КОЛЛАЙДЕР БЕЗ ТВЁРДОГО ТЕЛА — НЕПОДВИЖНАЯ ГЕОМЕТРИЯ, как в Unity.
+    // Раньше такой коллайдер в физику не попадал вовсе: стена, пол и камни
+    // уровня с одним лишь Collider (обычно Mesh) были невидимы и для ящиков, и
+    // для персонажа, а «работал» только тот объект, которому кто-то добавил
+    // Rigid Body. Тело заводится здесь же, в компонент ничего не пишется —
+    // сцена после Play остаётся какой была.
+    for (auto e : reg.view<ColliderComponent, Transform>()) {
+        if (m_implicit.count(e) || !NeedsImplicitBody(scene, e)) continue;
+        RigidBodyComponent rb;
+        rb.Type = BodyType::Static;
+        auto [it, fresh] = m_implicit.emplace(e, rb);
+        if (!add(e, it->second, true)) m_implicit.erase(it);
+    }
+}
+
+bool PhysicsScene::NeedsImplicitBody(Scene& scene, entt::entity e) const {
+    const auto& reg = scene.Registry();
+    if (!reg.all_of<ColliderComponent, Transform>(e) || reg.all_of<RigidBodyComponent>(e)) return false;
+    // У персонажа своя форма (капсула контроллера) — его коллайдер не стена.
+    if (reg.all_of<CharacterControllerComponent>(e)) return false;
+    // Коллайдер под ДВИЖУЩИМСЯ телом — часть этого тела, а не стена мира:
+    // неподвижная копия осталась бы висеть, когда ящик уехал.
+    for (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e); h && h->Parent != entt::null;
+         h = reg.try_get<HierarchyComponent>(h->Parent)) {
+        if (!reg.valid(h->Parent)) break;
+        const RigidBodyComponent* prb = reg.try_get<RigidBodyComponent>(h->Parent);
+        if (prb && prb->Type != BodyType::Static) return false;
+    }
+    return true;
 }
 
 void PhysicsScene::SyncJoints(Scene& scene) {
