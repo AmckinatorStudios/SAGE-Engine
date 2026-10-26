@@ -302,6 +302,9 @@ TEST(ScriptModules_script_api_surface_does_not_lose_names) {
         if (kv.first.get_type() != sol::type::string) continue;
         const std::string k = kv.first.as<std::string>();
         if (k.rfind("__", 0) == 0) continue;   // служебное
+        // Метатаблицы типов sol2 («sol.glm::vec<3, float, …>») — имя типа C++
+        // от компилятора, у clang и gcc разное; скрипту это не API.
+        if (k.rfind("sol.", 0) == 0) continue;
         now.insert(k);
         if (k != "sage" || kv.second.get_type() != sol::type::table) continue;
         for (const auto& m : kv.second.as<sol::table>()) {
@@ -321,15 +324,14 @@ TEST(ScriptModules_script_api_surface_does_not_lose_names) {
     std::ifstream in(path);
     CHECK_TRUE(in.good());
     std::string line;
-    int known = 0, lost = 0;
+    int known = 0;
+    std::string lost;
     while (std::getline(in, line)) {
         if (line.empty()) continue;
         ++known;
-        if (!now.count(line)) {
-            ++lost;
-            std::printf("       пропало из API скриптов: %s\n", line.c_str());
-        }
+        if (!now.count(line)) lost += " " + line;
     }
     CHECK_TRUE(known > 300);
-    CHECK_EQ(lost, 0);
+    // Имена — в самом сообщении провала: оно повторяется в конце прогона.
+    if (!lost.empty()) ::sagetest::ReportFail(__FILE__, __LINE__, "пропало из API скриптов:" + lost);
 }

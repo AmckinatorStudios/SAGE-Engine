@@ -37,13 +37,23 @@ struct Registrar {
     }
 };
 
+// Все провалы прогона — чтобы повторить их в конце. Лог CI отдаёт хвост, а
+// провал посреди тысячи тестов уходит выше него: итог «1 провалено» без
+// имени теста чинить нечем.
+inline std::vector<std::string>& FailLog() {
+    static std::vector<std::string> v;
+    return v;
+}
+
 inline void ReportFail(const char* file, int line, const std::string& msg) {
     ++CurrentFailures();
     std::printf("    [FAIL] %s:%d: %s\n", file, line, msg.c_str());
+    FailLog().push_back(std::string(file) + ":" + std::to_string(line) + ": " + msg);
 }
 
 inline int RunAll() {
     int passed = 0, failed = 0;
+    std::vector<std::string> failedNames;
     std::printf("=== sage_tests: %zu тестов ===\n", Registry().size());
     for (auto& tc : Registry()) {
         CurrentFailures() = 0;
@@ -60,7 +70,13 @@ inline int RunAll() {
         } else {
             std::printf("[FAIL] %s (%d проверок провалено)\n", tc.name.c_str(), CurrentFailures());
             ++failed;
+            failedNames.push_back(tc.name);
         }
+    }
+    if (failed) {
+        std::printf("\n=== Провалы ===\n");
+        for (const std::string& n : failedNames) std::printf("[FAIL] %s\n", n.c_str());
+        for (const std::string& m : FailLog()) std::printf("    %s\n", m.c_str());
     }
     std::printf("\n=== Итог: %d прошло, %d провалено (всего %zu) ===\n",
                 passed, failed, Registry().size());

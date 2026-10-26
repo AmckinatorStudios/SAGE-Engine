@@ -671,50 +671,6 @@ save
 scene
 select
 setmetatable
-sol.::NoiseGen.♻
-sol.::Rng.♻
-sol.::TextureCanvas.♻
-sol.::UIRef.♻
-sol.::VarsProxy.♻
-sol.Camera.♻
-sol.CameraComponent.♻
-sol.ColliderComponent.♻
-sol.DayNightCycle.♻
-sol.DecalComponent.♻
-sol.DirectionalLight.♻
-sol.FogSettings.♻
-sol.GameObject.♻
-sol.JointComponent.♻
-sol.LightComponent.♻
-sol.LightingEnvironment.♻
-sol.Material.♻
-sol.MaterialRender.♻
-sol.MeshRendererComponent.♻
-sol.ParticleEmitterComponent.♻
-sol.RigidBodyComponent.♻
-sol.ScriptComponent.♻
-sol.ShadowSettings.♻
-sol.SkyboxSettings.♻
-sol.Transform.♻
-sol.glm::qua<float, glm::packed_highp>.♻
-sol.glm::vec<2, float, glm::packed_highp>.♻
-sol.glm::vec<3, float, glm::packed_highp>.♻
-sol.glm::vec<4, float, glm::packed_highp>.♻
-sol.sage::fx::ParticleEffect.♻
-sol.sage::fx::Range.♻
-sol.sage::render::MeshBuilder.♻
-sol.sage::scripting::lua::::TweenRef.♻
-sol.sage::scripting::lua::AnimatorRef.♻
-sol.sage::scripting::lua::AudioRef.♻
-sol.sage::scripting::lua::CameraRef.♻
-sol.sage::scripting::lua::CharacterRef.♻
-sol.sage::scripting::lua::ConnectionRef.♻
-sol.sage::scripting::lua::ObjectRef.♻
-sol.sage::scripting::lua::SignalRef.♻
-sol.sage::scripting::lua::TransformRef.♻
-sol.sage::scripting::lua::TransformVector.♻
-sol.☢☢
-sol.🔩
 string
 table
 texture
