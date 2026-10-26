@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 3034.
+// Язык: Русский. Строк: 3038.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1904,6 +1904,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Каждые"},
     {"Every element with this style takes the new look.",
      "Все элементы с этим стилем получат новый вид."},
+    {"Every setting of this group is applied when the game window is created",
+     "Все параметры группы применяются, когда создаётся окно игры"},
     {"Everyone subscribed to this name hears it: scripts and\nengine code alike.",
      "Его услышат все, кто подписан на это имя: и скрипты,\nи код движка."},
     {"Everything above as text: for a chat or an issue",
@@ -2702,6 +2704,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ни на что не легла: под коробкой нет геометрии, либо она отвёрнута от наклейки."},
     {"Language",
      "Язык"},
+    {"Language of the editor and the program that opens code. Stored for you, not in the project.",
+     "Язык редактора и программа, в которой открывается код. Хранятся у вас, а не в проекте."},
     {"Larger — a narrower glow around the sun",
      "Больше — уже свечение вокруг солнца"},
     {"Largest scale",
@@ -5650,6 +5654,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Виньетка"},
     {"Visible",
      "Видимый"},
+    {"Visible in the editor right away",
+     "Видно в редакторе сразу"},
     {"Visible sides",
      "Видимые стороны"},
     {"Volume",
@@ -5882,6 +5888,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "правятся здесь же."},
     {"animation clip",
      "клип анимации"},
+    {"at once",
+     "сразу"},
     {"automatic",
      "автоматически"},
     {"bone not found in skeleton",

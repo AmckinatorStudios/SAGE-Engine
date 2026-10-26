@@ -42,6 +42,26 @@ bool Matches(const Ctx& c, const char* label, const char* keywords) {
 }
 
 namespace {
+// Метка возле подписи: целиком, если влезает в строку, иначе — значок.
+void Mark(const char* text, EditorTheme::Role role, const char* icon, const char* tip, float reserve) {
+    const Sage::UI::Style& ui = Sage::UI::Get();
+    ImGui::SameLine(0.0f, 8.0f);
+    const float w = ImGui::CalcTextSize(text).x + ui.SpacingSM * 2.0f;
+    const float room = ImGui::GetContentRegionMax().x - reserve - ImGui::GetCursorPosX();
+    if (w <= room) {
+        Sage::UI::Badge(text, role);
+    } else {
+        const float s = ImGui::GetFontSize();
+        const float h = ImGui::GetFrameHeight();
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        const ImVec4 col = EditorTheme::Color(role);
+        EditorIcons::Overlay(ImGui::GetWindowDrawList(), p.x, p.y + (h - s) * 0.5f, s, icon,
+                             glm::vec3(col.x, col.y, col.z));
+        ImGui::Dummy(ImVec2(s, h));
+    }
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", tip);
+}
+
 void OpenPending(Ctx& c) {
     if (c.GroupOpen || !c.PendingTitle) return;
     c.GroupOpen = true;
@@ -57,8 +77,17 @@ void OpenPending(Ctx& c) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ui.SpacingLG, ui.SpacingMD));
     ImGui::BeginChild("##group", ImVec2(0, 0), ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
     ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.08f);
+    ImGui::AlignTextToFramePadding();
     ImGui::TextUnformatted(c.PendingTitle);
     ImGui::PopFont();
+    if (c.GroupWhen != Apply::Live) {
+        ImGui::SameLine(0.0f, 10.0f);
+        Mark(c.GroupWhen == Apply::Launch ? T("on game start") : T("after restart"), EditorTheme::Role::TextDim,
+             "clock",
+             c.GroupWhen == Apply::Launch ? T("Every setting of this group is applied when the game window is created")
+                                          : T("Takes effect after the program restarts"),
+             0.0f);
+    }
     if (c.PendingNote) {
         ImGui::PushTextWrapPos(0.0f);
         Sage::UI::TextSecondary("%s", c.PendingNote);
@@ -85,7 +114,8 @@ void EnsureTable(Ctx& c, bool wide) {
 }
 } // namespace
 
-void BeginGroup(Ctx& c, const char* title, const char* note) {
+void BeginGroup(Ctx& c, const char* title, const char* note, Apply when) {
+    c.GroupWhen = when;
     c.PendingTitle = title;
     c.PendingNote = note;
     c.GroupOpen = false;
@@ -115,29 +145,8 @@ void EndGroup(Ctx& c) {
     c.PendingTitle = nullptr;
     c.GroupOpen = false;
     c.InTable = false;
+    c.GroupWhen = Apply::Live;
 }
-
-namespace {
-// Метка возле подписи: целиком, если влезает в строку, иначе — значок.
-void Mark(const char* text, EditorTheme::Role role, const char* icon, const char* tip, float reserve) {
-    const Sage::UI::Style& ui = Sage::UI::Get();
-    ImGui::SameLine(0.0f, 8.0f);
-    const float w = ImGui::CalcTextSize(text).x + ui.SpacingSM * 2.0f;
-    const float room = ImGui::GetContentRegionMax().x - reserve - ImGui::GetCursorPosX();
-    if (w <= room) {
-        Sage::UI::Badge(text, role);
-    } else {
-        const float s = ImGui::GetFontSize();
-        const float h = ImGui::GetFrameHeight();
-        const ImVec2 p = ImGui::GetCursorScreenPos();
-        const ImVec4 col = EditorTheme::Color(role);
-        EditorIcons::Overlay(ImGui::GetWindowDrawList(), p.x, p.y + (h - s) * 0.5f, s, icon,
-                             glm::vec3(col.x, col.y, col.z));
-        ImGui::Dummy(ImVec2(s, h));
-    }
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", tip);
-}
-} // namespace
 
 bool Row(Ctx& c, const char* label, const RowOpts& o, bool* reset) {
     if (reset) *reset = false;
@@ -168,7 +177,11 @@ bool Row(Ctx& c, const char* label, const RowOpts& o, bool* reset) {
     const float reserve = (o.Modified && reset) ? ImGui::GetFrameHeight() + 4.0f : 0.0f;
     if (o.Price == Cost::Heavy)
         Mark(T("heavy"), EditorTheme::Role::Warn, "warn", T("Noticeably lowers the frame rate"), reserve);
-    if (o.When != Apply::Live)
+    // В группе «при запуске» строка, что видна сразу, — исключение, и
+    // помечается она, а не остальные.
+    if (o.When == Apply::Live && c.GroupWhen != Apply::Live)
+        Mark(T("at once"), EditorTheme::Role::Accent, "play", T("Visible in the editor right away"), reserve);
+    if (o.When != Apply::Live && o.When != c.GroupWhen)
         Mark(o.When == Apply::Launch ? T("on game start") : T("after restart"), EditorTheme::Role::TextDim, "clock",
              o.When == Apply::Launch ? T("The game window is created with this value")
                                      : T("Takes effect after the program restarts"),

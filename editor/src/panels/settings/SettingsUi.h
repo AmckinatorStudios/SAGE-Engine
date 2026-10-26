@@ -39,6 +39,10 @@ struct Ctx {
     bool InTable = false;
     int GroupIndex = 0;
     int TableIndex = 0;        // таблица в группе рвётся широкой строкой
+    // Как применяется ВСЯ группа: метка стоит один раз у заголовка, а строки
+    // с тем же способом её не повторяют (шесть «при запуске игры» подряд —
+    // шум, за которым не видно параметров).
+    Apply GroupWhen = Apply::Live;
 
 };
 
@@ -46,7 +50,7 @@ struct Ctx {
 std::string Lower(const char* utf8);
 bool Matches(const Ctx& c, const char* label, const char* keywords);
 
-void BeginGroup(Ctx& c, const char* title, const char* note = nullptr);
+void BeginGroup(Ctx& c, const char* title, const char* note = nullptr, Apply when = Apply::Live);
 // Дальше в группе — на всю ширину карточки (пояснение, кнопка), не в колонке.
 void FullWidth(Ctx& c);
 // Свободный блок группы (текст, кнопки) без строки-параметра: открывает

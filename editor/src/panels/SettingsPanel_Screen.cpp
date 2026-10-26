@@ -50,7 +50,7 @@ void SettingsPanel::DrawScreen(EditorHost& host, ui::Ctx& ctx) {
         for (const auto& m : monitors)
             if (m.ModeKnown) mon = &m;
 
-    ui::BeginGroup(ctx, T("Display mode"));
+    ui::BeginGroup(ctx, T("Display mode"), nullptr, ui::Apply::Launch);
     {
         ui::RowOpts o;
         o.Keywords = "window mode fullscreen borderless окно полноэкранный безрамочный";
@@ -239,7 +239,7 @@ void SettingsPanel::DrawScreen(EditorHost& host, ui::Ctx& ctx) {
     }
     ui::EndGroup(ctx);
 
-    ui::BeginGroup(ctx, T("Frame rate"));
+    ui::BeginGroup(ctx, T("Frame rate"), nullptr, ui::Apply::Launch);
     {
         ui::RowOpts o;
         o.Keywords = "vsync vertical sync tearing вертикальная синхронизация разрывы";

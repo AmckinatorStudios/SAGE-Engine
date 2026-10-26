@@ -23,7 +23,6 @@
 #include "sage/core/Log.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/ScriptComponent.h"
-#include "sage/scripting/ScriptLint.h"
 #include "sage/scripting/ScriptingSystem.h"
 
 namespace fs = std::filesystem;
@@ -136,19 +135,4 @@ void EditorLayer::TickLuaTests() {
     }
     m_panels[EditorPanel::Console] = true;
     if (m_luaTests.StartedPlay && m_play.Active()) StopPlay();
-}
-
-void EditorLayer::CheckScripts() {
-    if (!m_project.Loaded()) return;
-    const sage::scripting::ScriptLintResult r = sage::scripting::LintScripts(m_project.Dir());
-    LOG_INFO("Script") << "Проверка скриптов: файлов " << r.Files << ", ошибок " << r.Errors
-                       << ", предупреждений " << r.Warnings;
-    if (r.Errors + r.Warnings == 0) {
-        SetStatusMessage(std::string(T("Scripts are clean")) + " (" + std::to_string(r.Files) + ")");
-        return;
-    }
-    SetStatusMessage(std::string(T("Check Scripts")) + ": " + std::to_string(r.Errors) + " " + T("errors") + ", " +
-                     std::to_string(r.Warnings) + " " + T("warnings"));
-    // Находки — сразу на виду: иначе их ищут по консоли.
-    m_console.ShowProblems();
 }

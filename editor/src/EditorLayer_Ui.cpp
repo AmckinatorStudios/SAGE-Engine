@@ -399,9 +399,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
             if (EditorIcons::MenuItem("pause", T("Pause"), nullptr, m_play.Playing())) PausePlay();
             if (EditorIcons::MenuItem("play", T("Resume"), nullptr, m_play.Paused())) ResumePlay();
             if (EditorIcons::MenuItem("stop", T("Stop"), nullptr, InPlayMode())) StopPlay();
-            ImGui::Separator();
-            // Строгая проверка всех скриптов без запуска — находки в «Проблемах».
-            if (EditorIcons::MenuItem("script", T("Check Scripts"), nullptr, m_project.Loaded())) CheckScripts();
             ImGui::EndMenu();
         }
         // ОБЪЕКТ — ОДИН КАТАЛОГ НА ВЕСЬ РЕДАКТОР.
@@ -487,56 +484,11 @@ void EditorLayer::DrawDockspaceAndMenu() {
             }
             ImGui::Separator();
             // Настройки — одним окном: игра (экран, качество, освещение и
-            // тени, управление) и оформление редактора. Отдельных окон
-            // «Управление» и подменю «Оформление» больше нет — то же самое
+            // тени, управление) и редактор (язык, программа для кода,
+            // оформление). Отдельного окна «Управление» и подменю
+            // «Оформление», «Редактор кода», «Язык» больше нет — то же самое
             // жило в двух местах.
             EditorIcons::MenuItemToggle("gear", T("Settings..."), &PanelVisible(EditorPanel::Settings));
-            // Чем открывать код. Здесь же, где язык и оформление, и по той же
-            // причине: это настройка РЕДАКТОРА, она живёт в профиле человека.
-            // Проект, навязывающий соавтору свою IDE, — не то, чего ждут от
-            // проекта.
-            if (EditorIcons::BeginMenu("code", T("Code editor"))) {
-                namespace codeapp = sage::editor::codeapp;
-                const std::string current = codeapp::CurrentId();
-                // Системная ассоциация — всегда первая и всегда доступна: это
-                // единственный вариант, который не может «не установиться».
-                if (EditorIcons::MenuItemSelected("gear", T("As the system opens it"), current.empty()))
-                    codeapp::SetCurrent("");
-                const std::vector<codeapp::App>& apps = codeapp::Available();
-                if (!apps.empty()) ImGui::Separator();
-                for (const codeapp::App& app : apps) {
-                    // Имя программы НЕ переводится — как название темы и языка:
-                    // по нему её узнают в меню «Пуск» и в своей же панели задач.
-                    if (EditorIcons::MenuItemSelected("code", app.Name.c_str(), app.Id == current))
-                        codeapp::SetCurrent(app.Id);
-                }
-                ImGui::Separator();
-                if (apps.empty()) {
-                    // Пустой список — не поломка, и сказать об этом надо прямо:
-                    // иначе меню из одного пункта читается как «выбор сломан».
-                    ImGui::TextDisabled("%s", T("No code editors found on this machine"));
-                }
-                ImGui::TextDisabled("%s", T("Only what is actually installed is listed"));
-                if (EditorIcons::MenuItem("search", T("Search again"))) {
-                    codeapp::Rescan();
-                    SetStatusMessage(T("Code editors: ") +
-                                     std::to_string(codeapp::Available().size()));
-                }
-                ImGui::EndMenu();
-            }
-            if (EditorIcons::BeginMenu("language", T("Language"))) {
-                for (const sage::editor::LanguageInfo& lang : sage::editor::AvailableLanguages()) {
-                    const bool active = lang.Code == sage::editor::CurrentLanguageCode();
-                    // Название языка НЕ переводится: человек, случайно
-                    // переключивший интерфейс на незнакомый, должен найти
-                    // дорогу назад по слову «English», а не по переводу.
-                    if (EditorIcons::MenuItemSelected("language", lang.Name.c_str(), active) && !active) {
-                        sage::editor::SetLanguage(lang.Code);
-                        SetStatusMessage(T("Interface language changed"));
-                    }
-                }
-                ImGui::EndMenu();
-            }
             ImGui::EndMenu();
         }
         // ПЛАГИНЫ — своим меню: пункты плагинов появляются здесь же, под

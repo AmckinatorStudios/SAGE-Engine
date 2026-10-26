@@ -157,6 +157,9 @@ void EditorLayer::ApplyStartupHooks() {
         if (!page.empty()) m_settingsPanel.SelectByKey(page.c_str());
         const std::string query = sage::EnvString("SAGE_EDITOR_SETTINGS_SEARCH");
         if (!query.empty()) m_settingsPanel.SetSearch(query.c_str());
+        int w = 0, h = 0;
+        if (std::sscanf(sage::EnvString("SAGE_EDITOR_SETTINGS_SIZE").c_str(), "%dx%d", &w, &h) == 2)
+            m_settingsPanel.ForceSize((float)w, (float)h);
     }
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_headlessProject = true; m_panels[EditorPanel::Profiler] = true; }
     // Консоль впереди вкладки Assets — для скриншот-проверки её панели.
