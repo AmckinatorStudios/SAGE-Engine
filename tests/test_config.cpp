@@ -541,3 +541,102 @@ TEST(FrameCap_takes_the_strictest_of_user_background_and_idle) {
     CHECK_EQ(cfg.BackgroundFrameCap, 30);
     CHECK_EQ(sage::AppConfig::FromEngineConfig(cfg).BackgroundFrameCap, 30);
 }
+
+// Профиль качества — полный набор значений, а не «поверх прежнего»: раньше
+// «Низкое» после «Ультра» оставляло часть ультра-значений, и один и тот же
+// профиль давал разную картинку в зависимости от того, что стояло до него.
+TEST(Config_preset_does_not_depend_on_previous_state) {
+    for (int i = 0; i < sage::kQualityPresetCount; ++i) {
+        const auto p = (QualityPreset)i;
+        EngineConfig fresh;
+        fresh.ApplyPreset(p);
+        for (int k = 0; k < sage::kQualityPresetCount; ++k) {
+            EngineConfig c;
+            c.ApplyPreset((QualityPreset)k);
+            c.ApplyPreset(p);
+            CHECK_TRUE(c.MatchesPreset(p));
+            CHECK_EQ(c.ToJsonString(), fresh.ToJsonString());
+        }
+    }
+}
+
+// Индикатор «свои настройки» и «Вернуть к профилю» опираются на это.
+TEST(Config_tweaked_profile_is_custom_until_reapplied) {
+    EngineConfig c;
+    c.ApplyPreset(QualityPreset::Medium);
+    QualityPreset cur = QualityPreset::Ultra;
+    CHECK_TRUE(c.CurrentPreset(cur));
+    CHECK_TRUE(cur == QualityPreset::Medium);
+    c.ShadowResolution = 4096;
+    CHECK_FALSE(c.CurrentPreset(cur));
+    CHECK_EQ(c.QualityProfile, std::string("medium")); // выбранный профиль помнится
+    QualityPreset chosen = QualityPreset::Low;
+    CHECK_TRUE(sage::QualityPresetFromKey(c.QualityProfile, chosen));
+    c.ApplyPreset(chosen);
+    CHECK_TRUE(c.CurrentPreset(cur));
+    CHECK_TRUE(cur == QualityPreset::Medium);
+}
+
+TEST(Config_presets_are_distinct_and_keys_round_trip) {
+    for (int i = 0; i < sage::kQualityPresetCount; ++i) {
+        QualityPreset back;
+        CHECK_TRUE(sage::QualityPresetFromKey(sage::QualityPresetKey((QualityPreset)i), back));
+        CHECK_EQ((int)back, i);
+        EngineConfig a;
+        a.ApplyPreset((QualityPreset)i);
+        for (int k = 0; k < sage::kQualityPresetCount; ++k)
+            if (k != i) CHECK_FALSE(a.MatchesPreset((QualityPreset)k));
+    }
+    QualityPreset dummy;
+    CHECK_FALSE(sage::QualityPresetFromKey("bogus", dummy));
+}
+
+// Файл, правленный руками (или старой версией), не должен ставить движку
+// невозможные значения: отрицательное окно, MSAA ×3, карту теней 3000.
+TEST(Config_load_sanitizes_impossible_values) {
+    const char* path = "sage_test_sanitize.cfg";
+    {
+        std::ofstream f(path);
+        f << R"({"window":{"width":-5,"height":100000,"monitor":-7,"refreshRate":-60,"msaa":3,"frameCap":-1},
+                 "display":{"renderScale":9.0},
+                 "graphics":{"profile":"bogus","shadowResolution":3000,"shadowCascades":9,"shadowDistance":-1}})";
+    }
+    EngineConfig c;
+    CHECK_TRUE(c.LoadFile(path));
+    CHECK_TRUE(c.Width >= 320);
+    CHECK_TRUE(c.Height <= 16384);
+    CHECK_EQ(c.Monitor, -1);
+    CHECK_EQ(c.RefreshRate, 0);
+    CHECK_EQ(c.Msaa, 2);
+    CHECK_EQ(c.FrameCap, 0);
+    CHECK_TRUE(c.RenderScale <= 2.0f);
+    CHECK_EQ(c.ShadowResolution, 2048);
+    CHECK_TRUE(c.ShadowCascades <= 3);
+    CHECK_TRUE(c.ShadowDistance >= 10.0f);
+    CHECK_EQ(c.QualityProfile, std::string("high"));
+    std::remove(path);
+}
+
+// Монитор, частота и выбранный профиль раньше не сохранялись вовсе: игра
+// всегда открывалась на основном мониторе с частотой «как получится».
+TEST(Config_monitor_refresh_and_profile_round_trip) {
+    const char* path = "sage_test_display.cfg";
+    EngineConfig c;
+    c.ApplyPreset(QualityPreset::Minimal);
+    c.Monitor = 1;
+    c.RefreshRate = 144;
+    c.Mode = sage::WindowMode::Fullscreen;
+    c.Width = 2560;
+    c.Height = 1440;
+    CHECK_TRUE(c.SaveFile(path));
+    EngineConfig l;
+    CHECK_TRUE(l.LoadFile(path));
+    CHECK_EQ(l.Monitor, 1);
+    CHECK_EQ(l.RefreshRate, 144);
+    CHECK_TRUE(l.Mode == sage::WindowMode::Fullscreen);
+    CHECK_EQ(l.Width, 2560);
+    CHECK_EQ(l.Height, 1440);
+    CHECK_EQ(l.QualityProfile, std::string("minimal"));
+    CHECK_TRUE(l.MatchesPreset(QualityPreset::Minimal));
+    std::remove(path);
+}

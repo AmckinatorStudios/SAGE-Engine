@@ -22,7 +22,7 @@ namespace fs = std::filesystem;
 namespace {
 // Размер окна в пикселях интерфейса: при крупном масштабе (4K, 150 %) окно
 // растёт вместе с текстом, а не обрезает его.
-float Scaled(float px) { return px * EditorTheme::UiScale(); }
+float Scaled(float px) { return px * EditorTheme::EffectiveScale(); }
 } // namespace
 
 DialogsPanel::DialogsPanel() {

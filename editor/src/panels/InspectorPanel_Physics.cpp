@@ -290,6 +290,12 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
                 ImGui::DragFloat(T("Half Height"), &col->HalfHeight, 0.02f, 0.001f, 100.0f);
                 host.TrackLastImGuiItem();
             }
+            // Центр формы — в осях объекта; у форм по мешу его задаёт сам меш.
+            if (col->Shape == sage::physics::ShapeType::Box || col->Shape == sage::physics::ShapeType::Sphere ||
+                col->Shape == sage::physics::ShapeType::Capsule) {
+                ImGui::DragFloat3(T("Shape Center"), &col->Center.x, 0.02f);
+                host.TrackLastImGuiItem();
+            }
 
 
             // --- Составная (compound) форма: список дочерних примитивов ---

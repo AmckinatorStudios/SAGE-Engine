@@ -11,6 +11,8 @@
 #include "imgui.h"
 #include "../RectSelect.h"
 #include "../ViewGizmo.h"
+#include "../gizmo/ColliderHandles.h"
+#include "../gizmo/LightGizmo.h"
 
 
 class EditorHost;
@@ -100,7 +102,8 @@ private:
     void StartPilot(EditorHost& host, int cameraId);
     void StopPilot(EditorHost& host);
     void SyncPilotCamera(EditorHost& host);   // камера редактора -> объект камеры
-    void DrawSpaceMenu(EditorHost& host);     // оси: мира или объекта
+    void DrawSpaceMenu(EditorHost& host);
+    void DrawSnapMenu(EditorHost& host);     // оси: мира или объекта
     void DrawShadingMenu(EditorHost& host);   // чем показывать сцену
     void DrawMoreMenu(EditorHost& host);      // редкие инструменты и раскладка видов
     // Рисует один вид раскладки в текущем регионе. Возвращает true, если курсор
@@ -161,6 +164,14 @@ private:
     // Куда вернуть курсор после захвата (см. ViewportPanel.cpp).
     ImVec2 m_captureReturnPos{0.0f, 0.0f};
     bool m_gizmoWasUsing = false; // фронт «начали таскать гизмо» -> одна запись undo
+    // Ручки формы коллайдера (режим C) и «мышь занята ими» в этом кадре —
+    // тогда щелчок не выбирает объект под ручкой.
+    sage::editor::ColliderHandles m_colliderHandles;
+    sage::editor::LightHandles m_lightHandles;
+public:
+    const sage::editor::ColliderHandles& ColliderHandlesState() const { return m_colliderHandles; }
+private:
+    bool m_colliderMouse = false;
     int m_focusFrames = 3;        // >0 — просим фокус (стартовые кадры + после RequestFocus)
 
     // Мультивыделение: на старте перетаскивания гизмо запоминаем мировые матрицы

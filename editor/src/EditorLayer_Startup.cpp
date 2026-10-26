@@ -102,6 +102,7 @@ void EditorLayer::InitImGui() {
     m_play.Attach(m_playInputBridge, app.GetWindow());
     // Вид гизмо коллайдеров — привычка человека, а не сцены: из настроек редактора.
     m_tools.ColliderGizmo.Load();
+    m_tools.LoadSnap();
 
     // --- ImGui: docking + multi-viewport (панели можно вытаскивать в
     // отдельные OS-окна — «плавающие» панели становятся полноценными окнами) ---
@@ -173,6 +174,10 @@ void EditorLayer::InitImGui() {
     // Init, а не Apply: он собирает список тем (встроенные + themes/*.json) и
     // применяет ту, что человек выбрал в прошлый раз, вместе с масштабом.
     EditorTheme::Init();
+    // Масштаб Windows (125%, 150%…) — сразу и при каждой смене: окно
+    // перетащили на другой монитор или поменяли «Масштаб» в настройках системы.
+    EditorTheme::SetSystemScale(app.GetWindow().ContentScale());
+    app.GetWindow().AddContentScaleCallback([](float s) { EditorTheme::SetSystemScale(s); });
     ImGui_ImplGlfw_InitForOpenGL(app.GetWindow().Handle(), true);
     cursorcapture::InstallViewportInput();
     ImGui_ImplOpenGL3_Init("#version 330");

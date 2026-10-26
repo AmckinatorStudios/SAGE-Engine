@@ -175,6 +175,11 @@ struct ColliderComponent {
     glm::vec3 HalfExtents{0.5f, 0.5f, 0.5f}; // Box
     float Radius = 0.5f;                     // Sphere / Capsule
     float HalfHeight = 0.5f;                 // Capsule
+    // Центр формы в осях объекта (как Center у коллайдера Unity), домножается
+    // на масштаб так же, как размеры. Двигает форму, не двигая объект: дверь
+    // с петлёй на краю, ящик с моделью, у которой опорная точка — у пола.
+    // Только для Box/Sphere/Capsule; у форм по мешу центр задаёт сам меш.
+    glm::vec3 Center{0.0f};
 
     // ConvexHull / Mesh: из какой модели брать геометрию. Пусто — из меша
     // самого объекта (MeshRendererComponent), то есть «коллайдер по форме того,

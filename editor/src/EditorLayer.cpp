@@ -576,6 +576,7 @@ void EditorLayer::OnRender() {
     // положение курсора, и синтетические события обязаны прийти последними.
     TickInputProbe();
     TickCursorLockProbe();
+    TickColliderHandleProbe();
     PinMouseWhileCaptured();
     ImGui::NewFrame();
     if (!app.GetWindow().CursorCaptured()) m_freeMousePos = ImGui::GetIO().MousePos;
@@ -820,7 +821,8 @@ void EditorLayer::TakeAutoScreenshot(sage::Application& app) {
     // вердикта вовсе — провал Lua-теста проходил сборку молча. Ждём конца
     // последней в цепочке, но не вечно: зависшая проверка не должна вешать CI,
     // её отсутствие в логе поймает сам smoke-тест.
-    if (std::getenv("SAGE_EDITOR_SELFTEST") && (m_luaSelfTestStep >= 0 || m_cursorProbeStep >= 0)) {
+    if (std::getenv("SAGE_EDITOR_SELFTEST") && (m_luaSelfTestStep >= 0 || m_cursorProbeStep >= 0 ||
+                                               m_colliderProbeStep >= 0)) {
         using Clock = std::chrono::steady_clock;
         if (!m_shotWaitStarted) { m_shotWaitStart = Clock::now(); m_shotWaitStarted = true; }
         if (Clock::now() - m_shotWaitStart < std::chrono::minutes(5)) return;

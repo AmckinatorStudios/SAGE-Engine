@@ -187,6 +187,7 @@ void SaveCollider(json& j, const ColliderComponent& col) {
     j["collider"]["halfExtents"] = Vec3ToJson(col.HalfExtents);
     j["collider"]["radius"] = col.Radius;
     j["collider"]["halfHeight"] = col.HalfHeight;
+    if (col.Center != glm::vec3(0.0f)) j["collider"]["center"] = Vec3ToJson(col.Center);
     // Ссылкой на ассет (GUID + путь), как меш и материал: переименованная
     // модель коллайдера не должна молча превращать его в коробку.
     if (!col.MeshPath.empty()) SaveAssetRef(j["collider"], "mesh", col.MeshPath);
@@ -212,6 +213,7 @@ ColliderComponent ParseCollider(const json& cj) {
     if (cj.contains("halfExtents")) col.HalfExtents = Vec3FromJson(cj["halfExtents"]);
     col.Radius = cj.value("radius", col.Radius);
     col.HalfHeight = cj.value("halfHeight", col.HalfHeight);
+    if (cj.contains("center")) col.Center = Vec3FromJson(cj["center"]);
     if (cj.contains("mesh")) col.MeshPath = LoadAssetRef(cj, "mesh");
     if (cj.contains("parts") && cj["parts"].is_array()) {
         for (const json& pj : cj["parts"]) {

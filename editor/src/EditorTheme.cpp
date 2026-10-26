@@ -7,6 +7,7 @@
 #include "EditorIcons.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -351,6 +352,25 @@ const std::string& CurrentId() { return CurrentIdRef(); }
 
 float UiScale() { return ScaleRef(); }
 
+namespace {
+float& SystemScaleRef() {
+    static float s = 1.0f;
+    return s;
+}
+} // namespace
+
+float SystemScale() { return SystemScaleRef(); }
+
+void SetSystemScale(float scale) {
+    // 100…300%: за пределами — ответ монитора, которому верить нельзя.
+    const float s = std::clamp(scale > 0.01f ? scale : 1.0f, 1.0f, 3.0f);
+    if (std::abs(s - SystemScaleRef()) < 0.01f) return;
+    SystemScaleRef() = s;
+    if (!Registry().empty()) Apply();
+}
+
+float EffectiveScale() { return std::clamp(ScaleRef() * SystemScaleRef(), 0.5f, 4.0f); }
+
 void SetUiScale(float scale) {
     ScaleRef() = std::clamp(scale, 0.75f, 2.0f);
     sage::editor::prefs::SetFloat("uiScale", ScaleRef());
@@ -467,7 +487,7 @@ void Apply() {
 
     // Токены пересчитываются ПЕРЕД раскладкой стиля: ниже почти всё берётся из
     // них, а не из чисел на месте (см. ui/UIStyle.h).
-    Sage::UI::Rebuild(ScaleRef());
+    Sage::UI::Rebuild(EffectiveScale());
     const Sage::UI::Style& ui = Sage::UI::Get();
 
     // Полный сброс перед раскладкой темы. Без него смена темы накапливала бы
@@ -479,7 +499,7 @@ void Apply() {
     // FontSizeBase, а не пересборка атласа: в ImGui 1.92 шрифт растеризуется
     // динамически, поэтому размер меняется в любом кадре и без мыла.
     style.FontSizeBase = m.FontSize;
-    style.FontScaleMain = ScaleRef();
+    style.FontScaleMain = EffectiveScale();
 
     // --- метрики: ТОЛЬКО из токенов --------------------------------------
     //

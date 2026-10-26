@@ -2,6 +2,8 @@
 #include "sage/core/EngineContext.h"
 
 #include <cctype>
+#include <cmath>
+#include <type_traits>
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
@@ -96,73 +98,138 @@ void EngineConfig::LetterboxViewport(int winW, int winH, int& x, int& y, int& w,
     }
 }
 
-void EngineConfig::ApplyPreset(QualityPreset preset) {
-    switch (preset) {
-        case QualityPreset::Low:
-            // Слабый/старый ПК: убираем тени и рендерим в 75% разрешения.
-            // Туман и скайбокс остаются — они почти бесплатны, а картинку
-            // держат. Пост-обработки здесь нет: она принадлежит камере
-            // (компонент «Пост-обработка»), а не пресету качества.
-            Shadows = false;
-            ShadowResolution = 512;
-            ShadowCascades = 1;
-            LocalShadows = false;
-            Msaa = 0;
-            RenderScale = 0.75f;
-            ScreenSpaceGI = false;   // полноэкранная трассировка — первое, что слабой машине не по силам
-            // Объём не выключаем — его включает игра, а не пресет, — но на
-            // слабой машине он идёт в половине стороны и с коротким маршем.
-            VolumetricScale = 0.5f;
-            VolumetricSteps = 20;
-            CloudSteps = 32;
-            break;
-        case QualityPreset::Medium:
-            Shadows = true;
-            ShadowResolution = 1024;
-            ShadowCascades = 1;
-            // Тени ламп на средних настройках выключены: каждый точечный свет
-            // стоит шести проходов геометрии, и это ровно та цена, ради которой
-            // выбирают «средне».
-            LocalShadows = false;
-            LocalShadowResolution = 1024;
-            Msaa = 0;
-            RenderScale = 1.0f;
-            ScreenSpaceGI = true;
-            VolumetricScale = 0.5f;
-            VolumetricSteps = 28;
-            CloudSteps = 40;
-            break;
-        case QualityPreset::High:
-            // Значения по умолчанию движка — всё включено.
-            Shadows = true;
-            ShadowResolution = 2048;
-            ShadowCascades = 3;
-            LocalShadows = true;
-            LocalShadowResolution = 2048;
-            Msaa = 0;
-            RenderScale = 1.0f;
-            ScreenSpaceGI = true;
-            VolumetricScale = 1.0f;
-            VolumetricSteps = 32;
-            CloudSteps = 48;
-            break;
-        case QualityPreset::Ultra:
-            Shadows = true;
-            ShadowResolution = 4096;
-            // Три, а не четыре: четвёртый каскад упирался в текстурный юнит,
-            // который нужен карте самосвечения (см. render/ShadowMap.h). На
-            // «ультре» разрешение вдвое выше, и подробность берётся оттуда.
-            ShadowCascades = 3;
-            LocalShadows = true;
-            LocalShadowResolution = 4096;
-            Msaa = 4;
-            RenderScale = 1.0f;
-            ScreenSpaceGI = true;
-            VolumetricScale = 1.0f;
-            VolumetricSteps = 48;
-            CloudSteps = 64;
-            break;
+namespace {
+// ТАБЛИЦА ПРОФИЛЕЙ КАЧЕСТВА. Каждый профиль задаёт ВСЕ поля ниже — раньше
+// «низкий» не трогал отражения, а «ультра» — дальность теней, и итог зависел от
+// того, что было выставлено до нажатия: кнопка подсвечивалась, а картинка
+// оставалась прежней. Применение и сравнение идут по одному списку полей
+// (ForEachQualityField), поэтому новое поле качества достаточно дописать сюда.
+struct Profile {
+    bool Shadows;
+    int ShadowResolution;
+    int ShadowCascades;
+    float ShadowDistance;
+    bool LocalShadows;
+    int LocalShadowResolution;
+    int Msaa;
+    float RenderScale;
+    bool ScreenSpaceGI;
+    bool Reflections;
+    bool PlanarReflections;
+    float VolumetricScale;
+    int VolumetricSteps;
+    int CloudSteps;
+};
+
+const Profile& ProfileOf(QualityPreset p) {
+    // Тени ламп — только от «высокого»: каждый точечный свет стоит шести
+    // проходов геометрии. Объём профиль не включает — его включает игра, — но
+    // задаёт его цену (сторона буфера и шаги марша).
+    static const Profile table[kQualityPresetCount] = {
+        /* Minimal */ {false, 512, 1, 60.0f, false, 512, 0, 0.5f, false, false, false, 0.5f, 16, 24},
+        /* Low     */ {false, 512, 1, 80.0f, false, 512, 0, 0.75f, false, true, false, 0.5f, 20, 32},
+        /* Medium  */ {true, 1024, 1, 100.0f, false, 1024, 0, 1.0f, true, true, true, 0.5f, 28, 40},
+        /* High    */ {true, 2048, 3, 120.0f, true, 2048, 0, 1.0f, true, true, true, 1.0f, 32, 48},
+        /* Ultra   */ {true, 4096, 3, 200.0f, true, 4096, 4, 1.0f, true, true, true, 1.0f, 48, 64},
+    };
+    return table[std::clamp((int)p, 0, kQualityPresetCount - 1)];
+}
+
+// Пары «поле конфига — поле профиля» одним списком: и для записи, и для сравнения.
+template <class Cfg, class F> void ForEachQualityField(Cfg& c, const Profile& p, F&& f) {
+    f(c.Shadows, p.Shadows);
+    f(c.ShadowResolution, p.ShadowResolution);
+    f(c.ShadowCascades, p.ShadowCascades);
+    f(c.ShadowDistance, p.ShadowDistance);
+    f(c.LocalShadows, p.LocalShadows);
+    f(c.LocalShadowResolution, p.LocalShadowResolution);
+    f(c.Msaa, p.Msaa);
+    f(c.RenderScale, p.RenderScale);
+    f(c.ScreenSpaceGI, p.ScreenSpaceGI);
+    f(c.Reflections, p.Reflections);
+    f(c.PlanarReflections, p.PlanarReflections);
+    f(c.VolumetricScale, p.VolumetricScale);
+    f(c.VolumetricSteps, p.VolumetricSteps);
+    f(c.CloudSteps, p.CloudSteps);
+}
+} // namespace
+
+const char* QualityPresetKey(QualityPreset p) {
+    switch (p) {
+        case QualityPreset::Minimal: return "minimal";
+        case QualityPreset::Low: return "low";
+        case QualityPreset::Medium: return "medium";
+        case QualityPreset::High: return "high";
+        case QualityPreset::Ultra: return "ultra";
     }
+    return "high";
+}
+
+bool QualityPresetFromKey(const std::string& key, QualityPreset& out) {
+    std::string k = key;
+    for (auto& ch : k) ch = (char)std::tolower((unsigned char)ch);
+    for (int i = 0; i < kQualityPresetCount; ++i)
+        if (k == QualityPresetKey((QualityPreset)i)) {
+            out = (QualityPreset)i;
+            return true;
+        }
+    return false;
+}
+
+void EngineConfig::ApplyPreset(QualityPreset preset) {
+    ForEachQualityField(*this, ProfileOf(preset), [](auto& field, const auto& value) { field = value; });
+    QualityProfile = QualityPresetKey(preset);
+}
+
+bool EngineConfig::MatchesPreset(QualityPreset preset) const {
+    bool same = true;
+    ForEachQualityField(*this, ProfileOf(preset), [&](const auto& field, const auto& value) {
+        using T = std::decay_t<decltype(field)>;
+        if constexpr (std::is_floating_point_v<T>) same = same && std::abs(field - value) < 1e-4f;
+        else same = same && field == value;
+    });
+    return same;
+}
+
+bool EngineConfig::CurrentPreset(QualityPreset& out) const {
+    // Сначала тот, что выбран последним: у соседних профилей наборы не
+    // совпадают, но так ответ не зависит от порядка таблицы.
+    QualityPreset chosen;
+    if (QualityPresetFromKey(QualityProfile, chosen) && MatchesPreset(chosen)) {
+        out = chosen;
+        return true;
+    }
+    for (int i = 0; i < kQualityPresetCount; ++i)
+        if (MatchesPreset((QualityPreset)i)) {
+            out = (QualityPreset)i;
+            return true;
+        }
+    return false;
+}
+
+void EngineConfig::Sanitize() {
+    auto pow2 = [](int v, int def) {
+        for (int s : {512, 1024, 2048, 4096})
+            if (v == s) return v;
+        return def;
+    };
+    Width = std::clamp(Width, 320, 16384);
+    Height = std::clamp(Height, 240, 16384);
+    Monitor = std::max(Monitor, -1);
+    RefreshRate = std::clamp(RefreshRate, 0, 1000);
+    FrameCap = std::clamp(FrameCap, 0, 1000);
+    BackgroundFrameCap = std::clamp(BackgroundFrameCap, 0, 1000);
+    Msaa = Msaa >= 8 ? 8 : Msaa >= 4 ? 4 : Msaa >= 2 ? 2 : 0;
+    RenderScale = std::clamp(RenderScale, 0.25f, 2.0f);
+    ShadowResolution = pow2(ShadowResolution, 2048);
+    LocalShadowResolution = pow2(LocalShadowResolution, 2048);
+    ShadowCascades = std::clamp(ShadowCascades, 1, 3);
+    ShadowDistance = std::clamp(ShadowDistance, 10.0f, 2000.0f);
+    VolumetricScale = VolumetricScale < 0.75f ? 0.5f : 1.0f;
+    VolumetricSteps = std::clamp(VolumetricSteps, 4, 128);
+    CloudSteps = std::clamp(CloudSteps, 4, 128);
+    QualityPreset p;
+    if (!QualityPresetFromKey(QualityProfile, p)) QualityProfile = "high";
 }
 
 bool EngineConfig::LoadFile(const std::string& path) {
@@ -181,6 +248,8 @@ bool EngineConfig::LoadFile(const std::string& path) {
     Height    = win.value("height", Height);
     Title     = win.value("title", Title);
     Mode      = ModeFromStr(win.value("mode", std::string(ModeToStr(Mode))));
+    Monitor   = win.value("monitor", Monitor);
+    RefreshRate = win.value("refreshRate", RefreshRate);
     Resizable = win.value("resizable", Resizable);
     VSync     = win.value("vsync", VSync);
     FrameCap  = win.value("frameCap", FrameCap);
@@ -196,6 +265,7 @@ bool EngineConfig::LoadFile(const std::string& path) {
 
     auto gfx = j.value("graphics", json::object());
     Backend          = gfx.value("backend", Backend);
+    QualityProfile   = gfx.value("profile", QualityProfile);
     Shadows          = gfx.value("shadows", Shadows);
     ShadowResolution = gfx.value("shadowResolution", ShadowResolution);
     ShadowCascades = std::clamp(gfx.value("shadowCascades", ShadowCascades), 1, 3);
@@ -251,6 +321,7 @@ bool EngineConfig::LoadFile(const std::string& path) {
     auto build = j.value("build", json::object());
     BuildProjectFile = build.value("projectFile", BuildProjectFile);
 
+    Sanitize();
     LOG_INFO("Config") << "Загружены настройки: " << path;
     return true;
 }
@@ -260,6 +331,7 @@ std::string EngineConfig::ToJsonString() const {
     j["window"] = {
         {"width", Width}, {"height", Height}, {"title", Title},
         {"mode", ModeToStr(Mode)}, {"resizable", Resizable},
+        {"monitor", Monitor}, {"refreshRate", RefreshRate},
         {"vsync", VSync}, {"frameCap", FrameCap}, {"msaa", Msaa},
         {"backgroundFrameCap", BackgroundFrameCap},
     };
@@ -267,7 +339,7 @@ std::string EngineConfig::ToJsonString() const {
         {"aspect", AspectToStr(Aspect)}, {"renderScale", RenderScale},
     };
     j["graphics"] = {
-        {"backend", Backend},
+        {"backend", Backend}, {"profile", QualityProfile},
         {"shadows", Shadows}, {"shadowResolution", ShadowResolution},
         {"shadowCascades", ShadowCascades}, {"shadowDistance", ShadowDistance},
         {"localShadows", LocalShadows}, {"localShadowResolution", LocalShadowResolution},
@@ -322,12 +394,10 @@ void EngineConfig::ApplyEnvOverrides() {
     if (const char* v = std::getenv("SAGE_QUALITY")) {
         std::string s(v);
         for (auto& c : s) c = (char)std::tolower((unsigned char)c);
-        if (s == "low")         ApplyPreset(QualityPreset::Low);
-        else if (s == "medium") ApplyPreset(QualityPreset::Medium);
-        else if (s == "high")   ApplyPreset(QualityPreset::High);
-        else if (s == "ultra")  ApplyPreset(QualityPreset::Ultra);
+        QualityPreset p;
+        if (QualityPresetFromKey(s, p)) ApplyPreset(p);
         else LOG_WARN("Config") << "SAGE_QUALITY: неизвестный пресет '" << v
-                                << "' (ожидается low/medium/high/ultra) — игнорирую";
+                                << "' (ожидается minimal/low/medium/high/ultra) — игнорирую";
     }
 
     // Размер/окно
@@ -390,6 +460,7 @@ void EngineConfig::ApplyEnvOverrides() {
     // проверяет ОБА расклада файлов, не заводя ради этого двух sage.cfg.
     if (const char* v = std::getenv("SAGE_BUILD_PROJECT_FILE"))
         BuildProjectFile = EnvBool(v, BuildProjectFile);
+    Sanitize();
 }
 
 EngineConfig& EngineConfig::Get() { return EngineContext::Current().Config(); }

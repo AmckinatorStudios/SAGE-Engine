@@ -526,6 +526,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
                     EditorTheme::SetUiScale(scale);
                 if (EditorIcons::MenuItem("refresh", T("Reset scale"), nullptr, scale != 1.0f))
                     EditorTheme::SetUiScale(1.0f);
+                // Масштаб системы уже учтён — видно, откуда итоговый размер.
+                if (EditorTheme::SystemScale() > 1.001f)
+                    ImGui::TextDisabled(T("System scale %d%% is applied on top"),
+                                        (int)std::lround(EditorTheme::SystemScale() * 100.0f));
                 ImGui::Separator();
                 // Выгрузка темы файлом — вот ради чего вся система: взять
                 // текущую за основу, поправить цвета в текстовом редакторе и

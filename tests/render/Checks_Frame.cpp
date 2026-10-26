@@ -964,6 +964,61 @@ void TestDecals(FrameRenderer& r) {
     Check(after > before + 500, "наклейка видна в кадре");
 }
 
+// --- Каркас на гранях модели не рябит -------------------------------------------
+//
+// Каркас коллайдера и рёбра Mesh Collider лежат РОВНО на гранях модели, и тест
+// глубины решал «линия или грань» шумом округления: линия рябила и пропадала
+// пятнами. Проверка: штрихи по видимым граням куба (каждый — на самой грани)
+// видны почти целиком — столько же пикселей, сколько без теста глубины.
+void TestGizmoLinesOnSurfacesDoNotFlicker(FrameRenderer& r) {
+    Scene scene("GizmoOnFaces");
+    GameObject cube = scene.CreateObject("Cube");
+    cube.Renderer().Ref = MeshRef{MeshRef::Type::Cube, ""};
+    cube.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+    cube.Renderer().Color = glm::vec3(0.6f);
+    cube.GetTransform().Scale = glm::vec3(3.0f);
+    const LightingEnvironment env = sage::ecs::CollectLighting(scene);
+    const glm::mat4 view = TestView();
+    const glm::mat4 proj = PerspectiveProj();
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+
+    auto green = [&](bool depthTest) {
+        Framebuffer out(kW, kH);
+        out.Bind();
+        device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        device.Clear(true, true);
+        r.Batch.RenderColor(scene, view, proj, kEye, env, ShadowBinding(), 0);
+        device.SetDepthTest(depthTest);
+        DebugDraw dd;
+        // Штрихи по каждой грани, обращённой к камере, — на самой грани.
+        for (int axis = 0; axis < 3; ++axis)
+            for (float sgn : {-1.0f, 1.0f}) {
+                glm::vec3 n(0.0f);
+                n[axis] = sgn;
+                if (glm::dot(n, kEye - n * 1.5f) <= 0.0f) continue;
+                glm::vec3 a(0.0f), b(0.0f);
+                a[(axis + 1) % 3] = 1.0f;
+                b[(axis + 2) % 3] = 1.0f;
+                for (int k = -5; k <= 5; ++k) {
+                    const glm::vec3 c = n * 1.5f + b * (0.27f * (float)k);
+                    dd.Line(c - a * 1.4f, c + a * 1.4f, {0.0f, 1.0f, 0.0f});
+                }
+            }
+        dd.Flush(view, proj, kH);
+        device.SetDepthTest(true);
+        const Image im = Capture(kW, kH);
+        device.BindDefaultFramebuffer();
+        long long g = 0;
+        for (size_t i = 0; i + 2 < im.Pixels.size(); i += 3)
+            if (im.Pixels[i + 1] > 200 && im.Pixels[i] < 90 && im.Pixels[i + 2] < 90) ++g;
+        return g;
+    };
+    const long long all = green(false), seen = green(true);
+    std::printf("       штрихов на гранях: без теста глубины %lld пикселей, с тестом %lld\n", all, seen);
+    Check(all > 500, "штрихи на гранях есть в кадре");
+    Check(seen >= all * 97 / 100, "линии на поверхности видны целиком — грань не грызёт их");
+}
+
 // --- Сетка не рвёт гизмо на своей плоскости ---------------------------------
 //
 // В редакторе после сетки рисуются оси выделенного объекта и прочие гизмо. Ось
@@ -1004,7 +1059,11 @@ void TestGridKeepsGizmoLinesOnItsPlane(FrameRenderer& r) {
     std::printf("       пикселей оси поверх сетки: без записи глубины %lld, с записью %lld\n",
                 editor, occluding);
     Check(editor > 100, "ось на плоскости сетки видна целиком, сетка её не рвёт");
-    Check(editor > occluding * 2, "именно запись глубины сеткой прятала ось");
+    // Линии теперь подтягиваются к глазу на несколько пикселей глубины (см.
+    // DebugDraw), и даже сетка, пишущая глубину, прячет лишь самый дальний,
+    // почти касательный к плоскости участок оси (там, на горизонте, грань уже
+    // уже пикселя), а не рвёт её по всей длине, как раньше.
+    Check(occluding * 2 > editor, "линия на поверхности, пишущей глубину, видна почти целиком");
 }
 
 // --- Заливка гизмо: объём по нормалям и прозрачность --------------------------
@@ -1825,6 +1884,7 @@ void RunFrameChecks(FrameRenderer& r, Scene& scene) {
     TestEmissive(r, scene);
     TestGrid(r, scene);
     TestGridKeepsGizmoLinesOnItsPlane(r);
+    TestGizmoLinesOnSurfacesDoNotFlicker(r);
     TestSolidGizmoShading(r);
     TestDecals(r);
     TestObjectMotionBlur(r);

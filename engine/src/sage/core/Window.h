@@ -16,6 +16,8 @@ public:
     // Параметры создания окна (режим/ресайз/vsync/сглаживание) берутся из конфига.
     struct Params {
         sage::WindowMode Mode = sage::WindowMode::Windowed;
+        int Monitor = -1;       // номер монитора системы, -1 — главный
+        int RefreshRate = 0;    // полноэкранный режим: Гц, 0 — текущая у монитора
         bool Resizable = true;
         bool VSync = true;
         int Msaa = 0;
@@ -69,6 +71,20 @@ public:
 
     // Вызывается GLFW при изменении размера окна
     void OnResize(int width, int height);
+
+    // --- Режим экрана на ходу ------------------------------------------------
+    // То, что раньше менялось только перезапуском: режим окна, монитор,
+    // разрешение и частота. Неудача — окно остаётся (или возвращается) как
+    // было, а причина — в err.
+    struct Display {
+        sage::WindowMode Mode = sage::WindowMode::Windowed;
+        int Monitor = -1;
+        int Width = 1280;
+        int Height = 720;
+        int RefreshRate = 0;
+    };
+    Display CurrentDisplay() const;
+    bool ApplyDisplay(const Display& d, std::string* err = nullptr);
 
     // Подписка на события мыши. GLFW даёт ровно ОДИН user pointer и один
     // колбэк каждого типа на окно — ими монопольно владеет Window (user
@@ -137,6 +153,18 @@ public:
     // Фокус окна. Подписчики, считающие смещение мыши по разнице положений
     // (GlfwBridge), начинают отсчёт заново: смещение «до» и «после» alt-tab —
     // не движение мыши в игре, а скачок обзора.
+    // Масштаб системы для этого окна (Windows: 1.25 при 125%). Не 0 никогда:
+    // не ответивший монитор даёт масштаб главного или 1.0 (sage/core/Display.h).
+    float ContentScale() const {
+#if defined(__APPLE__)
+        return 1.0f;
+#else
+        return m_contentScale;
+#endif
+    }
+    using ScaleFn = std::function<void(float scale)>;
+    void AddContentScaleCallback(ScaleFn fn) { m_scaleFns.push_back(std::move(fn)); }
+
     using FocusFn = std::function<void(bool focused)>;
     void AddFocusCallback(FocusFn fn) { m_focusFns.push_back(std::move(fn)); }
 
@@ -194,6 +222,15 @@ private:
     bool m_haveLast = false;
     double m_frameDx = 0.0, m_frameDy = 0.0;
     bool m_iconified = false;
+    float m_contentScale = 1.0f;
+    // Последнее положение и размер В ОКНЕ: выход из полноэкранного режима
+    // возвращает окно туда, где оно было, а не в угол экрана.
+    int m_windowedX = 100, m_windowedY = 100, m_windowedW = 1280, m_windowedH = 720;
+    sage::WindowMode m_mode = sage::WindowMode::Windowed;
+    int m_monitor = -1;
+    int m_refresh = 0;
+    std::vector<ScaleFn> m_scaleFns;
+    float QueryContentScale() const;
     bool m_focused = true;
     double m_lastInput = 0.0;     // glfwGetTime() последнего события ввода
     void TouchInput();

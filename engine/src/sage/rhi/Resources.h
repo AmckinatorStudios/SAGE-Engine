@@ -52,7 +52,9 @@ struct QueryHandle {
 };
 
 // --- Общие перечисления состояния конвейера ---
-enum class DepthFunc { Less, LessEqual };
+// Greater — «только то, что ЗА поверхностью»: так редактор рисует скрытую
+// часть гизмо бледной, а не прячет её совсем.
+enum class DepthFunc { Less, LessEqual, Greater };
 enum class CullMode { Back, Front, Off };
 // Обмотка лицевой стороны. CounterClockwise — соглашение движка и всех его
 // генераторов геометрии; Clockwise нужен зеркальным проходам, где отражение

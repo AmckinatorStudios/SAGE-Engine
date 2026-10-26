@@ -1,5 +1,7 @@
 #include "Window.h"
 #include "Log.h"
+#include "sage/core/Display.h"
+#include <algorithm>
 #include <stdexcept>
 
 static void FramebufferSizeCallback(GLFWwindow* handle, int width, int height) {
@@ -97,6 +99,14 @@ void Window::ForwardFileDrop(GLFWwindow* handle, int count, const char** paths) 
 // «не найден OpenGL». Именно этот текст и отвечает на вопрос, почему на одном
 // ПК запускается, а на другом нет; без него разбор упирается в переписку.
 static void GlfwErrorCallback(int code, const char* description) {
+    // Неответ монитора на запрос масштаба или режима — не поломка: и ImGui, и
+    // движок пропускают такой монитор и берут запасное значение (см.
+    // sage/core/Display.h). Ошибкой он выглядел как сбой редактора — три
+    // красные строки при каждом опросе мониторов.
+    if (sage::display::IsMonitorQueryError(code, description)) {
+        sage::display::NoteMonitorQueryError(description);
+        return;
+    }
     LOG_ERROR("Window") << "GLFW " << code << ": " << (description ? description : "(без текста)");
 }
 
@@ -128,15 +138,26 @@ Window::Window(int width, int height, const std::string& title, Params params)
     glfwWindowHint(GLFW_SRGB_CAPABLE, GLFW_TRUE);
     if (params.Msaa > 0) glfwWindowHint(GLFW_SAMPLES, params.Msaa); // сглаживание экранного буфера
 
-    // Полноэкранный/безрамочный режим использует текущий видеорежим монитора
-    // (borderless = «окно во весь монитор без рамки», fullscreen = эксклюзивный).
+    // Монитор — ВЫБРАННЫЙ, а не всегда главный; пропавший или не отвечающий
+    // о своём режиме — главный (sage/core/Display.h).
     GLFWmonitor* monitor = glfwGetPrimaryMonitor();
+    {
+        const auto all = sage::display::QueryMonitors();
+        if (params.Monitor >= 0 && params.Monitor < (int)all.size() && all[(size_t)params.Monitor].ModeKnown)
+            monitor = all[(size_t)params.Monitor].Handle;
+    }
     const GLFWvidmode* vmode = monitor ? glfwGetVideoMode(monitor) : nullptr;
     GLFWmonitor* useMonitor = nullptr;
     int createW = width, createH = height;
     if (params.Mode == sage::WindowMode::Fullscreen && monitor && vmode) {
+        // Эксклюзивный режим — В ЗАКАЗАННОМ РАЗРЕШЕНИИ. Раньше брался текущий
+        // режим монитора, и выбранные 1280×720 молча превращались в 2560×1440.
         useMonitor = monitor;
-        createW = vmode->width; createH = vmode->height;
+        if (width <= 0 || height <= 0) {
+            createW = vmode->width;
+            createH = vmode->height;
+        }
+        glfwWindowHint(GLFW_REFRESH_RATE, params.RefreshRate > 0 ? params.RefreshRate : GLFW_DONT_CARE);
     } else if (params.Mode == sage::WindowMode::Borderless && monitor && vmode) {
         // Безрамочное окно во весь монитор: подсказки под видеорежим + decorated=false.
         glfwWindowHint(GLFW_RED_BITS, vmode->redBits);
@@ -182,6 +203,24 @@ Window::Window(int width, int height, const std::string& title, Params params)
     LOG_INFO("Window") << "Окно создано: " << createW << "x" << createH
                        << ", контекст OpenGL 3.3 получен";
 
+    m_mode = params.Mode;
+    m_monitor = params.Monitor;
+    m_refresh = params.RefreshRate;
+    m_windowedW = width;
+    m_windowedH = height;
+    if (params.Mode == sage::WindowMode::Windowed && params.Monitor >= 0 && vmode && !params.Maximized) {
+        // Окно — по центру ВЫБРАННОГО монитора, а не там, куда его поставит система.
+        int mx = 0, my = 0;
+        glfwGetMonitorPos(monitor, &mx, &my);
+        glfwSetWindowPos(m_handle, mx + std::max(0, (vmode->width - width) / 2), my + std::max(0, (vmode->height - height) / 2));
+    }
+    if (params.Mode == sage::WindowMode::Borderless && monitor) {
+        // Безрамочное окно — в угол ВЫБРАННОГО монитора.
+        int mx = 0, my = 0;
+        glfwGetMonitorPos(monitor, &mx, &my);
+        glfwSetWindowPos(m_handle, mx, my);
+    }
+
     glfwMakeContextCurrent(m_handle);
     glfwSwapInterval(params.VSync ? 1 : 0); // вертикальная синхронизация
     glfwSetWindowUserPointer(m_handle, this);
@@ -191,6 +230,17 @@ Window::Window(int width, int height, const std::string& title, Params params)
     // этом каждый кадр на X11 значит обмен с сервером на каждый вопрос.
     glfwSetWindowIconifyCallback(m_handle, [](GLFWwindow* h, int iconified) {
         if (auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h))) win->m_iconified = iconified != 0;
+    });
+    // МАСШТАБ — ИЗ СОБЫТИЯ, а не вопросом каждый кадр: в Windows вопрос идёт к
+    // монитору (GetDpiForMonitor), и монитор, который не отвечает, превращал бы
+    // каждый кадр в ошибку. Событие приносит масштаб в самом сообщении о смене
+    // DPI (окно перетащили на другой монитор, поменяли «Масштаб» в Windows).
+    m_contentScale = QueryContentScale();
+    glfwSetWindowContentScaleCallback(m_handle, [](GLFWwindow* h, float sx, float) {
+        auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h));
+        if (!win || sx <= 0.01f) return;
+        win->m_contentScale = sx;
+        for (const ScaleFn& fn : win->m_scaleFns) fn(sx);
     });
     glfwSetWindowFocusCallback(m_handle, [](GLFWwindow* h, int focused) {
         if (auto* win = static_cast<Window*>(glfwGetWindowUserPointer(h))) win->EmitFocus(focused != 0);
@@ -314,4 +364,103 @@ void Window::OnResize(int width, int height) {
     // экранного буфера через rhi::GraphicsDevice), окно к GL не обращается.
     m_width = width;
     m_height = height;
+}
+
+float Window::QueryContentScale() const {
+#if defined(__APPLE__)
+    // На Mac плотность пикселей уже в размере кадрового буфера (Retina = 2),
+    // и интерфейс масштабирует ImGui через FramebufferScale — второй раз не надо.
+    return 1.0f;
+#else
+    float sx = 0.0f, sy = 0.0f;
+    glfwGetWindowContentScale(m_handle, &sx, &sy);
+    if (sx > 0.01f) return sx;
+    // Монитор окна не ответил — масштаб главного монитора, затем 100%.
+    if (GLFWmonitor* m = glfwGetPrimaryMonitor()) {
+        glfwGetMonitorContentScale(m, &sx, &sy);
+        if (sx > 0.01f) return sx;
+    }
+    return 1.0f;
+#endif
+}
+
+Window::Display Window::CurrentDisplay() const {
+    Display d;
+    d.Mode = m_mode;
+    d.Monitor = m_monitor;
+    d.RefreshRate = m_refresh;
+    int w = 0, h = 0;
+    glfwGetWindowSize(m_handle, &w, &h);
+    d.Width = m_mode == sage::WindowMode::Windowed ? w : (m_mode == sage::WindowMode::Fullscreen ? w : m_windowedW);
+    d.Height = m_mode == sage::WindowMode::Windowed ? h : (m_mode == sage::WindowMode::Fullscreen ? h : m_windowedH);
+    return d;
+}
+
+bool Window::ApplyDisplay(const Display& d, std::string* err) {
+    auto fail = [&](const std::string& why) {
+        if (err) *err = why;
+        return false;
+    };
+    const auto monitors = sage::display::QueryMonitors();
+    if (monitors.empty()) return fail("система не сообщила ни одного монитора");
+    const sage::display::Monitor* mon = nullptr;
+    if (d.Monitor >= 0 && d.Monitor < (int)monitors.size()) mon = &monitors[(size_t)d.Monitor];
+    if (!mon)
+        for (const auto& m : monitors)
+            if (m.Primary) mon = &m;
+    if (!mon) mon = &monitors.front();
+    if (!mon->ModeKnown) return fail("монитор «" + mon->Name + "» не сообщает свой режим — выберите другой");
+
+    // Запомнить окно, ИЗ которого уходим, — чтобы вернуть его на место.
+    if (m_mode == sage::WindowMode::Windowed) {
+        glfwGetWindowPos(m_handle, &m_windowedX, &m_windowedY);
+        glfwGetWindowSize(m_handle, &m_windowedW, &m_windowedH);
+    }
+    switch (d.Mode) {
+        case sage::WindowMode::Fullscreen: {
+            // Только режим, который монитор действительно умеет: иначе система
+            // подставит ближайший молча, и интерфейс показывал бы не то, что есть.
+            bool supported = false;
+            for (const auto& vm : mon->Modes)
+                supported = supported || (vm.Width == d.Width && vm.Height == d.Height &&
+                                          (d.RefreshRate <= 0 || vm.RefreshHz == d.RefreshRate));
+            if (!supported)
+                return fail("монитор «" + mon->Name + "» не поддерживает " + std::to_string(d.Width) + "×" +
+                            std::to_string(d.Height) +
+                            (d.RefreshRate > 0 ? " " + std::to_string(d.RefreshRate) + " Гц" : std::string()));
+            glfwSetWindowMonitor(m_handle, mon->Handle, 0, 0, d.Width, d.Height,
+                                 d.RefreshRate > 0 ? d.RefreshRate : GLFW_DONT_CARE);
+            break;
+        }
+        case sage::WindowMode::Borderless:
+            // Безрамочное — окно ровно по монитору, без смены видеорежима:
+            // переключение мгновенное и не моргает экраном.
+            glfwSetWindowMonitor(m_handle, nullptr, mon->X, mon->Y, mon->Current.Width, mon->Current.Height, 0);
+            glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_FALSE);
+            break;
+        case sage::WindowMode::Windowed: {
+            glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_TRUE);
+            // Окно не больше монитора и по его центру, если пришло с другого.
+            const int w = std::min(d.Width, mon->Current.Width), h = std::min(d.Height, mon->Current.Height);
+            int x = m_windowedX, y = m_windowedY;
+            if (x < mon->X || y < mon->Y || x + w > mon->X + mon->Current.Width ||
+                y + h > mon->Y + mon->Current.Height) {
+                x = mon->X + (mon->Current.Width - w) / 2;
+                y = mon->Y + (mon->Current.Height - h) / 2;
+            }
+            glfwSetWindowMonitor(m_handle, nullptr, x, y, w, h, 0);
+            break;
+        }
+    }
+    m_mode = d.Mode;
+    m_monitor = mon->Index;
+    m_refresh = d.RefreshRate;
+    int fw = 0, fh = 0;
+    glfwGetFramebufferSize(m_handle, &fw, &fh);
+    if (fw > 0 && fh > 0) OnResize(fw, fh);
+    LOG_INFO("Window") << "Режим экрана: "
+                       << (d.Mode == sage::WindowMode::Fullscreen ? "полноэкранный"
+                           : d.Mode == sage::WindowMode::Borderless ? "безрамочный" : "оконный")
+                       << " на «" << mon->Name << "», кадр " << fw << "x" << fh;
+    return true;
 }

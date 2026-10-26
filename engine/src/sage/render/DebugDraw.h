@@ -49,6 +49,10 @@ public:
 
     // Каркасная сфера: три больших круга (XY/XZ/YZ).
     void WireSphere(glm::vec3 center, float radius, glm::vec3 color, int segments = 32);
+    // Окружность в плоскости с нормалью normal.
+    void Circle(glm::vec3 center, glm::vec3 normal, float radius, glm::vec3 color, int segments = 32);
+    // Стрелка from -> to с наконечником (длина наконечника — head).
+    void Arrow(glm::vec3 from, glm::vec3 to, glm::vec3 color, float head = 0.15f);
     // Капсула в произвольном повороте: цилиндр высотой 2*halfHeight вдоль
     // локальной оси Y плюс полусферы на торцах.
     //
@@ -96,9 +100,24 @@ public:
 
     // Рисует накопленный батч и очищает его. Вызывать после отрисовки сцены
     // в тот же кадровый буфер (иначе тесту глубины не с чем сравнивать).
-    void Flush(const glm::mat4& view, const glm::mat4& proj);
+    // viewportHeight — высота кадра в пикселях (для подтяжки глубины в
+    // пикселях); 0 — принять 1080.
+    void Flush(const glm::mat4& view, const glm::mat4& proj, int viewportHeight = 0);
+
+    // Непрозрачность ЗАСЛОНЁННОЙ части линий: 0 — не рисовать (игра), редактор
+    // ставит бледную, чтобы гизмо за стеной читались, но не мешали.
+    void SetHiddenLineAlpha(float a) { m_hiddenAlpha = a; }
+
+    // Подтяжка к глазу (см. шейдер) — в ПИКСЕЛЯХ, как наклонный polygon offset
+    // у граней: линия на поверхности отличается от грани по глубине на
+    // «наклон грани × полпикселя», и на скошенной грани это намного больше
+    // шага буфера глубины. Три угловых размера пикселя покрывают грани до
+    // ~80° к лучу взгляда; круче — грань и так видна полоской в пиксель, а
+    // остаток дорисовывает бледный проход скрытых линий.
+    static constexpr float kDepthPullPixels = 3.0f;
 
 private:
+    float m_hiddenAlpha = 0.0f;
     struct LineVertex {
         glm::vec3 Pos;
         glm::vec3 Color;

@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 #include <entt/entt.hpp>
+#include "sage/physics/PhysicsComponents.h"
 #include "sage/physics/PhysicsWorld.h"
 
 class Scene;
@@ -194,7 +195,8 @@ private:
     // Между «состав мира» и шагом мира: скрипт уже сказал, куда идти, а
     // столкновения ещё не посчитаны.
     void StepCharacters(Scene& scene, float dt);
-    void PullCharacters(Scene& scene);
+    void PullCharacters(Scene& scene, float dt);
+    static void StopAtCeiling(CharacterControllerComponent& cc, float actualUp);
     // Пересчитывает m_inside по событиям сенсоров бэкенда и по персонажам и
     // дописывает в m_contacts разницу с прошлым шагом.
     void UpdateTriggers(Scene& scene);
@@ -216,8 +218,14 @@ private:
         entt::entity Entity = entt::null;
         sage::physics::BodyHandle Body = sage::physics::kInvalidBody;
         std::string Settings;   // см. SettingsKey в PhysicsScene.cpp
+        bool Implicit = false;  // неявное статическое тело коллайдера (m_implicit)
+        glm::mat4 Pose{1.0f};   // мировая поза, с которой тело поставлено
     };
     std::vector<Tracked> m_tracked;
+    // Коллайдеры без RigidBodyComponent — неподвижная геометрия мира. Их тело
+    // живёт здесь, а не в компоненте сцены: Play ничего не дописывает объекту.
+    std::unordered_map<entt::entity, RigidBodyComponent> m_implicit;
+    bool NeedsImplicitBody(Scene& scene, entt::entity e) const;
 
     // Геометрия коллайдеров: исходная (по модели, без масштаба) и готовая (с
     // масштабом). Две ступени — чтобы растянутая копия камня не перечитывала
