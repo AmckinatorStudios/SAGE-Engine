@@ -137,8 +137,6 @@ void EditorLayer::RegisterCommands() {
                     [this] { StartPlay(); }});
     m_commands.Add({"play.stop", T("Stop"), scene, "", "stop",
                     [this] { return InPlayMode(); }, [this] { StopPlay(); }});
-    m_commands.Add({"play.checkScripts", T("Check Scripts"), scene, "", "script", hasProject,
-                    [this] { CheckScripts(); }});
 
     m_commands.Add({"object.duplicate", T("Duplicate"), object, "Ctrl+D", "cube",
                     hasSelection, [this] { DuplicateSelected(); }});

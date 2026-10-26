@@ -61,12 +61,13 @@ bool EditorLayer::SelfTestPanelRegistry() {
     // Окно «Настройки»: управление и оформление — его разделы, а лишних
     // (постобработка — компонент камеры, среда — своё окно, шрифт) нет.
     {
-        for (const char* key : {"screen", "quality", "lighting", "controls", "advanced", "appearance"})
+        for (const char* key : {"screen", "quality", "lighting", "controls", "advanced", "general", "appearance"})
             if (!m_settingsPanel.SelectByKey(key)) fail(std::string("в настройках нет раздела ") + key);
         for (const char* key : {"post", "environment", "interface", "shadows"})
             if (m_settingsPanel.SelectByKey(key)) fail(std::string("в настройках остался лишний раздел ") + key);
         if (!m_commands.Find("window.controls")) fail("нет команды «Управление» в палитре");
         if (m_commands.Find("play.luaTests")) fail("в палитре остался проверочный пункт Lua-тестов");
+        if (m_commands.Find("play.checkScripts")) fail("в палитре осталась «Проверить скрипты»");
         m_commands.Run("window.controls");
         if (!m_panels[EditorPanel::Settings] || m_settingsPanel.Current() != SettingsPanel::Category::Controls)
             fail("«Управление» не открыло раздел окна настроек");

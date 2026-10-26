@@ -15,6 +15,7 @@
 
 #include <imgui.h>
 
+#include "CodeEditorApp.h"
 #include "EditorHost.h"
 #include "EditorIcons.h"
 #include "EditorTheme.h"
@@ -217,7 +218,17 @@ static void DrawShadowGroups(sage::EngineConfig& c, ui::Ctx& ctx) {
         o.Tooltip = T("More cascades keep shadows sharp both near and far");
         bool reset = false;
         if (ui::Row(ctx, T("Cascades"), o, &reset)) {
-            ui::SliderInt("##casc", &c.ShadowCascades, 1, 3, "%d");
+            // Три значения — три кнопки: у ползунка на диапазон 1…3 бегунок
+            // шириной в треть поля, и он выглядел сломанным.
+            const float gap = Sage::UI::Get().SpacingXS;
+            const float bw = (ImGui::GetContentRegionAvail().x - gap * 2.0f) / 3.0f;
+            for (int k = 1; k <= 3; ++k) {
+                if (k > 1) ImGui::SameLine(0.0f, gap);
+                char label[8];
+                std::snprintf(label, sizeof(label), "%d", k);
+                const auto style = c.ShadowCascades == k ? Sage::UI::ButtonStyle::Primary : Sage::UI::ButtonStyle::Secondary;
+                if (Sage::UI::Button(label, style, ImVec2(bw, 0))) c.ShadowCascades = k;
+            }
             if (reset) c.ShadowCascades = Def().ShadowCascades;
             ui::EndRow(ctx, o);
         }
@@ -301,7 +312,8 @@ void SettingsPanel::DrawLighting(EditorHost& host, ui::Ctx& ctx) {
 void SettingsPanel::DrawAdvanced(EditorHost& host, ui::Ctx& ctx) {
     sage::EngineConfig& c = host.Settings();
     using State = sage::rhi::GraphicsDevice::BackendInfo::State;
-    ui::BeginGroup(ctx, T("Graphics API"), T("Changing the API of an open window is impossible in any engine."));
+    ui::BeginGroup(ctx, T("Graphics API"), T("Changing the API of an open window is impossible in any engine."),
+                   ui::Apply::Launch);
     {
         ui::RowOpts o;
         o.Keywords = "api backend opengl vulkan directx графический";
@@ -361,6 +373,69 @@ void SettingsPanel::DrawAdvanced(EditorHost& host, ui::Ctx& ctx) {
         }
         Sage::UI::TextSecondary(T("Settings file: %s"),
                                 (host.CurrentProject().Dir() / "sage.cfg").string().c_str());
+    }
+    ui::EndGroup(ctx);
+}
+
+// --- Общие настройки редактора -----------------------------------------------------
+// Язык и программа для кода — настройки ЧЕЛОВЕКА, а не проекта: проект,
+// навязывающий соавтору свой язык или свою IDE, — не то, чего ждут от проекта.
+void SettingsPanel::DrawGeneral(EditorHost& host, ui::Ctx& ctx) {
+    ui::BeginGroup(ctx, T("Editor"));
+    {
+        ui::RowOpts o;
+        o.Keywords = "language interface russian english язык интерфейса русский английский";
+        if (ui::Row(ctx, T("Language"), o)) {
+            const auto& langs = sage::editor::AvailableLanguages();
+            const char* current = "";
+            for (const sage::editor::LanguageInfo& l : langs)
+                if (l.Code == sage::editor::CurrentLanguageCode()) current = l.Name.c_str();
+            if (ImGui::BeginCombo("##lang", current)) {
+                for (const sage::editor::LanguageInfo& l : langs) {
+                    const bool active = l.Code == sage::editor::CurrentLanguageCode();
+                    // Название языка НЕ переводится: случайно переключивший
+                    // интерфейс на незнакомый находит дорогу назад по «English».
+                    if (ImGui::Selectable(l.Name.c_str(), active) && !active) {
+                        sage::editor::SetLanguage(l.Code);
+                        host.SetStatusMessage(T("Interface language changed"));
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ui::EndRow(ctx, o);
+        }
+    }
+    {
+        namespace codeapp = sage::editor::codeapp;
+        ui::RowOpts o;
+        o.Keywords = "code editor ide vscode script open редактор кода программа скрипты";
+        o.Tooltip = T("Only what is actually installed is listed");
+        if (ui::Row(ctx, T("Code editor"), o)) {
+            const std::string id = codeapp::CurrentId();
+            const std::vector<codeapp::App>& apps = codeapp::Available();
+            std::string current = T("As the system opens it");
+            for (const codeapp::App& app : apps)
+                if (app.Id == id) current = app.Name;
+            const float bw = ImGui::GetFrameHeight();
+            ImGui::SetNextItemWidth(-(bw + Sage::UI::Get().SpacingXS));
+            if (ImGui::BeginCombo("##code", current.c_str())) {
+                // Системная ассоциация — всегда первая: единственный вариант,
+                // который не может «не установиться».
+                if (ImGui::Selectable(T("As the system opens it"), id.empty())) codeapp::SetCurrent("");
+                // Имя программы не переводится — по нему её узнают в системе.
+                for (const codeapp::App& app : apps)
+                    if (ImGui::Selectable(app.Name.c_str(), app.Id == id)) codeapp::SetCurrent(app.Id);
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine(0.0f, Sage::UI::Get().SpacingXS);
+            if (EditorIcons::IconOnlyButton("search", T("Search again"))) {
+                codeapp::Rescan();
+                host.SetStatusMessage(T("Code editors: ") + std::to_string(codeapp::Available().size()));
+            }
+            // Пустой список — не поломка, и сказать об этом надо прямо.
+            if (apps.empty()) Sage::UI::TextSecondary("%s", T("No code editors found on this machine"));
+            ui::EndRow(ctx, o);
+        }
     }
     ui::EndGroup(ctx);
 }

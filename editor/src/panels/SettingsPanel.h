@@ -16,7 +16,8 @@ struct Ctx;
 // «НАСТРОЙКИ» — одно окно на всё, что настраивают, а не строят:
 //   • игра (уезжает в сборку): экран, качество графики, освещение и тени,
 //     управление, дополнительно;
-//   • редактор (живёт в профиле человека, а не в проекте): оформление.
+//   • редактор (живёт в профиле человека, а не в проекте): общие (язык,
+//     программа для кода) и оформление.
 //
 // Постобработки, среды и шрифта интерфейса здесь нет: постобработка — компонент
 // камеры, небо и туман — окно «Среда», шрифт — элементы интерфейса. Второе
@@ -28,15 +29,17 @@ struct Ctx;
 //     её задача сохранить, а не «включить»;
 //   • Отмена — вернуть то, что сохранено в проекте;
 //   • По умолчанию — значения движка для ТЕКУЩЕГО раздела.
-// Оформление применяется сразу и сохраняется в профиле — кнопок у него нет.
+// Разделы редактора применяются сразу и сохраняются в профиле — кнопок у них нет.
 // Режим экрана проверяется отдельно: «Проверить на этом экране» ставит его
 // окну редактора, спрашивает «оставить?» и сам возвращает прежний, если ответа
 // нет.
 // ---------------------------------------------------------------------------
 class SettingsPanel {
 public:
-    // Порядок — порядок списка слева; Appearance — первый раздел редактора.
-    enum class Category { Screen, Quality, Lighting, Controls, Advanced, Appearance, Count };
+    // Порядок — порядок списка слева; General — первый раздел редактора.
+    enum class Category { Screen, Quality, Lighting, Controls, Advanced, General, Appearance, Count };
+    // Раздел редактора (профиль человека, применяется сразу), а не игры.
+    static bool IsEditorCategory(Category c) { return c == Category::General || c == Category::Appearance; }
 
     void Draw(EditorHost& host, bool& open);
 
@@ -44,8 +47,10 @@ public:
     Category Current() const { return m_cat; }
     void Select(Category c) { m_cat = c; }
     void SetSearch(const char* text);
+    // Размер окна при следующем открытии — для скриншот-проверки узкого окна.
+    void ForceSize(float w, float h) { m_forceW = w; m_forceH = h; }
     // Раздел по ключу ("screen", "quality", "lighting", "controls", "advanced",
-    // "appearance"); false — нет такого.
+    // "general", "appearance"); false — нет такого.
     bool SelectByKey(const char* key);
     bool HasUnsavedChanges(const EditorHost& host) const;
     // Записать в проект (как кнопка «Применить»).
@@ -67,6 +72,7 @@ private:
     void DrawQuality(EditorHost& host, sage::editor::settingsui::Ctx& ctx);
     void DrawLighting(EditorHost& host, sage::editor::settingsui::Ctx& ctx);
     void DrawAdvanced(EditorHost& host, sage::editor::settingsui::Ctx& ctx);
+    void DrawGeneral(EditorHost& host, sage::editor::settingsui::Ctx& ctx);
     void DrawAppearance(EditorHost& host, sage::editor::settingsui::Ctx& ctx);
 
     const std::vector<sage::display::Monitor>& Monitors();
@@ -81,4 +87,5 @@ private:
     std::vector<sage::display::Monitor> m_monitors;
     double m_monitorsAt = -100.0;
     InputPanel m_controls;             // раздел «Управление» (input.sageinput)
+    float m_forceW = 0.0f, m_forceH = 0.0f;
 };

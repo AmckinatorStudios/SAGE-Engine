@@ -39,6 +39,9 @@ CategoryInfo Info(SettingsPanel::Category c) {
             return {"keyboard", T("Game controls"), T("Game actions and the keys, buttons and sticks they are bound to.")};
         case SettingsPanel::Category::Advanced:
             return {"gear", T("Advanced"), T("Graphics API of the game and information about this machine.")};
+        case SettingsPanel::Category::General:
+            return {"language", T("General"),
+                    T("Language of the editor and the program that opens code. Stored for you, not in the project.")};
         case SettingsPanel::Category::Appearance:
             return {"theme", T("Appearance"),
                     T("Theme and scale of the editor. Stored for you, not in the project, and applied at once.")};
@@ -93,7 +96,8 @@ void SettingsPanel::SetSearch(const char* text) {
 }
 
 bool SettingsPanel::SelectByKey(const char* key) {
-    static const char* const kKeys[] = {"screen", "quality", "lighting", "controls", "advanced", "appearance"};
+    static const char* const kKeys[] = {"screen",   "quality", "lighting",  "controls",
+                                        "advanced", "general", "appearance"};
     static_assert(sizeof(kKeys) / sizeof(kKeys[0]) == (size_t)Category::Count, "ключ на каждый раздел");
     for (int i = 0; i < (int)Category::Count; ++i) {
         if (key && std::strcmp(key, kKeys[i]) == 0) {
@@ -116,6 +120,10 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     SyncSaved(host);
 
     ImGui::SetNextWindowSize(ImVec2(980, 660), ImGuiCond_FirstUseEver);
+    if (m_forceW > 0.0f) {
+        ImGui::SetNextWindowSize(ImVec2(m_forceW, m_forceH), ImGuiCond_Always);
+        m_forceW = 0.0f;
+    }
     ImGui::SetNextWindowSizeConstraints(ImVec2(560, 420), ImVec2(FLT_MAX, FLT_MAX));
     // Скрытый идентификатор прежний: раскладка доков помнит окно по нему.
     if (!ImGui::Begin(EditorIcons::WindowTitle("gear", T("Settings"), "Game Settings").c_str(), &open)) {
@@ -127,60 +135,83 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     const float avail = ImGui::GetContentRegionAvail().x;
     // Узкое окно — разделы колонкой иконок, параметры в одну колонку.
     const bool compactNav = avail < 720.0f;
-    const float navW = compactNav ? ImGui::GetFrameHeight() + st.SpacingLG * 2.0f : std::clamp(avail * 0.22f, 190.0f, 240.0f);
+    const float navW = compactNav ? ImGui::GetFrameHeight() + st.SpacingSM * 4.0f : std::clamp(avail * 0.22f, 190.0f, 240.0f);
 
     // --- Разделы ------------------------------------------------------------
     ImGui::PushStyleColor(ImGuiCol_ChildBg, EditorTheme::Color(EditorTheme::Role::SurfaceAlt));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 6.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(st.SpacingSM, st.SpacingSM));
     ImGui::BeginChild("##nav", ImVec2(navW, -footerH), ImGuiChildFlags_AlwaysUseWindowPadding);
     if (!compactNav) {
         ImGui::SetNextItemWidth(-FLT_MIN);
         Sage::UI::SearchField("##search", m_search, sizeof(m_search), T("Search settings"));
-        ImGui::Dummy(ImVec2(0.0f, st.SpacingSM));
+        ImGui::Dummy(ImVec2(0.0f, st.SpacingXS));
     }
     for (int i = 0; i < (int)Category::Count; ++i) {
         const Category c = (Category)i;
         const CategoryInfo info = Info(c);
         const bool sel = m_cat == c && m_search[0] == 0;
         // Заголовки «Игра» и «Редактор»: первое уезжает в сборку, второе —
-        // только у этого человека, и путать их нельзя.
-        if (!compactNav && (i == 0 || c == Category::Appearance)) {
+        // только у этого человека, и путать их нельзя. В узкой колонке
+        // значков подписи не влезают — там их место занимает черта.
+        if (!compactNav && (i == 0 || c == Category::General)) {
             if (i) ImGui::Dummy(ImVec2(0.0f, st.SpacingSM));
+            ImGui::SetCursorPosX(ImGui::GetCursorPosX() + st.SpacingSM);
             Sage::UI::TextSecondary("%s", i == 0 ? T("Game") : T("Editor"));
-        } else if (compactNav && c == Category::Appearance) {
+        } else if (compactNav && c == Category::General) {
+            ImGui::Dummy(ImVec2(0.0f, st.SpacingXS));
             ImGui::Separator();
+            ImGui::Dummy(ImVec2(0.0f, st.SpacingXS));
         }
         ImGui::PushID(i);
+        // Строка раздела рисуется сама, а не Selectable: у Selectable фон
+        // вылезает за отступ окна, а полоса акцента, нарисованная левее него,
+        // упиралась в край колонки — выбранный пункт выглядел съехавшим.
         const ImVec2 p = ImGui::GetCursorScreenPos();
+        const float w = ImGui::GetContentRegionAvail().x;
         const float h = ImGui::GetFrameHeight() + st.SpacingSM;
-        if (ImGui::Selectable("##cat", sel, 0, ImVec2(0.0f, h))) {
+        if (ImGui::InvisibleButton("##cat", ImVec2(w, h))) {
             m_cat = c;
             m_search[0] = 0;
         }
-        if (compactNav && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", info.Name);
+        const bool hovered = ImGui::IsItemHovered();
+        if (compactNav && hovered) ImGui::SetTooltip("%s", info.Name);
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        // Выбранный раздел — полоса акцента слева, как в списке параметров ОС.
+        const ImVec2 q(p.x + w, p.y + h);
+        if (sel || hovered) {
+            ImVec4 bg = EditorTheme::Color(sel ? EditorTheme::Role::Accent : EditorTheme::Role::Elevated);
+            bg.w = sel ? 0.16f : 0.9f;
+            dl->AddRectFilled(p, q, ImGui::ColorConvertFloat4ToU32(bg), 5.0f);
+        }
+        // Выбранный раздел — полоса акцента у левого края строки, внутри неё.
         if (sel)
-            dl->AddRectFilled(ImVec2(p.x - st.SpacingSM, p.y), ImVec2(p.x - st.SpacingSM + 3.0f, p.y + h),
-                              EditorTheme::Color32(EditorTheme::Role::Accent));
+            dl->AddRectFilled(ImVec2(p.x, p.y + h * 0.22f), ImVec2(p.x + 3.0f, q.y - h * 0.22f),
+                              EditorTheme::Color32(EditorTheme::Role::Accent), 1.5f);
         const ImU32 col = EditorTheme::Color32(sel ? EditorTheme::Role::Text : EditorTheme::Role::TextDim);
         const float icon = std::floor(ImGui::GetFontSize() * 1.15f);
-        if (compactNav) {
-            EditorIcons::DrawLabeled(dl, ImVec2(p.x + 2.0f, p.y + (h - icon) * 0.5f), icon, info.Icon, col, "", col);
-        } else {
-            EditorIcons::DrawLabeled(dl, ImVec2(p.x + 6.0f, p.y + (h - icon) * 0.5f), icon, info.Icon, col, info.Name,
-                                     col);
-        }
+        const float iy = p.y + (h - icon) * 0.5f;
+        if (compactNav)
+            EditorIcons::DrawLabeled(dl, ImVec2(p.x + (w - icon) * 0.5f, iy), icon, info.Icon, col, "", col);
+        else
+            EditorIcons::DrawLabeled(dl, ImVec2(p.x + st.SpacingSM + 4.0f, iy), icon, info.Icon, col, info.Name, col);
         ImGui::PopID();
     }
     ImGui::EndChild();
+    ImGui::PopStyleVar(2);
     ImGui::PopStyleColor();
-    ImGui::SameLine(0.0f, 0.0f);
+    ImGui::SameLine(0.0f, st.SpacingSM);
 
     // --- Раздел -------------------------------------------------------------
     ImGui::BeginChild("##page", ImVec2(0.0f, -footerH), ImGuiChildFlags_AlwaysUseWindowPadding);
     ui::Ctx ctx;
     ctx.Filter = ui::Lower(m_search);
     ctx.Narrow = ImGui::GetContentRegionAvail().x < 640.0f;
+    // В узком окне поиску нет места в колонке значков — он над разделом.
+    if (compactNav) {
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        Sage::UI::SearchField("##search", m_search, sizeof(m_search), T("Search settings"));
+        ImGui::Dummy(ImVec2(0.0f, st.SpacingXS));
+    }
     if (ctx.Filter.empty()) {
         const CategoryInfo info = Info(m_cat);
         const float big = std::floor(ImGui::GetFontSize() * 1.6f);
@@ -192,7 +223,10 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.35f);
         ImGui::TextUnformatted(info.Name);
         ImGui::PopFont();
+        // Описание переносится: в узком окне оно обрезалось на полуслове.
+        ImGui::PushTextWrapPos(0.0f);
         Sage::UI::TextSecondary("%s", info.About);
+        ImGui::PopTextWrapPos();
         ImGui::EndGroup();
         ImGui::Dummy(ImVec2(0.0f, st.SpacingMD));
         if (m_cat == Category::Controls) m_controls.DrawBody(host);
@@ -235,6 +269,7 @@ void SettingsPanel::DrawCategory(EditorHost& host, Category c, ui::Ctx& ctx) {
         case Category::Quality: DrawQuality(host, ctx); break;
         case Category::Lighting: DrawLighting(host, ctx); break;
         case Category::Advanced: DrawAdvanced(host, ctx); break;
+        case Category::General: DrawGeneral(host, ctx); break;
         case Category::Appearance: DrawAppearance(host, ctx); break;
         default: break;
     }
@@ -247,7 +282,7 @@ void SettingsPanel::DrawFooter(EditorHost& host) {
     ImGui::Dummy(ImVec2(0.0f, st.SpacingXS));
     // В поиске низ — про sage.cfg: находки только из разделов игры.
     const Category cat = m_search[0] ? Category::Screen : m_cat;
-    if (cat == Category::Appearance) {
+    if (IsEditorCategory(cat)) {
         ImGui::AlignTextToFramePadding();
         Sage::UI::TextSecondary("%s", T("Applied at once and stored in your editor profile"));
         return;
