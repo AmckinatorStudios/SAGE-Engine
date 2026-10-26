@@ -321,15 +321,14 @@ TEST(ScriptModules_script_api_surface_does_not_lose_names) {
     std::ifstream in(path);
     CHECK_TRUE(in.good());
     std::string line;
-    int known = 0, lost = 0;
+    int known = 0;
+    std::string lost;
     while (std::getline(in, line)) {
         if (line.empty()) continue;
         ++known;
-        if (!now.count(line)) {
-            ++lost;
-            std::printf("       пропало из API скриптов: %s\n", line.c_str());
-        }
+        if (!now.count(line)) lost += " " + line;
     }
     CHECK_TRUE(known > 300);
-    CHECK_EQ(lost, 0);
+    // Имена — в самом сообщении провала: оно повторяется в конце прогона.
+    if (!lost.empty()) ::sagetest::ReportFail(__FILE__, __LINE__, "пропало из API скриптов:" + lost);
 }
