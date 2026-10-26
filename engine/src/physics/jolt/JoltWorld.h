@@ -98,6 +98,8 @@ public:
 private:
     class ContactCollector;   // слушатель контактов Jolt (см. .cpp)
     struct CharacterEntry;
+    // Вес персонажа на динамическую опору — под его центром (см. .cpp).
+    void ApplyCharacterWeight(CharacterEntry& entry, float dt);
     std::unique_ptr<JPH::PhysicsSystem> m_system;
     std::unique_ptr<JPH::TempAllocator> m_tempAllocator;
     std::unique_ptr<JPH::JobSystem> m_jobSystem;

@@ -404,6 +404,8 @@ void EditorLayer::DrawDockspaceAndMenu() {
             if (EditorIcons::MenuItem("script", T("Run Lua Tests"), nullptr,
                                       m_project.Loaded() && !m_luaTests.Running))
                 RunLuaTests();
+            // Строгая проверка всех скриптов без запуска — находки в «Проблемах».
+            if (EditorIcons::MenuItem("script", T("Check Scripts"), nullptr, m_project.Loaded())) CheckScripts();
             ImGui::EndMenu();
         }
         // ОБЪЕКТ — ОДИН КАТАЛОГ НА ВЕСЬ РЕДАКТОР.

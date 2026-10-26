@@ -27,7 +27,7 @@ CompileResult Compile(const std::string& path, const std::string& source, const 
     r.Modules->Loader = options.Loader;
     if (ast) {
         r.Modules->Loading.push_back(path);
-        r.Program = Check(ast, path, diag, *r.Modules);
+        r.Program = Check(ast, path, diag, *r.Modules, options.Lint);
         r.Modules->Loading.pop_back();
     }
     r.Diagnostics = diag.Items();

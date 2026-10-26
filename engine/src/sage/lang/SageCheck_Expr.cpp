@@ -19,7 +19,11 @@ TypeRef Checker::Infer(const ExprPtr& e) {
         case Expr::K::Table: return InferTable(e);
         case Expr::K::Name: {
             Symbol* s = Lookup(e->Text);
-            if (!s) return Any();
+            if (!s) {
+                if (TypeRef api = ApiType(e->Text)) return api;
+                UnknownGlobal(e);
+                return Any();
+            }
             if (s->Kind == Symbol::K::Alias || s->Kind == Symbol::K::TypeParam) {
                 d.Error(e->P, "Ошибка типа", {e->Text + " — тип, а не значение"});
                 return Any();
@@ -129,6 +133,12 @@ TypeRef Checker::InferField(const ExprPtr& e) {
             return it->second.T ? it->second.T : Any();
         }
     }
+    // Функция API движка по полному имени: sage.noise.Perlin, noise.Perlin.
+    std::string path;
+    // Чего в таблице нет, то не ошибка: модули дописываются и из Lua
+    // (sage.modules, ui плагина), а таблица знает только Bind.
+    if (GlobalPath(e, path))
+        if (TypeRef api = ApiType(path)) return api;
     TypeRef obj = First(Infer(e->A));
     return MemberType(obj, e, false);
 }

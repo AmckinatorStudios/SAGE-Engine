@@ -62,7 +62,8 @@ def lua_type(cpp):
     """Тип аргумента или возврата. Второе значение — необязательный ли он."""
     text = cpp.strip()
     optional = False
-    m = re.search(r'sol::optional\s*<\s*(.+?)\s*>\s*$', text)
+    # После типа может стоять имя аргумента: `sol::optional<float> z`.
+    m = re.search(r'sol::optional\s*<\s*(.+)>\s*\w*\s*$', text)
     if m:
         optional = True
         text = m.group(1)
@@ -109,8 +110,16 @@ def collect():
             module, name, old, args, ret = m.groups()
             params = []
             for i, a in enumerate(split_args(args)):
+                # this_state Lua подставляет сам — скрипт его не передаёт.
+                if 'this_state' in a:
+                    continue
+                if 'variadic_args' in a:
+                    params.append(('...', '...', True))
+                    continue
                 t, opt = lua_type(a)
-                params.append((arg_name(a, i), t, opt))
+                # sol::object принимает и nil — значит, его можно не передать.
+                opt = opt or bool(re.search(r'\bsol::object\b', a))
+                params.append((arg_name(a, len(params)), t, opt))
             rtype = lua_type(ret)[0] if ret else 'nil'
             modules.setdefault(module, []).append((name, params, rtype))
             if old != 'nullptr':
@@ -1470,6 +1479,95 @@ def procgen_hints():
     return ''.join(out)
 
 
+# ТАБЛИЦА СИГНАТУР ДЛЯ ПРОВЕРКИ ТИПОВ (sage/lang/SageApi.h). Тот же источник
+# правды, что у подсказки: из неё проверка скриптов знает, что perlin берёт
+# числа, а remap — пять аргументов, и говорит об ошибке ДО запуска игры.
+# Имена верхнего уровня, которых в таблице нет, но которые скрипт видит
+# (Vec3, Input, Scene…), — из снимка API (tests/data/script_api_surface.txt):
+# по ним проверка отличает опечатку от настоящего имени.
+TABLE = ROOT / "engine/src/sage/lang/SageApiTable.inl"
+SURFACE = ROOT / "tests/data/script_api_surface.txt"
+LUA_STD = ['assert', 'error', 'ipairs', 'pairs', 'next', 'pcall', 'xpcall', 'print', 'select',
+           'tonumber', 'tostring', 'type', 'unpack', 'table', 'string', 'math', 'coroutine',
+           'require', 'setmetatable', 'getmetatable', 'rawget', 'rawset', 'rawequal', 'rawlen',
+           'load', 'dofile', 'loadfile', 'collectgarbage', 'utf8', 'debug', 'os', 'io', 'package',
+           '_G', '_ENV', '_VERSION', 'self', 'entity', 'this',
+           'editor']   # API плагинов редактора (editor.lua) — ставится не через Bind
+
+
+def procgen_sigs():
+    """[(имя, [(арг, тип, необяз)], возврат)] из аннотаций слоя стиля SAGE."""
+    text = PROCGEN.read_text(encoding='utf-8')
+    m = re.search(r'R"LUA\((.*?)\)LUA"', text, re.S)
+    out, params, ret = [], [], None
+    for line in (m.group(1).split('\n') if m else []):
+        # Тип — до конца строки: fun(x:number, z:number): number — с пробелами.
+        pm = re.match(r'^---@param (\w+)(\??) (.+?)\s*$', line)
+        rm = re.match(r'^---@return (\S+)', line)
+        fm = re.match(r'^function (\w+)\(([^)]*)\)', line)
+        if pm:
+            params.append((pm.group(1), pm.group(3), pm.group(2) == '?'))
+        elif rm and ret is None:
+            ret = rm.group(1)
+        elif fm:
+            names = [a.strip() for a in fm.group(2).split(',') if a.strip()]
+            known = {p[0]: p for p in params}
+            # Аргумент без аннотации — any, но обязателен: так читается код.
+            plist = [known.get(n, (n, 'any', False)) for n in names]
+            out.append((fm.group(1), plist, ret or 'any'))
+            params, ret = [], None
+        elif not line.startswith('---'):
+            params, ret = [], None
+    return out
+
+
+def lua_sig_text(params):
+    parts = []
+    for name, t, opt in params:
+        if name == '...' or t == '...':
+            parts.append('...')
+        else:
+            if t.startswith('fun('):
+                t = 'function'
+            parts.append(f'{name}{"?" if opt else ""}:{t}')
+    return ','.join(parts)
+
+
+def render_table(modules, legacy):
+    rows = []
+    for module in sorted(modules):
+        for name, params, rtype in modules[module]:
+            sig = lua_sig_text(params)
+            rows.append((f'sage.{module}.{name}', sig, rtype))
+            # Короткое имя модуля. Его нет, если имя занято стандартной
+            # библиотекой Lua: math.X — это всегда math из Lua, не sage.math.
+            if module not in LUA_STD:
+                rows.append((f'{module}.{name}', sig, rtype))
+    by_full = {r[0]: r for r in rows}
+    for old, module, name in legacy:
+        r = by_full.get(f'sage.{module}.{name}')
+        if r:
+            rows.append((old, r[1], r[2]))
+    for name, params, rtype in procgen_sigs():
+        rows.append((name, lua_sig_text(params), rtype))
+    rows = sorted(set(rows))
+    known = set(LUA_STD)
+    if SURFACE.exists():
+        for line in SURFACE.read_text(encoding='utf-8').split('\n'):
+            if line and '.' not in line:
+                known.add(line)
+    known |= {r[0] for r in rows if '.' not in r[0]}
+    out = ['// ФАЙЛ СОБРАН scripts/gen_script_api.py — руками не править (см. SageApi.h).\n']
+    out.append('static const ApiFunction kApiFunctions[] = {\n')
+    for full, sig, ret in rows:
+        out.append(f'    {{"{full}", "{sig}", "{ret}"}},\n')
+    out.append('};\n\nstatic const char* const kKnownGlobals[] = {\n')
+    for name in sorted(known):
+        out.append(f'    "{name}",\n')
+    out.append('};\n')
+    return ''.join(out)
+
+
 def render(modules, legacy):
     out = [HEADER]
     out.append('-- --- Модули ---------------------------------------------------------------\n')
@@ -1507,9 +1605,14 @@ def render(modules, legacy):
 def main():
     modules, legacy = collect()
     text = render(modules, legacy)
+    table = render_table(modules, legacy)
     check = '--check' in sys.argv
     total = sum(len(v) for v in modules.values())
     if check:
+        if not TABLE.exists() or TABLE.read_text(encoding='utf-8') != table:
+            print(f"Таблица сигнатур {TABLE.relative_to(ROOT)} устарела. "
+                  f"Перезапишите её: python3 scripts/gen_script_api.py")
+            return 1
         if not OUT.exists() or OUT.read_text(encoding='utf-8') != text:
             print(f"Подсказка {OUT.relative_to(ROOT)} устарела: движок регистрирует "
                   f"{total} функций в {len(modules)} модулях, а в файле лежит другое.\n"
@@ -1519,6 +1622,7 @@ def main():
         return 0
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(text, encoding='utf-8')
+    TABLE.write_text(table, encoding='utf-8')
     print(f"{OUT.relative_to(ROOT)}: функций {total}, модулей {len(modules)}, "
           f"старых имён {len(legacy)}")
     return 0
