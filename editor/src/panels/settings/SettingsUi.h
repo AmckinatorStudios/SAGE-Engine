@@ -49,6 +49,10 @@ bool Matches(const Ctx& c, const char* label, const char* keywords);
 void BeginGroup(Ctx& c, const char* title, const char* note = nullptr);
 // Дальше в группе — на всю ширину карточки (пояснение, кнопка), не в колонке.
 void FullWidth(Ctx& c);
+// Свободный блок группы (текст, кнопки) без строки-параметра: открывает
+// карточку, если её ещё нет, и участвует в поиске по label/keywords.
+// false — не подходит под поиск, рисовать нечего.
+bool FreeBlock(Ctx& c, const char* label, const char* keywords = nullptr);
 void EndGroup(Ctx& c);
 
 struct RowOpts {

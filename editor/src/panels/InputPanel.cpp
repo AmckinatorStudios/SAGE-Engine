@@ -501,17 +501,7 @@ void InputPanel::DrawActionList(EditorHost& host, InputSystem& input) {
 }
 
 
-void InputPanel::Draw(EditorHost& host, bool& open) {
-    if (!open) return;
-
-    ImGui::SetNextWindowSize(ImVec2(940, 620), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowSizeConstraints(ImVec2(640, 380), ImVec2(FLT_MAX, FLT_MAX));
-    if (!ImGui::Begin(EditorIcons::WindowTitle("keyboard", T("Controls"), "Controls").c_str(),
-                      &open)) {
-        ImGui::End();
-        return;
-    }
-
+void InputPanel::DrawBody(EditorHost& host) {
     InputSystem& input = host.ProjectInput();
 
     // Контекст по умолчанию для новых действий — тот, в котором человек сейчас
@@ -588,6 +578,4 @@ void InputPanel::Draw(EditorHost& host, bool& open) {
             host.SetProjectInputDirty(true);
         }
     }
-
-    ImGui::End();
 }

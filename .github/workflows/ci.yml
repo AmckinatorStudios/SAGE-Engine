@@ -67,6 +67,11 @@ jobs:
       - name: Menu style check (a popup declares its own padding)
         run: python3 scripts/check_menu_style.py
 
+      # Релиз — для тех, кто делает игры: в меню и палитре команд нет пунктов
+      # для разработчика движка («Запустить Lua-тесты», «Лист иконок»).
+      - name: Release UI check (no developer-only menu items)
+        run: python3 scripts/check_release_ui.py
+
       # Список ImGui закрывается EndCombo (EndPopup ломает счётчик окон
       # списков — разваливается СЛЕДУЮЩИЙ список, не этот), а кнопка со
       # значком не получает подпись «##…»: она печатается и растягивает

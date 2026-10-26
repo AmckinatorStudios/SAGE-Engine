@@ -400,10 +400,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
             if (EditorIcons::MenuItem("play", T("Resume"), nullptr, m_play.Paused())) ResumePlay();
             if (EditorIcons::MenuItem("stop", T("Stop"), nullptr, InPlayMode())) StopPlay();
             ImGui::Separator();
-            // Тесты проекта (*.test.lua) — в настоящем Play, итог в консоли.
-            if (EditorIcons::MenuItem("script", T("Run Lua Tests"), nullptr,
-                                      m_project.Loaded() && !m_luaTests.Running))
-                RunLuaTests();
             // Строгая проверка всех скриптов без запуска — находки в «Проблемах».
             if (EditorIcons::MenuItem("script", T("Check Scripts"), nullptr, m_project.Loaded())) CheckScripts();
             ImGui::EndMenu();
@@ -446,7 +442,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
             Sage::UI::MenuSection(T("Tools"));
             m_panelRegistry.DrawMenuSection(pe::PanelSection::Tools);
             EditorIcons::MenuItemToggle("nineslice", T("9-slice editor"), &m_showNineSlice);
-            EditorIcons::MenuItemToggle("grid", T("Icon sheet"), &m_showIconSheet);
             // Окна плагинов — своим разделом, только если они есть.
             {
                 bool any = false;
@@ -491,59 +486,11 @@ void EditorLayer::DrawDockspaceAndMenu() {
                 ImGui::EndMenu();
             }
             ImGui::Separator();
-            EditorIcons::MenuItemToggle("gear", T("Game Settings..."), &PanelVisible(EditorPanel::Settings));
-            // Управление — рядом с настройками игры: это тоже содержимое
-            // проекта, которое уезжает в собранную игру, а не настройка
-            // редактора.
-            EditorIcons::MenuItemToggle("keyboard", T("Controls..."), &PanelVisible(EditorPanel::Input));
-
-            // Язык интерфейса. Здесь, а не в окне Settings: то окно правит
-            // настройки ИГРЫ и сохраняется в проект, а язык — настройка
-            // редактора и живёт в профиле пользователя. Смешать их значило бы
-            // получить проект, навязывающий язык всем, кто его откроет.
-            // Оформление — рядом с языком и по той же причине: это настройка
-            // РЕДАКТОРА, она живёт в профиле человека, а не в проекте. Проект,
-            // навязывающий свою тему каждому, кто его открыл, — не то, чего
-            // ждут от проекта.
-            if (EditorIcons::BeginMenu("theme", T("Appearance"))) {
-                for (const EditorTheme::Theme& theme : EditorTheme::Themes()) {
-                    const bool active = theme.Id == EditorTheme::CurrentId();
-                    // Название темы не переводится — как и название языка: по
-                    // нему тему находят в файле настроек и в themes/*.json.
-                    if (EditorIcons::MenuItemSelected("theme", theme.Name.c_str(), active) && !active) {
-                        EditorTheme::SetTheme(theme.Id);
-                        SetStatusMessage(T("Theme changed"));
-                    }
-                }
-                ImGui::Separator();
-                // Масштаб интерфейса — здесь же: на экране 4K шрифт в 16 точек
-                // читается лупой, и «сделайте покрупнее» до сих пор решалось
-                // только сменой разрешения всей системы.
-                ImGui::TextDisabled("%s", T("Interface scale"));
-                float scale = EditorTheme::UiScale();
-                ImGui::SetNextItemWidth(160.0f);
-                if (ImGui::SliderFloat("##uiscale", &scale, 0.75f, 2.0f, "%.2fx"))
-                    EditorTheme::SetUiScale(scale);
-                if (EditorIcons::MenuItem("refresh", T("Reset scale"), nullptr, scale != 1.0f))
-                    EditorTheme::SetUiScale(1.0f);
-                // Масштаб системы уже учтён — видно, откуда итоговый размер.
-                if (EditorTheme::SystemScale() > 1.001f)
-                    ImGui::TextDisabled(T("System scale %d%% is applied on top"),
-                                        (int)std::lround(EditorTheme::SystemScale() * 100.0f));
-                ImGui::Separator();
-                // Выгрузка темы файлом — вот ради чего вся система: взять
-                // текущую за основу, поправить цвета в текстовом редакторе и
-                // положить обратно в themes/. Пересборка не нужна.
-                if (EditorIcons::MenuItem("save", T("Export theme to themes/..."))) {
-                    const std::string dir = EditorTheme::ThemesDir();
-                    const std::string path = dir + "/" + EditorTheme::Current().Id + "-copy.json";
-                    if (EditorTheme::ExportTheme(EditorTheme::Current(), path))
-                        SetStatusMessage(std::string(T("Theme saved:")) + " " + path);
-                    else
-                        SetStatusMessage(T("Could not write the theme file"));
-                }
-                ImGui::EndMenu();
-            }
+            // Настройки — одним окном: игра (экран, качество, освещение и
+            // тени, управление) и оформление редактора. Отдельных окон
+            // «Управление» и подменю «Оформление» больше нет — то же самое
+            // жило в двух местах.
+            EditorIcons::MenuItemToggle("gear", T("Settings..."), &PanelVisible(EditorPanel::Settings));
             // Чем открывать код. Здесь же, где язык и оформление, и по той же
             // причине: это настройка РЕДАКТОРА, она живёт в профиле человека.
             // Проект, навязывающий соавтору свою IDE, — не то, чего ждут от
@@ -661,11 +608,12 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // раньше, чем этот код выполнится.
     DrawUnsavedPrompt();
     m_settingsPanel.Draw(*this, m_panels[EditorPanel::Settings]);
-    m_inputPanel.Draw(*this, m_panels[EditorPanel::Input]);
     m_assets.Tick(*this);           // пакетная конвертация идёт по кадрам, а не одним куском
     m_nineSlice.Draw(*this, m_showNineSlice);
     // Анимация, Tween и профилировщик рисуются вместе с остальными панелями —
     // из реестра (EditorLayer_Panels.cpp).
+    // Лист значков — только для скриншот-проверки (SAGE_EDITOR_ICON_SHEET), в
+    // меню его нет: человеку, делающему игру, он ни к чему.
     if (m_showIconSheet) EditorIcons::DrawSheet(&m_showIconSheet);
     m_confirm.Draw();
     // Окно настроек импорта модели (ModelImportDialog.h): его заказывают

@@ -137,9 +137,6 @@ void EditorLayer::RegisterCommands() {
                     [this] { StartPlay(); }});
     m_commands.Add({"play.stop", T("Stop"), scene, "", "stop",
                     [this] { return InPlayMode(); }, [this] { StopPlay(); }});
-    m_commands.Add({"play.luaTests", T("Run Lua Tests"), scene, "", "script",
-                    [this] { return m_project.Loaded() && !m_luaTests.Running; },
-                    [this] { RunLuaTests(); }});
     m_commands.Add({"play.checkScripts", T("Check Scripts"), scene, "", "script", hasProject,
                     [this] { CheckScripts(); }});
 
@@ -152,8 +149,10 @@ void EditorLayer::RegisterCommands() {
     // быть поиском по меню. Команды даёт реестр — и для панелей, которые
     // зарегистрируют позже (модуль, плагин).
     m_panelRegistry.AttachCommands(m_commands, window);
-    m_commands.Add({"window.settings", T("Game Settings..."), window, "", "project", {},
+    m_commands.Add({"window.settings", T("Settings..."), window, "", "gear", {},
                     [this] { m_panels[EditorPanel::Settings] = true; }});
+    m_commands.Add({"window.controls", T("Controls..."), window, "", "keyboard", {},
+                    [this] { OpenSettings(SettingsPanel::Category::Controls); }});
     m_commands.Add({"window.reset", T("Reset Layout"), window, "", "grid", {},
                     [this] { m_panelRegistry.Restore(); m_rebuildDockLayout = true; }});
 

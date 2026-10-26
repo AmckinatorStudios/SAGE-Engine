@@ -1,10 +1,11 @@
 // ---------------------------------------------------------------------------
-// «Настройки игры» → разделы качества: профиль, тени, освещение, окружение,
-// постобработка, интерфейс игры, дополнительно. Экран — SettingsPanel_Screen.cpp.
+// «Настройки» → разделы качества: профиль, освещение и тени, дополнительно,
+// и оформление редактора. Экран — SettingsPanel_Screen.cpp, управление —
+// InputPanel (встраивается как есть).
 //
-// Каждая строка — реальное поле EngineConfig (или компонента постобработки
-// сцены): того, чего движок не умеет, здесь нет. Изменения в этих разделах
-// видны во вьюпорте сразу; «Применить» записывает их в проект.
+// Каждая строка — реальное поле EngineConfig: того, чего движок не умеет,
+// здесь нет. Изменения видны во вьюпорте сразу; «Применить» записывает их в
+// проект.
 // ---------------------------------------------------------------------------
 #include "SettingsPanel.h"
 
@@ -14,19 +15,13 @@
 
 #include <imgui.h>
 
-#include "AssetSlot.h"
 #include "EditorHost.h"
 #include "EditorIcons.h"
 #include "EditorTheme.h"
-#include "PostChainUi.h"
 #include "panels/settings/SettingsUi.h"
 #include "sage/core/Paths.h"
 #include "Project.h"
-#include "sage/render/DebugView.h"
-#include "sage/render/PostProcessComponent.h"
 #include "sage/rhi/GraphicsDevice.h"
-#include "sage/scene/Components.h"
-#include "sage/scene/Scene.h"
 #include "../EditorTheme.h"
 #include "../Localization.h"
 #include "../ui/UI.h"
@@ -75,22 +70,6 @@ void ResolutionCombo(int& value, int def, bool allow4096) {
     }
 }
 
-// Общая постобработка сцены — компонент НЕ на камере с наибольшим приоритетом
-// (то самое правило, по которому его выбирает рендер, ResolvePostChain).
-entt::entity ScenePostEntity(Scene& scene) {
-    entt::entity best = entt::null;
-    int bestPriority = 0;
-    auto& reg = scene.Registry();
-    for (auto e : reg.view<sage::render::PostProcessComponent>()) {
-        if (reg.all_of<CameraComponent>(e)) continue;
-        const int p = reg.get<sage::render::PostProcessComponent>(e).Priority;
-        if (best == entt::null || p > bestPriority) {
-            best = e;
-            bestPriority = p;
-        }
-    }
-    return best;
-}
 } // namespace
 
 // --- Качество графики --------------------------------------------------------
@@ -205,9 +184,9 @@ void SettingsPanel::DrawQuality(EditorHost& host, ui::Ctx& ctx) {
     ui::EndGroup(ctx);
 }
 
-// --- Тени ----------------------------------------------------------------------
-void SettingsPanel::DrawShadows(EditorHost& host, ui::Ctx& ctx) {
-    sage::EngineConfig& c = host.Settings();
+// --- Освещение и тени -----------------------------------------------------------
+// Тени — первыми: их настраивают чаще всего, и цена у них самая заметная.
+static void DrawShadowGroups(sage::EngineConfig& c, ui::Ctx& ctx) {
     ui::BeginGroup(ctx, T("Sun shadows"),
                    T("Which light casts shadows is a property of the light object; here — their quality."));
     {
@@ -283,9 +262,9 @@ void SettingsPanel::DrawShadows(EditorHost& host, ui::Ctx& ctx) {
     ui::EndGroup(ctx);
 }
 
-// --- Освещение -----------------------------------------------------------------
 void SettingsPanel::DrawLighting(EditorHost& host, ui::Ctx& ctx) {
     sage::EngineConfig& c = host.Settings();
+    DrawShadowGroups(c, ctx);
     ui::BeginGroup(ctx, T("Global illumination"));
     {
         ui::RowOpts o;
@@ -314,246 +293,8 @@ void SettingsPanel::DrawLighting(EditorHost& host, ui::Ctx& ctx) {
     }
     ui::EndGroup(ctx);
     if (ctx.Filter.empty())
-        ui::Note(T("Ambient occlusion is an effect of the frame — see Post Processing."));
-}
-
-// --- Окружение -----------------------------------------------------------------
-void SettingsPanel::DrawEnvironment(EditorHost& host, ui::Ctx& ctx) {
-    sage::EngineConfig& c = host.Settings();
-    ui::BeginGroup(ctx, T("Sky and fog"),
-                   T("Whether they are drawn at all. Their look — colors, time of day — is in the Environment window."));
-    {
-        ui::RowOpts o;
-        o.Keywords = "sky skybox небо";
-        ToggleRow(ctx, T("Sky"), c.Skybox, Def().Skybox, T("Procedural sky of the scene"), o);
-    }
-    {
-        ui::RowOpts o;
-        o.Keywords = "fog туман";
-        ToggleRow(ctx, T("Fog"), c.Fog, Def().Fog, T("Distance fog of the scene"), o);
-    }
-    if (ctx.GroupOpen && ctx.Filter.empty()) {
-        ui::FullWidth(ctx);
-        if (EditorIcons::Button("world", T("Open Environment"), T("Sky, air and ambient light of the scene")))
-            host.PanelVisible(EditorPanel::Environment) = true;
-    }
-    ui::EndGroup(ctx);
-
-    ui::BeginGroup(ctx, T("Volumetric light and clouds"), T("The most expensive pass of the frame."));
-    {
-        ui::RowOpts o;
-        o.Keywords = "volumetrics volumetric light clouds объёмный свет облака";
-        o.Price = ui::Cost::Heavy;
-        ToggleRow(ctx, T("Volumetric light"), c.Volumetrics, Def().Volumetrics, T("Light shafts and clouds"), o);
-    }
-    const bool vol = c.Volumetrics;
-    auto dep = [&](ui::RowOpts& o) {
-        o.Disabled = !vol;
-        o.DisabledWhy = T("Volumetric light is off");
-    };
-    {
-        ui::RowOpts o;
-        dep(o);
-        o.Keywords = "shafts rays лучи";
-        ToggleRow(ctx, T("Light shafts"), c.VolumetricShafts, Def().VolumetricShafts, T("Rays of light in the air"), o);
-    }
-    {
-        ui::RowOpts o;
-        dep(o);
-        o.Keywords = "clouds облака";
-        ToggleRow(ctx, T("Clouds"), c.VolumetricClouds, Def().VolumetricClouds, T("A layer of volumetric clouds"), o);
-    }
-    auto slider = [&](const char* label, const char* kw, float& v, float def, float lo, float hi, const char* fmt,
-                      const char* tip, bool needsClouds = false) {
-        ui::RowOpts o;
-        dep(o);
-        if (needsClouds && vol && !c.VolumetricClouds) {
-            o.Disabled = true;
-            o.DisabledWhy = T("Clouds are off");
-        }
-        o.Keywords = kw;
-        o.Tooltip = tip;
-        o.Modified = std::abs(v - def) > 1e-5f;
-        bool reset = false;
-        if (!ui::Row(ctx, label, o, &reset)) return;
-        ui::SliderFloat("##v", &v, lo, hi, fmt);
-        if (reset) v = def;
-        ui::EndRow(ctx, o);
-    };
-    slider(T("Haze density"), "haze density дымка плотность", c.VolumetricDensity, Def().VolumetricDensity, 0.0f, 0.2f,
-           "%.3f", nullptr);
-    slider(T("Shaft intensity"), "intensity яркость лучей", c.VolumetricIntensity, Def().VolumetricIntensity, 0.0f,
-           4.0f, "%.2f", nullptr);
-    slider(T("Haze height falloff"), "height falloff высота", c.VolumetricHeightFalloff, Def().VolumetricHeightFalloff,
-           0.0f, 0.5f, "%.3f", T("How fast the haze thins out with height: 0 — the same at the ground and in the sky"));
-    slider(T("Max distance"), "distance дальность", c.VolumetricMaxDistance, Def().VolumetricMaxDistance, 10.0f, 500.0f,
-           T("%.0f m"), nullptr);
-    slider(T("Cloud coverage"), "coverage облачность", c.CloudCoverage, Def().CloudCoverage, 0.0f, 1.0f, "%.2f",
-           T("0 — clear sky, 1 — overcast"), true);
-    slider(T("Cloud density"), "cloud density плотность облаков", c.CloudDensity, Def().CloudDensity, 0.1f, 4.0f,
-           "%.2f", nullptr, true);
-    {
-        ui::RowOpts o;
-        dep(o);
-        o.Keywords = "cloud layer height слой облаков высота";
-        o.Modified = std::abs(c.CloudBottom - Def().CloudBottom) > 1e-3f || std::abs(c.CloudTop - Def().CloudTop) > 1e-3f;
-        bool reset = false;
-        if (ui::Row(ctx, T("Cloud layer"), o, &reset)) {
-            ImGui::DragFloatRange2("##layer", &c.CloudBottom, &c.CloudTop, 5.0f, 20.0f, 5000.0f, T("from %.0f m"),
-                                   T("to %.0f m"), ImGuiSliderFlags_AlwaysClamp);
-            if (reset) {
-                c.CloudBottom = Def().CloudBottom;
-                c.CloudTop = Def().CloudTop;
-            }
-            ui::EndRow(ctx, o);
-        }
-    }
-    {
-        ui::RowOpts o;
-        dep(o);
-        o.Keywords = "volumetric resolution half full разрешение объёма половина";
-        o.Modified = std::abs(c.VolumetricScale - Def().VolumetricScale) > 1e-3f;
-        o.Tooltip = T("Half is about four times cheaper; edges stay clean, the haze gets a little softer");
-        bool reset = false;
-        if (ui::Row(ctx, T("Volumetric resolution"), o, &reset)) {
-            const char* items[] = {T("Full"), T("Half")};
-            int idx = c.VolumetricScale < 0.75f ? 1 : 0;
-            if (ImGui::Combo("##vs", &idx, items, IM_ARRAYSIZE(items))) c.VolumetricScale = idx ? 0.5f : 1.0f;
-            if (reset) c.VolumetricScale = Def().VolumetricScale;
-            ui::EndRow(ctx, o);
-        }
-    }
-    ui::EndGroup(ctx);
-}
-
-// --- Постобработка --------------------------------------------------------------
-//
-// ТА ЖЕ СИСТЕМА, НЕ ВТОРАЯ. Постобработка — компонент: на камере он
-// обрабатывает её кадр, на другом объекте — кадр всех камер сцены. Раздел
-// правит ЭТОТ общий компонент сцены (тот, что рендер и выбирает, см.
-// ResolvePostChain) теми же элементами, что инспектор; камеры со своим
-// компонентом показаны списком — их кадр решают они.
-void SettingsPanel::DrawPost(EditorHost& host, ui::Ctx& ctx) {
-    Scene& scene = host.CurrentScene();
-    auto& reg = scene.Registry();
-    const entt::entity e = ScenePostEntity(scene);
-    sage::render::PostProcessComponent* pp =
-        e != entt::null ? reg.try_get<sage::render::PostProcessComponent>(e) : nullptr;
-
-    ui::BeginGroup(ctx, T("General"), T("Applies to every camera of the scene that has no post processing of its own."));
-    {
-        ui::RowOpts o;
-        o.Keywords = "post processing enabled постобработка включить";
-        o.Wide = true;
-        if (ui::Row(ctx, T("Scene post processing"), o)) {
-            if (!pp) {
-                Sage::UI::TextSecondary("%s", T("The scene has no common post processing yet."));
-                if (Sage::UI::Button(T("Create for the whole scene"), Sage::UI::ButtonStyle::Primary)) {
-                    host.PushUndoSnapshot();
-                    GameObject obj = scene.CreateEmptyObject("Post Processing");
-                    reg.emplace<sage::render::PostProcessComponent>(obj.Entity());
-                }
-            } else {
-                bool on = pp->Enabled;
-                if (ui::Toggle("##ppon", &on, T("Effects of the frame are on"))) {
-                    host.PushUndoSnapshot();
-                    pp->Enabled = on;
-                }
-                GameObject owner(&reg, e);
-                Sage::UI::TextSecondary(T("Stored in the scene, on the object «%s»"), owner.Name().c_str());
-            }
-            ui::EndRow(ctx, o);
-        }
-    }
-    if (pp) {
-        ui::RowOpts o;
-        o.Keywords = "post profile preset default профиль постобработки стандартный";
-        o.Wide = true;
-        o.Disabled = !pp->Enabled;
-        o.DisabledWhy = T("Post processing is off");
-        if (ui::Row(ctx, T("Post processing profile"), o)) {
-            // Профили — те, что есть у самого тракта: стандартный набор и
-            // голый вывод на экран (кривая и кодирование без эффектов).
-            if (Sage::UI::Button(T("Standard"), Sage::UI::ButtonStyle::Secondary)) {
-                host.PushUndoSnapshot();
-                pp->Chain = sage::render::PostChain::Default();
-            }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Tone mapping, bloom, ambient occlusion and the rest at their defaults"));
-            ImGui::SameLine();
-            if (Sage::UI::Button(T("Display only"), Sage::UI::ButtonStyle::Secondary)) {
-                host.PushUndoSnapshot();
-                pp->Chain = sage::render::PostChain::Display();
-            }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Only the tone curve and output to the screen — no effects"));
-            ui::EndRow(ctx, o);
-        }
-    }
-    ui::EndGroup(ctx);
-
-    if (pp && ctx.Filter.empty()) {
-        // Эффекты — тем же редактором, что в инспекторе: этапы в порядке
-        // обработки кадра, у каждого свой выключатель.
-        ImGui::BeginDisabled(!pp->Enabled);
-        sage::editor::DrawPostChainEditor(&host, pp->Chain, "settingsPost");
-        ImGui::EndDisabled();
-    }
-    if (ctx.Filter.empty()) {
-        std::vector<std::string> own;
-        for (auto ce : reg.view<CameraComponent, sage::render::PostProcessComponent>()) own.push_back(GameObject(&reg, ce).Name());
-        if (!own.empty()) {
-            std::string list;
-            for (const auto& n : own) list += (list.empty() ? "" : ", ") + n;
-            ImGui::Dummy(ImVec2(0.0f, Sage::UI::Get().SpacingSM));
-            ui::Note((std::string(T("These cameras have their own post processing and use it instead: ")) + list).c_str());
-        }
-    }
-}
-
-// --- Интерфейс игры --------------------------------------------------------------
-void SettingsPanel::DrawInterface(EditorHost& host, ui::Ctx& ctx) {
-    sage::EngineConfig& c = host.Settings();
-    ui::BeginGroup(ctx, T("Interface font"), T("The font of the game's interface text (not of the editor)."));
-    {
-        ui::RowOpts o;
-        o.Keywords = "font шрифт";
-        o.Modified = c.UiFont != Def().UiFont;
-        o.Wide = true;
-        bool reset = false;
-        if (ui::Row(ctx, T("Font"), o, &reset)) {
-            const assetslot::Result r =
-                assetslot::Draw(host, "uifont", assetslot::Kind::Font, c.UiFont, nullptr, T("Built-in font"));
-            if (r.Changed) c.UiFont = r.Path;
-            if (reset) c.UiFont = Def().UiFont;
-            ui::EndRow(ctx, o);
-        }
-    }
-    {
-        ui::RowOpts o;
-        o.Keywords = "font size pixel height размер шрифта растр";
-        o.Modified = std::abs(c.UiFontPixelHeight - Def().UiFontPixelHeight) > 1e-3f;
-        o.Tooltip = T("Size the font is rasterized at: larger — sharper big text, more memory");
-        bool reset = false;
-        if (ui::Row(ctx, T("Raster size"), o, &reset)) {
-            ui::SliderFloat("##px", &c.UiFontPixelHeight, 12.0f, 128.0f, T("%.0f px"), 1.0f);
-            if (reset) c.UiFontPixelHeight = Def().UiFontPixelHeight;
-            ui::EndRow(ctx, o);
-        }
-    }
-    {
-        ui::RowOpts o;
-        o.Keywords = "filtering pixel smooth фильтрация пиксельный сглаженный";
-        o.Modified = c.UiFontFiltering != Def().UiFontFiltering;
-        bool reset = false;
-        if (ui::Row(ctx, T("Filtering"), o, &reset)) {
-            const char* items[] = {T("Smooth"), T("Pixel (sharp)")};
-            int idx = c.UiFontFiltering == sage::TextureFiltering::Nearest ? 1 : 0;
-            if (ImGui::Combo("##filt", &idx, items, IM_ARRAYSIZE(items)))
-                c.UiFontFiltering = idx ? sage::TextureFiltering::Nearest : sage::TextureFiltering::Smooth;
-            if (reset) c.UiFontFiltering = Def().UiFontFiltering;
-            ui::EndRow(ctx, o);
-        }
-    }
-    ui::EndGroup(ctx);
+        ui::Note(T("Ambient occlusion, bloom and other effects of the frame belong to the Post Processing "
+                   "component of the camera; sky and fog — to the Environment window."));
 }
 
 // --- Дополнительно ---------------------------------------------------------------
@@ -602,30 +343,8 @@ void SettingsPanel::DrawAdvanced(EditorHost& host, ui::Ctx& ctx) {
     }
     ui::EndGroup(ctx);
 
-    ui::BeginGroup(ctx, T("Diagnostics"));
-    {
-        ui::RowOpts o;
-        o.Keywords = "debug view отладочный вид";
-        o.When = ui::Apply::Launch;
-        o.Modified = c.DebugView != Def().DebugView;
-        o.Tooltip = T("The built game starts with this debug view (normals, shadows, depth…)");
-        bool reset = false;
-        if (ui::Row(ctx, T("Debug view in the game"), o, &reset)) {
-            sage::render::DebugView cur = sage::render::DebugView::None;
-            sage::render::ParseDebugView(c.DebugView.c_str(), cur);
-            if (ImGui::BeginCombo("##dv", sage::render::DebugViewName(cur))) {
-                for (int i = 0; i < (int)sage::render::DebugView::Count; ++i) {
-                    const auto v = (sage::render::DebugView)i;
-                    if (ImGui::Selectable(sage::render::DebugViewName(v), v == cur)) c.DebugView = sage::render::DebugViewId(v);
-                }
-                ImGui::EndCombo();
-            }
-            if (reset) c.DebugView = Def().DebugView;
-            ui::EndRow(ctx, o);
-        }
-    }
-    if (ctx.GroupOpen && ctx.Filter.empty()) {
-        ui::FullWidth(ctx);
+    ui::BeginGroup(ctx, T("This machine"), T("For a bug report: what the editor runs on."));
+    if (ui::FreeBlock(ctx, T("This machine"), "diagnostics monitor renderer диагностика монитор видеокарта")) {
         sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
         Sage::UI::TextSecondary(T("Editor renders with: %s %s"), device.BackendName(), device.ApiVersion().c_str());
         Sage::UI::TextSecondary(T("Interface scale: %d%% (system %d%%)"),
@@ -646,6 +365,62 @@ void SettingsPanel::DrawAdvanced(EditorHost& host, ui::Ctx& ctx) {
     ui::EndGroup(ctx);
 }
 
+// --- Оформление редактора --------------------------------------------------------
+// Настройка РЕДАКТОРА, а не игры: живёт в профиле человека и применяется
+// сразу. Проект, навязывающий свою тему каждому, кто его открыл, — не то, чего
+// ждут от проекта, поэтому в sage.cfg это не попадает.
+void SettingsPanel::DrawAppearance(EditorHost& host, ui::Ctx& ctx) {
+    ui::BeginGroup(ctx, T("Editor appearance"));
+    {
+        ui::RowOpts o;
+        o.Keywords = "theme color dark light тема цвет тёмная светлая оформление";
+        if (ui::Row(ctx, T("Color theme"), o)) {
+            // Название темы не переводится: по нему её находят в themes/*.json.
+            if (ImGui::BeginCombo("##theme", EditorTheme::Current().Name.c_str())) {
+                for (const EditorTheme::Theme& theme : EditorTheme::Themes()) {
+                    const bool active = theme.Id == EditorTheme::CurrentId();
+                    if (ImGui::Selectable(theme.Name.c_str(), active) && !active) {
+                        EditorTheme::SetTheme(theme.Id);
+                        host.SetStatusMessage(T("Theme changed"));
+                    }
+                }
+                ImGui::EndCombo();
+            }
+            ui::EndRow(ctx, o);
+        }
+    }
+    {
+        ui::RowOpts o;
+        o.Keywords = "scale size dpi zoom масштаб размер крупнее";
+        float scale = EditorTheme::UiScale();
+        o.Modified = std::abs(scale - 1.0f) > 1e-3f;
+        o.Tooltip = T("On a 4K screen a 16 px font is read with a magnifier — make the whole editor larger");
+        bool reset = false;
+        if (ui::Row(ctx, T("Interface scale"), o, &reset)) {
+            float pct = scale * 100.0f;
+            if (ui::SliderFloat("##uiscale", &pct, 75.0f, 200.0f, "%.0f%%", 5.0f)) EditorTheme::SetUiScale(pct / 100.0f);
+            if (EditorTheme::SystemScale() > 1.001f)
+                Sage::UI::TextSecondary(T("System scale %d%% is applied on top"),
+                                        (int)std::lround(EditorTheme::SystemScale() * 100.0f));
+            if (reset) EditorTheme::SetUiScale(1.0f);
+            ui::EndRow(ctx, o);
+        }
+    }
+    // Выгрузка темы файлом — ради неё вся система тем: взять текущую за
+    // основу, поправить цвета в текстовом редакторе и положить в themes/.
+    if (ui::FreeBlock(ctx, T("Export theme to themes/..."), "export theme file выгрузить тему файл")) {
+        if (EditorIcons::Button("save", T("Export theme to themes/..."),
+                                T("Copy of the current theme as a file: edit its colors and put it back"))) {
+            const std::string path = EditorTheme::ThemesDir() + "/" + EditorTheme::Current().Id + "-copy.json";
+            if (EditorTheme::ExportTheme(EditorTheme::Current(), path))
+                host.SetStatusMessage(std::string(T("Theme saved:")) + " " + path);
+            else
+                host.SetStatusMessage(T("Could not write the theme file"));
+        }
+    }
+    ui::EndGroup(ctx);
+}
+
 // --- По умолчанию для раздела ------------------------------------------------------
 void SettingsPanel::ResetCategory(EditorHost& host, Category cat) {
     sage::EngineConfig& c = host.Settings();
@@ -662,39 +437,15 @@ void SettingsPanel::ResetCategory(EditorHost& host, Category cat) {
             c.MultithreadedRender = d.MultithreadedRender;
             c.WorkerThreads = d.WorkerThreads;
             break;
-        case Category::Shadows:
+        case Category::Lighting:
             c.Shadows = d.Shadows; c.ShadowResolution = d.ShadowResolution; c.ShadowCascades = d.ShadowCascades;
             c.ShadowDistance = d.ShadowDistance; c.LocalShadows = d.LocalShadows;
             c.LocalShadowResolution = d.LocalShadowResolution;
-            break;
-        case Category::Lighting:
             c.ScreenSpaceGI = d.ScreenSpaceGI; c.Reflections = d.Reflections; c.PlanarReflections = d.PlanarReflections;
             break;
-        case Category::Environment:
-            c.Skybox = d.Skybox; c.Fog = d.Fog; c.Volumetrics = d.Volumetrics; c.VolumetricShafts = d.VolumetricShafts;
-            c.VolumetricClouds = d.VolumetricClouds; c.VolumetricDensity = d.VolumetricDensity;
-            c.VolumetricIntensity = d.VolumetricIntensity; c.VolumetricHeightFalloff = d.VolumetricHeightFalloff;
-            c.VolumetricMaxDistance = d.VolumetricMaxDistance; c.CloudCoverage = d.CloudCoverage;
-            c.CloudDensity = d.CloudDensity; c.CloudBottom = d.CloudBottom; c.CloudTop = d.CloudTop;
-            c.VolumetricScale = d.VolumetricScale;
-            break;
-        case Category::Post: {
-            Scene& scene = host.CurrentScene();
-            const entt::entity e = ScenePostEntity(scene);
-            if (e != entt::null) {
-                host.PushUndoSnapshot();
-                auto& pp = scene.Registry().get<sage::render::PostProcessComponent>(e);
-                pp.Enabled = true;
-                pp.Chain = sage::render::PostChain::Default();
-            }
-            break;
-        }
-        case Category::Interface:
-            c.UiFont = d.UiFont; c.UiFontPixelHeight = d.UiFontPixelHeight; c.UiFontFiltering = d.UiFontFiltering;
-            break;
         case Category::Advanced:
-            c.Backend = d.Backend; c.DebugView = d.DebugView;
+            c.Backend = d.Backend;
             break;
-        default: break;
+        default: break; // управление и оформление — со своими кнопками
     }
 }

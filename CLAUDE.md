@@ -52,6 +52,7 @@ python3 scripts/check_paths.py                                    # пути и�
 python3 scripts/check_asset_slots.py                              # ассеты — слотами
 python3 scripts/check_popup_ids.py                                # имена всплывающих окон
 python3 scripts/check_menu_style.py                               # отступы меню
+python3 scripts/check_release_ui.py                               # меню без проверочных пунктов
 python3 scripts/check_imgui_pairs.py                              # EndCombo и подписи кнопок
 python3 scripts/check_file_size.py                                # файлы ≤ 1000 строк
 python3 scripts/gen_script_api.py --check                         # подсказка по API скриптов
@@ -107,6 +108,13 @@ mingw) — половина поломок Windows-сборки на Linux не 
   `BeginPopup` (иначе наследует стиль того, кто его открыл — например,
   обнулённый `WindowPadding` панели). Модальных окон не касается. Проверяет
   `scripts/check_menu_style.py`.
+- **Релиз — без проверочных штучек.** В меню, палитре команд и окнах
+  редактора нет пунктов для разработчика движка: «Запустить Lua-тесты»,
+  «Лист иконок», демо, самопроверка. Проверочное включается переменной
+  окружения (`SAGE_EDITOR_SELFTEST`, `SAGE_EDITOR_ICON_SHEET`, …), а не мышью.
+  В окне «Настройки» — только то, что реально настраивают (постобработка —
+  компонент камеры, небо и туман — окно «Среда», а не второй раздел
+  настроек). Подписи меню проверяет `scripts/check_release_ui.py`.
 - **Список закрывается `ImGui::EndCombo`**, а не `EndPopup`: EndCombo ещё и
   уменьшает счётчик окон списков ImGui, и без него разваливается СЛЕДУЮЩИЙ
   список редактора, а не этот. **Кнопке без подписи —
