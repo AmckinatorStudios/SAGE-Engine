@@ -302,6 +302,9 @@ TEST(ScriptModules_script_api_surface_does_not_lose_names) {
         if (kv.first.get_type() != sol::type::string) continue;
         const std::string k = kv.first.as<std::string>();
         if (k.rfind("__", 0) == 0) continue;   // служебное
+        // Метатаблицы типов sol2 («sol.glm::vec<3, float, …>») — имя типа C++
+        // от компилятора, у clang и gcc разное; скрипту это не API.
+        if (k.rfind("sol.", 0) == 0) continue;
         now.insert(k);
         if (k != "sage" || kv.second.get_type() != sol::type::table) continue;
         for (const auto& m : kv.second.as<sol::table>()) {
