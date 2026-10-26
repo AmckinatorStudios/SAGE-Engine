@@ -406,6 +406,23 @@ void EditorLayer::ApplyStartupHooks() {
         // второй раз. Смотреть надо на ссылку копии: она обязана вести в СВОЮ
         // дверь, а не в первую. Ошибка здесь молчит — в инспекторе ссылка
         // выглядит заполненной и даже указывает на существующий объект.
+        // SAGE_EDITOR_VARS_DEMO=events — объект только со скриптом и связями:
+        // секция «События» целиком в кадре (у кнопки её закрывают секции
+        // интерфейса). Скрипт шлёт «opened» — оно должно попасть в список
+        // подсказок, а связь на несуществующий метод — быть помеченной.
+        if (mode && std::string(mode) == "events") {
+            const std::filesystem::path chestPath = m_project.AssetsDir() / "chest.lua";
+            {
+                std::ofstream f(chestPath);
+                f << "function Open(entity, event)\n    entity:emit(\"opened\")\nend\n";
+            }
+            GameObject chest = m_scene->CreateObject("Сундук");
+            reg.emplace_or_replace<ScriptComponent>(chest.Entity(), ScriptComponent{m_project.AssetRef(chestPath)});
+            auto& links = reg.emplace_or_replace<sage::signals::SignalLinksComponent>(chest.Entity()).Links;
+            links.push_back({"opened", sage::vars::EntityRef{door.Id()}, "Open", true, {}});
+            links.push_back({"opened", sage::vars::EntityRef{door.Id()}, "Close", true, {}});
+            m_focusInspectorFrames = 3; // выбор — ниже, SAGE_EDITOR_SELECT_ENTITY=Сундук
+        }
         if (mode && std::string(mode) == "prefab") {
             m_scene->SetParent(button.Entity(), door.Entity());
             const std::filesystem::path pf = m_project.AssetsDir() / "door.sageprefab";

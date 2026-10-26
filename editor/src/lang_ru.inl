@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 3038.
+// Язык: Русский. Строк: 3043.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -262,6 +262,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ряд, который переносится на следующую строку, когда кончается место"},
     {"A screen of its own: its elements live inside it and are edited apart",
      "Свой экран: его элементы живут внутри и правятся отдельно"},
+    {"A script sends it: obj:emit(\"",
+     "Его шлёт скрипт: obj:emit(\""},
     {"A share of the room left in the row or column. 0 — keep own size;\ntwo children with 1 and 2 split the rest 1:2.",
      "Доля свободного места в ряду или столбце. 0 — свой размер;\nдва ребёнка с 1 и 2 делят остаток как 1:2."},
     {"A skeletal clip: the Animation component plays it.",
@@ -3354,6 +3356,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Конвертировать нечего: в папке нет моделей и картинок"},
     {"Nothing to edit",
      "Нечего править"},
+    {"Nothing to suggest — type the name",
+     "Подсказать нечего — впишите имя"},
     {"Nothing — drag an object here",
      "Ничего — перетащите объект сюда"},
     {"Nothing — pick or drag an object",
@@ -3706,6 +3710,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сначала выберите объект"},
     {"Pick from screen",
      "Пипетка (взять с экрана)"},
+    {"Pick from the list",
+     "Выбрать из списка"},
     {"Pick in the scene: click the object in the viewport or in Hierarchy (Esc — cancel)",
      "Пипетка: щёлкните объект во вьюпорте или в иерархии (Esc — отмена)"},
     {"Pick one from the list, or create a new one on the left.",
@@ -4556,6 +4562,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ниже соседей"},
     {"Sensitivity",
      "Чувствительность"},
+    {"Sent by project scripts",
+     "Шлют скрипты проекта"},
     {"Separate window",
      "В отдельном окне"},
     {"Set the end to the current value",
@@ -5952,6 +5960,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "метка в списке"},
     {"material",
      "материал"},
+    {"method",
+     "метод"},
     {"metres",
      "метры"},
     {"mine",

@@ -11,6 +11,7 @@
 //     один механизм, и оба доходят;
 //   • ошибки называются словами: удалённая цель, нет метода, мёртвый объект,
 //     повторный disconnect, плохое имя события, не та функция.
+#include "ui/SuggestInput.h"
 #include "TestFramework.h"
 
 #include <algorithm>
@@ -698,4 +699,41 @@ TEST(Signals_handler_connected_from_a_coroutine_outlives_the_coroutine) {
     CHECK_EQ(calls, 1);
     store.Clear(&bus);
     CHECK_EQ((int)store.Size(), 0);
+}
+
+// Подсказки списка событий инспектора: сигналы, которые шлют скрипты проекта.
+// Без них своё событие приходилось помнить и набирать по буквам.
+TEST(Signals_emitted_names_are_found_in_script_text) {
+    const std::vector<std::string> s = sage::scripting::ParseEmittedSignals(R"(
+function Player:Hit()
+    self:emit("player_died", {score = 10})
+    door : emit ( 'opened' )
+    self:emit("player_died")          -- повтор
+    Events.emit("global_only")        -- глобальное — не сигнал объекта
+    self:emitter("not_a_call")
+    self:emit(name_from_var)
+    self:emit("bad name")
+end
+)");
+    CHECK_EQ(s.size(), (size_t)2);
+    CHECK_EQ(s[0], std::string("player_died"));
+    CHECK_EQ(s[1], std::string("opened"));
+}
+
+// Список подсказок не прячет ничего, а поднимает похожее на набранное: точное
+// имя, затем начало, затем вхождение, затем остальные в своём порядке.
+TEST(SuggestInput_ranks_matches_first_and_keeps_everything) {
+    using sage::editor::suggest::Item;
+    const std::vector<Item> items = {
+        {"clicked", "On Click", {}, {}},          {"pressed", "On Press", {}, {}},
+        {"player_died", "On Player Died", {}, {}}, {"value_changed", "On Value Changed", {}, {}},
+    };
+    const std::vector<int> r = sage::editor::suggest::Rank(items, "PRE");
+    CHECK_EQ(r.size(), items.size());
+    CHECK_EQ(r[0], 1); // «pressed» — по началу, без учёта регистра
+    const std::vector<int> c = sage::editor::suggest::Rank(items, "change");
+    CHECK_EQ(c[0], 3); // вхождение в середине
+    CHECK_EQ(sage::editor::suggest::Rank(items, "")[2], 2); // пусто — исходный порядок
+    CHECK_TRUE(sage::editor::suggest::Known(items, "player_died"));
+    CHECK_FALSE(sage::editor::suggest::Known(items, "player"));
 }
