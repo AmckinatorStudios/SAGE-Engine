@@ -25,4 +25,12 @@ sage::vars::Table ParseFields(const std::string& path, const std::string& source
 // звать их связью значит ломать порядок кадра, который им обещан.
 std::vector<std::string> ParseMethods(const std::string& path, const std::string& source);
 
+// Сигналы, которые скрипт шлёт своему или чужому объекту (`self:emit("hit")`,
+// `door:emit('opened', data)`), — подсказки для списка событий инспектора: такие
+// события движок заранее не знает, но по тексту скриптов проекта их видно.
+// Глобальные `Events.emit(...)` сюда не входят: связь слушает сигнал ОБЪЕКТА.
+// Порядок — порядок первого появления, без повторов. Язык не важен: и Lua, и
+// SAGE Lua пишут вызов одинаково.
+std::vector<std::string> ParseEmittedSignals(const std::string& source);
+
 } // namespace sage::scripting

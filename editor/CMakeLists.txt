@@ -159,6 +159,7 @@ add_executable(SageEditor WIN32
     src/interface/InterfaceViewportPanel.cpp
     src/interface/InterfaceWidgets.cpp
     src/ui/TreeLines.cpp
+    src/ui/SuggestInput.cpp
     src/panels/AnimationPanel.cpp
     src/panels/AnimationPanel_Timeline.cpp
     src/panels/TweenPanel.cpp

@@ -91,4 +91,32 @@ std::vector<std::string> ParseMethods(const std::string& path, const std::string
     return {};
 }
 
+std::vector<std::string> ParseEmittedSignals(const std::string& source) {
+    std::vector<std::string> out;
+    const size_t n = source.size();
+    for (size_t i = source.find(":"); i != std::string::npos && i < n; i = source.find(":", i + 1)) {
+        size_t j = i + 1;
+        while (j < n && (source[j] == ' ' || source[j] == '\t')) ++j;
+        if (source.compare(j, 4, "emit") != 0) continue;
+        j += 4;
+        // «emitter» и подобные — не вызов emit.
+        if (j < n && (std::isalnum((unsigned char)source[j]) || source[j] == '_')) continue;
+        while (j < n && (source[j] == ' ' || source[j] == '\t')) ++j;
+        if (j >= n || source[j] != '(') continue;
+        ++j;
+        while (j < n && (source[j] == ' ' || source[j] == '\t')) ++j;
+        if (j >= n || (source[j] != '"' && source[j] != '\'')) continue; // имя переменной — не узнать
+        const char quote = source[j++];
+        const size_t start = j;
+        while (j < n && source[j] != quote && source[j] != '\n') ++j;
+        if (j >= n || source[j] != quote) continue;
+        std::string name = source.substr(start, j - start);
+        const bool valid = !name.empty() && std::none_of(name.begin(), name.end(), [](unsigned char c) {
+            return std::isspace(c) || c < 32;
+        });
+        if (valid && std::find(out.begin(), out.end(), name) == out.end()) out.push_back(std::move(name));
+    }
+    return out;
+}
+
 } // namespace sage::scripting

@@ -125,6 +125,8 @@ add_executable(sage_tests
     ../editor/src/PanelRegistry.cpp
     ../editor/src/PanelWindows.cpp
     ../editor/src/ui/Commands.cpp
+    # Поле «написать или выбрать» (события и методы в инспекторе).
+    ../editor/src/ui/SuggestInput.cpp
 )
 
 target_include_directories(sage_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
