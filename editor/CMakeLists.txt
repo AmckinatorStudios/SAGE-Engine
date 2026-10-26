@@ -134,6 +134,9 @@ add_executable(SageEditor WIN32
     src/gizmo/ColliderHandles.cpp
     src/gizmo/LightGizmo.cpp
     src/panels/SettingsPanel.cpp
+    src/panels/SettingsPanel_Screen.cpp
+    src/panels/SettingsPanel_Sections.cpp
+    src/panels/settings/SettingsUi.cpp
     src/panels/InputPanel.cpp
     src/panels/InputPanel_Modals.cpp
     src/panels/InputPanel_Properties.cpp

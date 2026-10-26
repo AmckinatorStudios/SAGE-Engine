@@ -10,6 +10,7 @@
 
 #include "sage/core/Log.h"
 #include "sage/core/Problems.h"
+#include "sage/core/Window.h"
 
 namespace sage::display {
 
@@ -141,6 +142,47 @@ std::string AspectName(int width, int height) {
         if (std::abs(r - n.Ratio) < 0.06f) return n.Name;
     const int g = std::gcd(width, height);
     return std::to_string(width / g) + ":" + std::to_string(height / g);
+}
+
+namespace {
+Window::Display ToWindow(const DisplayRequest& r) {
+    Window::Display d;
+    d.Mode = r.Mode;
+    d.Monitor = r.Monitor;
+    d.Width = r.Width;
+    d.Height = r.Height;
+    d.RefreshRate = r.RefreshRate;
+    return d;
+}
+} // namespace
+
+bool DisplayTrial::Begin(Window& window, const DisplayRequest& next, double now, double seconds, std::string* err) {
+    const Window::Display cur = window.CurrentDisplay();
+    m_previous = {cur.Mode, cur.Monitor, cur.Width, cur.Height, cur.RefreshRate};
+    if (!window.ApplyDisplay(ToWindow(next), err)) {
+        // Частично применённое — назад, человек не должен остаться в
+        // полуперенастроенном окне.
+        window.ApplyDisplay(ToWindow(m_previous), nullptr);
+        m_active = false;
+        return false;
+    }
+    m_active = true;
+    m_deadline = now + seconds;
+    return true;
+}
+
+double DisplayTrial::SecondsLeft(double now) const { return m_active ? std::max(0.0, m_deadline - now) : 0.0; }
+
+void DisplayTrial::Revert(Window& window) {
+    if (!m_active) return;
+    m_active = false;
+    window.ApplyDisplay(ToWindow(m_previous), nullptr);
+}
+
+bool DisplayTrial::Tick(Window& window, double now) {
+    if (!m_active || now < m_deadline) return false;
+    Revert(window);
+    return true;
 }
 
 } // namespace sage::display

@@ -24,6 +24,10 @@ struct AppConfig {
     float MaxDeltaTime = 0.05f; // ограничитель dt после паузы/лага (см. Run)
 
     WindowMode Mode = WindowMode::Windowed;
+
+    int Monitor = -1;      // полноэкранный/безрамочный — на каком мониторе (-1 — главный)
+
+    int RefreshRate = 0;   // частота полноэкранного режима, 0 — текущая
     // Развернуть окно на весь экран при запуске. Для игры — нет (окно игры
     // открывается тем размером, который задал автор), для редактора — да.
     bool Maximized = false;
@@ -41,7 +45,8 @@ struct AppConfig {
     static AppConfig FromEngineConfig(const EngineConfig& cfg) {
         AppConfig a;
         a.Width = cfg.Width; a.Height = cfg.Height; a.Title = cfg.Title;
-        a.Mode = cfg.Mode; a.Resizable = cfg.Resizable; a.VSync = cfg.VSync;
+        a.Mode = cfg.Mode; a.Monitor = cfg.Monitor; a.RefreshRate = cfg.RefreshRate;
+        a.Resizable = cfg.Resizable; a.VSync = cfg.VSync;
         a.FrameCap = cfg.FrameCap; a.Msaa = cfg.Msaa;
         a.BackgroundFrameCap = cfg.BackgroundFrameCap;
         a.Backend = cfg.Backend;

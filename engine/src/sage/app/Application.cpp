@@ -95,6 +95,8 @@ Application::Application(const AppConfig& config) : m_config(config) {
     // OnAttach) уже могут создавать GPU-ресурсы.
     Window::Params wp;
     wp.Mode = config.Mode;
+    wp.Monitor = config.Monitor;
+    wp.RefreshRate = config.RefreshRate;
     wp.Maximized = config.Maximized;
     wp.Resizable = config.Resizable;
     wp.VSync = config.VSync;

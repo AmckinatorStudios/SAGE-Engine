@@ -148,7 +148,16 @@ void EditorLayer::ApplyStartupHooks() {
         sage::editor::pluginswindow::Select("rasstanovka_derevev");
     }
     // Открыть окно Settings при старте (для скриншот-проверки/демо настроек).
-    if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) { m_headlessProject = true; m_panels[EditorPanel::Settings] = true; }
+    if (std::getenv("SAGE_EDITOR_SHOW_SETTINGS")) {
+        m_headlessProject = true;
+        m_panels[EditorPanel::Settings] = true;
+        // Раздел и строка поиска — чтобы скриншот видел не только первый
+        // раздел: остальные открываются мышью, а её у прогона нет.
+        const std::string page = sage::EnvString("SAGE_EDITOR_SETTINGS_PAGE");
+        if (!page.empty()) m_settingsPanel.SelectByKey(page.c_str());
+        const std::string query = sage::EnvString("SAGE_EDITOR_SETTINGS_SEARCH");
+        if (!query.empty()) m_settingsPanel.SetSearch(query.c_str());
+    }
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_headlessProject = true; m_panels[EditorPanel::Profiler] = true; }
     // Консоль впереди вкладки Assets — для скриншот-проверки её панели.
     if (std::getenv("SAGE_EDITOR_SHOW_CONSOLE")) m_console.RequestFocus();

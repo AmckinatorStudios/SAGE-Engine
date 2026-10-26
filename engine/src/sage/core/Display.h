@@ -2,8 +2,11 @@
 #include <string>
 #include <vector>
 
+#include "sage/core/Config.h"
+
 struct GLFWmonitor;
 struct GLFWwindow;
+class Window;
 
 // ---------------------------------------------------------------------------
 // ДИСПЛЕИ: мониторы, их режимы и масштаб — с запасом на мониторы, которые не
@@ -59,5 +62,35 @@ int MonitorQueryErrorCount();
 
 // Соотношение сторон текстом: 1920×1080 -> «16:9», 2560×1080 -> «21:9».
 std::string AspectName(int width, int height);
+
+// РЕЖИМ ЭКРАНА НА ПРОБУ — как в любой игре: новый режим ставится сразу,
+// человека спрашивают «оставить?», и если он не ответил (экран погас, картинка
+// уехала за край), через несколько секунд всё возвращается само. Не
+// получилось применить вовсе — возвращается сразу, с причиной.
+struct DisplayRequest {
+    sage::WindowMode Mode = sage::WindowMode::Windowed;
+    int Monitor = -1;
+    int Width = 1280;
+    int Height = 720;
+    int RefreshRate = 0;
+};
+
+class DisplayTrial {
+public:
+    // Применить next на seconds секунд. false — не применилось (окно как было).
+    bool Begin(Window& window, const DisplayRequest& next, double nowSeconds, double seconds, std::string* err);
+    bool Active() const { return m_active; }
+    double SecondsLeft(double nowSeconds) const;
+    void Confirm() { m_active = false; }
+    void Revert(Window& window);
+    // Время вышло — откат. true — откатили в этом вызове.
+    bool Tick(Window& window, double nowSeconds);
+    const DisplayRequest& Previous() const { return m_previous; }
+
+private:
+    bool m_active = false;
+    double m_deadline = 0.0;
+    DisplayRequest m_previous;
+};
 
 } // namespace sage::display

@@ -27,6 +27,8 @@
 #include "sage/render/ShadowMap.h"
 #include "sage/scene/Scene.h"
 
+class Window;
+
 namespace sage::rendertest {
 
 // --- Учёт результатов -------------------------------------------------------
@@ -115,5 +117,6 @@ void RunVolumetricChecks();                                 // объёмный 
 void RunStabilityChecks(FrameRenderer& r, Scene& scene);     // дрейф, утечки, разрешения, resize
 void RunTextureChecks(FrameRenderer& r);                    // мипмапы, детализация, анизотропия
 void RunParticleChecks();                                   // частицы: текстура, кадры, смешивание, меш, след
+void RunDisplayChecks(::Window& window);                    // режим экрана: проба и откат по времени
 
 } // namespace sage::rendertest
