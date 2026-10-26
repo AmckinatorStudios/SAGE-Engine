@@ -529,6 +529,9 @@ bool PhysicsScene::NeedsImplicitBody(Scene& scene, entt::entity e) const {
         if (!reg.valid(h->Parent)) break;
         const RigidBodyComponent* prb = reg.try_get<RigidBodyComponent>(h->Parent);
         if (prb && prb->Type != BodyType::Static) return false;
+        // Под персонажем — его снаряжение (оружие, модель тела с коллайдером):
+        // неподвижная копия стала бы стеной, в которую он упирается сам.
+        if (reg.all_of<CharacterControllerComponent>(h->Parent)) return false;
     }
     return true;
 }
@@ -666,7 +669,7 @@ void PhysicsScene::Step(Scene& scene, float dt) {
         }
     }
 
-    PullCharacters(scene);
+    PullCharacters(scene, dt);
 
     // События столкновений: забираем накопленное за шаг и переводим в сущности.
     // Именно здесь, а не по запросу: очередь бэкенда одна, и кто прочитал её

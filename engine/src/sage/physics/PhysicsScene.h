@@ -195,7 +195,8 @@ private:
     // Между «состав мира» и шагом мира: скрипт уже сказал, куда идти, а
     // столкновения ещё не посчитаны.
     void StepCharacters(Scene& scene, float dt);
-    void PullCharacters(Scene& scene);
+    void PullCharacters(Scene& scene, float dt);
+    static void StopAtCeiling(CharacterControllerComponent& cc, float actualUp);
     // Пересчитывает m_inside по событиям сенсоров бэкенда и по персонажам и
     // дописывает в m_contacts разницу с прошлым шагом.
     void UpdateTriggers(Scene& scene);

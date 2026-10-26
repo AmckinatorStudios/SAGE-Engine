@@ -213,6 +213,7 @@ void PhysicsScene::StepCharacters(Scene& scene, float dt) {
             cc.Blocked = cc.Motor->Blocked();
             cc.StepUp = cc.Motor->StepUp();
             cc.Velocity = (st.Position - before) / dt;
+            StopAtCeiling(cc, cc.Velocity.y);
         } else {
             // Маска — каждый шаг: её правят в инспекторе посреди Play.
             m_world->SetCharacterCollidesWith(cc.Runtime, cc.CollidesWith);
@@ -222,9 +223,8 @@ void PhysicsScene::StepCharacters(Scene& scene, float dt) {
             cc.Velocity = velocity;
         }
 
-        // Уткнулись в потолок или встали на опору — вертикаль обнуляется.
-        // Без этого прыжок в низкий проём «прилипает» к потолку, пока не
-        // иссякнет набранная вверх скорость.
+        // Встали на опору — падение обнуляется (потолок — StopAtCeiling, по
+        // фактическому ходу после шага).
         if (cc.Grounded && cc.VerticalVelocity < 0.0f) cc.VerticalVelocity = 0.0f;
 
         // Запрос действует ОДИН кадр: персонаж, которому забыли сказать «иди»,
@@ -237,7 +237,15 @@ void PhysicsScene::StepCharacters(Scene& scene, float dt) {
 // Переносит положение контроллеров в Transform сущностей и обновляет флаг
 // опоры. После шага: до него положение ведёт игра (через MoveCharacter), после
 // — физика, и путать эти два момента значит терять то одно, то другое.
-void PhysicsScene::PullCharacters(Scene& scene) {
+// ПОТОЛОК ГАСИТ ПРЫЖОК. Персонаж летит вверх, а поднялся меньше половины
+// запрошенного — значит, упёрся головой. Скорость вверх тогда обнуляется
+// сразу: иначе прыжок в низкий проём «прилипал» к потолку, пока гравитация
+// не съест набранную скорость (при 8 м/с — почти секунду под плитой).
+void PhysicsScene::StopAtCeiling(CharacterControllerComponent& cc, float actualUp) {
+    if (cc.VerticalVelocity > 0.0f && actualUp < cc.VerticalVelocity * 0.5f) cc.VerticalVelocity = 0.0f;
+}
+
+void PhysicsScene::PullCharacters(Scene& scene, float dt) {
     if (!m_world || !m_world->SupportsCharacters()) return;
     for (const auto& [entity, handle] : m_characters) {
         if (!scene.Registry().valid(entity)) continue;
@@ -245,6 +253,13 @@ void PhysicsScene::PullCharacters(Scene& scene) {
         auto* tr = scene.Registry().try_get<Transform>(entity);
         if (!cc || !tr) continue;
         const sage::physics::CharacterState st = m_world->GetCharacterState(handle);
+        if (dt > 0.0f) {
+            // Скорость — фактическая, а не запрошенная: игре нужно «как
+            // персонаж на самом деле движется» (анимация, звук шагов), а
+            // упёршийся в стену не идёт, сколько бы его ни просили.
+            cc->Velocity = (st.Position - (tr->Position + cc->Center)) / dt;
+            StopAtCeiling(*cc, cc->Velocity.y);
+        }
         tr->Position = st.Position - cc->Center;
         cc->Grounded = st.Grounded;
         cc->GroundNormal = st.GroundNormal;
