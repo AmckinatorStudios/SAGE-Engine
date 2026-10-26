@@ -315,6 +315,12 @@ public:
 
     // --- EditorHost: панель Game ---
     void ShowSettingsWindow() override { m_panels[EditorPanel::Settings] = true; }
+    // Окно настроек сразу на нужном разделе (например, «Управление»).
+    void OpenSettings(SettingsPanel::Category c) {
+        m_settingsPanel.Select(c);
+        m_settingsPanel.SetSearch("");
+        m_panels[EditorPanel::Settings] = true;
+    }
 
     // --- EditorHost: раскладка управления ---
     sage::input::InputSystem& ProjectInput() override { return m_projectInput; }
@@ -693,7 +699,7 @@ private:
     // EditorHost::RequestCameraPreview).
     int m_cameraPreviewId = -1;
     int m_viewCount = 1;
-    bool m_showIconSheet = false; // страница со всеми иконками (Window > Icon sheet)
+    bool m_showIconSheet = false; // страница со всеми иконками (только SAGE_EDITOR_ICON_SHEET)
     HierarchyPanel m_hierarchy;
     InspectorPanel m_inspector;
     ViewportPanel m_viewport;
@@ -724,7 +730,6 @@ private:
     int m_currentInterface = -1;
     TopBarPanel m_topBar;
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
-    InputPanel m_inputPanel;       // раскладка управления проекта (input.sageinput)
     // Редактор девятины (см. panels/NineSlicePanel.h) — отдельный инструмент:
     // нарезку подбирают подолгу и по самой картинке, а не по числам вслепую.
     NineSlicePanel m_nineSlice;

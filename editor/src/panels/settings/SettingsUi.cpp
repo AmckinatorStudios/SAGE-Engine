@@ -95,6 +95,14 @@ void BeginGroup(Ctx& c, const char* title, const char* note) {
 
 void FullWidth(Ctx& c) { EnsureTable(c, true); }
 
+bool FreeBlock(Ctx& c, const char* label, const char* keywords) {
+    if (!Matches(c, label, keywords) && !(c.PendingTitle && Matches(c, c.PendingTitle, nullptr))) return false;
+    OpenPending(c);
+    EnsureTable(c, true);
+    ++c.Shown;
+    return true;
+}
+
 void EndGroup(Ctx& c) {
     if (c.GroupOpen) {
         if (c.InTable) ImGui::EndTable();

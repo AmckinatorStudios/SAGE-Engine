@@ -32,21 +32,20 @@ CategoryInfo Info(SettingsPanel::Category c) {
             return {"window", T("Screen"), T("Window mode, monitor, resolution and frame rate of the game.")};
         case SettingsPanel::Category::Quality:
             return {"chart", T("Graphics Quality"), T("Quality profile, render resolution and anti-aliasing.")};
-        case SettingsPanel::Category::Shadows:
-            return {"sun", T("Shadows"), T("Shadows of the sun and of lamps: resolution, cascades, distance.")};
         case SettingsPanel::Category::Lighting:
-            return {"light", T("Lighting"), T("Bounced light and reflections.")};
-        case SettingsPanel::Category::Environment:
-            return {"world", T("Environment"), T("Sky, fog, light shafts and volumetric clouds.")};
-        case SettingsPanel::Category::Post:
-            return {"camera", T("Post Processing"), T("Exposure, color, bloom, depth of field and other effects of the frame.")};
-        case SettingsPanel::Category::Interface:
-            return {"ui-screen", T("Interface"), T("Font of the game interface.")};
+            return {"sun", T("Lighting and shadows"),
+                    T("Shadows of the sun and of lamps, bounced light and reflections.")};
+        case SettingsPanel::Category::Controls:
+            return {"keyboard", T("Game controls"), T("Game actions and the keys, buttons and sticks they are bound to.")};
         case SettingsPanel::Category::Advanced:
-            return {"gear", T("Advanced"), T("Graphics API, threads and diagnostics.")};
+            return {"gear", T("Advanced"), T("Graphics API of the game and information about this machine.")};
+        case SettingsPanel::Category::Appearance:
+            return {"theme", T("Appearance"),
+                    T("Theme and scale of the editor. Stored for you, not in the project, and applied at once.")};
         default: return {"gear", "", ""};
     }
 }
+
 } // namespace
 
 const std::vector<sage::display::Monitor>& SettingsPanel::Monitors() {
@@ -94,8 +93,7 @@ void SettingsPanel::SetSearch(const char* text) {
 }
 
 bool SettingsPanel::SelectByKey(const char* key) {
-    static const char* const kKeys[] = {"screen",      "quality", "shadows",   "lighting",
-                                        "environment", "post",    "interface", "advanced"};
+    static const char* const kKeys[] = {"screen", "quality", "lighting", "controls", "advanced", "appearance"};
     static_assert(sizeof(kKeys) / sizeof(kKeys[0]) == (size_t)Category::Count, "ключ на каждый раздел");
     for (int i = 0; i < (int)Category::Count; ++i) {
         if (key && std::strcmp(key, kKeys[i]) == 0) {
@@ -119,7 +117,8 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
 
     ImGui::SetNextWindowSize(ImVec2(980, 660), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSizeConstraints(ImVec2(560, 420), ImVec2(FLT_MAX, FLT_MAX));
-    if (!ImGui::Begin(EditorIcons::WindowTitle("gear", T("Game Settings"), "Game Settings").c_str(), &open)) {
+    // Скрытый идентификатор прежний: раскладка доков помнит окно по нему.
+    if (!ImGui::Begin(EditorIcons::WindowTitle("gear", T("Settings"), "Game Settings").c_str(), &open)) {
         ImGui::End();
         return;
     }
@@ -142,6 +141,14 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         const Category c = (Category)i;
         const CategoryInfo info = Info(c);
         const bool sel = m_cat == c && m_search[0] == 0;
+        // Заголовки «Игра» и «Редактор»: первое уезжает в сборку, второе —
+        // только у этого человека, и путать их нельзя.
+        if (!compactNav && (i == 0 || c == Category::Appearance)) {
+            if (i) ImGui::Dummy(ImVec2(0.0f, st.SpacingSM));
+            Sage::UI::TextSecondary("%s", i == 0 ? T("Game") : T("Editor"));
+        } else if (compactNav && c == Category::Appearance) {
+            ImGui::Separator();
+        }
         ImGui::PushID(i);
         const ImVec2 p = ImGui::GetCursorScreenPos();
         const float h = ImGui::GetFrameHeight() + st.SpacingSM;
@@ -188,10 +195,13 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         Sage::UI::TextSecondary("%s", info.About);
         ImGui::EndGroup();
         ImGui::Dummy(ImVec2(0.0f, st.SpacingMD));
-        DrawCategory(host, m_cat, ctx);
+        if (m_cat == Category::Controls) m_controls.DrawBody(host);
+        else DrawCategory(host, m_cat, ctx);
     } else {
         // Поиск — по всем разделам сразу, с названием раздела над находками.
         for (int i = 0; i < (int)Category::Count; ++i) {
+            // Управление — свой редактор со своим поиском, не строки.
+            if ((Category)i == Category::Controls) continue;
             const int before = ctx.Shown;
             ImGui::PushID(i);
             const ImVec2 at = ImGui::GetCursorPos();
@@ -223,12 +233,9 @@ void SettingsPanel::DrawCategory(EditorHost& host, Category c, ui::Ctx& ctx) {
     switch (c) {
         case Category::Screen: DrawScreen(host, ctx); break;
         case Category::Quality: DrawQuality(host, ctx); break;
-        case Category::Shadows: DrawShadows(host, ctx); break;
         case Category::Lighting: DrawLighting(host, ctx); break;
-        case Category::Environment: DrawEnvironment(host, ctx); break;
-        case Category::Post: DrawPost(host, ctx); break;
-        case Category::Interface: DrawInterface(host, ctx); break;
         case Category::Advanced: DrawAdvanced(host, ctx); break;
+        case Category::Appearance: DrawAppearance(host, ctx); break;
         default: break;
     }
 }
@@ -238,24 +245,42 @@ void SettingsPanel::DrawFooter(EditorHost& host) {
     ImGui::Dummy(ImVec2(0.0f, st.SpacingSM));
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0.0f, st.SpacingXS));
-    if (EditorIcons::Button("refresh", T("Defaults"), T("Engine defaults for this section")))
-        ResetCategory(host, m_cat);
-    const bool dirty = HasUnsavedChanges(host);
-    ImGui::SameLine();
+    // В поиске низ — про sage.cfg: находки только из разделов игры.
+    const Category cat = m_search[0] ? Category::Screen : m_cat;
+    if (cat == Category::Appearance) {
+        ImGui::AlignTextToFramePadding();
+        Sage::UI::TextSecondary("%s", T("Applied at once and stored in your editor profile"));
+        return;
+    }
+    const bool controls = cat == Category::Controls;
+    if (!controls) {
+        if (EditorIcons::Button("refresh", T("Defaults"), T("Engine defaults for this section")))
+            ResetCategory(host, cat);
+        ImGui::SameLine();
+    }
+    const bool dirty = controls ? host.ProjectInputDirty() : HasUnsavedChanges(host);
     ImGui::AlignTextToFramePadding();
-    if (dirty) Sage::UI::TextSecondary("%s", T("Unsaved changes — the scene view already shows them"));
+    if (dirty && controls) Sage::UI::TextSecondary("%s", T("Unsaved changes in the controls"));
+    else if (dirty) Sage::UI::TextSecondary("%s", T("Unsaved changes — the scene view already shows them"));
     else Sage::UI::TextSecondary("%s", T("Saved in the project"));
     // Справа: Отмена, Применить.
     const float bw = 110.0f;
     ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - bw * 2.0f - st.SpacingSM));
     ImGui::BeginDisabled(!dirty);
-    if (Sage::UI::Button(T("Cancel"), Sage::UI::ButtonStyle::Secondary, ImVec2(bw, 0))) RevertUnsaved(host);
+    if (Sage::UI::Button(T("Cancel"), Sage::UI::ButtonStyle::Secondary, ImVec2(bw, 0))) {
+        if (!controls) RevertUnsaved(host);
+        else if (host.ReloadProjectInput()) host.SetStatusMessage(T("Controls reloaded from disk"));
+    }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
         ImGui::SetTooltip("%s", T("Return to what is saved in the project"));
     ImGui::SameLine(0.0f, st.SpacingSM);
-    if (Sage::UI::Button(T("Apply"), Sage::UI::ButtonStyle::Primary, ImVec2(bw, 0))) SaveToProject(host);
+    if (Sage::UI::Button(T("Apply"), Sage::UI::ButtonStyle::Primary, ImVec2(bw, 0))) {
+        if (!controls) SaveToProject(host);
+        else if (host.SaveProjectInput()) host.SetStatusMessage(T("Controls saved: input.sageinput"));
+    }
     if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip("%s", T("Save to the project (sage.cfg): the built game starts with these settings"));
+        ImGui::SetTooltip("%s", controls ? T("Save to the project (input.sageinput)")
+                                         : T("Save to the project (sage.cfg): the built game starts with these settings"));
     ImGui::EndDisabled();
 }
 

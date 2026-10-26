@@ -174,7 +174,7 @@ void EditorLayer::ApplyStartupHooks() {
     // глазами, и открыть панель в прогоне больше нечем.
     if (std::getenv("SAGE_EDITOR_SHOW_INPUT")) {
         m_headlessProject = true;
-        m_panels[EditorPanel::Input] = true;
+        OpenSettings(SettingsPanel::Category::Controls);
         // Раскладка для снимка: пустое окно управления показывает только
         // подсказку «действий пока нет», а проверять надо СПИСОК.
         if (std::getenv("SAGE_EDITOR_INPUT_DEMO")) {
