@@ -1305,6 +1305,7 @@ function Script:OnAnimationEvent(name) end
 
 -- --- Модули ---------------------------------------------------------------
 ---@class sage
+---@field ai sage.ai
 ---@field anim sage.anim
 ---@field app sage.app
 ---@field audio sage.audio
@@ -1334,6 +1335,45 @@ function Script:OnAnimationEvent(name) end
 ---@field ui sage.ui
 ---@field volumetric sage.volumetric
 sage = {}
+
+---@class sage.ai
+sage.ai = {}
+
+---Короткое имя того же модуля: `ai.X()` — это ТОТ ЖЕ объект,
+---что `sage.ai`, а не копия. Движок ставит его, только если имя
+---свободно: игра, объявившая своё, остаётся при своём.
+---@type sage.ai
+ai = nil
+
+---@param owner? any
+---@param opts? table
+---@return table
+function sage.ai.agent(owner, opts) end
+---@param name string
+---@param ...? ...
+---@return any
+function sage.ai.call(name, ...) end
+---@param event string
+---@param data? any
+---@param target? any
+---@return number
+function sage.ai.emit(event, data, target) end
+---@param vars any
+---@return table
+function sage.ai.names(vars) end
+---@param name string
+---@param fn function
+---@param spec? table
+function sage.ai.operation(name, fn, spec) end
+---@return table
+function sage.ai.operations() end
+---@param space? string
+function sage.ai.shared(space) end
+---@param name string
+---@param spec table
+function sage.ai.task(name, spec) end
+---@return table
+function sage.ai.tasks() end
 
 ---@class sage.anim
 sage.anim = {}

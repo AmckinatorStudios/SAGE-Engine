@@ -34,6 +34,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/vars/Value.cpp
     src/sage/vars/Table.cpp
     src/sage/vars/ScriptVars.cpp
+    src/sage/ai/Blackboard.cpp
+    src/sage/ai/World.cpp
     src/sage/vars/Refs.cpp
     src/sage/events/Events.cpp
     src/sage/events/TypedBus.cpp
@@ -217,6 +219,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_Components.cpp
     src/sage/scripting/ScriptApi_UI.cpp
     src/sage/scripting/ScriptApi_Vars.cpp
+    src/sage/scripting/ScriptApi_AI.cpp
     src/sage/scripting/ScriptApi_Tween.cpp
     src/sage/scripting/ScriptTween.cpp
     src/sage/scripting/ScriptApi_Animation.cpp

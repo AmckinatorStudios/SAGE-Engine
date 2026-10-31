@@ -34,7 +34,7 @@ BASELINE = os.path.join(ROOT, "scripts", "layer_baseline.json")
 # новый модуль без слоя тоже провал: иначе он оказался бы вне правил.
 LAYERS = [
     ("основа", ["rhi", "core"]),
-    ("службы", ["events", "vars", "input", "physics"]),
+    ("службы", ["events", "vars", "input", "physics", "ai"]),
     ("ресурсы", ["assets"]),
     ("мир", ["render", "ecs", "scene", "anim", "audio", "gi", "ui", "net"]),
     ("язык", ["lang"]),

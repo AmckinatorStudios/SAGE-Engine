@@ -7,6 +7,7 @@
 #include "sage/render/Texture.h"
 #include "sage/audio/AudioEngine.h"
 #include "sage/physics/PhysicsScene.h"
+#include "sage/ai/World.h"
 #include "sage/scripting/LuaHandlerStore.h"
 
 namespace sage::net { class NetworkSystem; }
@@ -226,6 +227,12 @@ public:
     sol::object ValueToLua(const sage::vars::Value& value);
     sage::vars::Value ValueFromLua(const sol::object& object);
 
+    // Мир SAGE AI этих скриптов (docs/ai.md): задачи, экземпляры ИИ, операции.
+    // Открыт C++ ради одного: задача на C++ (или на графе) регистрируется в ТУ
+    // ЖЕ библиотеку, что и задачи на Lua, — иначе они не смогли бы звать
+    // друг друга по имени.
+    sage::ai::World& AI();
+
     // Доступ к состоянию Lua — на случай если игре нужно зарегистрировать
     // свою собственную API-функцию/тип в дополнение к базовой
     sol::state& Lua() { return m_lua; }
@@ -423,6 +430,7 @@ private:
     void RegisterVarsApi();       // obj:Vars() — публичные переменные и ссылки
     void RegisterRenderTextureApi(); // sage.rt.* — съёмка сцены в картинку
     void RegisterNetApi();        // Net.* — мультиплеер (см. ScriptApi_Net.cpp)
+    void RegisterAiApi();         // ai.* — задачи и экземпляры ИИ (ScriptApi_AI.cpp)
 
     // Доставляет события сети (сообщения и подключения) в хуки скриптов.
     // Зовётся из UpdateAll: сеть прокачивается кадром, и её события обязаны
@@ -529,6 +537,11 @@ private:
     float m_timeScale = 1.0f;
 
     int m_nextTimerId = 1;
+
+    // SAGE AI. ПОСЛЕ m_lua намеренно, как и всё, что держит функции Lua:
+    // описания задач и их корутины обязаны умереть раньше интерпретатора.
+    std::unique_ptr<sage::ai::World> m_ai;
+    sol::table m_aiNative;   // служебные функции привязки (__sage_ai)
 
     // Мост к скриптам объектов (см. SetMessageSink). ПОСЛЕ m_lua намеренно:
     // внутри лежат ссылки в реестр Lua.
