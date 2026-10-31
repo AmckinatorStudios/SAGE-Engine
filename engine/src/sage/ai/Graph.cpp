@@ -15,12 +15,29 @@ const char* GraphKindId(GraphKind kind) {
         case GraphKind::Behavior: return "behavior";
         case GraphKind::Task: return "task";
         case GraphKind::Function: return "function";
+        case GraphKind::Script: return "script";
     }
     return "task";
 }
 
+bool NodeAllowed(unsigned nodeDomains, GraphKind kind) {
+    switch (kind) {
+        case GraphKind::Function: return nodeDomains == kDomainAll;
+        case GraphKind::Script: return (nodeDomains & kDomainScript) != 0;
+        default: return (nodeDomains & kDomainAI) != 0;
+    }
+}
+
+unsigned GraphDomain(GraphKind kind) {
+    switch (kind) {
+        case GraphKind::Function: return kDomainAll;
+        case GraphKind::Script: return kDomainScript;
+        default: return kDomainAI;
+    }
+}
+
 bool ParseGraphKind(const std::string& id, GraphKind& out) {
-    for (GraphKind k : {GraphKind::Behavior, GraphKind::Task, GraphKind::Function}) {
+    for (GraphKind k : {GraphKind::Behavior, GraphKind::Task, GraphKind::Function, GraphKind::Script}) {
         if (id == GraphKindId(k)) {
             out = k;
             return true;

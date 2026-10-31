@@ -175,6 +175,10 @@ public:
         m_panelRegistry.SetVisible("AiGraph", true);
         m_aiGraph.Open(*this, graphPath);
     }
+    void OpenVisualScript(const std::string& graphPath) override {
+        m_panelRegistry.SetVisible("VisualScript", true);
+        m_visualScript.Open(*this, graphPath);
+    }
     void OpenTween(int objectId, int tweenIndex, TweenOpen what) override {
         m_panels[EditorPanel::Tween] = true;
         m_tween.Open(objectId, tweenIndex,
@@ -455,6 +459,7 @@ private:
     bool SelfTestPlugins();
     bool SelfTestModelHierarchy();
     bool SelfTestPanelRegistry();
+    bool SelfTestVisualScript();     // Visual Scripting: свой редактор, узлы, компонент в Play
     bool SelfTestAiGraph();          // SAGE AI Graph: библиотека, редактор графов, компонент AI в Play
     bool SelfTestGIBake();           // запекание освещения: разметка, фон, свет по месту, «устарело»    // реестр панелей: встроенные, на ходу, окна плагинов          // плагины на Lua: шаблон, меню, отмена, ошибки, Play
     // Многооконность — проверка В ЖИВОМ КАДРЕ: окно системы заводит платформа,
@@ -748,6 +753,9 @@ private:
     AnimationPanel m_animation;
     AiGraphPanel m_aiGraph;     // SAGE AI Graph (aigraph/AiGraphPanel.h)
     AiDebugPanel m_aiDebug;     // отладчик ИИ
+    // Visual Scripting — тот же редактор графов в своём режиме (свои виды
+    // графов и узлы, папка assets/visual).
+    AiGraphPanel m_visualScript{GraphEditorMode::Visual()};
     TweenPanel m_tween;
     bool m_showNineSlice = false;
 

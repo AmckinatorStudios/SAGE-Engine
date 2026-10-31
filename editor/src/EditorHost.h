@@ -168,6 +168,8 @@ public:
     virtual void OpenAnimationClip(const std::string& clipPath) = 0;
     // Открыть граф SAGE AI в редакторе графов (путь на диске).
     virtual void OpenAiGraph(const std::string& graphPath) = 0;
+    // Открыть граф Visual Scripting в его редакторе (путь на диске).
+    virtual void OpenVisualScript(const std::string& graphPath) = 0;
     // Открыть окно Tween на твине объекта (индекс в его TweenComponent) и
     // сразу сделать то, ради чего открыли: показать меню свойств или сыграть.
     enum class TweenOpen { Edit, AddProperty, Play };

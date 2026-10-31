@@ -4,6 +4,7 @@
 
 #include "sage/core/Log.h"
 #include "sage/scene/AiAgentComponent.h"
+#include "sage/scene/VisualScriptComponent.h"
 #include "sage/scene/Signals.h"
 #include "sage/vars/Refs.h"
 
@@ -26,6 +27,7 @@ void EnsureBuiltins() {
     if (done) return;
     done = true;
     RegisterAiAgentComponent();
+    RegisterVisualScriptComponent();
 }
 } // namespace
 

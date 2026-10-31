@@ -41,6 +41,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ai/Graph.cpp
     src/sage/ai/GraphRuntime.cpp
     src/sage/ai/GraphDebug.cpp
+    src/sage/ai/GraphValidate.cpp
     src/sage/ai/GraphNodes_Flow.cpp
     src/sage/ai/GraphNodes_Data.cpp
     src/sage/vars/Refs.cpp
@@ -182,6 +183,7 @@ set(SAGE_ENGINE_SOURCES
     src/physics/builtin/BuiltinWorld_Solver.cpp
     src/physics/builtin/Collide.cpp
     src/sage/scene/AiAgentComponent.cpp
+    src/sage/scene/VisualScriptComponent.cpp
     src/sage/scene/CopyName.cpp
     src/sage/scene/ScaleLock.cpp
     src/sage/scene/CharacterFit.cpp
@@ -237,6 +239,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_AI.cpp
     src/sage/scripting/ScriptApi_AIGraph.cpp
     src/sage/scripting/ScriptApi_AIWorld.cpp
+    src/sage/scripting/ScriptApi_Visual.cpp
     src/sage/scripting/ScriptApi_Tween.cpp
     src/sage/scripting/ScriptTween.cpp
     src/sage/scripting/ScriptApi_Animation.cpp

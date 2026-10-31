@@ -270,6 +270,7 @@ void AssetsPanel::OpenItem(EditorHost& host, const fs::path& path, bool isDir) {
         // нельзя (см. panels/AnimationPanel.h).
         case OpenAs::Clip: host.OpenAnimationClip(path.string()); break;
         case OpenAs::AiGraph: host.OpenAiGraph(sage::PathToUtf8(path)); break;
+        case OpenAs::VisualScript: host.OpenVisualScript(sage::PathToUtf8(path)); break;
         case OpenAs::Text:
             // Текст открывается ТЕМ, ЧЕМ ЕГО ОТКРЫВАЕТ СИСТЕМА (или выбранным
             // редактором кода). Отказ виден: молчащий щелчок неотличим от

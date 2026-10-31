@@ -101,6 +101,11 @@ public:
     RunPtr Start(int agent, const std::string& task, const Blackboard& inputs = {},
                  int parentRun = 0);
     bool Cancel(int runId);
+    // Запустить и сразу шагать, пока выполнение не начнёт ждать или не
+    // кончится: функция графа без ожиданий отдаёт результат в тот же вызов
+    // (visual.call из Lua). Внутри идущего Tick — обычный Start: шаг будет в
+    // этом же проходе.
+    RunPtr RunNow(int agent, const std::string& task, const Blackboard& inputs = {});
     RunPtr FindRun(int runId) const;
     size_t ActiveCount() const { return m_byId.size(); }
 

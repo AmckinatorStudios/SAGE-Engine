@@ -127,8 +127,12 @@ void BindGraphApi(sol::table& ed, const std::string& id) {
         };
         sage::editor::aigraph::AddPinEditor(std::move(ext));
     });
-    ed.set_function("graph_tool", [id](const std::string& title, sol::protected_function fn) {
+    // Третий аргумент {editor = "ai" | "visual"} — кнопка только в одном из
+    // редакторов графов; без него — в обоих.
+    ed.set_function("graph_tool", [id](const std::string& title, sol::protected_function fn,
+                                       sol::optional<sol::table> opts) {
         sage::editor::aigraph::ToolExt t;
+        if (opts) t.Editor = opts->get_or<std::string>("editor", "");
         t.Owner = id;
         t.Title = title;
         t.Run = [fn, id](const sage::editor::aigraph::ToolContext& c) {
@@ -136,6 +140,7 @@ void BindGraphApi(sol::table& ed, const std::string& id) {
             sol::table g = lua.create_table();
             g["path"] = c.Path;
             g["name"] = c.Name;
+            g["editor"] = c.Editor;
             sol::table sel = lua.create_table();
             for (size_t i = 0; i < c.Selected.size(); ++i) sel[i + 1] = c.Selected[i];
             g["selected"] = sel;

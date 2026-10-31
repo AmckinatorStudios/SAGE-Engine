@@ -21,6 +21,7 @@ void EditorLayer::CheckAiGraphFrame() {
         fs::remove(graphPath, ec);
         m_panelRegistry.SetVisible("AiGraph", false);
         m_panelRegistry.SetVisible("AiDebugger", false);
+        m_panelRegistry.SetVisible("VisualScript", false);
         if (ok) LOG_INFO("Editor") << "AI_GRAPH: OK — окно графа и отладчик ИИ рисуются в Play без ошибок";
         else LOG_ERROR("Editor") << "AI_GRAPH: FAIL — " << why;
         m_aiGraphFrameStep = -1;
@@ -48,6 +49,8 @@ void EditorLayer::CheckAiGraphFrame() {
             c.Graph = "assets/ai/SelftestFrame.aigraph";
             m_scene->Registry().emplace<AiAgentComponent>(probe.Entity(), c);
             OpenAiGraph(sage::PathToUtf8(graphPath));
+            // Редактор Visual Script — та же основа в своём режиме: рисуется рядом.
+            m_panelRegistry.SetVisible("VisualScript", true);
             m_panelRegistry.SetVisible("AiDebugger", true);
             m_aiGraphFrameErrors = m_console.ErrorCount();
             StartPlay();

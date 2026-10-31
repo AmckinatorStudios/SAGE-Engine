@@ -18,6 +18,7 @@
 #include "ui/UI.h"
 #include "InspectorPanel.h"
 #include "sage/scene/AiAgentComponent.h"
+#include "sage/scene/VisualScriptComponent.h"
 #include "../SignalLinksEditor.h"
 #include "../UIElementProperties.h"
 
@@ -654,6 +655,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     DrawEffectSections(host, obj, reg, rm);
 
     DrawAiSection(host, obj, reg, rm);
+    DrawVisualScriptSection(host, obj, reg, rm);
 
     // ИНТЕРФЕЙС И ЭЛЕМЕНТ — РАЗНЫЕ РАЗДЕЛЫ, и это главное разделение этого
     // окна. Интерфейс — граница: что показывать, в каком порядке и под какой
@@ -808,6 +810,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     if (rm.Ai) {
         host.PushUndoSnapshot();
         reg.remove<AiAgentComponent>(obj.Entity());
+    }
+
+    if (rm.VisualScript) {
+        host.PushUndoSnapshot();
+        reg.remove<VisualScriptComponent>(obj.Entity());
     }
 
     if (rm.Audio) {

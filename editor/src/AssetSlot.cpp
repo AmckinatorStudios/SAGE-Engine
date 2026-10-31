@@ -157,6 +157,7 @@ Kind KindOf(const fs::path& path) {
     if (ext == ".sagefx") return Kind::Effect;
     if (ext == ".sageuistyle") return Kind::UiStyle;
     if (ext == ".aigraph") return Kind::AiGraph;
+    if (ext == ".vgraph") return Kind::VisualScript;
     // Модели спрашиваются у РЕЕСТРА импортёров, а не у списка здесь: движок
     // умеет .obj/.gltf/.glb/.fbx/.blend/.bbmodel и пополняется плагинами.
     if (ext == ".sagemesh" || ModelLoader::IsSupportedModel(path.string())) return Kind::Model;
@@ -184,6 +185,7 @@ const char* KindName(Kind kind) {
         case Kind::Effect:   return T("particle effect");
         case Kind::UiStyle:  return T("interface style");
         case Kind::AiGraph:  return T("AI graph");
+        case Kind::VisualScript: return T("visual script");
         default:             return T("file");
     }
 }
@@ -204,6 +206,7 @@ const char* KindIcon(Kind kind) {
         case Kind::Effect:   return "particles";
         case Kind::UiStyle:  return "ui-panel";
         case Kind::AiGraph:  return "wire";
+        case Kind::VisualScript: return "wire";
         default:             return "file";
     }
 }
@@ -223,6 +226,7 @@ std::vector<std::string> Extensions(Kind kind) {
         case Kind::Effect:   return {".sagefx"};
         case Kind::UiStyle:  return {".sageuistyle"};
         case Kind::AiGraph:  return {".aigraph"};
+        case Kind::VisualScript: return {".vgraph"};
         // У папки расширений нет: диалог выбирает КАТАЛОГ, а подсказка «поддер-
         // живаются…» в отказе остаётся пустой — перечислять там нечего.
         case Kind::Folder:   return {};

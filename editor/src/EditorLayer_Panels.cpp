@@ -175,6 +175,16 @@ void EditorLayer::RegisterPanels() {
     }
     {
         PanelSpec s;
+        s.Id = "VisualScript";
+        s.Title = "Visual Script";
+        s.Icon = "wire";
+        s.Section = PanelSection::Tools;
+        s.WrapWindow = false;
+        s.Draw = [this](EditorHost&, bool* open, const std::string&) { m_visualScript.Draw(*this, open); };
+        m_panelRegistry.Register(std::move(s));
+    }
+    {
+        PanelSpec s;
         s.Id = "AiDebugger";
         s.Title = "AI Debugger";
         s.Icon = "debug";

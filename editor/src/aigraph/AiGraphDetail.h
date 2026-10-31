@@ -26,5 +26,8 @@ ImU32 TypeColor(const sage::ai::TypeRegistry& types, const std::string& type);
 const char* Tr(const std::string& key);
 // Раздел палитры «Math/Vectors» — по частям: «Математика/Векторы».
 std::string TrPath(const std::string& category);
+// Строка не длиннее max символов (а не байт): обрезка по байтам резала
+// русскую букву пополам, и у пина появлялся «битый» знак.
+std::string ClipUtf8(const std::string& s, size_t max);
 
 } // namespace sage::editor::aigraph

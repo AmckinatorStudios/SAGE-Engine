@@ -60,6 +60,17 @@ void Wire(ImDrawList* dl, ImVec2 a, ImVec2 b, ImU32 color, float thickness) {
 
 } // namespace
 
+std::string AiGraphPanel::LinkedGraph(const GraphNode& n) const {
+    const char* key = n.Type == "graph.call" ? "function"
+                      : (n.Type == "task.run" || n.Type == "task.call") ? "task"
+                                                                         : nullptr;
+    if (!key || !Library()) return {};
+    auto it = n.Values.find(key);
+    if (it == n.Values.end()) return {};
+    const std::string name = it->second.AsString();
+    return Library()->FindGraph(name) ? name : std::string();
+}
+
 const NodeType* AiGraphPanel::TypeOf(const GraphNode& n) const {
     sage::ai::World* lib = Library();
     return lib ? lib->Nodes().Find(n.Type) : nullptr;
@@ -101,7 +112,7 @@ void AiGraphPanel::Layout(const GraphNode& n, NodeLayout& out) const {
         std::string s = p.Title.empty() ? p.Name : std::string(Tr(p.Title));
         if (input && p.Type != sage::ai::type::Exec && !m_doc.LinkInto(n.Id, p.Name)) {
             auto v = n.Values.find(p.Name);
-            if (v != n.Values.end()) s += " = " + v->second.AsString().substr(0, 18);
+            if (v != n.Values.end()) s += " = " + ClipUtf8(v->second.AsString(), 18);
         }
         return ImGui::CalcTextSize(s.c_str()).x * 0.9f;
     };
@@ -231,6 +242,7 @@ void AiGraphPanel::FrameAll(ImVec2 size) {
 
 void AiGraphPanel::DrawCanvas(EditorHost& host) {
     ImGuiIO& io = ImGui::GetIO();
+    Revalidate();
     m_origin = ImGui::GetCursorScreenPos();
     m_canvasSize = ImGui::GetContentRegionAvail();
     if (m_canvasSize.x < 50.0f || m_canvasSize.y < 50.0f) return;
@@ -346,6 +358,24 @@ void AiGraphPanel::DrawCanvas(EditorHost& host) {
             if (rd->Paused && rd->PausedNode == n.Id) { border = IM_COL32(255, 70, 70, 255); bw = 3.5f; }
         }
         dl->AddRect(L.Min, L.Max, border, 6.0f * m_zoom, 0, bw);
+        // Проблема проверки графа — знак в углу заголовка, текст — при наведении.
+        {
+            std::string text;
+            bool error = false;
+            for (const auto& [node, issue] : m_issues)
+                if (node == n.Id) {
+                    error |= issue.first;
+                    text += (text.empty() ? "" : "\n") + issue.second;
+                }
+            if (!text.empty()) {
+                const ImVec2 c(L.Max.x - 10.0f * m_zoom, L.Min.y + L.HeaderH * 0.5f);
+                dl->AddCircleFilled(c, 6.0f * m_zoom, error ? IM_COL32(230, 60, 50, 255) : IM_COL32(240, 170, 40, 255));
+                dl->AddText(font, fontSize * 0.9f, ImVec2(c.x - 2.0f * m_zoom, c.y - fontSize * 0.45f), IM_COL32_WHITE, "!");
+                if (!error) border = IM_COL32(240, 170, 40, 200);
+                if (hovered && Dist2(io.MousePos, c) < 100.0f * m_zoom * m_zoom) ImGui::SetTooltip("%s", text.c_str());
+                if (error) dl->AddRect(L.Min, L.Max, IM_COL32(230, 60, 50, 220), 6.0f * m_zoom, 0, 2.0f);
+            }
+        }
         // Точка останова — красная метка в углу заголовка (щелчок — переключить).
         const ImVec2 bpPos(L.Min.x + 11.0f * m_zoom, L.Min.y + L.HeaderH * 0.5f);
         if (dbg.HasBreakpoint(m_doc.Name, n.Id)) dl->AddCircleFilled(bpPos, 5.0f * m_zoom, IM_COL32(230, 50, 50, 255));
@@ -371,7 +401,7 @@ void AiGraphPanel::DrawCanvas(EditorHost& host) {
             // Вписанное значение несоединённого входа — прямо у пина.
             if (!p.Output && !exec && !linked) {
                 auto v = n.Values.find(p.Pin);
-                if (v != n.Values.end()) label += " = " + v->second.AsString().substr(0, 18);
+                if (v != n.Values.end()) label += " = " + ClipUtf8(v->second.AsString(), 18);
             }
             const ImVec2 sz = font->CalcTextSizeA(fontSize * 0.9f, FLT_MAX, 0.0f, label.c_str());
             const ImVec2 at = p.Output ? ImVec2(p.Pos.x - r - 6.0f * m_zoom - sz.x, p.Pos.y - sz.y * 0.5f)
@@ -457,9 +487,7 @@ void AiGraphPanel::DrawCanvas(EditorHost& host) {
     }
     if (hovered && nodeUnder && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
         if (const GraphNode* n = m_doc.FindNode(nodeUnder))
-            if ((n->Type == "task.run" || n->Type == "task.call") && n->Values.count("task") && lib &&
-                lib->FindGraph(n->Values.at("task").AsString()))
-                OpenTaskGraph(host, n->Values.at("task").AsString());
+            if (const std::string g = LinkedGraph(*n); !g.empty()) OpenTaskGraph(host, g);
     }
     const bool dragging = ImGui::IsMouseDragging(ImGuiMouseButton_Left, 2.0f);
     auto beginDragUndo = [this]() {

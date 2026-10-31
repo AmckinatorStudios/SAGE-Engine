@@ -325,9 +325,12 @@ RunPtr World::Start(int agentId, const std::string& task, const Blackboard& inpu
     m_byId[run->Id] = run;
     if (m_ticking) m_queue.push_back(run);
     if (GraphDebugger::Get().Enabled) {
-        const bool graph = dynamic_cast<GraphTaskDefinition*>(def.get()) != nullptr;
+        auto* gdef = dynamic_cast<GraphTaskDefinition*>(def.get());
+        const bool graph = gdef != nullptr;
         GraphDebugger::Get().TaskStarted(run->Id, parentRun, agentId, task, def->Origin, graph ? task : "",
                                          m_time);
+        if (gdef && gdef->Doc()->Kind == GraphKind::Script)
+            if (RunDebug* rd = GraphDebugger::Get().FindRun(run->Id)) rd->Script = true;
     }
     return run;
 }
@@ -335,6 +338,23 @@ RunPtr World::Start(int agentId, const std::string& task, const Blackboard& inpu
 RunPtr World::FindRun(int runId) const {
     auto it = m_byId.find(runId);
     return it == m_byId.end() ? nullptr : it->second;
+}
+
+RunPtr World::RunNow(int agent, const std::string& task, const Blackboard& inputs) {
+    RunPtr run = Start(agent, task, inputs);
+    if (run->Rejected || m_ticking) return run;
+    m_ticking = true;
+    m_queue.assign(1, run);
+    while (!m_queue.empty()) {
+        RunPtr r = std::move(m_queue.front());
+        m_queue.pop_front();
+        StepRun(r);
+    }
+    m_active.erase(std::remove_if(m_active.begin(), m_active.end(),
+                                  [](const RunPtr& r) { return r->Status != TaskStatus::Running; }),
+                   m_active.end());
+    m_ticking = false;
+    return run;
 }
 
 bool World::Cancel(int runId) {

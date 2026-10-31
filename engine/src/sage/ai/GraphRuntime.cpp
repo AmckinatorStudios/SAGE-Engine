@@ -24,13 +24,15 @@ std::shared_ptr<CompiledGraph> CompileGraph(std::shared_ptr<const GraphDoc> doc,
     g->Doc = std::move(doc);
     const GraphDoc& d = *g->Doc;
     const GraphEnv env{&world, &world.Types(), &d};
-    std::string unknown;
+    std::string unknown, foreign;
     for (const GraphNode& n : d.Nodes) {
         CompiledNode c;
         c.Node = &n;
         c.Type = world.Nodes().Find(n.Type);
         if (c.Type) c.Pins = ResolvePins(*c.Type, n, env);
         else if (unknown.empty()) unknown = "'" + n.Type + "' (#" + std::to_string(n.Id) + ")";
+        if (c.Type && !NodeAllowed(c.Type->Domains, d.Kind) && foreign.empty())
+            foreign = "'" + c.Type->Title + "' (#" + std::to_string(n.Id) + ")";
         g->Index[n.Id] = g->Nodes.size();
         g->Nodes.push_back(std::move(c));
     }
@@ -47,14 +49,19 @@ std::shared_ptr<CompiledGraph> CompileGraph(std::shared_ptr<const GraphDoc> doc,
     }
     for (size_t i = 0; i < g->Nodes.size(); ++i) {
         const std::string& t = g->Nodes[i].Node->Type;
-        if (t == "flow.start" && !g->StartNode) g->StartNode = g->Nodes[i].Node->Id;
+        if ((t == "flow.start" || t == "script.on_start") && !g->StartNode) g->StartNode = g->Nodes[i].Node->Id;
         if (t == "event.on") g->EventNodes.push_back(i);
+        if (t == "script.on_update") g->UpdateNodes.push_back(i);
     }
     // Узла нет в реестре — чаще всего не загружена библиотека, где он
     // объявлен (свой узел на Lua). Граф с дыркой не запускается вовсе: молча
     // пропустить узел значило бы выполнить другую логику, чем нарисовано.
     if (!unknown.empty()) g->Problem = "в графе '" + d.Name + "' неизвестный узел " + unknown;
-    else if (!g->StartNode && g->EventNodes.empty())
+    // Узел чужого редактора (задача ИИ в Visual Scripting) — тоже не запуск:
+    // правила назначения одни для палитры, проверки и выполнения.
+    else if (!foreign.empty())
+        g->Problem = "в графе '" + d.Name + "' узел " + foreign + " не для этого вида графа";
+    else if (!g->StartNode && g->EventNodes.empty() && g->UpdateNodes.empty())
         g->Problem = "в графе '" + d.Name + "' нет ни узла Start, ни обработчика событий";
     return g;
 }
@@ -281,6 +288,8 @@ bool GraphBehavior::Ready(Fiber& f) {
 bool GraphBehavior::AnyReady() {
     if (m_paused) return !GraphDebugger::Get().IsPaused(m_runId);
     if (!m_events.empty() || !m_cancelQueue.empty()) return true;
+    // On Update — каждый новый кадр.
+    if (m_g && !m_g->UpdateNodes.empty() && m_world && m_world->Frame() != m_updateFrame) return true;
     for (auto& f : m_fibers)
         if (!f->Done && Ready(*f)) return true;
     return false;
@@ -493,6 +502,7 @@ TaskStatus GraphBehavior::Step(TaskContext& ctx) {
     }
 
     DeliverEvents(ctx);
+    StartUpdates(ctx);
     m_budget = kMaxNodesPerStep;
     for (size_t i = 0; i < m_fibers.size() && !m_finished && !m_paused; ++i) {
         Fiber& f = *m_fibers[i];
@@ -522,9 +532,32 @@ TaskStatus GraphBehavior::Step(TaskContext& ctx) {
             if (f->Node) cur.insert(f->Node);
         dbg.SetCurrent(m_runId, std::move(cur));
     }
-    if (m_fibers.empty() && m_g->EventNodes.empty() && !m_paused) return TaskStatus::Succeeded;
+    if (m_fibers.empty() && m_g->EventNodes.empty() && m_g->UpdateNodes.empty() && !m_paused)
+        return TaskStatus::Succeeded;
     ctx.WaitUntil([this] { return AnyReady(); });
     return TaskStatus::Running;
+}
+
+void GraphBehavior::StartUpdates(TaskContext& ctx) {
+    if (m_g->UpdateNodes.empty()) return;
+    const World& w = ctx.GetWorld();
+    if (m_updateFrame == w.Frame()) return;   // кадр уже заведён
+    m_updateFrame = w.Frame();
+    const float dt = m_updateTime < 0.0 ? 0.0f : (float)(w.Time() - m_updateTime);
+    m_updateTime = w.Time();
+    for (size_t i : m_g->UpdateNodes) {
+        const CompiledNode& n = m_g->Nodes[i];
+        const int id = n.Node->Id;
+        auto prev = m_updateFiber.find(id);
+        if (prev != m_updateFiber.end()) {
+            Fiber* f = FindFiber(prev->second);
+            if (f && !f->Done) continue;   // прошлый кадр ещё ждёт — не догоняем сами себя
+        }
+        m_state[id].Outputs["dt"] = vars::Value(dt);
+        if (const int target = Target(n, "then")) m_updateFiber[id] = NewFiber(target).Id;
+        GraphDebugger& dbg = GraphDebugger::Get();
+        if (dbg.Enabled) dbg.NodeStepped(m_runId, GraphName(), id, w.Frame(), w.Time());
+    }
 }
 
 void GraphBehavior::Cancel(TaskContext&) {

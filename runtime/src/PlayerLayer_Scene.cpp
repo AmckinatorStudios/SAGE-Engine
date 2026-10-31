@@ -157,6 +157,7 @@ void PlayerLayer::BuildSceneRuntime() {
     // Библиотека SAGE AI (assets/ai, из пакета): до скриптов объектов — их
     // Start вправе запустить граф по имени.
     m_scripts->LoadAiLibrary("assets/ai");
+    m_scripts->LoadAiLibrary("assets/visual");
 
     // Раскладка управления проекта — ПОСЛЕ скриптов, и порядок здесь значащий.
     // Скрипты объявляют СВОИ умолчания (BindAction в OnStart), а input.sageinput

@@ -706,6 +706,13 @@ sage.ui.SetSprite
 sage.ui.SetValue
 sage.ui.SpawnDemo
 sage.ui.SpawnShowcase
+sage.visual
+sage.visual.call
+sage.visual.functions
+sage.visual.graph
+sage.visual.node
+sage.visual.of
+sage.visual.type
 sage.volumetric
 sage.volumetric.Enabled
 sage.volumetric.Set
@@ -730,6 +737,7 @@ tween
 type
 ui
 value_noise
+visual
 volumetric
 wait
 warn
