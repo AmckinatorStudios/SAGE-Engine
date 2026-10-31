@@ -1,3 +1,4 @@
+#include <algorithm>
 #include "ScriptApiCommon.h"
 
 #include "sage/core/Log.h"
@@ -89,6 +90,21 @@ sol::object ScriptEngine::ValueToLua(const sage::vars::Value& v) {
             if (!obj.Valid()) return sol::lua_nil;
             return sol::make_object(m_lua, obj);
         }
+        case K::Rotation: return sol::make_object(m_lua, v.AsRotation());
+        // Список — последовательностью Lua, структура — таблицей полей с
+        // именем типа в _type: так значение возвращается обратно тем же.
+        case K::Array: {
+            sol::table t = m_lua.create_table((int)v.Items().size(), 0);
+            int i = 1;
+            for (const sage::vars::Value& x : v.Items()) t[i++] = ValueToLua(x);
+            return t;
+        }
+        case K::Struct: {
+            sol::table t = m_lua.create_table();
+            if (!v.StructType().empty()) t["_type"] = v.StructType();
+            for (const sage::vars::Field& f : v.Fields()) t[f.first] = ValueToLua(f.second);
+            return t;
+        }
     }
     return sol::lua_nil;
 }
@@ -114,7 +130,44 @@ sage::vars::Value ScriptEngine::ValueFromLua(const sol::object& o) {
         if (d == (double)(int)d) return sage::vars::Value((int)d);
     }
     if (o.is<float>()) return sage::vars::Value(o.as<float>());
+    if (o.is<glm::quat>()) return sage::vars::Value(o.as<glm::quat>());
+    if (o.get_type() == sol::type::table) return TableToValue(o.as<sol::table>(), 0);
     return sage::vars::Value();
+}
+
+// Таблица Lua -> список или структура. Последовательность (ключи 1..n) —
+// список; иначе — структура, имя типа — в _type. Глубина ограничена: таблица,
+// ссылающаяся на саму себя, обычна в Lua и не должна уронить движок.
+sage::vars::Value ScriptEngine::TableToValue(const sol::table& t, int depth) {
+    if (depth > 32) return sage::vars::Value::Array();
+    const size_t n = t.size();
+    bool onlySequence = true;
+    for (const auto& kv : t) {
+        if (kv.first.get_type() != sol::type::number) { onlySequence = false; break; }
+    }
+    auto conv = [&](const sol::object& x) {
+        return x.get_type() == sol::type::table ? TableToValue(x.as<sol::table>(), depth + 1) : ValueFromLua(x);
+    };
+    if (onlySequence) {
+        std::vector<sage::vars::Value> items;
+        items.reserve(n);
+        for (size_t i = 1; i <= n; ++i) items.push_back(conv(t[i]));
+        return sage::vars::Value::Array(std::move(items));
+    }
+    std::vector<sage::vars::Field> fields;
+    std::string type;
+    for (const auto& kv : t) {
+        if (kv.first.get_type() != sol::type::string) continue;
+        const std::string k = kv.first.as<std::string>();
+        if (k == "_type") { type = kv.second.is<std::string>() ? kv.second.as<std::string>() : ""; continue; }
+        const sol::type vt = kv.second.get_type();
+        if (vt == sol::type::function || vt == sol::type::thread) continue;
+        fields.emplace_back(k, conv(kv.second));
+    }
+    // Поля по имени: порядок обхода таблицы Lua не определён.
+    std::sort(fields.begin(), fields.end(),
+              [](const sage::vars::Field& a, const sage::vars::Field& b) { return a.first < b.first; });
+    return sage::vars::Value::Struct(type, std::move(fields));
 }
 
 void ScriptEngine::RegisterVarsApi() {

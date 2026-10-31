@@ -1,6 +1,8 @@
 #include "sage/app/CoreSystems.h"
 #include "EditorPlaySession.h"
 
+#include "sage/ai/GraphDebug.h"
+
 #include <cstdint>
 
 #include "imgui.h"
@@ -87,6 +89,15 @@ int EditorPlaySession::BuildRuntime(const PlayContext& ctx, Scene& scene) {
     // (headless-прогон CI ставит SAGE_GAME_ARGS="autopilot=1").
     if (const std::string args = sage::EnvString("SAGE_GAME_ARGS"); !args.empty())
         m_scripts->SetLaunchArgsFromString(args);
+
+    // Библиотека SAGE AI проекта (assets/ai): задачи, узлы, типы и графы — ДО
+    // скриптов объектов, чтобы их Start мог запустить граф по имени. Отладчик
+    // графов пишет только в Play редактора; прошлый прогон забывается здесь, а
+    // не на Stop — после Stop человек как раз смотрит, почему всё кончилось.
+    sage::ai::GraphDebugger::Get().Reset();
+    sage::ai::GraphDebugger::Get().Enabled = true;
+    m_scripts->SetAiRoot(sage::PathToUtf8(ctx.ProjectDir));
+    m_scripts->LoadAiLibrary("assets/ai");
 
     // Физика: строим мир по сущностям с RigidBodyComponent. Бэкенд по умолчанию —
     // Jolt, если собран, иначе встроенный движок (см. PhysicsWorld::DefaultBackend).
@@ -180,6 +191,7 @@ void EditorPlaySession::TeardownRuntime(const PlayContext& ctx, Scene* scene) {
     if (m_scripting) m_scripting->Shutdown();
     m_scripting.reset();
     m_scripts.reset();
+    sage::ai::GraphDebugger::Get().Enabled = false;
     // Частицы спрашивали физику о столкновениях — запрос держит указатель на
     // неё, и снять его надо ДО того, как физики не станет.
     if (ctx.Particles) ctx.Particles->SetCollisionQuery({});

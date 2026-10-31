@@ -34,6 +34,8 @@ add_executable(sage_tests
     test_lua_simple.cpp
     test_ai.cpp
     test_ai_lua.cpp
+    test_ai_graph.cpp
+    test_ai_graph_lua.cpp
     test_input.cpp
     test_eventbus.cpp
     test_framegraph.cpp
@@ -116,6 +118,8 @@ add_executable(sage_tests
     ../editor/src/Localization.cpp
     # Плагины редактора на Lua: шаблоны и сторож проверяются без окна.
     ../editor/src/LuaPlugins.cpp
+    ../editor/src/LuaPlugins_Graph.cpp
+    ../editor/src/aigraph/AiGraphExtensions.cpp
     ../editor/src/LuaPluginsFiles.cpp
     ../editor/src/ObjectCatalog.cpp
     ../editor/src/gizmo/ColliderEdit.cpp

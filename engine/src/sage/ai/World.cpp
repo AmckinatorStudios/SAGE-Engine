@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <exception>
 
+#include "sage/ai/GraphDebug.h"
+#include "sage/ai/GraphRuntime.h"
 #include "sage/core/Log.h"
 
 namespace sage::ai {
@@ -133,13 +135,14 @@ TaskStatus TaskContext::Fail(const std::string& reason) {
 // ---------------------------------------------------------------------------
 // Библиотека.
 // ---------------------------------------------------------------------------
-World::World() = default;
+World::World() { RegisterBuiltinNodes(m_nodes); }
 
 World::~World() { Clear(); }
 
 void World::RegisterTask(TaskDefinitionPtr definition) {
     if (!definition || definition->Name.empty()) return;
     m_tasks[definition->Name] = std::move(definition);
+    ++m_version;
 }
 
 TaskDefinitionPtr World::FindTask(const std::string& name) const {
@@ -157,6 +160,7 @@ void World::RegisterOperation(Operation operation) {
     if (operation.Name.empty() || !operation.Fn) return;
     std::string name = operation.Name;
     m_operations[name] = std::move(operation);
+    ++m_version;
 }
 
 const Operation* World::FindOperation(const std::string& name) const {
@@ -240,6 +244,28 @@ void World::DestroyAgent(int id) {
     m_agents.erase(id);
 }
 
+int World::AgentOf(int owner) const {
+    if (owner <= 0) return 0;
+    for (const auto& [id, a] : m_agents)
+        if (a.Owner == owner) return id;
+    return 0;
+}
+
+bool World::RegisterGraph(const GraphDoc& doc, std::string& error) {
+    if (doc.Name.empty()) {
+        error = "у графа нет имени — по нему его зовут задачей";
+        return false;
+    }
+    auto def = std::make_shared<GraphTaskDefinition>(std::make_shared<const GraphDoc>(doc), *this);
+    RegisterTask(def);
+    return true;
+}
+
+std::shared_ptr<const GraphDoc> World::FindGraph(const std::string& task) const {
+    auto g = std::dynamic_pointer_cast<GraphTaskDefinition>(FindTask(task));
+    return g ? g->Doc() : nullptr;
+}
+
 Agent* World::FindAgent(int id) {
     auto it = m_agents.find(id);
     return it == m_agents.end() ? nullptr : &it->second;
@@ -298,6 +324,11 @@ RunPtr World::Start(int agentId, const std::string& task, const Blackboard& inpu
     m_active.push_back(run);
     m_byId[run->Id] = run;
     if (m_ticking) m_queue.push_back(run);
+    if (GraphDebugger::Get().Enabled) {
+        const bool graph = dynamic_cast<GraphTaskDefinition*>(def.get()) != nullptr;
+        GraphDebugger::Get().TaskStarted(run->Id, parentRun, agentId, task, def->Origin, graph ? task : "",
+                                         m_time);
+    }
     return run;
 }
 
@@ -424,8 +455,11 @@ void World::Finish(Run& r, TaskStatus status) {
     // Ожидание и исполнитель держат ссылки в скриптовый язык (условие,
     // корутину) — отпускаем их сразу, а не когда пропадёт последняя ручка.
     r.Waiting = Wait{};
+    r.Listener = nullptr;
     r.Behavior.reset();
+    r.Definition.reset();
     Detach(r);
+    if (GraphDebugger::Get().Enabled) GraphDebugger::Get().TaskFinished(r.Id, StatusName(status), r.Error, m_time);
     WakeParent(r);
 }
 
@@ -459,8 +493,11 @@ void World::CancelRun(Run& r) {
     cancelKids();
     r.Status = TaskStatus::Cancelled;
     r.Waiting = Wait{};
+    r.Listener = nullptr;
     r.Behavior.reset();
+    r.Definition.reset();
     Detach(r);
+    if (GraphDebugger::Get().Enabled) GraphDebugger::Get().TaskFinished(r.Id, "cancelled", r.Error, m_time);
     WakeParent(r);
 }
 
@@ -472,9 +509,15 @@ int World::Emit(const std::string& event, const vars::Value& payload, int agent)
     const std::vector<RunPtr> active = m_active;
     for (const RunPtr& run : active) {
         Run& r = *run;
-        if (r.Status != TaskStatus::Running || r.Waiting.Kind != WaitKind::Event) continue;
-        if (r.Waiting.Event != event) continue;
+        if (r.Status != TaskStatus::Running) continue;
         if (agent && r.Agent != agent) continue;
+        if (r.Listener && r.Listener(event, payload)) {
+            r.Waiting = Wait{};
+            ++woken;
+            Wake(run);
+            continue;
+        }
+        if (r.Waiting.Kind != WaitKind::Event || r.Waiting.Event != event) continue;
         r.EventName = event;
         r.EventPayload = payload;
         r.TimedOut = false;
@@ -492,6 +535,7 @@ void World::Tick(float dt) {
     m_ticking = true;
     m_time += dt > 0.0f ? dt : 0.0f;
     ++m_frame;
+    if (GraphDebugger::Get().Enabled) GraphDebugger::Get().SetFrame(m_frame);
 
     if (m_ownerAlive) {
         std::vector<int> dead;
@@ -517,8 +561,10 @@ void World::Clear() {
     for (const RunPtr& r : m_active) {
         if (r->Status == TaskStatus::Running) r->Status = TaskStatus::Cancelled;
         r->Waiting = Wait{};
+        r->Listener = nullptr;
         r->Children.clear();
         r->Behavior.reset();
+        r->Definition.reset();
     }
     m_active.clear();
     m_byId.clear();
@@ -527,6 +573,11 @@ void World::Clear() {
     m_shared.clear();
     m_tasks.clear();
     m_operations.clear();
+    // Свои типы и узлы держат функции скриптового языка — тоже конец мира.
+    m_types = TypeRegistry();
+    m_nodes = NodeRegistry();
+    RegisterBuiltinNodes(m_nodes);
+    ++m_version;
 }
 
 } // namespace sage::ai

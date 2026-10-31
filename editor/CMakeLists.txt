@@ -45,6 +45,8 @@ add_executable(SageEditor WIN32
     src/selftest/SelfTestModelHierarchy.cpp
     src/selftest/SelfTestPanels.cpp
     src/selftest/SelfTestGIBake.cpp
+    src/selftest/SelfTestAiGraph.cpp
+    src/selftest/SelfTestAiGraphFrame.cpp
     src/selftest/SelfTestCursorLock.cpp
     src/selftest/SelfTestColliderHandles.cpp
     src/selftest/SelfTestProjectAndAssets.cpp
@@ -76,6 +78,7 @@ add_executable(SageEditor WIN32
     src/AssetSlot.cpp
     src/CreateAssetDialog.cpp
     src/LuaPlugins.cpp
+    src/LuaPlugins_Graph.cpp
     src/LuaPluginsFiles.cpp
     src/PluginsWindow.cpp
     src/ObjectSlot.cpp
@@ -103,6 +106,12 @@ add_executable(SageEditor WIN32
     src/panels/InspectorPanel_Physics.cpp
     src/panels/InspectorPanel_Animation.cpp
     src/panels/InspectorPanel_Effects.cpp
+    src/panels/InspectorPanel_Ai.cpp
+    src/aigraph/AiGraphPanel.cpp
+    src/aigraph/AiGraphPanel_Sides.cpp
+    src/aigraph/AiGraphCanvas.cpp
+    src/aigraph/AiDebugPanel.cpp
+    src/aigraph/AiGraphExtensions.cpp
     src/panels/InspectorPanel_AddComponent.cpp
     src/panels/InspectorPanel_Ui.cpp
     src/panels/ViewportPanel.cpp

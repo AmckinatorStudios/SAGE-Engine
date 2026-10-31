@@ -520,6 +520,7 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
                 case OpenAs::Scene: openLabel = T("Open scene"); openIcon = "scene"; break;
                 case OpenAs::Prefab: openLabel = T("Add to the scene"); openIcon = "prefab"; break;
                 case OpenAs::Clip: openLabel = T("Open in the animation tool"); openIcon = "anim"; break;
+                case OpenAs::AiGraph: openLabel = T("Open in the graph editor"); openIcon = "wire"; break;
                 case OpenAs::Text: openLabel = T("Open in the code editor"); openIcon = "code"; break;
                 case OpenAs::None: break;
             }

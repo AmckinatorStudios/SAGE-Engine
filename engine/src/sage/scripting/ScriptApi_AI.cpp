@@ -1,4 +1,4 @@
-#include "ScriptApiCommon.h"
+#include "ScriptApiAIDetail.h"
 
 #include <algorithm>
 #include <stdexcept>
@@ -42,29 +42,27 @@ using sage::ai::RunPtr;
 using sage::ai::TaskStatus;
 using sage::vars::Value;
 
-struct AiRunRef {
-    RunPtr R;
-};
-struct AiVars {
-    BlackboardPtr B;
-};
+} // namespace
+
+namespace sage::scripting::aidetail {
 
 // Значение Lua -> значение ИИ. Объект нового API (self.gameObject) и сам
 // экземпляр скрипта (self) становятся ссылкой на объект, как и GameObject.
-Value AiValue(ScriptEngine& se, const sol::object& o, const std::string& what) {
+sage::vars::Value AiValue(ScriptEngine& se, const sol::object& o, const std::string& what) {
     if (o.is<sage::scripting::lua::ObjectRef>()) {
         const auto& r = o.as<sage::scripting::lua::ObjectRef>();
         return Value(sage::vars::EntityRef{r.Obj.Valid() ? r.Obj.Id() : 0});
     }
     if (o.get_type() == sol::type::table) {
-        sol::object go = o.as<sol::table>()["gameObject"];
+        sol::table t = o.as<sol::table>();
+        sol::object go = t["gameObject"];
         if (go.valid() && go.get_type() != sol::type::lua_nil) return AiValue(se, go, what);
-        throw std::runtime_error(what + ": таблицу положить нельзя — в переменных ИИ числа, "
-                                        "строки, векторы и объекты");
+        // Таблица — список или структура (см. ScriptEngine::TableToValue).
+        return se.TableToValue(t, 0);
     }
     if (o.get_type() == sol::type::function)
-        throw std::runtime_error(what + ": функцию положить нельзя — в переменных ИИ числа, "
-                                        "строки, векторы и объекты");
+        throw std::runtime_error(what + ": функцию положить нельзя — в переменных ИИ значения, "
+                                        "списки и структуры");
     return se.ValueFromLua(o);
 }
 
@@ -82,6 +80,12 @@ int OwnerId(const sol::object& o) {
     if (o.get_type() == sol::type::number) return o.as<int>();
     throw std::runtime_error("ai.agent: хозяин — объект сцены (self) или ничего");
 }
+
+} // namespace sage::scripting::aidetail
+
+namespace {
+
+using namespace sage::scripting::aidetail;
 
 // Входы/выходы из таблицы {имя = умолчание}. По имени — порядок записи в
 // таблице Lua не определён, а граф и журнал должны видеть одно и то же.
@@ -262,6 +266,7 @@ end
 local function agent_of(id)
     return AGENTS[id] or N.make_agent(id, N.owner(id), N.space(id))
 end
+N.agent_table = agent_of
 
 function N.make_ctx(r, id)
     local a = agent_of(id)
@@ -573,4 +578,6 @@ void ScriptEngine::RegisterAiApi() {
         sol::error e = ok;
         LOG_ERROR("AI") << "Не удалось собрать Lua-часть SAGE AI: " << e.what();
     }
+    RegisterAiGraphApi();
+    RegisterAiWorldNodes();
 }

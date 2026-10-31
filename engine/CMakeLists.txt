@@ -32,10 +32,17 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ecs/DayNightCycle.cpp
     src/sage/ecs/DecalSystem.cpp
     src/sage/vars/Value.cpp
+    src/sage/vars/ValueJson.cpp
     src/sage/vars/Table.cpp
     src/sage/vars/ScriptVars.cpp
     src/sage/ai/Blackboard.cpp
     src/sage/ai/World.cpp
+    src/sage/ai/Types.cpp
+    src/sage/ai/Graph.cpp
+    src/sage/ai/GraphRuntime.cpp
+    src/sage/ai/GraphDebug.cpp
+    src/sage/ai/GraphNodes_Flow.cpp
+    src/sage/ai/GraphNodes_Data.cpp
     src/sage/vars/Refs.cpp
     src/sage/events/Events.cpp
     src/sage/events/TypedBus.cpp
@@ -167,6 +174,7 @@ set(SAGE_ENGINE_SOURCES
     src/physics/builtin/BuiltinWorld.cpp
     src/physics/builtin/BuiltinWorld_Solver.cpp
     src/physics/builtin/Collide.cpp
+    src/sage/scene/AiAgentComponent.cpp
     src/sage/scene/CopyName.cpp
     src/sage/scene/ScaleLock.cpp
     src/sage/scene/CharacterFit.cpp
@@ -220,6 +228,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_UI.cpp
     src/sage/scripting/ScriptApi_Vars.cpp
     src/sage/scripting/ScriptApi_AI.cpp
+    src/sage/scripting/ScriptApi_AIGraph.cpp
+    src/sage/scripting/ScriptApi_AIWorld.cpp
     src/sage/scripting/ScriptApi_Tween.cpp
     src/sage/scripting/ScriptTween.cpp
     src/sage/scripting/ScriptApi_Animation.cpp

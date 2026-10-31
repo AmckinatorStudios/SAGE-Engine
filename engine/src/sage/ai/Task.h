@@ -150,6 +150,10 @@ struct Run {
     bool InStep = false;
     bool CancelRequested = false;
     bool FailRequested = false;
+    // Слушатель событий мира, независимо от ожидания: граф с обработчиками
+    // On Event слышит событие, даже когда его ветки ждут другого. true —
+    // событие нужно, разбудить выполнение.
+    std::function<bool(const std::string& event, const vars::Value& payload)> Listener;
 };
 
 // То, через что исполнитель говорит с миром на своём шаге. Живёт ровно один

@@ -20,6 +20,7 @@
 class Project;
 class AudioEngine;
 class PhysicsScene;
+class ScriptEngine;
 
 // ---------------------------------------------------------------------------
 // EditorHost — контракт операций редактора, доступных панелям.
@@ -165,6 +166,8 @@ public:
     // действие, что «открыть сцену» или «поставить префаб»: файл знает, чем
     // его открывают, и спрашивать об этом человека незачем.
     virtual void OpenAnimationClip(const std::string& clipPath) = 0;
+    // Открыть граф SAGE AI в редакторе графов (путь на диске).
+    virtual void OpenAiGraph(const std::string& graphPath) = 0;
     // Открыть окно Tween на твине объекта (индекс в его TweenComponent) и
     // сразу сделать то, ради чего открыли: показать меню свойств или сыграть.
     enum class TweenOpen { Edit, AddProperty, Play };
@@ -251,6 +254,9 @@ public:
     // Физика идущей игры; nullptr вне Play. Инспектору — показать, кто сейчас
     // в зоне триггера.
     virtual PhysicsScene* PlayPhysics() = 0;
+    // Движок скриптов идущей игры; nullptr вне Play. Отладчику ИИ — живые
+    // задачи и их переменные.
+    virtual ScriptEngine* PlayScripts() = 0;
 
     // ПЕРЕСТАВИТЬ ФИЗИЧЕСКОЕ ТЕЛО ТУДА, КУДА ЕГО ПОСТАВИЛИ МЫШЬЮ.
     //

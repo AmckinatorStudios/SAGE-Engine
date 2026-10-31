@@ -8,7 +8,10 @@
 #include <unordered_map>
 #include <vector>
 
+#include "sage/ai/Graph.h"
+#include "sage/ai/Nodes.h"
 #include "sage/ai/Task.h"
+#include "sage/ai/Types.h"
 
 // ---------------------------------------------------------------------------
 // МИР ИИ: библиотека задач и операций, экземпляры ИИ и планировщик.
@@ -64,6 +67,20 @@ public:
     // умолчанием), выходы — сколько объявлено.
     bool Call(const std::string& operation, const Values& in, Values& out, std::string& error);
 
+    // --- Граф (SAGE AI Graph) ----------------------------------------------
+    TypeRegistry& Types() { return m_types; }
+    const TypeRegistry& Types() const { return m_types; }
+    NodeRegistry& Nodes() { return m_nodes; }
+    const NodeRegistry& Nodes() const { return m_nodes; }
+    // Зарегистрировать граф задачей с именем doc.Name. Повторно — замена.
+    bool RegisterGraph(const GraphDoc& doc, std::string& error);
+    // Описание графа задачи (nullptr — задача не графом).
+    std::shared_ptr<const GraphDoc> FindGraph(const std::string& task) const;
+    // Меняется при каждой регистрации задачи, операции, типа или узла: по
+    // ней граф узнаёт, что его пины надо собрать заново.
+    uint64_t LibraryVersion() const { return m_version; }
+    void TouchLibrary() { ++m_version; }
+
     // --- Экземпляры -------------------------------------------------------
     int CreateAgent(int owner = 0, const std::string& sharedSpace = "world");
     // Отменяет все задачи экземпляра и удаляет его.
@@ -71,6 +88,8 @@ public:
     // Отменяет все задачи, экземпляр остаётся.
     void StopAgent(int id);
     Agent* FindAgent(int id);
+    // Экземпляр, чей хозяин — объект с этим Id (0 — нет такого).
+    int AgentOf(int owner) const;
     size_t AgentCount() const { return m_agents.size(); }
 
     BlackboardPtr Shared(const std::string& space);
@@ -117,6 +136,9 @@ private:
     void Wake(const RunPtr& run);
     void WakeParent(const Run& run);
 
+    TypeRegistry m_types;
+    NodeRegistry m_nodes;
+    uint64_t m_version = 1;
     std::map<std::string, TaskDefinitionPtr> m_tasks;
     std::map<std::string, Operation> m_operations;
 

@@ -1,5 +1,8 @@
 #include "LuaPlugins.h"
 
+#include "aigraph/AiGraphExtensions.h"
+
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -54,6 +57,9 @@ struct Entry {
     // этого окна уничтожила бы его под ногами — откладывается до Tick.
     bool RestartRequested = false;
 };
+
+// Расширения редактора графа ИИ для плагинов (LuaPlugins_Graph.cpp).
+void BindGraphApi(sol::table& ed, const std::string& id);
 
 namespace {
 
@@ -434,6 +440,9 @@ void BindApi(sol::state& lua, Entry* entry) {
         return SaveSettings(*S().Host, entry->Info.Manifest.Id, out, err);
     });
 
+    // SAGE AI Graph: editor.graph_pin, editor.graph_tool (LuaPlugins_Graph.cpp).
+    BindGraphApi(ed, id);
+
     // --- ui.* — виджеты для editor.panel -----------------------------------------
     // Возвращают новое значение (а не «изменилось ли»): `speed = ui.slider("Скорость",
     // speed, 0, 10)` — одна строка вместо пары «указатель + флаг».
@@ -532,6 +541,9 @@ std::string PanelKey(const Entry& e, size_t i) { return "plugin." + e.Info.Manif
 void DrawPanel(EditorHost& host, Entry& e, size_t i);
 
 void UnregisterPanels(Entry& e) {
+    // Поля и инструменты графа ИИ держат функции Lua этого плагина — уходят
+    // вместе с ним, зарегистрированы ли окна или нет.
+    sage::editor::aigraph::RemoveOwner(e.Info.Manifest.Id);
     if (!e.Registered) return;
     for (size_t i = 0; i < e.Panels.size(); ++i) e.Registered->Panels().Unregister(PanelKey(e, i));
     e.Registered = nullptr;

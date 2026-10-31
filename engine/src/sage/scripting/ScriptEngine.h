@@ -14,6 +14,8 @@ namespace sage::net { class NetworkSystem; }
 #include <sol/sol.hpp>
 #include <functional>
 #include <memory>
+#include <map>
+#include <set>
 #include <unordered_map>
 #include <vector>
 #include <string>
@@ -226,12 +228,25 @@ public:
     // Перевод значений движка в Lua и обратно (см. ScriptApi_Vars.cpp).
     sol::object ValueToLua(const sage::vars::Value& value);
     sage::vars::Value ValueFromLua(const sol::object& object);
+    sage::vars::Value TableToValue(const sol::table& table, int depth);
 
     // Мир SAGE AI этих скриптов (docs/ai.md): задачи, экземпляры ИИ, операции.
     // Открыт C++ ради одного: задача на C++ (или на графе) регистрируется в ТУ
     // ЖЕ библиотеку, что и задачи на Lua, — иначе они не смогли бы звать
     // друг друга по имени.
     sage::ai::World& AI();
+
+    // Библиотека ИИ проекта: все .lua (задачи, узлы, типы, операции) и
+    // .aigraph из папки — рекурсивно, через пакет игры или диск. Lua первыми:
+    // граф может звать узлы и задачи, которые они объявили. Возвращает,
+    // сколько файлов загружено.
+    int LoadAiLibrary(const std::string& directory);
+    // Загрузить граф и зарегистрировать задачей. Возвращает имя задачи
+    // (пусто — не загрузился, причина в журнале).
+    std::string LoadAiGraph(const std::string& path);
+    // Корень проекта для путей ассетов ИИ (компонент AI хранит путь от него).
+    // Пусто — текущая папка (собранная игра).
+    void SetAiRoot(const std::string& projectDir) { m_aiRoot = projectDir; }
 
     // Доступ к состоянию Lua — на случай если игре нужно зарегистрировать
     // свою собственную API-функцию/тип в дополнение к базовой
@@ -431,6 +446,12 @@ private:
     void RegisterRenderTextureApi(); // sage.rt.* — съёмка сцены в картинку
     void RegisterNetApi();        // Net.* — мультиплеер (см. ScriptApi_Net.cpp)
     void RegisterAiApi();         // ai.* — задачи и экземпляры ИИ (ScriptApi_AI.cpp)
+    void RegisterAiGraphApi();    // граф: ai.node, ai.type, узлы мира (ScriptApi_AIGraph.cpp)
+    void RegisterAiWorldNodes();  // узлы мира движка и API (ScriptApi_AIWorld.cpp)
+    // Компонент AI объектов сцены: завести экземпляр и запустить граф.
+    void UpdateAiAgents();
+    std::string ResolveAiPath(const std::string& path) const;
+    std::string LoadAiGraphFile(const std::string& fullPath, const std::string& key);
 
     // Доставляет события сети (сообщения и подключения) в хуки скриптов.
     // Зовётся из UpdateAll: сеть прокачивается кадром, и её события обязаны
@@ -542,6 +563,11 @@ private:
     // описания задач и их корутины обязаны умереть раньше интерпретатора.
     std::unique_ptr<sage::ai::World> m_ai;
     sol::table m_aiNative;   // служебные функции привязки (__sage_ai)
+    std::string m_aiRoot;
+    std::map<std::string, std::string> m_aiGraphs;   // путь -> имя задачи
+    std::map<int, int> m_aiAgents;                   // объект -> экземпляр (компонент AI)
+    std::set<int> m_aiFailed;                        // объекты, чей граф не запустился
+    sol::protected_function m_aiPathFinder;
 
     // Мост к скриптам объектов (см. SetMessageSink). ПОСЛЕ m_lua намеренно:
     // внутри лежат ссылки в реестр Lua.

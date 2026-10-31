@@ -145,6 +145,8 @@ editor.on("selection", function(obj) if obj then editor.log("выделен " ..
 | `editor.open(путь)` | открыть файл в редакторе кода |
 | `editor.save_scene()` | сохранить сцену |
 | `editor.settings`, `editor.save_settings()` | настройки из `plugin.json`; изменить таблицу и сохранить |
+| `editor.graph_pin(тип, fn)` | своё поле значения этого типа в окне свойств узла SAGE AI Graph: `fn(v)` рисует через `ui.*` и возвращает новое значение (или nil) — см. [ai.md](ai.md) |
+| `editor.graph_tool(подпись, fn)` | своя кнопка на панели графа: `fn({path, name, selected})` |
 | `editor.plugin_id`, `editor.plugin_dir` | свой id и папка |
 
 ### Объект сцены
