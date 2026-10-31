@@ -23,6 +23,7 @@ add_executable(sage_render_tests
     Checks_Textures.cpp      # мипмапы, детализация, анизотропия
     Checks_Display.cpp       # режим экрана: проба и откат
     Checks_Pipeline.cpp      # свой рендер: вычисления, граф, шейдеры
+    Checks_Lens.cpp          # хроматическая аберрация
     RenderTestHarness.cpp    # сравнение картинок и запись эталонов
 )
 

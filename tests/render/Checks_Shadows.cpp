@@ -400,6 +400,53 @@ void TestLocalShadows(FrameRenderer& r) {
     TestLocalShadowsOfKind(r, LightComponent::Type::Point, "точечный", "local_point");
 }
 
+// --- Много ламп и слабая лампа: тень есть у каждой ---------------------------
+//
+// В атласе было четыре места для прожекторов и два для точечных, и раздавались
+// они по «яркость × дальность». Третья точечная лампа и любая слабая лампа
+// рядом с яркими оставались без тени молча — свет шёл сквозь плиту. Здесь
+// измеряемая лампа СЛАБЕЕ всех остальных, а ярких ламп больше, чем было мест.
+void AddFarLamps(Scene& scene, LightComponent::Type kind, int count) {
+    for (int i = 0; i < count; ++i) {
+        GameObject lamp = scene.CreateObject("Far" + std::to_string(i));
+        // Далеко за кадром и на короткой дальности: на измеряемый пол они не
+        // светят, но по «весу» обгоняют измеряемую лампу.
+        lamp.GetTransform().Position = {80.0f + 10.0f * (float)i, 4.0f, 80.0f};
+        lamp.GetTransform().Rotation = {-90.0f, 0.0f, 0.0f};
+        LightComponent& lc = lamp.Registry()->emplace<LightComponent>(lamp.Entity());
+        lc.Kind = kind;
+        lc.Intensity = 400.0f;
+        lc.Range = 6.0f;
+    }
+}
+
+void TestManyAndWeakLamps(FrameRenderer& r) {
+    for (LightComponent::Type kind : {LightComponent::Type::Point, LightComponent::Type::Spot}) {
+        const bool point = kind == LightComponent::Type::Point;
+        auto build = [&](bool blocker) {
+            std::unique_ptr<Scene> scene = MakeLampScene(kind, blocker);
+            GameObject lamp = scene->FindByName("Lamp");
+            lamp.Registry()->get<LightComponent>(lamp.Entity()).Intensity = 18.0f;
+            AddFarLamps(*scene, LightComponent::Type::Point, 4);
+            AddFarLamps(*scene, LightComponent::Type::Spot, 5);
+            return scene;
+        };
+        sage::render::LocalShadowAtlas atlas(1024, 256);
+        std::unique_ptr<Scene> blocked = build(true);
+        const long long darkened = NewlyShadowed(RenderWithLampShadows(r, *blocked, nullptr),
+                                                 RenderWithLampShadows(r, *blocked, &atlas));
+        std::unique_ptr<Scene> open = build(false);
+        const long long phantom = NewlyShadowed(RenderWithLampShadows(r, *open, nullptr),
+                                                RenderWithLampShadows(r, *open, &atlas));
+        std::printf("    %s среди 9 ярких: затенено %lld, без перекрытия %lld, плиток атласа %d\n",
+                    point ? "слабая точечная" : "слабый прожектор", darkened, phantom,
+                    atlas.Binding().Grid * atlas.Binding().Grid);
+        Check(darkened > 400, point ? "слабая точечная лампа среди многих отбрасывает тень"
+                                    : "слабый прожектор среди многих отбрасывает тень");
+        Check(phantom < 50, "лишние лампы не дают тени из ниоткуда");
+    }
+}
+
 // --- Тень листвы: вырез по альфе и двусторонность -----------------------------
 //
 // Дерево из набора (Stylized Nature MegaKit) отбрасывало тень КВАДРАТАМИ: проход
@@ -470,6 +517,7 @@ void RunShadowChecks(FrameRenderer& r, Scene& scene) {
     TestShadowSoftness(r, scene);
     TestShadowCascades(r);
     TestLocalShadows(r);
+    TestManyAndWeakLamps(r);
     TestFoliageShadows(r);
 }
 

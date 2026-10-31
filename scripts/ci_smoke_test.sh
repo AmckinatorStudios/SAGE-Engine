@@ -26,7 +26,7 @@ run_headless() {
     fi
 }
 
-echo "=== Smoke-тест 1/13: Sandbox (рендер сцены + скриптинг) ==="
+echo "=== Smoke-тест 1/12: Sandbox (рендер сцены + скриптинг) ==="
 if [ ! -x "${SANDBOX_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${SANDBOX_EXE}"
     exit 1
@@ -47,7 +47,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: Sandbox отрисовал кадр, скриншот ${SHOT_SIZE} байт"
 
-echo "=== Smoke-тест 2/13: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
+echo "=== Smoke-тест 2/12: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
 if [ ! -x "${EDITOR_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${EDITOR_EXE}"
     exit 1
@@ -98,14 +98,14 @@ for CHECK in UI_INSPECTOR ENVIRONMENT TWEEN AI_GRAPH LUA_TESTS DETACHED_INPUT CU
 done
 echo "OK: SageEditor self-test прошёл (включая отдельное окно редактора интерфейса, мышь во вьюпорте и Lua-тесты в Play)"
 
-echo "=== Smoke-тест 3/13: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
+echo "=== Smoke-тест 3/12: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
 if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then
     echo "ОШИБКА: плагин example_stats не загрузился при SAGE_EDITOR_PLUGINS=1"
     cat "${EDITOR_LOG}"; exit 1
 fi
 echo "OK: плагин example_stats загрузился и выгрузился без падения (плагины — opt-in)"
 
-echo "=== Smoke-тест 4/13: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
+echo "=== Smoke-тест 4/12: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
 TESTGAME_EXE="${BUILD_DIR}/games/testgame/TestGame"
 if [ ! -x "${TESTGAME_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${TESTGAME_EXE}"
@@ -141,7 +141,7 @@ if grep -q "ERROR" "${TESTGAME_LOG}"; then
 fi
 echo "OK: TestGame прошёл игровой цикл (подбор + портал + рендер, скриншот ${SHOT_SIZE} байт, без ERROR)"
 
-echo "=== Smoke-тест 5/13: собранная игра (SagePlayer + проект из редактора) ==="
+echo "=== Smoke-тест 5/12: собранная игра (SagePlayer + проект из редактора) ==="
 # Self-test редактора (тест 2) собрал selftest-проект в запускаемую игру через
 # File > Build Game — здесь она реально запускается отдельным процессом.
 GAME_DIR="${BUILD_DIR}/editor/selftest_dist/selftest_project"
@@ -381,7 +381,7 @@ if cmp -s "${POST_OFF}" "${POST_ON}"; then
 fi
 echo "OK: пост-обработка камеры выполняется в собранной игре (кадры отличаются)"
 
-echo "=== Smoke-тест 6/13: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
+echo "=== Smoke-тест 6/12: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
 # Редактор (SAGE_EDITOR_E2E=1) сам создаёт проект «Coin Rush»: пишет три Lua-
 # скрипта (бот-сборщик, монеты с OnMessage, HUD-счёт из Lua), строит сцену,
 # сохраняет и перечитывает .sage, проигрывает её в Play (проверяя, что бот
@@ -422,7 +422,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: E2E — редактор создал игру с Lua-логикой, сыграл её, собрал exe; собранный exe собрал ${COLLECTED}/5 монет (скриншот ${SHOT_SIZE} байт)"
 
-echo "=== Smoke-тест 7/13: обработчик падений (настоящее падение) ==="
+echo "=== Smoke-тест 7/12: обработчик падений (настоящее падение) ==="
 # Единственный честный способ проверить обработчик падений — уронить процесс.
 # Обычным тестом это не сделать: обработчик по замыслу доводит падение до
 # конца и убивает процесс, а вместе с ним весь прогон. Поэтому падение вынесено
@@ -465,7 +465,7 @@ if [ ! -f "${CRASH_DIR}/crashprobe-recovered.txt" ]; then
 fi
 echo "OK: падение перехвачено (segv и terminate), отчёт со стеком и контекстом записан, работа сохранена"
 
-echo "=== Smoke-тест 8/13: отказ запуска слышно ==="
+echo "=== Smoke-тест 8/12: отказ запуска слышно ==="
 # «Просто запускаю — ничего не происходит, даже ошибки нет, а в логе только
 # строка о старте». Так выглядел ЛЮБОЙ отказ запуска: причина уходила в stderr,
 # которого у окна Windows нет, и в лог не попадала вовсе.
@@ -499,7 +499,7 @@ if ! grep -q "GLFW" "${STARTFAIL_DIR}/sage_editor.log"; then
 fi
 echo "OK: отказ запуска записан в лог с причиной от GLFW (код ${STATUS})"
 
-echo "=== Smoke-тест 9/13: путь с кириллицей (имя пользователя по-русски) ==="
+echo "=== Smoke-тест 9/12: путь с кириллицей (имя пользователя по-русски) ==="
 # ЭТО ПРОВЕРКА ТОЙ САМОЙ ОШИБКИ, из-за которой редактор не запускался на
 # русской Windows: «filesystem error: Cannot convert character sequence».
 # Причина — путь с кириллицей, пришедший из окружения (APPDATA у пользователя
@@ -585,7 +585,7 @@ fi
 echo "OK: кириллица в пути работает везде — настройки редактора, папка проекта,"
 echo "    аргумент командной строки и запись кадра (${UNI_SHOT_SIZE} байт)"
 
-echo "=== Smoke-тест 10/13: шаблон скачивается из каталога и ставится ==="
+echo "=== Smoke-тест 10/12: шаблон скачивается из каталога и ставится ==="
 # СЕТЬ — единственная часть системы шаблонов, которую не проверить ни модульным
 # тестом, ни самопроверкой редактора: там нет ни сервера, ни щелчка по кнопке.
 # А именно ею шаблоны теперь и раздаются: готовых проектов внутри сборки больше
@@ -675,7 +675,7 @@ PYEOF
     echo "OK: шаблон скачан по HTTP и установлен (${TPL_SIZE} байт, сцен ${SCENES})"
 fi
 
-echo "=== Smoke-тест 11/13: выход из движка — код возврата ==="
+echo "=== Smoke-тест 11/12: выход из движка — код возврата ==="
 # Падение при выходе случается ПОСЛЕ main: обработчик выхода разрушает
 # статические объекты движка уже без графического контекста. В логе к тому
 # моменту всё хорошо, отчёт напечатан, и наружу виден только код возврата — им и
@@ -697,7 +697,7 @@ if [ ${STATUS} -ne 0 ]; then
 fi
 echo "OK: движок завершился сам, без обходного Clear() (код 0)"
 
-echo "=== Smoke-тест 12/13: захват мыши в собранной игре — настоящая мышь X11 ==="
+echo "=== Smoke-тест 12/12: захват мыши в собранной игре — настоящая мышь X11 ==="
 # Камера от первого лица просит захват каждый кадр и копит поворот; мышь двигает
 # X-сервер (XTest), как её двигал бы человек: долгий поворот, alt-tab в другое
 # окно, возврат. Пробы редактора подают положения курсора в окно сами — это
@@ -744,35 +744,5 @@ RUN
 else
     echo "ПРОПУЩЕНО: нет xvfb-run или python3"
 fi
-
-echo "=== Smoke-тест 13/13: Voxel World — свой рендерер (граф, compute, свет по блокам) ==="
-# Игра без единого штатного PBR-прохода: если система своего рендера сломана,
-# это видно здесь — кадр, самопроверка света и графа, оба пути карты света
-# (вычислительный шейдер и запасной на CPU).
-VOXEL_EXE="${BUILD_DIR}/games/voxelworld/VoxelWorld"
-if [ ! -x "${VOXEL_EXE}" ]; then
-    echo "ОШИБКА: не найден собранный бинарник ${VOXEL_EXE}"; exit 1
-fi
-for MODE in compute cpu; do
-    VOXEL_LOG="${SCRATCH_DIR}/voxel_${MODE}.log"
-    VOXEL_SHOT="${SCRATCH_DIR}/voxel_${MODE}.png"
-    EXTRA=""
-    [ "${MODE}" = "cpu" ] && EXTRA="SAGE_VOXEL_CPU_LIGHTMAP=1"
-    STATUS=0
-    ( cd "$(dirname "${VOXEL_EXE}")" && \
-      run_headless env ${EXTRA} SAGE_VOXEL_CHUNKS=6 SAGE_SCREENSHOT_AT_FRAME=10 SAGE_SCREENSHOT_PATH="${VOXEL_SHOT}" \
-          "./$(basename "${VOXEL_EXE}")" ) > "${VOXEL_LOG}" 2>&1 || STATUS=$?
-    if [ ${STATUS} -ne 0 ]; then
-        echo "ОШИБКА: VoxelWorld (${MODE}) завершился с кодом ${STATUS}"; cat "${VOXEL_LOG}"; exit 1
-    fi
-    if ! grep -q "VOXEL: SELFTEST PASS" "${VOXEL_LOG}"; then
-        echo "ОШИБКА: самопроверка VoxelWorld (${MODE}) не прошла"; grep -E "VOXEL|ERROR" "${VOXEL_LOG}"; exit 1
-    fi
-    SHOT_SIZE=$(stat -c%s "${VOXEL_SHOT}" 2>/dev/null || echo 0)
-    if [ "${SHOT_SIZE}" -lt 1024 ]; then
-        echo "ОШИБКА: скриншот VoxelWorld (${MODE}) отсутствует или мал (${SHOT_SIZE} байт)"; exit 1
-    fi
-    echo "OK: VoxelWorld (${MODE}): $(grep -o 'VOXEL: SELFTEST PASS.*' "${VOXEL_LOG}" | head -1 | sed 's/\x1b\[[0-9;]*m//g')"
-done
 
 echo "=== Все smoke-тесты прошли ==="

@@ -259,7 +259,12 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
         k.Hint = "Расхождение каналов к краям кадра — как в настоящей оптике";
         k.Needs = PostNeeds::LdrColor;
         k.Stage = PostStage::Lens;
-        k.Params = {Param("amount", "Amount", 0.3f, 0.0f, 1.0f, "Сила расхождения")};
+        k.Params = {Param("amount", "Amount", 0.3f, 0.0f, 10.0f,
+                          "Сила расхождения: 1 — каналы расходятся на 3% кадра у края"),
+                    Param("start", "Clean Center", 0.2f, 0.0f, 0.95f,
+                          "Радиус центра без аберрации: 0 — от самого центра, ближе к 1 — только углы"),
+                    IntParam("samples", "Quality", 12, 3, 32,
+                             "Выборок по спектру: больше — ровнее кайма, дороже")};
         k.Run = RunChromatic;
         catalog.Register(std::move(k));
     }

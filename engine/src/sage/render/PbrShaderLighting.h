@@ -13,8 +13,6 @@ inline constexpr char kPbrGlslLighting[] = R"GLSL(
 // чем самих источников, и намеренно: карта прожектора стоит целого прохода
 // геометрии, карта точечного — шести (см. render/ShadowAtlas.h). Кто попал в
 // это число, решает распределитель мест по яркости, а не порядок в сцене.
-#define MAX_SPOT_SHADOWS 4
-#define MAX_POINT_SHADOWS 2
 const float PI = 3.14159265359;
 
 // shadowSlot — номер места в атласе теней, -1 если тени у источника нет.
@@ -59,12 +57,13 @@ uniform bool uShadowsEnabled;
 // OpenGL 3.3 просто нет. Плитку источника задаёт прямоугольник в uv атласа.
 uniform sampler2D uLocalShadowAtlas;
 uniform bool uLocalShadowsEnabled;
-uniform float uLocalAtlasTexel;                     // 1 / сторона атласа
-uniform mat4 uSpotShadowMat[MAX_SPOT_SHADOWS];
-uniform vec4 uSpotShadowRect[MAX_SPOT_SHADOWS];     // xy — угол плитки, z — сторона
-uniform vec3 uSpotShadowParams[MAX_SPOT_SHADOWS];   // x near, y far, z тексель/единица дальности
-uniform vec4 uPointShadowRect[MAX_POINT_SHADOWS * 6];
-uniform vec3 uPointShadowParams[MAX_POINT_SHADOWS];
+uniform float uLocalAtlasTexel;  // 1 / сторона атласа
+// Раскладка плиток вместо массивов по местам (их размер был лимитом числа
+// теневых ламп): плитка места считается по номеру (LocalShadowTile).
+uniform int uLocalAtlasGrid;     // плиток по стороне
+uniform float uLocalTileUV;      // сторона плитки в uv
+uniform float uLocalTileTexels;  // сторона плитки в текселях
+uniform int uLocalSpotCount;     // плиток прожекторов — точечные идут после них
 // Где тень начинает растворяться и где её уже нет (метры от камеры).
 uniform float uShadowFadeStart;
 uniform float uShadowFadeEnd;
@@ -243,8 +242,20 @@ float ShadowRotation() {
 // один раз на процессоре. Здесь тексель растёт линейно с расстоянием от лампы:
 // у самой лампы он миллиметровый, у границы дальности — дециметровый. Поэтому
 // и отступ вдоль нормали, и запас по глубине считаются ЗДЕСЬ, из расстояния до
-// источника, а с процессора приходит только «сколько метров текселя на метр
-// дальности» (uSpotShadowParams[].z).
+// источника — по углу проекции и размеру плитки (uLocalTileTexels).
+
+// Ближняя плоскость карт локального света — та же, что LocalShadowBinding::kNear.
+const float kLocalShadowNear = 0.05;
+
+// Плитка атласа по номеру: xy — левый нижний угол в uv, z — сторона.
+vec4 LocalShadowTile(int index) {
+    int g = max(uLocalAtlasGrid, 1);
+    return vec4(vec2(float(index - (index / g) * g), float(index / g)) * uLocalTileUV, uLocalTileUV, 0.0);
+}
+
+// Дальность лампы из её затухания (Linear = 4.5 / Range, см. scene/Light.h):
+// так она есть и в кластерном пути, и в старых массивах источников.
+float LightRangeFromLinear(float linear) { return max(4.5 / max(linear, 1e-6), kLocalShadowNear * 2.0); }
 
 // Глубина, записанная в карту, для точки на расстоянии dist вдоль оси взгляда
 // источника. Повторяет то, что делает перспективная матрица: глубина в буфере
@@ -293,19 +304,35 @@ float AtlasShadowPCF(vec4 rect, vec2 uv, float depth, float bias, float rotation
 
 // Тень прожектора. dist — расстояние от фрагмента до лампы (у вызывающего оно
 // уже посчитано для затухания, и считать его второй раз незачем).
-float SpotShadow(int slot, vec3 worldPos, vec3 normal, float ndl, float dist, float rotation) {
-    vec3 prm = uSpotShadowParams[slot];
+//
+// Проекцию строим здесь же — та же, что LocalShadowAtlas::Prepare на
+// процессоре: lookAt(позиция, позиция + направление, верх) и перспектива на
+// полный внешний угол конуса. Массивов матриц по местам больше нет — их размер
+// и был потолком числа теневых прожекторов.
+float SpotShadow(int slot, vec3 lightPos, vec3 lightDir, float cosOuter, float linear,
+                 vec3 worldPos, vec3 normal, float ndl, float dist, float rotation) {
+    float outer = clamp(acos(clamp(cosOuter, -1.0, 1.0)), radians(1.0), radians(87.0));
+    float far = LightRangeFromLinear(linear);
+    float focal = 1.0 / tan(outer);
     float slope = clamp(1.0 - abs(ndl), 0.0, 1.0);
-    float texelWorld = dist * prm.z;
+    float texelWorld = dist * (2.0 / focal) / max(uLocalTileTexels, 1.0);
     float offset = texelWorld * kShadowFilterTexels * 1.5 * (1.0 + 2.0 * slope);
-    vec4 lp = uSpotShadowMat[slot] * vec4(worldPos + normal * offset, 1.0);
-    // За спиной у лампы (w <= 0) карты нет. Делить на такое w — значит получить
+
+    vec3 f = normalize(lightDir);
+    vec3 up = abs(f.y) > 0.99 ? vec3(0.0, 0.0, 1.0) : vec3(0.0, 1.0, 0.0);
+    vec3 s = normalize(cross(f, up));
+    vec3 u = cross(s, f);
+    vec3 rel = worldPos + normal * offset - lightPos;
+    float axis = dot(rel, f);
+    // За спиной у лампы карты нет: деление на такое расстояние дало бы
     // координаты, зеркально отражённые в её плитку, то есть чужую тень.
-    if (lp.w <= 0.0) return 0.0;
-    vec3 pc = (lp.xyz / lp.w) * 0.5 + 0.5;
-    if (pc.z > 1.0) return 0.0;  // дальше дальности лампы — она туда не светит
-    float bias = LocalDepthBias(dist, prm.x, prm.y, texelWorld * (1.0 + 3.0 * slope));
-    return AtlasShadowPCF(uSpotShadowRect[slot], pc.xy, pc.z, bias, rotation);
+    if (axis <= kLocalShadowNear) return 0.0;
+    vec2 uv = vec2(dot(rel, s), dot(rel, u)) * focal / axis * 0.5 + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 0.0;
+    float depth = PerspectiveDepth01(axis, kLocalShadowNear, far);
+    if (depth > 1.0) return 0.0;  // дальше дальности лампы — она туда не светит
+    float bias = LocalDepthBias(axis, kLocalShadowNear, far, texelWorld * (1.0 + 3.0 * slope));
+    return AtlasShadowPCF(LocalShadowTile(slot), uv, depth, bias, rotation);
 }
 
 // Грань куба точечного света и координаты внутри её плитки. Ручной аналог того,
@@ -339,22 +366,24 @@ int PointFace(vec3 v, out vec2 uv, out float axis) {
     return face;
 }
 
-float PointShadow(int slot, vec3 worldPos, vec3 normal, vec3 lightPos, float ndl, float rotation) {
-    vec3 prm = uPointShadowParams[slot];
+float PointShadow(int slot, vec3 worldPos, vec3 normal, vec3 lightPos, float linear, float ndl,
+                  float rotation) {
+    float far = LightRangeFromLinear(linear);
     float slope = clamp(1.0 - abs(ndl), 0.0, 1.0);
     float dist = length(worldPos - lightPos);
-    float texelWorld = dist * prm.z;
+    // Грань 90°: ширина на расстоянии d равна 2d — отсюда тексель.
+    float texelWorld = dist * 2.0 / max(uLocalTileTexels, 1.0);
     float offset = texelWorld * kShadowFilterTexels * 1.5 * (1.0 + 2.0 * slope);
     vec3 v = (worldPos + normal * offset) - lightPos;
 
     vec2 uv;
     float axis;
     int face = PointFace(v, uv, axis);
-    if (axis <= prm.x) return 0.0;   // ближе ближней плоскости — в карту не писалось
-    float depth = PerspectiveDepth01(axis, prm.x, prm.y);
+    if (axis <= kLocalShadowNear) return 0.0;   // ближе ближней плоскости — в карту не писалось
+    float depth = PerspectiveDepth01(axis, kLocalShadowNear, far);
     if (depth > 1.0) return 0.0;     // дальше дальности лампы
-    float bias = LocalDepthBias(axis, prm.x, prm.y, texelWorld * (1.0 + 3.0 * slope));
-    return AtlasShadowPCF(uPointShadowRect[slot * 6 + face], uv, depth, bias, rotation);
+    float bias = LocalDepthBias(axis, kLocalShadowNear, far, texelWorld * (1.0 + 3.0 * slope));
+    return AtlasShadowPCF(LocalShadowTile(uLocalSpotCount + slot * 6 + face), uv, depth, bias, rotation);
 }
 
 // Координаты фрагмента в пространстве каскада, приведённые к [0,1], со

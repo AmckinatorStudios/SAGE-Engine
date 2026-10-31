@@ -97,6 +97,7 @@ void RunChromatic(PostContext& ctx, const PostEffect& e);
 void RunGrain(PostContext& ctx, const PostEffect& e);
 void RunFxaa(PostContext& ctx, const PostEffect& e);
 PostParamDesc Param(const char* name, const char* label, float def, float min, float max, const char* hint);
+PostParamDesc IntParam(const char* name, const char* label, int def, int min, int max, const char* hint);
 PostParamDesc EnumParam(const char* name, const char* label, int def, std::vector<std::string> options, const char* hint);
 void RunSimplePass(PostContext& ctx, Shader& shader, bool ldrOut, const std::function<void(Shader&)>& setup);
 

@@ -57,6 +57,14 @@ PostParamDesc Param(const char* name, const char* label, float def, float min, f
     return p;
 }
 
+// Целое в диапазоне: число выборок, шагов — то, что дробным не бывает.
+PostParamDesc IntParam(const char* name, const char* label, int def, int min, int max,
+                       const char* hint) {
+    PostParamDesc p = Param(name, label, (float)def, (float)min, (float)max, hint);
+    p.Type = PostParamType::Int;
+    return p;
+}
+
 // Цвет-множитель. Умолчание — белый: «ничего не менять» обязано быть видно
 // глазом, а не вычисляться из нулей.
 PostParamDesc ColorParam(const char* name, const char* label, const char* hint) {
@@ -610,7 +618,12 @@ void RunVignette(PostContext& ctx, const PostEffect& e) {
 void RunChromatic(PostContext& ctx, const PostEffect& e) {
     SAGE_PROFILE("Хроматическая аберрация");
     RunSimplePass(ctx, ChromaticShader(), /*ldrOut=*/true, [&](Shader& sh) {
-        sh.SetFloat("uAmount", glm::max(e.Float("amount", 0.3f), 0.0f));
+        // Сила без верхнего потолка параметра: 1.0 — разница увеличения 3%
+        // кадра. Зажим только там, где масштаб выборки стал бы бессмысленным.
+        sh.SetFloat("uAmount", glm::clamp(e.Float("amount", 0.3f) * 0.03f, 0.0f, 0.9f));
+        sh.SetFloat("uStart", glm::clamp(e.Float("start", 0.2f), 0.0f, 0.99f));
+        sh.SetFloat("uAspect", (float)ctx.Width / (float)std::max(ctx.Height, 1));
+        sh.SetInt("uSamples", glm::clamp(e.Int("samples", 12), 3, 32));
     });
 }
 

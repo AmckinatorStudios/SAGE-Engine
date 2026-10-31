@@ -78,31 +78,17 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
     shader.SetFloat("uFogSunExponent", std::max(env.Fog.SunExponent, 1.0f));
 }
 
-// Тени прожекторов и точечных источников: один атлас, по прямоугольнику на
-// плитку (см. render/ShadowAtlas.h).
-//
-// Незанятые места заливаются нулевым прямоугольником осознанно: до них шейдер
-// не доходит (у источника без места shadowSlot == -1), но оставить там мусор
-// от прошлого кадра значило бы, что первая же ошибка в раздаче мест проявится
-// не как отсутствие тени, а как тень из ниоткуда.
+// Тени прожекторов и точечных источников: один атлас (см. render/ShadowAtlas.h).
+// Только раскладка плиток — плитку и проекцию своего места шейдер считает сам,
+// поэтому массивов по местам (и потолка числа теневых ламп) здесь нет.
 inline void UploadLocalShadowUniforms(Shader& shader, const sage::render::LocalShadowBinding& local) {
     shader.SetInt("uLocalShadowAtlas", sage::render::kLocalShadowUnit);
     shader.SetInt("uLocalShadowsEnabled", local.Enabled ? 1 : 0);
     shader.SetFloat("uLocalAtlasTexel", local.AtlasTexel);
-    for (int i = 0; i < sage::render::LocalShadowBinding::kMaxSpot; ++i) {
-        const std::string idx = "[" + std::to_string(i) + "]";
-        shader.SetMat4("uSpotShadowMat" + idx, local.SpotMatrix[i]);
-        shader.SetVec4("uSpotShadowRect" + idx, local.SpotRect[i]);
-        shader.SetVec3("uSpotShadowParams" + idx, local.SpotParams[i]);
-    }
-    for (int i = 0; i < sage::render::LocalShadowBinding::kMaxPoint; ++i) {
-        shader.SetVec3("uPointShadowParams[" + std::to_string(i) + "]", local.PointParams[i]);
-    }
-    const int rects =
-        sage::render::LocalShadowBinding::kMaxPoint * sage::render::LocalShadowBinding::kFaces;
-    for (int i = 0; i < rects; ++i) {
-        shader.SetVec4("uPointShadowRect[" + std::to_string(i) + "]", local.PointRect[i]);
-    }
+    shader.SetInt("uLocalAtlasGrid", local.Grid);
+    shader.SetFloat("uLocalTileUV", local.TileUV);
+    shader.SetFloat("uLocalTileTexels", (float)local.TileTexels);
+    shader.SetInt("uLocalSpotCount", local.SpotCount);
 }
 
 // Заливает uniform'ы карт теней в шейдер-приёмник: матрицы пространства света

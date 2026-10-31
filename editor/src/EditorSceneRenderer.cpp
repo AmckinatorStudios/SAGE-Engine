@@ -118,8 +118,8 @@ void EditorSceneRenderer::EnsureShadowMap() {
         m_shadowCascades = wantCascades;
     }
 
-    // Атлас локальных теней. Плитка — четверть стороны: шестнадцать мест, ровно
-    // под четыре прожектора и два точечных источника (см. ShadowAtlas.h).
+    // Атлас локальных теней. Плитка — четверть стороны; ламп больше, чем мест, —
+    // атлас сам мельчит плитки и растёт (см. ShadowAtlas.h).
     const int wantLocal = cfg.LocalShadows ? cfg.LocalShadowResolution : 0;
     if (m_localShadowRes == wantLocal) return;
     m_localShadowRes = wantLocal;
