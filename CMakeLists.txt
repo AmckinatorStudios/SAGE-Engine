@@ -485,6 +485,10 @@ option(SAGE_BUILD_RUNTIME "Собрать рантайм-плеер SagePlayer" 
 option(SAGE_BUILD_EDITOR  "Собрать редактор SageEditor" ON)
 option(SAGE_BUILD_SAMPLES "Собрать игры-примеры (sandbox, testgame)" ON)
 option(SAGE_BUILD_TESTS   "Собрать модульные тесты движка" ON)
+# Блочная песочница на своём рендерере — отдельная ИГРА, а не часть движка
+# (правило «движок — инструмент, а не конструктор», CLAUDE.md): с движком по
+# умолчанию не собирается, в CI и релиз не входит.
+option(SAGE_BUILD_VOXELWORLD "Собрать отдельную игру games/voxelworld" OFF)
 
 add_subdirectory(engine)
 
@@ -495,6 +499,9 @@ endif()
 if (SAGE_BUILD_SAMPLES)
     add_subdirectory(games/sandbox)
     add_subdirectory(games/testgame)
+endif()
+
+if (SAGE_BUILD_VOXELWORLD)
     add_subdirectory(games/voxelworld)
 endif()
 

@@ -119,5 +119,6 @@ void RunTextureChecks(FrameRenderer& r);                    // мипмапы, �
 void RunParticleChecks();                                   // частицы: текстура, кадры, смешивание, меш, след
 void RunDisplayChecks(::Window& window);                    // режим экрана: проба и откат по времени
 void RunPipelineChecks(Scene& scene);                       // свой рендер: вычисления, граф, шейдеры
+void RunLensChecks();                                       // хроматическая аберрация
 
 } // namespace sage::rendertest

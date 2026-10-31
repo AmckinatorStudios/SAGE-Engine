@@ -89,7 +89,7 @@ engine/     ядро (sage::engine): core, rhi, ecs, scene, render, input, event
             anim, physics, audio, net, ui, assets, gi, scripting
 editor/     SageEditor — редактор на ImGui
 runtime/    SagePlayer — плеер собранной игры
-games/      sandbox, testgame, voxelworld — примеры на движке
+games/      sandbox, testgame — примеры на движке
 tests/      модульные и кадровые (эталонные) тесты
 external/   вендоренные зависимости
 docs/       документация

@@ -216,7 +216,7 @@ vec3 PointLightContrib(PointLight pl, float range, vec3 N, vec3 V, vec3 fragPos,
     // выборка стоит восьми чтений атласа.
     float sh = 0.0;
     if (uLocalShadowsEnabled && pl.shadowSlot >= 0 && ndl > 0.0)
-        sh = PointShadow(pl.shadowSlot, fragPos, shN, pl.position, ndl, localRot);
+        sh = PointShadow(pl.shadowSlot, fragPos, shN, pl.position, pl.linear, ndl, localRot);
     return PbrContrib(N, V, L, pl.color * pl.intensity * att * (1.0 - sh), albedo, metallic, rough);
 }
 
@@ -235,7 +235,8 @@ vec3 SpotLightContrib(SpotLight sl, float range, vec3 N, vec3 V, vec3 fragPos, v
     if (range > 0.0) att *= RangeFade(dist, range);
     float sh = 0.0;
     if (uLocalShadowsEnabled && sl.shadowSlot >= 0 && ndl > 0.0)
-        sh = SpotShadow(sl.shadowSlot, fragPos, shN, ndl, dist, localRot);
+        sh = SpotShadow(sl.shadowSlot, sl.position, sl.direction, sl.cosOuter, sl.linear, fragPos, shN,
+                       ndl, dist, localRot);
     return PbrContrib(N, V, L, sl.color * sl.intensity * att * cone * (1.0 - sh), albedo, metallic, rough);
 }
 
