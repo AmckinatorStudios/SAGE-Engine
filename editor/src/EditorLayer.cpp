@@ -1,6 +1,7 @@
 #include "sage/core/Problems.h"
 #include "sage/app/CoreSystems.h"
 #include "EditorLayer.h"
+#include "LogicKinds.h"
 #include "CursorCapture.h"
 #include "LuaPlugins.h"
 #include "PluginsWindow.h"
@@ -176,6 +177,8 @@ EditorLayer::EditorLayer()
 void EditorLayer::OnAttach() {
     InitImGui();
     InitEditorServices();
+    // Виды логики окна «Создать…» — до плагинов: плагин добавляет свои к ним.
+    sage::editor::logic::RegisterBuiltins();
     InitPlugins();
     ApplyStartupHooks();
     UpdateWindowTitle();

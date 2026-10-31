@@ -459,6 +459,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
                 auto it = std::find(m_multi.begin(), m_multi.end(), victim);
                 if (it != m_multi.end()) m_multi.erase(it);
             }
+            host.AssetsDeleted(m_deleteTargets);
             m_deleteTargets.clear();
             ImGui::CloseCurrentPopup();
         }
@@ -674,6 +675,7 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
             req.Name = defaultName;
             req.Dir = kind == ca::What::Scene && host.CurrentProject().Loaded() ? host.CurrentProject().ScenesDir()
                                                                                 : host.AssetsCwd();
+            req.OpenAfter = true;   // граф — сразу в его редактор
             req.Done = [this, &host, kind](const fs::path& made) {
                 if (kind == ca::What::Scene) host.AssetsCwd() = made.parent_path();
                 m_selected = made;
@@ -683,7 +685,9 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
         };
         if (EditorIcons::MenuItem("folder-plus", T("Folder..."))) startCreate(ca::What::Folder, "NewFolder");
         if (EditorIcons::MenuItem("scene", T("Scene..."))) startCreate(ca::What::Scene, "NewScene");
-        if (EditorIcons::MenuItem("script", T("Script..."))) startCreate(ca::What::Script, "NewScript");
+        // Логика — один пункт на все виды (LogicKinds.h): Lua, SAGE Lua, Visual
+        // Script, задача, AI Graph и языки плагинов выбираются в окне.
+        if (EditorIcons::MenuItem("script", T("Script or graph..."))) startCreate(ca::What::Script, "NewScript");
         if (EditorIcons::MenuItem("material", T("Material..."))) startCreate(ca::What::Material, "NewMaterial");
         if (EditorIcons::MenuItem("file", T("Text file..."))) startCreate(ca::What::TextFile, "notes");
         ImGui::Separator();

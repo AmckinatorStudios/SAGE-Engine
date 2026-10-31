@@ -738,3 +738,48 @@ void EditorLayer::UpdateWindowTitle() {
     m_windowTitle = title;
     glfwSetWindowTitle(sage::Application::Get().GetWindow().Handle(), title.c_str());
 }
+
+
+// УДАЛИЛИ ФАЙЛЫ — ОТПУСТИТЬ ССЫЛКИ НА НИХ (см. EditorHost::AssetsDeleted).
+//
+// Удаление всех сцен проекта оставляло редактор держаться за пустоту: путь
+// открытой сцены вёл в удалённый файл (Ctrl+S молча создавал его снова),
+// project.sageproj называл стартовой сцену, которой нет, а база ассетов
+// продолжала выдавать GUID удалённых файлов.
+void EditorLayer::AssetsDeleted(const std::vector<fs::path>& paths) {
+    auto norm = [](const fs::path& p) {
+        std::error_code ec;
+        const fs::path a = fs::absolute(p, ec);
+        return (ec ? p : a).lexically_normal();
+    };
+    // p совпадает с root или лежит внутри него (удалили папку со сценой).
+    auto within = [&](const fs::path& p, const fs::path& root) {
+        const fs::path a = norm(p), r = norm(root);
+        auto ai = a.begin();
+        for (auto ri = r.begin(); ri != r.end(); ++ri, ++ai) {
+            if (ri->empty()) continue;   // хвостовой «/» папки
+            if (ai == a.end() || *ai != *ri) return false;
+        }
+        return true;
+    };
+    bool sceneGone = false, startGone = false;
+    for (const fs::path& victim : paths) {
+        if (!m_scenePath.empty() && within(m_scenePath, victim)) sceneGone = true;
+        if (m_project.Loaded() && !m_project.StartScene().empty() &&
+            within(m_project.ScenesDir() / sage::PathFromUtf8(m_project.StartScene() + ".sage"), victim))
+            startGone = true;
+    }
+    if (sceneGone) {
+        LOG_WARN("Editor") << "Файл открытой сцены удалён: " << sage::PathToUtf8(m_scenePath)
+                           << " — сцена осталась открытой без файла";
+        m_scenePath.clear();
+        m_sceneDirty = true;
+        SetStatusMessage(T("The scene file was deleted: the scene stays open, save it to keep it"));
+        UpdateWindowTitle();
+    }
+    if (startGone) {
+        std::string err;
+        if (!m_project.SetStartScene("", err)) LOG_WARN("Editor") << "Стартовая сцена не снята: " << err;
+    }
+    if (m_project.Loaded()) sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
+}

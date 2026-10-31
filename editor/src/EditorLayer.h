@@ -350,6 +350,7 @@ public:
         return m_scenePath.empty() ? m_scene->Name() : m_scenePath.filename().string();
     }
     bool SceneDirty() const override { return m_sceneDirty; }
+    void AssetsDeleted(const std::vector<std::filesystem::path>& paths) override;
 
     uint64_t GameTexture() const override { return m_renderer.GameTexture(); }
     void SetGameViewportSize(int w, int h) override { m_renderer.SetGameSize(w, h); }
@@ -461,6 +462,7 @@ private:
     bool SelfTestPanelRegistry();
     bool SelfTestVisualScript();     // Visual Scripting: свой редактор, узлы, компонент в Play
     bool SelfTestAiGraph();          // SAGE AI Graph: библиотека, редактор графов, компонент AI в Play
+    bool SelfTestScenesGone();       // удалили все сцены — редактор живёт; виды логики «Создать…»
     bool SelfTestGIBake();           // запекание освещения: разметка, фон, свет по месту, «устарело»    // реестр панелей: встроенные, на ходу, окна плагинов          // плагины на Lua: шаблон, меню, отмена, ошибки, Play
     // Многооконность — проверка В ЖИВОМ КАДРЕ: окно системы заводит платформа,
     // а не флаг, и этот последний шаг ломается молча (см. EditorSelfTest.cpp).

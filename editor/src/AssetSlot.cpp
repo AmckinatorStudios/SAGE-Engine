@@ -249,7 +249,10 @@ void BeginDrag(const fs::path& path, AssetPreview* preview) {
     ImGui::TextUnformatted(path.filename().string().c_str());
 }
 
-bool CanCreate(Kind kind) { return kind == Kind::Material || kind == Kind::Script || kind == Kind::Scene; }
+bool CanCreate(Kind kind) {
+    return kind == Kind::Material || kind == Kind::Script || kind == Kind::Scene || kind == Kind::VisualScript ||
+           kind == Kind::AiGraph;
+}
 
 namespace {
 // Создано окном «Создать…» по просьбе слота: путь ждёт, пока слот нарисуется
@@ -258,6 +261,16 @@ namespace {
 std::unordered_map<ImGuiID, std::string>& CreatedForSlot() {
     static std::unordered_map<ImGuiID, std::string> m;
     return m;
+}
+
+// Какие виды логики (LogicKinds.h) предлагает «+» этого слота.
+const char* LogicSlot(Kind kind) {
+    switch (kind) {
+        case Kind::Script: return "script";
+        case Kind::VisualScript: return "visual";
+        case Kind::AiGraph: return "ai";
+        default: return "";
+    }
 }
 
 sage::editor::createasset::What CreateWhat(Kind kind) {
@@ -456,6 +469,7 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
             } else {
                 sage::editor::createasset::Request req;
                 req.Kind = CreateWhat(kind);
+                req.Slot = LogicSlot(kind);
                 req.Name = actions && !actions->SuggestedName.empty() ? actions->SuggestedName
                            : kind == Kind::Material ? "NewMaterial"
                            : kind == Kind::Scene    ? "NewScene"

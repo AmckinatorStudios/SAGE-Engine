@@ -507,4 +507,10 @@ public:
     // подписать кнопку Play тем, что именно она запустит.
     virtual std::string CurrentSceneName() const = 0;
     virtual bool SceneDirty() const = 0;
+
+    // Панель Assets удалила файлы или папки. Редактор отпускает то, что на
+    // них ссылалось: открытая сцена остаётся в окне, но уже без файла
+    // (Ctrl+S спросит, куда сохранить, а не воскресит удалённое), стартовая
+    // сцена проекта снимается, база ассетов забывает удалённое.
+    virtual void AssetsDeleted(const std::vector<std::filesystem::path>& paths) = 0;
 };

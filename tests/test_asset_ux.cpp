@@ -20,9 +20,9 @@ TEST(AssetOpen_only_openable_files_get_open) {
 }
 
 TEST(CreateAsset_one_script_item_two_languages) {
-    CHECK_EQ(ca::FileName(ca::What::Script, ca::Language::Lua, "hero"), std::string("hero.lua"));
-    CHECK_EQ(ca::FileName(ca::What::Script, ca::Language::SageLua, "hero"), std::string("hero.slua"));
-    CHECK_EQ(ca::FileName(ca::What::Folder, ca::Language::Lua, "Props"), std::string("Props"));
+    CHECK_EQ(ca::FileName(ca::What::Script, ".lua", "hero"), std::string("hero.lua"));
+    CHECK_EQ(ca::FileName(ca::What::Script, ".slua", "hero"), std::string("hero.slua"));
+    CHECK_EQ(ca::FileName(ca::What::Folder, ".lua", "Props"), std::string("Props"));
     CHECK_TRUE(ca::DefaultDir("assets", ca::What::Scene) == std::filesystem::path("assets/Scenes"));
     CHECK_TRUE(ca::DefaultDir("assets", ca::What::Material) == std::filesystem::path("assets/materials"));
 }

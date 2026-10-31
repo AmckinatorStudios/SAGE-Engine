@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 3399.
+// Язык: Русский. Строк: 3407.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1132,6 +1132,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Выберите папку"},
     {"Choose a font",
      "Выберите шрифт"},
+    {"Choose a language",
+     "Выберите язык"},
     {"Choose a material",
      "Выбрать материал"},
     {"Choose a model",
@@ -1672,6 +1674,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Решение"},
     {"Decisions",
      "Решения"},
+    {"Decisions of a character: which task to run and when to switch",
+     "Решения персонажа: какую задачу выполнять и когда сменить"},
     {"Declared in:",
      "Объявлен в:"},
     {"Default",
@@ -2736,6 +2740,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Наведение, нажатие, щелчок, вид каждого состояния и что делает элемент"},
     {"How a tween works:\n• each card is one property that changes from Start to End;\n• the bar on the right is when it happens: drag the middle to move it,\n  the dots to change when it starts and how long it lasts;\n• the curve says how the speed changes along the way;\n• Play shows it on the object, the round arrow next to it puts the object back.",
      "Как устроен твин:\n• каждая карточка — одно свойство, которое меняется от «Начала» к «Концу»;\n• полоса справа — когда это происходит: тяните середину, чтобы сдвинуть,\n  точки — чтобы изменить начало и длительность;\n• кривая — как меняется скорость по пути;\n• Play показывает твин на объекте, круглая стрелка рядом возвращает объект как был."},
+    {"How an AI task is done, in nodes: AI Graph runs it by name",
+     "Как выполняется задача ИИ — узлами; AI Graph запускает её по имени"},
     {"How far from the camera shadows reach. 0 — from Game Settings",
      "Как далеко от камеры видны тени. 0 — из настроек игры"},
     {"How far the content has moved. Also the starting position.",
@@ -3590,6 +3596,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "В сцене пока нет интерфейса."},
     {"No key assigned — the action can never fire",
      "Клавиша не назначена — действие никогда не сработает"},
+    {"No kinds of logic for this slot",
+     "Для этого слота нет видов логики"},
     {"No light sources in the scene — nothing is lit. Add one: Objects > Light, or \"Create a sun\" in Environment",
      "В сцене нет источников света — освещать нечем. Добавьте: Объекты > Свет, либо «Создать солнце» в окружении"},
     {"No messages of the selected level",
@@ -3740,6 +3748,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ссылка на объект"},
     {"Object is gone (id ",
      "Объекта больше нет (номер "},
+    {"Object logic made of nodes: On Start, On Update, events",
+     "Логика объекта из узлов: On Start, On Update, события"},
     {"Object reference",
      "Ссылка на объект"},
     {"Object:",
@@ -4980,6 +4990,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Имя скрипта (файл ляжет в assets/visual)"},
     {"Script object",
      "Объект со скриптом"},
+    {"Script or graph...",
+     "Скрипт или граф…"},
     {"Script...",
      "Скрипт…"},
     {"Scripts (*.lua, *.slua)",
@@ -5666,6 +5678,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Выход задачи"},
     {"Task Status",
      "Состояние задачи"},
+    {"Task for AI (.vgraph)",
+     "Задача для ИИ (.vgraph)"},
     {"Task graph",
      "Граф задачи"},
     {"Task is not a graph of this project: ",
@@ -5906,6 +5920,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "То же направление, длина 1."},
     {"The scene changed while baking — bake again",
      "Сцена изменилась во время запекания — запеките заново"},
+    {"The scene file was deleted: the scene stays open, save it to keep it",
+     "Файл сцены удалён: сцена осталась открытой — сохраните её, чтобы не потерять"},
     {"The scene has no common post processing yet.",
      "У сцены пока нет общей постобработки."},
     {"The scene itself: everything lives here",

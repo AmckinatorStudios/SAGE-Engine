@@ -121,6 +121,7 @@ add_executable(sage_tests
     ../editor/src/Localization.cpp
     # Плагины редактора на Lua: шаблоны и сторож проверяются без окна.
     ../editor/src/LuaPlugins.cpp
+    ../editor/src/LogicKinds.cpp
     ../editor/src/LuaPlugins_Graph.cpp
     ../editor/src/aigraph/AiGraphExtensions.cpp
     ../editor/src/LuaPluginsFiles.cpp
