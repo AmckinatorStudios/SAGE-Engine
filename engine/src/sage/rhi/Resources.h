@@ -312,6 +312,8 @@ struct Texture3DDesc {
     int Height = 0;  // Y
     int Depth = 0;   // Z
     int Channels = 4;
+    // Повтор на краях — для бесшовного шума (облака); пробам GI нужен зажим.
+    Wrap WrapMode = Wrap::ClampEdge;
 };
 
 class Texture3D : public CountedResource<ResourceKind::Texture> {

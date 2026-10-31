@@ -182,6 +182,30 @@ double MeanBrightness(const Image& img, int y0, int y1) {
 
 // --- Проверки ---------------------------------------------------------------
 
+// Объём с НАСТРОЙКАМИ ПО УМОЛЧАНИЮ виден не только при взгляде на солнце.
+//
+// Было: фазовая функция с g = 0.76 отправляла почти весь свет «вперёд», а
+// неба в дымке не было вовсе. Стоило отвернуться от солнца на четверть круга —
+// вклад падал в десятки раз, и включённый объём ничего не менял в кадре, хотя
+// исправно стоил своё время. Здесь солнце светит ПОПЕРЁК взгляда.
+void TestVisibleAcrossTheSun(sage::render::Volumetrics& vol, Scene& base) {
+    std::unique_ptr<Scene> scene = BuildShaftScene();
+    // Направление взгляда фикстуры — из (4.2, 3.4, 5.6) в начало координат;
+    // солнце — почти перпендикулярно ему.
+    scene->Lighting.Sun.Direction = glm::normalize(glm::vec3(0.8f, -0.35f, -0.55f));
+    (void)base;
+    sage::EngineConfig cfg;
+    cfg.Volumetrics = true;
+    cfg.VolumetricClouds = false;
+    sage::render::VolumetricSettings s = sage::render::VolumetricsFromConfig(cfg);
+    vol.ResetHistory();
+    const Image img = RenderVolume(vol, *scene, s, 12, 41);
+    const double air = MeanBrightness(img, 0, kH / 2);
+    std::printf("    объём поперёк солнца (умолчания): средняя яркость воздуха %.2f\n", air);
+    // Замер: прежние умолчания — 18.8, нынешние — 79. Порог между ними.
+    Check(air > 40.0, "объём с настройками по умолчанию заметен и сбоку от солнца");
+}
+
 void TestTemporalRemovesGrain(sage::render::Volumetrics& vol, Scene& scene) {
     sage::render::VolumetricSettings s = ShaftSettings();
 
@@ -408,6 +432,7 @@ void RunVolumetricChecks() {
     std::unique_ptr<Scene> scene = BuildShaftScene();
     sage::render::Volumetrics vol;
 
+    TestVisibleAcrossTheSun(vol, *scene);
     TestTemporalRemovesGrain(vol, *scene);
     TestFullResIsSharp(vol, *scene);
     TestHistoryIsPerView(vol, *scene);

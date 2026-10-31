@@ -122,6 +122,7 @@ json LightingToJson(const LightingEnvironment& lighting) {
     // Дальность теней сцены. Ноль (по умолчанию) — «взять из настроек движка»,
     // и такие сцены ведут себя ровно как до появления поля.
     j["shadows"]["distance"] = lighting.Shadows.Distance;
+    j["shadows"]["sunAngle"] = lighting.Shadows.SunAngle;
 
     // Цикл дня и ночи — своим объектом: это отдельная система, а не свойство
     // неба (работает при любом его типе).
@@ -180,6 +181,7 @@ LightingEnvironment LightingFromJson(const json& root) {
 
     if (j.contains("shadows")) {
         lighting.Shadows.Distance = j["shadows"].value("distance", lighting.Shadows.Distance);
+        lighting.Shadows.SunAngle = j["shadows"].value("sunAngle", lighting.Shadows.SunAngle);
     }
     // Нет ключа — сцена старше цикла: он выключен, время задаёт поворот солнца.
     if (j.contains("dayNightCycle") && j["dayNightCycle"].is_object()) {

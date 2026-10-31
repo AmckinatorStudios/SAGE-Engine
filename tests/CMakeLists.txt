@@ -42,6 +42,7 @@ add_executable(sage_tests
     test_eventbus.cpp
     test_framegraph.cpp
     test_render_pipeline.cpp
+    test_shadow_stability.cpp
     test_lod.cpp
     test_resources.cpp
     test_sagelua.cpp

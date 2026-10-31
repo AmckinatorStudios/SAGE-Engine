@@ -168,6 +168,19 @@ public:
     // всё, что дальше двадцати четырёх метров от начала координат, теней не
     // имело и не отбрасывало — не из-за настройки качества, а просто потому,
     // что уехало из карты. Здесь карта едет за игроком.
+    // Угловой размер солнца в градусах (ShadowSettings::SunAngle) — от него
+    // ширина полутени. Ставит проход теней (RenderShadowDepth) из сцены.
+    void SetSunAngle(float degrees) { m_sunAngle = std::max(0.0f, degrees); }
+    float SunAngle() const { return m_sunAngle; }
+
+    // Полуширина полутени в ТЕКСЕЛЯХ каскада на единицу записанной глубины
+    // (разницы «приёмник − заслон»). Глубина ортобокса линейна, поэтому
+    // перевод прямой: метры = Δz × диапазон, полутень = метры × tg(угол / 2).
+    float CascadePenumbraTexels(int cascade) const {
+        const float texel = std::max(CascadeTexelSize(cascade), 1e-6f);
+        return CascadeDepthRange(cascade) * std::tan(glm::radians(m_sunAngle) * 0.5f) / texel;
+    }
+
     void FitSingle(glm::vec3 sunDir, const CameraView& view) {
         const float nearZ = std::max(view.Near, 0.01f);
         const float farZ = std::max(view.ShadowDistance, nearZ * 2.0f);
@@ -315,19 +328,29 @@ private:
 
         // ПРИВЯЗКА К СЕТКЕ ТЕКСЕЛЕЙ.
         //
-        // Ортобокс двигается вслед за сценой, и без привязки его край каждый
+        // Ортобокс двигается вслед за камерой, и без привязки его край каждый
         // кадр попадает между текселями. Тень при этом «кипит»: одни и те же
         // кромки перескакивают на тексель туда-обратно, и в движении это
         // заметно сильнее, чем сама пикселизация. Лечится тем, что центр бокса
         // округляется до целого числа текселей — тогда содержимое карты
         // сдвигается ровно на тексель, а не на его долю.
+        //
+        // Округлять надо в НЕПОДВИЖНОМ базисе света (из начала мира вдоль
+        // луча). Здесь стоял базис lookAt(center - dir, center): в нём центр
+        // всегда лежит в точке (0, 0, -1), округлять было нечего — привязки не
+        // было вовсе, и тени дрожали при каждом шаге камеры.
+        //
+        // Радиус тоже квантуется: сфера каскада зависит от угла обзора и
+        // дальности, и дрожание их последних битов меняло бы масштаб карты —
+        // тень «дышала» бы на месте.
+        radius = std::ceil(radius * 16.0f) / 16.0f;
         const float texelWorld = (radius * 2.0f) / (float)m_resolution;
         {
-            const glm::mat4 view = glm::lookAt(center - dir, center, up);
-            glm::vec3 inLight = glm::vec3(view * glm::vec4(center, 1.0f));
+            const glm::mat4 basis = glm::lookAt(glm::vec3(0.0f), dir, up);
+            glm::vec3 inLight = glm::vec3(basis * glm::vec4(center, 1.0f));
             inLight.x = std::floor(inLight.x / texelWorld) * texelWorld;
             inLight.y = std::floor(inLight.y / texelWorld) * texelWorld;
-            center = glm::vec3(glm::inverse(view) * glm::vec4(inLight, 1.0f));
+            center = glm::vec3(glm::inverse(basis) * glm::vec4(inLight, 1.0f));
         }
 
         // «Камеру света» отодвигаем назад по лучу так, чтобы в кадр попал не
@@ -354,6 +377,7 @@ private:
     // недобор здесь виден как обрыв тени, а перебор не виден вовсе.
     float m_casterRange = 150.0f;
     float m_shadowDistance = 1e9f; // выставляется подгонкой карт под кадр
+    float m_sunAngle = 0.8f;       // см. ShadowSettings::SunAngle
 };
 
 // Текстурные юниты каскадов. Нулевой сидит на юните 1 с тех пор, как тени
@@ -402,6 +426,10 @@ struct ShadowBinding {
     // Запас по глубине каждого каскада в единицах записанной глубины — считается
     // из размера текселя и диапазона ортобокса (см. ShadowMap::CascadeDepthBias).
     float DepthBias[ShadowMap::kMaxCascades];
+    // Полуширина полутени в текселях на единицу глубины (см.
+    // ShadowMap::CascadePenumbraTexels): по ней шейдер растит фильтр с
+    // удалением от заслона.
+    float PenumbraTexels[ShadowMap::kMaxCascades];
     int Count = 1;
     bool Enabled = false;
     // Сторона карты в текселях. Нужна тем, кто фильтрует выборку САМ: объёмный
@@ -432,6 +460,7 @@ struct ShadowBinding {
         // конструктор с одной матрицей): без карт посчитать его не из чего, а
         // ноль означал бы самозатенение на всей сцене.
         for (float& b : DepthBias) b = 0.0005f;
+        for (float& p : PenumbraTexels) p = 0.0f;
     }
 
     // Одна карта — частный случай каскадов с Count == 1.
@@ -450,6 +479,7 @@ struct ShadowBinding {
             Textures[i] = shadows.DepthTexture(i);
             TexelWorld[i] = shadows.CascadeTexelSize(i);
             DepthBias[i] = shadows.CascadeDepthBias(i);
+            PenumbraTexels[i] = shadows.CascadePenumbraTexels(i);
         }
         Enabled = enabled;
         SetFadeFromDistance(shadows.ShadowDistance());

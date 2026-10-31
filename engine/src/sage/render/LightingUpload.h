@@ -106,6 +106,7 @@ inline void UploadShadowUniforms(Shader& shader, const ShadowBinding& shadows) {
         shader.SetMat4("uShadowLightSpace[" + std::to_string(i) + "]", shadows.Matrices[src]);
         shader.SetFloat("uShadowTexelWorld[" + std::to_string(i) + "]", shadows.TexelWorld[src]);
         shader.SetFloat("uShadowDepthBias[" + std::to_string(i) + "]", shadows.DepthBias[src]);
+        shader.SetFloat("uShadowPenumbra[" + std::to_string(i) + "]", shadows.PenumbraTexels[src]);
         shader.SetInt(i == 0 ? "uShadowMap" : ("uShadowMap" + std::to_string(i)),
                       ShadowCascadeUnit(i));
     }

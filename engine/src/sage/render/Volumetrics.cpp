@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <string>
+#include <vector>
 
 #include "sage/core/Config.h"
 #include "sage/core/Profiler.h"
@@ -130,6 +131,12 @@ uniform int   uCloudSteps;
 uniform int   uCloudLightSteps;
 
 uniform int   uDebug;        // 1 — показать поле видимости солнца
+uniform int   uSoftShadow;   // 1 — четыре выборки тени на шаг (без накопления)
+uniform vec3  uSkyAmbient;   // рассеяние неба в дымке (своё и в тени)
+// Шум облаков — 3D-текстура с повтором: одно чтение на октаву вместо восьми
+// хэшей и семи смешиваний (см. vnoise).
+uniform sampler3D uNoise;
+uniform float uNoiseSize;
 uniform int   uShadowsOn;
 uniform int   uCascades;
 uniform mat4  uLightMat[4];
@@ -181,6 +188,10 @@ float sampleCascade(int i, vec3 world) {
     vec4 lp = uLightMat[i] * vec4(world, 1.0);
     vec3 uv = lp.xyz / max(lp.w, 1e-6) * 0.5 + 0.5;
     if (uv.x < 0.02 || uv.x > 0.98 || uv.y < 0.02 || uv.y > 0.98 || uv.z > 1.0) return -1.0;
+    // С накоплением по кадрам хватает ОДНОЙ выборки: начало марша и так
+    // сдвигается каждый кадр, и история усредняет кромку луча сама. Четыре —
+    // только когда накопления нет (иначе рубленый край в пиксель).
+    if (uSoftShadow == 0) return shadowTap(i, uv.xy, uv.z);
     vec2 t = uShadowTexel[i];
     float s = shadowTap(i, uv.xy + vec2(-0.5, -0.5) * t, uv.z)
             + shadowTap(i, uv.xy + vec2( 0.5, -0.5) * t, uv.z)
@@ -201,19 +212,15 @@ float sunVisibility(vec3 world) {
     return 1.0;   // за последним каскадом карты нет — считаем освещённым
 }
 
-float hash13(vec3 p) {
-    p = fract(p * 0.1031);
-    p += dot(p, p.zyx + 31.32);
-    return fract((p.x + p.y) * p.z);
-}
-
+// Шум значений по решётке из 3D-текстуры. Узел решётки i — тексель i, а
+// гладкая (smoothstep) интерполяция получается ОДНОЙ аппаратной трилинейной
+// выборкой: координата внутри ячейки заранее пропускается через кривую.
+// Раньше то же самое стоило восьми хэшей и семи смешиваний на октаву — а
+// облака зовут шум сотни раз на пиксель.
 float vnoise(vec3 x) {
     vec3 i = floor(x), f = fract(x);
     f = f * f * (3.0 - 2.0 * f);
-    return mix(mix(mix(hash13(i + vec3(0,0,0)), hash13(i + vec3(1,0,0)), f.x),
-                   mix(hash13(i + vec3(0,1,0)), hash13(i + vec3(1,1,0)), f.x), f.y),
-               mix(mix(hash13(i + vec3(0,0,1)), hash13(i + vec3(1,0,1)), f.x),
-                   mix(hash13(i + vec3(0,1,1)), hash13(i + vec3(1,1,1)), f.x), f.y), f.z);
+    return texture(uNoise, (i + f + 0.5) / uNoiseSize).r;
 }
 
 float fbm(vec3 p) {
@@ -258,7 +265,9 @@ float cloudAt(vec3 p) {
     // Крупная карта решает, ГДЕ облака есть, а где чистое небо. Без неё шум
     // одной частоты даёт ровную пелену от края до края: отдельных облаков с
     // просветами между ними не получается ни при какой плотности.
-    float gate = smoothstep(0.36, 0.62, fbm(q * 0.85 + 19.3));
+    // Карта облаков низкочастотная — двух октав ей хватает, а пустое небо
+    // (gate == 0) уходит отсюда, не тратя четырёхоктавный шум формы.
+    float gate = smoothstep(0.36, 0.62, fbmLow(q * 0.85 + 19.3));
     if (gate <= 0.0) return 0.0;
 
     // Порог по покрытию с ПЕРЕНОРМИРОВКОЙ: остаток растягивается обратно на
@@ -365,7 +374,11 @@ void main() {
                 // переоценивает вклад в разы, и дальние шаги светятся ярче
                 // ближних — ровно наоборот тому, как ведёт себя среда.
                 float att = exp(-d * seg);
-                scatter += uSunColor * (vis * ph * transmittance * (1.0 - att));
+                // Солнце — с тенью и фазой; небо — со всех сторон, поэтому и в
+                // тени дымка не чёрная. Без неба воздух в тени не светился
+                // вовсе, а освещённый заливал кадр ровной пеленой — луч и тень
+                // различались на доли процента, и эффекта не было видно.
+                scatter += (uSunColor * (vis * ph) + uSkyAmbient) * (transmittance * (1.0 - att));
                 transmittance *= att;
                 if (transmittance < 0.02) break;   // дальше вклада уже не видно
             }
@@ -625,6 +638,26 @@ Shader& BlitShader() {
     return *s;
 }
 
+// Решётка шума облаков: 64³ случайных значений с повтором по краям. Значения
+// — тот же хэш, что раньше считался в шейдере на каждую выборку, только один
+// раз при создании.
+constexpr int kNoiseSize = 64;
+std::unique_ptr<Texture3D> MakeNoise() {
+    std::vector<float> v((size_t)kNoiseSize * kNoiseSize * kNoiseSize);
+    uint32_t h = 0x9E3779B9u;
+    for (float& x : v) {
+        h ^= h << 13;
+        h ^= h >> 17;
+        h ^= h << 5;
+        x = (float)(h & 0xFFFFFFu) / 16777215.0f;
+    }
+    Texture3DDesc d;
+    d.Width = d.Height = d.Depth = kNoiseSize;
+    d.Channels = 1;
+    d.WrapMode = Wrap::Repeat;
+    return GraphicsDevice::Get().CreateTexture3D(d, v.data());
+}
+
 std::unique_ptr<RenderTarget> MakeColor(int w, int h) {
     RenderTargetDesc d;
     d.Width = std::max(w, 1);
@@ -655,6 +688,7 @@ VolumetricSettings VolumetricsFromConfig(const sage::EngineConfig& cfg) {
     v.TemporalBlend = cfg.VolumetricTemporalBlend;
     v.Anisotropy = cfg.VolumetricAnisotropy;
     v.CloudDensity = cfg.CloudDensity;
+    v.SkyScatter = cfg.VolumetricSkyScatter;
     return v;
 }
 
@@ -764,6 +798,13 @@ void Volumetrics::Render(Framebuffer& target, sage::rhi::TextureHandle sceneDept
                                               : 0.0f);
 
     march.SetInt("uDebug", s.Debug ? 1 : 0);
+    march.SetInt("uSoftShadow", s.Temporal ? 0 : 1);
+    // Небо, рассеянное дымкой: среднее верха и горизонта текущего часа.
+    march.SetVec3("uSkyAmbient", glm::mix(env.SkyHorizon(), env.SkyTop(), 0.5f) * s.SkyScatter);
+    if (!m_noise) m_noise = MakeNoise();
+    march.SetInt("uNoise", 5);
+    march.SetFloat("uNoiseSize", (float)kNoiseSize);
+    if (m_noise) m_noise->Bind(5);
     march.SetInt("uShafts", s.LightShafts ? 1 : 0);
     march.SetFloat("uDensity", s.Density);
     march.SetFloat("uAniso", glm::clamp(s.Anisotropy, -0.95f, 0.95f));

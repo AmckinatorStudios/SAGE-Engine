@@ -355,7 +355,9 @@ System MakeAmbient() {
     s.Variants = {sky, custom};
     s.Common = {G("shadows", "Shadows",
                   {Float("shadows.distance", "Shadow distance", FIELD(Shadows.Distance), 0.0f, 2000.0f, 0.5f,
-                         "%.0f m", "How far from the camera shadows reach. 0 — from Game Settings")},
+                         "%.0f m", "How far from the camera shadows reach. 0 — from Game Settings"),
+                   Float("shadows.sunAngle", "Sun size", FIELD(Shadows.SunAngle), 0.0f, 5.0f, 0.05f,
+                         "%.2f°", "Angular size of the sun: sharp shadow at the base, softer farther away. 0 — hard shadows")},
                   false)};
     return s;
 }
