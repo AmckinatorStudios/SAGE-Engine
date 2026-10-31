@@ -36,6 +36,8 @@ struct NullCounters {
     int Textures = 0;
     int RenderTargets = 0;
     int StateChanges = 0;
+    int Dispatches = 0; // запуски вычислительных программ
+    int Buffers = 0;
 };
 
 class NullDevice : public GraphicsDevice {
@@ -72,6 +74,21 @@ public:
     std::unique_ptr<RenderTarget> CreateRenderTarget(const RenderTargetDesc& desc) override;
     std::unique_ptr<CubeRenderTarget> CreateCubeRenderTarget(
         const CubeRenderTargetDesc& desc) override;
+
+    // Свой рендер. Пустышка соглашается на всё (как и с остальным интерфейсом):
+    // на ней проверяется устройство кадра — граф, проходы, распределение
+    // ресурсов, — а не видеокарта. Буферы при этом НАСТОЯЩИЕ (память
+    // процесса): записанное читается обратно, иначе тест на обмен данными
+    // проверял бы подделку.
+    Caps Capabilities() const override;
+    std::unique_ptr<ShaderProgram> CreateProgram(const ShaderProgramDesc& desc,
+                                                 ShaderBuildLog& log) override;
+    std::unique_ptr<GpuBuffer> CreateBuffer(const BufferDesc& desc, const void* data) override;
+    void BindBuffer(int slot, const GpuBuffer* buffer) override;
+    void BindImage(int unit, TextureHandle texture, ImageAccess access, ImageFormat format,
+                   int mip) override;
+    void Dispatch(int groupsX, int groupsY, int groupsZ) override;
+    void ShaderBarrier(BarrierBits bits) override;
 
     // Счётчики этого устройства. Общие на процесс: ресурсы создаются из
     // разных мест, и таскать ссылку на устройство ради счётчика незачем.

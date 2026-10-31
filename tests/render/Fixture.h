@@ -118,5 +118,6 @@ void RunStabilityChecks(FrameRenderer& r, Scene& scene);     // дрейф, ут
 void RunTextureChecks(FrameRenderer& r);                    // мипмапы, детализация, анизотропия
 void RunParticleChecks();                                   // частицы: текстура, кадры, смешивание, меш, след
 void RunDisplayChecks(::Window& window);                    // режим экрана: проба и откат по времени
+void RunPipelineChecks(Scene& scene);                       // свой рендер: вычисления, граф, шейдеры
 
 } // namespace sage::rendertest

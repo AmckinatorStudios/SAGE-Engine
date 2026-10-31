@@ -86,6 +86,12 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/Material.cpp
     src/sage/render/Mesh.cpp
     src/sage/render/FrameGraph.cpp
+    src/sage/render/EffectChain.cpp
+    src/sage/render/RenderGraph.cpp
+    src/sage/render/RenderPipeline.cpp
+    src/sage/render/ShaderLibrary.cpp
+    src/sage/render/ShaderMaterial.cpp
+    src/sage/render/StandardPipeline.cpp
     src/sage/render/LodGroup.cpp
     src/sage/render/MeshSimplify.cpp
     src/sage/render/ScenePasses.cpp
@@ -166,6 +172,7 @@ set(SAGE_ENGINE_SOURCES
     src/rhi/opengl/GLDebug.cpp
     src/rhi/opengl/OpenGLDevice.cpp
     src/rhi/opengl/OpenGLResources.cpp
+    src/rhi/opengl/OpenGLCompute.cpp
     src/physics/CharacterMotor.cpp
     src/physics/PhysicsWorld.cpp
     src/physics/PhysicsScene.cpp

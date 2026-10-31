@@ -71,6 +71,8 @@ public:
     uint64_t NativeColorTexture() const { return m_target->NativeColorHandle(); }
     int Width() const { return m_target->Width(); }
     int Height() const { return m_target->Height(); }
+    // Сам таргет — для графа кадра своего рендера (RenderGraph::ImportTarget).
+    sage::rhi::RenderTarget& Target() const { return *m_target; }
 
 private:
     std::unique_ptr<sage::rhi::RenderTarget> m_target;
