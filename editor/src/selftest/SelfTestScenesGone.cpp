@@ -39,6 +39,11 @@ bool EditorLayer::SelfTestScenesGone() {
         projectText = ss.str();
     }
     const std::string startBefore = m_project.StartScene();
+    // Сцена, на которой работают следующие проверки (кадровые VIEWPORT_INPUT
+    // и другие), — снимком: вернуть её ровно такой, а не стартовую проекта.
+    const std::string sceneSnapshot = SceneSerializer::SaveToString(*m_scene);
+    const fs::path scenePathBefore = m_scenePath;
+    const bool dirtyBefore = m_sceneDirty;
     const fs::path scenes = m_project.ScenesDir();
     // Спрятать сцены проекта на время проверки и вернуть потом: проверка
     // удаляет всё, что лежит в папке сцен.
@@ -95,8 +100,13 @@ bool EditorLayer::SelfTestScenesGone() {
     fs::create_directories(scenes, ec);
     m_project.SetStartScene(startBefore, err);
     fs::remove_all(m_project.Dir() / ".sage" / "selftest_nobuild", ec);
-    // Открыть проект заново — со своей сценой, как до проверки.
     if (!OpenProject(m_project.Dir().string(), err)) fail("проект не вернулся: " + err);
+    if (!RestoreSceneFromString(sceneSnapshot)) fail("сцена проверок не вернулась");
+    m_scenePath = scenePathBefore;
+    m_sceneDirty = dirtyBefore;
+    m_history.Clear();
+    m_selection.Clear();
+    UpdateWindowTitle();
 
     // --- Виды логики ---------------------------------------------------------
     namespace lg = sage::editor::logic;
