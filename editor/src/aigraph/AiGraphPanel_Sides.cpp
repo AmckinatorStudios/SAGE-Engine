@@ -79,6 +79,35 @@ void AiGraphPanel::DrawGraphSide(EditorHost& host) {
         m_doc.Description = desc;
         MarkChanged();
     }
+    if (m_doc.Kind == GraphKind::Task) {
+        // Каналы персонажа, которые задача занимает (через запятую), и можно ли
+        // её прервать — правила параллельного выполнения (TaskSignature).
+        std::string channels;
+        for (const std::string& c : m_doc.Channels) channels += (channels.empty() ? "" : ", ") + c;
+        ImGui::SetNextItemWidth(-1.0f);
+        if (InputStr("##gchan", channels, T("Channels it occupies: legs, voice…"))) {
+            EditBegin();
+            m_doc.Channels.clear();
+            std::string cur;
+            for (char ch : channels + ",") {
+                if (ch == ',') {
+                    while (!cur.empty() && cur.front() == ' ') cur.erase(cur.begin());
+                    while (!cur.empty() && cur.back() == ' ') cur.pop_back();
+                    if (!cur.empty()) m_doc.Channels.push_back(cur);
+                    cur.clear();
+                } else {
+                    cur += ch;
+                }
+            }
+            MarkChanged();
+        }
+        bool interruptible = m_doc.Interruptible;
+        if (ImGui::Checkbox(T("May be interrupted"), &interruptible)) {
+            PushUndo();
+            m_doc.Interruptible = interruptible;
+            MarkChanged();
+        }
+    }
     if (m_doc.Kind == GraphKind::Function) {
         std::string cat = m_doc.Category;
         ImGui::SetNextItemWidth(-1.0f);

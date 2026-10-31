@@ -3,13 +3,16 @@
 #include <fstream>
 
 #include "sage/ai/GraphDebug.h"
+#include "sage/ai/GraphValidate.h"
 #include "sage/ai/World.h"
 #include "sage/scene/AiAgentComponent.h"
 
 // SAGE AI GRAPH в редакторе: библиотека проекта (узел и задача на Lua из
 // assets/ai) видна редактору графов, граф открывается из файла, а в Play
-// компонент AI объекта запускает его — граф зовёт Lua-задачу и узел из Lua,
-// двигает объект, отладчик видит выполнение графа и его узлы.
+// компонент AI объекта запускает его — граф решений зовёт Lua-задачу (с узлом
+// из Lua) и задачу Visual Scripting, которая двигает объект; отладчик видит
+// выполнение графа и его узлы. Граф задачи открывается в Visual Script, а не
+// в AI Graph: AI Graph решает, задача — дело Visual Scripting.
 bool EditorLayer::SelfTestAiGraph() {
     bool ok = true;
     auto fail = [&](const std::string& why) {
@@ -26,7 +29,26 @@ bool EditorLayer::SelfTestAiGraph() {
              "    run = function(n) n.outputs.y = n.inputs.x * 2 end})\n"
              "ai.task('SelftestMark', {inputs = {v = 0}, run = function(t) t.instance.mark = t.inputs.v; return true end})\n";
     }
-    // Граф: Start -> Run Task SelftestMark(v = double(21)) -> Set Position(self, (3, 0, 0)).
+    // Задача Visual Scripting: Start -> Set Position(self, (3, 0, 0)).
+    const fs::path vdir = m_project.AssetsDir() / "visual";
+    fs::create_directories(vdir, ec);
+    sage::ai::GraphDoc task;
+    task.Kind = sage::ai::GraphKind::Task;
+    task.Name = "SelftestMove";
+    {
+        const int ts = task.AddNode("flow.start", 0, 0).Id;
+        const int tself = task.AddNode("world.self", 0, 200).Id;
+        const int tmove = task.AddNode("object.set_position", 250, 0).Id;
+        task.FindNode(tmove)->Values["position"] = sage::vars::Value(glm::vec3(3.0f, 0.0f, 0.0f));
+        task.Link({ts, "then"}, {tmove, "in"}, true);
+        task.Link({tself, "object"}, {tmove, "object"}, false);
+    }
+    const fs::path taskPath = vdir / "SelftestMove.vgraph";
+    {
+        std::ofstream f(taskPath, std::ios::binary);
+        f << sage::ai::SaveGraph(task);
+    }
+    // Решение: Start -> Run Task SelftestMark(v = double(21)) -> Run Task SelftestMove.
     sage::ai::GraphDoc d;
     d.Kind = sage::ai::GraphKind::Behavior;
     d.Name = "SelftestBrain";
@@ -35,13 +57,11 @@ bool EditorLayer::SelfTestAiGraph() {
     d.FindNode(dbl)->Values["x"] = sage::vars::Value(21.0f);
     const int run = d.AddNode("task.run", 250, 0).Id;
     d.FindNode(run)->Values["task"] = sage::vars::Value(std::string("SelftestMark"));
-    const int self = d.AddNode("world.self", 250, 200).Id;
-    const int move = d.AddNode("object.set_position", 500, 0).Id;
-    d.FindNode(move)->Values["position"] = sage::vars::Value(glm::vec3(3.0f, 0.0f, 0.0f));
+    const int move = d.AddNode("task.run", 500, 0).Id;
+    d.FindNode(move)->Values["task"] = sage::vars::Value(std::string("SelftestMove"));
     d.Link({start, "then"}, {run, "in"}, true);
     d.Link({dbl, "y"}, {run, "v"}, false);
     d.Link({run, "succeeded"}, {move, "in"}, true);
-    d.Link({self, "object"}, {move, "object"}, false);
     const fs::path graphPath = dir / "SelftestBrain.aigraph";
     {
         std::ofstream f(graphPath, std::ios::binary);
@@ -56,9 +76,18 @@ bool EditorLayer::SelfTestAiGraph() {
         if (!lib->FindTask("SelftestMark")) fail("Lua-задача библиотеки не видна редактору");
         if (!lib->Nodes().Find("api.scene.Find")) fail("нет узлов API движка");
         if (!lib->FindGraph("SelftestBrain")) fail("граф проекта не попал в библиотеку");
+        if (!lib->FindTask("SelftestMove")) fail("задача Visual Scripting не видна AI Graph");
+        if (auto bad = lib->FindGraph("SelftestBrain"))
+            for (const auto& issue : sage::ai::ValidateGraph(*bad, *lib))
+                if (issue.Error) fail("граф решений с ошибкой: " + issue.Text);
     }
+    // Граф задачи из AI Graph уходит в Visual Script — его вид там.
+    m_aiGraph.Open(*this, sage::PathToUtf8(taskPath));
+    if (m_visualScript.Doc().Name != "SelftestMove") fail("граф задачи не открылся в Visual Script");
+    if (m_aiGraph.Doc().Name == "SelftestMove") fail("граф задачи открылся в AI Graph");
+    m_panelRegistry.SetVisible("VisualScript", false);
     OpenAiGraph(sage::PathToUtf8(graphPath));
-    if (m_aiGraph.Doc().Name != "SelftestBrain" || m_aiGraph.Doc().Nodes.size() != 5)
+    if (m_aiGraph.Doc().Name != "SelftestBrain" || m_aiGraph.Doc().Nodes.size() != 4)
         fail("граф не открылся в редакторе графов");
 
     GameObject probe = m_scene->CreateObject("AI Probe");
@@ -86,6 +115,7 @@ bool EditorLayer::SelfTestAiGraph() {
     if (GameObject o = m_scene->Get(probeId); o.Valid()) m_scene->RemoveObject(probeId);
     fs::remove(lua, ec);
     fs::remove(graphPath, ec);
+    fs::remove(taskPath, ec);
     m_aiGraph.ReloadLibrary(*this);
     // Окно графа открыл OpenAiGraph — закрыть: плавающее окно поверх вьюпорта
     // перехватывало бы щелчки следующих проверок (VIEWPORT_INPUT).

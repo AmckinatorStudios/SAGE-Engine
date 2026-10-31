@@ -1,6 +1,8 @@
 #include "sage/ai/World.h"
 
 #include <algorithm>
+#include <chrono>
+#include <set>
 #include <exception>
 
 #include "sage/ai/GraphDebug.h"
@@ -122,8 +124,8 @@ void TaskContext::WaitUntil(std::function<bool()> condition) {
     m_run.Waiting.Condition = std::move(condition);
 }
 
-RunPtr TaskContext::Start(const std::string& task, const Blackboard& inputs) {
-    return m_world.Start(m_run.Agent, task, inputs, m_run.Id);
+RunPtr TaskContext::Start(const std::string& task, const Blackboard& inputs, int priority) {
+    return m_world.Start(m_run.Agent, task, inputs, m_run.Id, priority);
 }
 
 TaskStatus TaskContext::Fail(const std::string& reason) {
@@ -280,11 +282,13 @@ BlackboardPtr World::Shared(const std::string& space) {
 // ---------------------------------------------------------------------------
 // Выполнение.
 // ---------------------------------------------------------------------------
-RunPtr World::Start(int agentId, const std::string& task, const Blackboard& inputs, int parentRun) {
+RunPtr World::Start(int agentId, const std::string& task, const Blackboard& inputs, int parentRun,
+                    int priority) {
     auto run = std::make_shared<Run>();
     run->Id = m_nextRun++;
     run->Agent = agentId;
     run->Parent = parentRun;
+    run->Priority = priority;
     run->Task = task;
     auto reject = [&](const std::string& why) {
         run->Status = TaskStatus::Failed;
@@ -315,6 +319,38 @@ RunPtr World::Start(int agentId, const std::string& task, const Blackboard& inpu
     }
     for (const Param& p : sig.Outputs) run->Outputs->Declare(p.Name, p.Default);
 
+    // Каналы: кто ещё занимает то же у этого персонажа. Предки не в счёт —
+    // задача, которая сама держит «legs», вправе позвать «MoveTo» с «legs».
+    if (!sig.Channels.empty()) {
+        std::set<int> ancestors;
+        for (RunPtr p = parent; p; p = p->Parent ? FindRun(p->Parent) : nullptr) ancestors.insert(p->Id);
+        std::vector<RunPtr> victims;
+        for (const RunPtr& other : m_active) {
+            if (other->Status != TaskStatus::Running || other->Agent != agentId || ancestors.count(other->Id)) continue;
+            if (!other->Definition) continue;
+            std::string shared;
+            for (const std::string& c : sig.Channels)
+                for (const std::string& oc : other->Definition->Signature.Channels)
+                    if (c == oc) shared = c;
+            if (shared.empty()) continue;
+            const bool canInterrupt = priority > other->Priority && other->Definition->Signature.Interruptible;
+            if (!canInterrupt) {
+                // Не опечатка, а игровая ситуация: задача честно не началась.
+                run->Status = TaskStatus::Failed;
+                run->Error = "канал '" + shared + "' занят задачей '" + other->Task + "' (приоритет " +
+                             std::to_string(other->Priority) +
+                             (other->Definition->Signature.Interruptible ? "" : ", непрерываемая") + ")";
+                if (GraphDebugger::Get().Enabled)
+                    GraphDebugger::Get().Log(0, "", 0, "decision", "'" + task + "' не запущена: " + run->Error, m_time);
+                return run;
+            }
+            victims.push_back(other);
+            victims.back()->Error = "прервана задачей '" + task + "' (приоритет " + std::to_string(priority) + " > " +
+                                    std::to_string(other->Priority) + ") за канал '" + shared + "'";
+        }
+        for (const RunPtr& v : victims) CancelRun(*v);
+    }
+
     run->Definition = def;
     run->Behavior = def->Create();
     if (!run->Behavior) return reject("задача '" + task + "' не создала исполнителя");
@@ -324,6 +360,7 @@ RunPtr World::Start(int agentId, const std::string& task, const Blackboard& inpu
     m_active.push_back(run);
     m_byId[run->Id] = run;
     if (m_ticking) m_queue.push_back(run);
+    ++m_stats[task].Runs;
     if (GraphDebugger::Get().Enabled) {
         auto* gdef = dynamic_cast<GraphTaskDefinition*>(def.get());
         const bool graph = gdef != nullptr;
@@ -357,9 +394,10 @@ RunPtr World::RunNow(int agent, const std::string& task, const Blackboard& input
     return run;
 }
 
-bool World::Cancel(int runId) {
+bool World::Cancel(int runId, const std::string& reason) {
     RunPtr r = FindRun(runId);
     if (!r) return false;
+    if (!reason.empty() && r->Status == TaskStatus::Running) r->Error = reason;
     CancelRun(*r);
     return true;
 }
@@ -417,6 +455,7 @@ void World::StepRun(const RunPtr& run) {
     TaskContext ctx(*this, r);
     TaskStatus s = TaskStatus::Failed;
     r.InStep = true;
+    const auto t0 = std::chrono::steady_clock::now();
     try {
         s = r.Behavior->Step(ctx);
     } catch (const std::exception& e) {
@@ -425,6 +464,13 @@ void World::StepRun(const RunPtr& run) {
         LOG_ERROR("AI") << "Задача '" << r.Task << "' упала: " << r.Error;
     }
     r.InStep = false;
+    {
+        const double sec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+        TaskStats& st = m_stats[r.Task];
+        ++st.Steps;
+        st.Seconds += sec;
+        st.MaxStep = std::max(st.MaxStep, sec);
+    }
 
     if (r.CancelRequested) {
         CancelRun(r);
@@ -468,6 +514,7 @@ void World::WakeParent(const Run& r) {
 void World::Finish(Run& r, TaskStatus status) {
     if (r.Status != TaskStatus::Running) return;
     r.Status = status;
+    ++(status == TaskStatus::Succeeded ? m_stats[r.Task].Succeeded : m_stats[r.Task].Failed);
     // Дети не переживают родителя (см. «Структура выполнения» в World.h).
     const std::vector<RunPtr> kids = std::move(r.Children);
     r.Children.clear();
@@ -512,6 +559,7 @@ void World::CancelRun(Run& r) {
     // Запущенное из самой отмены тоже не переживает задачу.
     cancelKids();
     r.Status = TaskStatus::Cancelled;
+    ++m_stats[r.Task].Cancelled;
     r.Waiting = Wait{};
     r.Listener = nullptr;
     r.Behavior.reset();
@@ -593,6 +641,7 @@ void World::Clear() {
     m_shared.clear();
     m_tasks.clear();
     m_operations.clear();
+    m_stats.clear();
     // Свои типы и узлы держат функции скриптового языка — тоже конец мира.
     m_types = TypeRegistry();
     m_nodes = NodeRegistry();

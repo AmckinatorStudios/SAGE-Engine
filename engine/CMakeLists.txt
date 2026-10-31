@@ -44,6 +44,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ai/GraphValidate.cpp
     src/sage/ai/GraphNodes_Flow.cpp
     src/sage/ai/GraphNodes_Data.cpp
+    src/sage/ai/GraphNodes_Decide.cpp
     src/sage/vars/Refs.cpp
     src/sage/events/Events.cpp
     src/sage/events/TypedBus.cpp

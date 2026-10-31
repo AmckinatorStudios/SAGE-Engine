@@ -59,6 +59,16 @@ struct Param {
 struct TaskSignature {
     std::vector<Param> Inputs;
     std::vector<Param> Outputs;
+    // КАНАЛЫ — что задача занимает у персонажа («legs», «voice», «hands»).
+    // Две задачи одного экземпляра с общим каналом одновременно не идут:
+    // новая с БОЛЬШИМ приоритетом прерывает старую (если та прерываемая), с
+    // меньшим или равным — не запускается и говорит, кто занял канал. Задачи
+    // без общих каналов идут параллельно свободно. Какие каналы и у каких
+    // задач — решает автор игры; движок только держит правило.
+    std::vector<std::string> Channels;
+    // Можно ли прервать задачу ради другой (по каналу или решением AI Graph).
+    // Непрерываемую можно только отменить явно (Cancel Task).
+    bool Interruptible = true;
 };
 
 struct Run;
@@ -120,6 +130,7 @@ struct Run {
     int Id = 0;
     int Agent = 0;   // экземпляр ИИ, чья это задача
     int Parent = 0;  // запустившее выполнение; 0 — верхнее (запущено экземпляру)
+    int Priority = 0;  // приоритет запуска: решает спор за каналы
     std::string Task;
     TaskStatus Status = TaskStatus::Running;
     std::string Error;
@@ -183,7 +194,7 @@ public:
 
     // Дочерняя задача того же экземпляра. Отменяется вместе с родителем и
     // завершается не позже него.
-    RunPtr Start(const std::string& task, const Blackboard& inputs = {});
+    RunPtr Start(const std::string& task, const Blackboard& inputs = {}, int priority = 0);
 
     // Завершиться неудачей с причиной: Step после этого возвращает Failed.
     TaskStatus Fail(const std::string& reason);

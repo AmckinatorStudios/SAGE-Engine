@@ -29,21 +29,33 @@
 // ---------------------------------------------------------------------------
 namespace sage::ai {
 
-// Script — граф Visual Scripting: игровая логика объекта (On Start, On
-// Update, события), без задач ИИ. Behavior и Task — графы SAGE AI. Function —
-// общая библиотека: её зовут оба редактора, поэтому в ней только общие узлы.
+// ВИДЫ ГРАФОВ И ИХ РЕДАКТОРЫ — главное разделение SAGE AI:
+//   Behavior — AI Graph: РЕШАЕТ, какую задачу выполнять и когда сменить
+//              поведение (условия, приоритеты, запуск и отмена задач).
+//   Task     — задача в Visual Scripting: КАК выполняется часть поведения
+//              (последовательность действий, проверки, ожидания).
+//   Script   — игровая логика объекта в Visual Scripting (On Start, On Update).
+//   Function — переиспользуемый блок обоих редакторов: только общие узлы.
+// Задачи на Lua (ai.task) и задачи графом Task равноправны: AI Graph зовёт
+// их одним узлом и по одним правилам.
 enum class GraphKind { Behavior, Task, Function, Script };
 const char* GraphKindId(GraphKind kind);
 bool ParseGraphKind(const std::string& id, GraphKind& out);
 
-// НАЗНАЧЕНИЕ УЗЛА. Общая основа графов одна (документ, выполнение, типы,
-// переменные), но наборы узлов у редакторов свои: узлы задач ИИ работают с
-// системой задач SAGE AI и в Visual Scripting не нужны, а «On Update»
-// объекта — не поведение ИИ. Branch, циклы, математика — общие.
+// НАЗНАЧЕНИЕ УЗЛА. Основа графов одна (документ, выполнение, типы,
+// переменные), наборы узлов — по назначению:
+//   AI     — управление поведением: решение с приоритетами, запуск задачи без
+//            ожидания, её состояние, отмена — только в AI Graph;
+//   Logic  — логика Visual Scripting (задачи, скрипты объектов);
+//   Object — входы скрипта объекта (On Start, On Update) — только в Script.
+// Общие (Branch, Sequence, циклы, математика, переменные, мир, Run Task,
+// Parallel) несут все биты.
 enum NodeDomain : unsigned {
     kDomainAI = 1u,
-    kDomainScript = 2u,
-    kDomainAll = kDomainAI | kDomainScript,
+    kDomainLogic = 2u,
+    kDomainObject = 4u,
+    kDomainScript = kDomainLogic | kDomainObject,   // узел Visual Scripting (visual.node)
+    kDomainAll = kDomainAI | kDomainLogic | kDomainObject,
 };
 // Можно ли узлу с таким назначением стоять в графе этого вида.
 bool NodeAllowed(unsigned nodeDomains, GraphKind kind);
@@ -92,6 +104,10 @@ struct GraphDoc {
     std::string Name;
     std::string Description;
     std::string Category;   // раздел в палитре для function-графов
+    // Граф задачи: какие каналы персонажа занимает и можно ли его прервать
+    // (TaskSignature::Channels / Interruptible).
+    std::vector<std::string> Channels;
+    bool Interruptible = true;
     std::vector<GraphVar> Inputs, Outputs, Locals;
     std::vector<GraphNode> Nodes;
     std::vector<GraphLink> Links;

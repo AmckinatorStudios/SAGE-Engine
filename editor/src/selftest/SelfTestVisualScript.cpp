@@ -42,8 +42,12 @@ bool EditorLayer::SelfTestVisualScript() {
     sage::ai::World* lib = m_visualScript.Library();
     if (!lib) fail("нет библиотеки у редактора Visual Script");
     else {
-        if (sage::ai::NodeAllowed(lib->Nodes().Find("task.run")->Domains, sage::ai::GraphKind::Script))
-            fail("узел задачи ИИ предлагается в Visual Scripting");
+        // Управление задачами — дело AI Graph; Run Task — общий узел.
+        if (sage::ai::NodeAllowed(lib->Nodes().Find("task.cancel")->Domains, sage::ai::GraphKind::Script) ||
+            sage::ai::NodeAllowed(lib->Nodes().Find("task.cancel")->Domains, sage::ai::GraphKind::Task))
+            fail("узел управления задачами ИИ предлагается в Visual Scripting");
+        if (!sage::ai::NodeAllowed(lib->Nodes().Find("task.run")->Domains, sage::ai::GraphKind::Task))
+            fail("Run Task не доступен графу задачи");
         if (!sage::ai::NodeAllowed(lib->Nodes().Find("flow.branch")->Domains, sage::ai::GraphKind::Script))
             fail("общего узла Branch нет в Visual Scripting");
         for (const sage::ai::GraphIssue& i : sage::ai::ValidateGraph(d, *lib))

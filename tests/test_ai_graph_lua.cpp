@@ -50,13 +50,13 @@ TEST(AIGraphLua_custom_nodes_types_and_tasks_both_ways) {
     ScriptEngine se;
     CHECK_TRUE(Lua(se, R"(
         ai.type("Target", {fields = {{"pos", Vec3(0, 0, 0)}, {"seen", false}}})
-        ai.node("my.double", {
+        visual.node("my.double", {
             title = "Double", category = "My game", pure = true,
             inputs = {{"x", "float", 1}}, outputs = {{"y", "float"}},
             run = function(n) n.outputs.y = n.inputs.x * 2 end,
             connect = function(pin, other) if other == "string" then return false, "только числа" end end,
         })
-        ai.node("my.pick", {
+        visual.node("my.pick", {
             inputs = {{"good", "bool", true}}, outputs = {{"yes", "exec"}, {"no", "exec"}},
             run = function(n) if n.inputs.good then return "yes" end return "no" end,
         })
@@ -113,24 +113,36 @@ TEST(AIGraphLua_api_nodes_file_component_and_events) {
     CHECK_TRUE(se.AI().Nodes().Find("api.scene.Find") != nullptr);
     CHECK_TRUE(se.AI().Nodes().Find("world.in_view") != nullptr);
 
-    // Граф поведения: найти пост, встать туда, дождаться события «alarm»
-    // (пришедшего через sage.events), записать в память.
+    // Задача (Visual Scripting): найти пост и встать туда. Действует задача, а
+    // не граф поведения — тот только решает.
+    GraphDoc task;
+    task.Kind = GraphKind::Task;
+    task.Name = "GoToPost";
+    {
+        const int s = Add(task, "flow.start");
+        const int find = Add(task, "api.scene.Find", {{"name", Str("Post")}});
+        const int info = Add(task, "object.info");
+        const int self = Add(task, "world.self");
+        const int move = Add(task, "object.set_position");
+        Exec(task, s, "then", find);
+        Exec(task, find, "then", move);
+        Data(task, find, "result", info, "object");
+        Data(task, self, "object", move, "object");
+        Data(task, info, "position", move, "position");
+    }
+    std::string terr;
+    CHECK_TRUE(se.AI().RegisterGraph(task, terr));
+    // AI Graph: выполнить задачу, дождаться события «alarm» (пришедшего через
+    // sage.events), записать в память.
     GraphDoc d;
     d.Kind = GraphKind::Behavior;
     d.Name = "GuardBrain";
     const int start = Add(d, "flow.start");
-    const int find = Add(d, "api.scene.Find", {{"name", Str("Post")}});
-    const int info = Add(d, "object.info");
-    const int self = Add(d, "world.self");
-    const int move = Add(d, "object.set_position");
+    const int go = Add(d, "task.run", {{"task", Str("GoToPost")}});
     const int wait = Add(d, "event.wait", {{"event", Str("alarm")}});
     const int mem = Add(d, "var.set", {{"scope", Str("instance")}, {"name", Str("alarm_level")}});
-    Exec(d, start, "then", find);
-    Exec(d, find, "then", move);
-    Data(d, find, "result", info, "object");
-    Data(d, self, "object", move, "object");
-    Data(d, info, "position", move, "position");
-    Exec(d, move, "then", wait);
+    Exec(d, start, "then", go);
+    Exec(d, go, "succeeded", wait);
     Exec(d, wait, "received", mem);
     Data(d, wait, "data", mem, "value");
     const std::string path = "sage_ai_guard.aigraph";

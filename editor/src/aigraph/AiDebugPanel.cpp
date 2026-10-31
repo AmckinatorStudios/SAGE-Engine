@@ -112,6 +112,11 @@ void AiDebugPanel::Draw(EditorHost& host, bool* open, AiGraphPanel& graph) {
         ImGui::TextDisabled(T("Written in: %s, AI instance #%d"), r->Origin.c_str(), r->Agent);
         ImGui::TextColored(StatusColor(r->Status), "%s", StatusTitle(r->Status));
         if (r->Ended > 0.0) ImGui::TextDisabled(T("Ran %.2f s"), r->Ended - r->Started);
+        // Последнее решение графа (узел Decide): «почему NPC делает это сейчас».
+        if (!r->LastDecision.empty()) {
+            ImGui::TextUnformatted(T("Last decision:"));
+            ImGui::TextWrapped("%s", r->LastDecision.c_str());
+        }
         if (!r->Error.empty()) {
             ImGui::TextUnformatted(T("Reason:"));
             ImGui::TextWrapped("%s", r->Error.c_str());
@@ -155,14 +160,22 @@ void AiDebugPanel::Draw(EditorHost& host, bool* open, AiGraphPanel& graph) {
     ImGui::EndChild();
 
     // --- История ---------------------------------------------------------------
-    static const char* kKinds[] = {"", "node", "task", "event", "error", "log", "pause"};
-    const char* kindTitles[] = {T("Everything"), T("Nodes"), T("Tasks"), T("Events"), T("Errors"), T("Log"),
-                                T("Pauses")};
+    static const char* kKinds[] = {"", "node", "task", "decision", "event", "error", "log", "pause"};
+    const char* kindTitles[] = {T("Everything"), T("Nodes"),  T("Tasks"), T("Decisions"),
+                                T("Events"),     T("Errors"), T("Log"),   T("Pauses")};
+    constexpr int kKindCount = (int)(sizeof(kKinds) / sizeof(kKinds[0]));
+    ImGui::Checkbox(T("Profile"), &m_profile);
+    ImGui::SameLine();
+    if (m_profile) {
+        ProfileTable(world);
+        ImGui::End();
+        return;
+    }
     ImGui::Checkbox(T("Only the selected task"), &m_onlyRun);
     ImGui::SameLine();
     ImGui::SetNextItemWidth(140.0f);
     if (ImGui::BeginCombo("##aid_kind", kindTitles[m_kind])) {
-        for (int i = 0; i < 7; ++i)
+        for (int i = 0; i < kKindCount; ++i)
             if (ImGui::Selectable(kindTitles[i], m_kind == i)) m_kind = i;
         ImGui::EndCombo();
     }
@@ -177,6 +190,7 @@ void AiDebugPanel::Draw(EditorHost& host, bool* open, AiGraphPanel& graph) {
         const ImVec4 c = e.Kind == "error" ? ImVec4(1, 0.45f, 0.4f, 1)
                          : e.Kind == "event" ? ImVec4(1, 0.8f, 0.4f, 1)
                          : e.Kind == "task"  ? ImVec4(0.5f, 0.8f, 1, 1)
+                         : e.Kind == "decision" ? ImVec4(0.6f, 1, 0.6f, 1)
                                              : ImVec4(0.8f, 0.8f, 0.8f, 1);
         ImGui::TextColored(c, "%8.2f  #%-4d %-6s %s", e.Time, e.Run, e.Kind.c_str(), text.c_str());
         if (ImGui::IsItemClicked()) m_run = e.Run;
@@ -184,4 +198,45 @@ void AiDebugPanel::Draw(EditorHost& host, bool* open, AiGraphPanel& graph) {
     if (m_follow && ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 20.0f) ImGui::SetScrollHereY(1.0f);
     ImGui::EndChild();
     ImGui::End();
+}
+
+// Профиль задач: что стоит дороже всего. Время — сумма шагов задачи на
+// процессоре (не длительность на часах игры), самый дорогой шаг — кто съел кадр.
+void AiDebugPanel::ProfileTable(sage::ai::World* world) {
+    if (!world) {
+        ImGui::NewLine();
+        ImGui::TextDisabled("%s", T("Profile appears while the game runs."));
+        return;
+    }
+    if (EditorIcons::Button("trash", T("Reset"))) world->ResetStats();
+    const ImGuiTableFlags flags = ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY |
+                                  ImGuiTableFlags_Resizable;
+    if (!ImGui::BeginTable("##aid_profile", 7, flags)) return;
+    ImGui::TableSetupScrollFreeze(0, 1);
+    ImGui::TableSetupColumn(T("Task"));
+    ImGui::TableSetupColumn(T("Runs"));
+    ImGui::TableSetupColumn(T("Steps"));
+    ImGui::TableSetupColumn(T("Time, ms"));
+    ImGui::TableSetupColumn(T("Max step, ms"));
+    ImGui::TableSetupColumn(T("Succeeded / failed"));
+    ImGui::TableSetupColumn(T("Cancelled"));
+    ImGui::TableHeadersRow();
+    for (const auto& [name, st] : world->Stats()) {
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextUnformatted(name.c_str());
+        ImGui::TableNextColumn();
+        ImGui::Text("%llu", (unsigned long long)st.Runs);
+        ImGui::TableNextColumn();
+        ImGui::Text("%llu", (unsigned long long)st.Steps);
+        ImGui::TableNextColumn();
+        ImGui::Text("%.3f", st.Seconds * 1000.0);
+        ImGui::TableNextColumn();
+        ImGui::Text("%.3f", st.MaxStep * 1000.0);
+        ImGui::TableNextColumn();
+        ImGui::Text("%llu / %llu", (unsigned long long)st.Succeeded, (unsigned long long)st.Failed);
+        ImGui::TableNextColumn();
+        ImGui::Text("%llu", (unsigned long long)st.Cancelled);
+    }
+    ImGui::EndTable();
 }

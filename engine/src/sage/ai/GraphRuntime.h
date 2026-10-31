@@ -51,6 +51,7 @@ struct CompiledGraph {
     int StartNode = 0;
     std::vector<size_t> EventNodes;   // On Event
     std::vector<size_t> UpdateNodes;  // On Update (Visual Scripting)
+    bool ListensAll = false;          // есть Decide с перепроверкой по событиям
     std::string Problem;              // почему граф нельзя выполнить
     const CompiledNode* Find(int id) const {
         auto it = Index.find(id);
@@ -122,10 +123,19 @@ public:
 
     // Новая ветка из выхода потока pin. 0 — выход ни с чем не соединён.
     int Spawn(const std::string& pin);
-    void Kill(int fiber);
+    // Сколько событий дошло до графа — Decide перепроверяет условия, когда
+    // счёт изменился (событийное выполнение вместо опроса каждый кадр).
+    uint64_t EventSerial() const;
+    // Ждать до момента until, конца ветки fiber или (onEvents) любого
+    // события графа — что раньше. Пока ничего из этого, узел не шагает.
+    void WaitDecision(double until, int fiber, bool onEvents);
+    // Запись в отладчик: «решение», «предупреждение» — с причиной.
+    void Note(const std::string& kind, const std::string& text);
+    // Снять ветку; задача, которую она ждала, отменяется с этой причиной.
+    void Kill(int fiber, const std::string& reason = {});
     bool FiberDone(int fiber) const;
 
-    RunPtr StartTask(const std::string& name, const Blackboard& inputs);
+    RunPtr StartTask(const std::string& name, const Blackboard& inputs, int priority = 0);
     RunPtr TaskById(int id) const;
 
     // Переменные по области: local, instance, shared, input, output.
@@ -178,7 +188,7 @@ private:
     vars::Value InputOf(TaskContext& ctx, const CompiledNode& n, const std::string& pin, int depth);
     Fiber& NewFiber(int node);
     Fiber* FindFiber(int id);
-    void KillFiber(int id);
+    void KillFiber(int id, const std::string& reason = {});
     void DeliverEvents(TaskContext& ctx);
     void Fail(const std::string& reason);
     int Target(const CompiledNode& n, const std::string& pin) const;
@@ -191,6 +201,7 @@ private:
     std::map<int, RunPtr> m_tasks;
     std::deque<std::pair<std::string, vars::Value>> m_events;
     std::deque<RunPtr> m_cancelQueue;
+    uint64_t m_eventSerial = 0;
     World* m_world = nullptr;
     int m_nextFiber = 1;
     int m_budget = 0;
