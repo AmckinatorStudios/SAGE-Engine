@@ -50,6 +50,8 @@ struct RunDebug {
     // Граф Visual Scripting, а не задача ИИ: отладчик ИИ его не показывает,
     // а редактор Visual Script — показывает.
     bool Script = false;
+    // Последнее решение AI Graph этого выполнения: «почему именно эта задача».
+    std::string LastDecision;
     std::string Error;
     double Started = 0.0, Ended = 0.0;
     std::map<int, uint64_t> NodeFrame;                      // узел -> кадр последнего шага
@@ -88,6 +90,9 @@ public:
     void SetCurrent(int run, std::set<int> nodes);
     // Сработала точка останова (или шаг): выполнение встаёт на паузу.
     void Paused(int run, const std::string& graph, int node, double time);
+    // Как Log, но решение ещё и запоминается у выполнения (LastDecision).
+    void Note(int run, const std::string& graph, int node, const std::string& kind, const std::string& text,
+              double time);
     void Log(int run, const std::string& graph, int node, const std::string& kind, const std::string& text,
              double time);
 

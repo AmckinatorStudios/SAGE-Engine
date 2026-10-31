@@ -24,5 +24,7 @@ std::string TypeOfValue(const GraphEnv& env, const vars::Value& v);
 
 // Математика, сравнения, логика, строки, списки, структуры, повороты.
 void RegisterDataNodes(NodeRegistry& nodes);
+// Решение с приоритетами (Decide) — AI Graph.
+void RegisterDecisionNodes(NodeRegistry& nodes);
 
 } // namespace sage::ai::nodes

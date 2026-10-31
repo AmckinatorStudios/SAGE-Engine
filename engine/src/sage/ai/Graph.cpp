@@ -22,18 +22,25 @@ const char* GraphKindId(GraphKind kind) {
 
 bool NodeAllowed(unsigned nodeDomains, GraphKind kind) {
     switch (kind) {
-        case GraphKind::Function: return nodeDomains == kDomainAll;
-        case GraphKind::Script: return (nodeDomains & kDomainScript) != 0;
-        default: return (nodeDomains & kDomainAI) != 0;
+        // Функцию зовут оба редактора — в ней только то, что годится обоим.
+        case GraphKind::Function: return (nodeDomains & (kDomainAI | kDomainLogic)) == (kDomainAI | kDomainLogic);
+        // Скрипт объекта — узлы объекта (On Start, действия, общие); узел ИИ
+        // из Lua (ИИ + логика задач) сюда не попадает.
+        case GraphKind::Script: return (nodeDomains & kDomainObject) != 0;
+        case GraphKind::Task: return (nodeDomains & kDomainLogic) != 0;
+        case GraphKind::Behavior: return (nodeDomains & kDomainAI) != 0;
     }
+    return false;
 }
 
 unsigned GraphDomain(GraphKind kind) {
     switch (kind) {
-        case GraphKind::Function: return kDomainAll;
+        case GraphKind::Function: return kDomainAI | kDomainLogic;
         case GraphKind::Script: return kDomainScript;
-        default: return kDomainAI;
+        case GraphKind::Task: return kDomainLogic;
+        case GraphKind::Behavior: return kDomainAI;
     }
+    return kDomainAll;
 }
 
 bool ParseGraphKind(const std::string& id, GraphKind& out) {
@@ -186,6 +193,10 @@ bool LoadGraph(const std::string& text, GraphDoc& out, std::string& error) {
     d.Name = j.value("name", std::string());
     d.Description = j.value("description", std::string());
     d.Category = j.value("category", std::string());
+    if (j.contains("channels") && j["channels"].is_array())
+        for (const json& c : j["channels"])
+            if (c.is_string()) d.Channels.push_back(c.get<std::string>());
+    d.Interruptible = j.value("interruptible", true);
     VarsFrom(j.value("inputs", json()), d.Inputs);
     VarsFrom(j.value("outputs", json()), d.Outputs);
     VarsFrom(j.value("locals", json()), d.Locals);
@@ -247,6 +258,8 @@ std::string SaveGraph(const GraphDoc& d) {
     j["name"] = d.Name;
     if (!d.Description.empty()) j["description"] = d.Description;
     if (!d.Category.empty()) j["category"] = d.Category;
+    if (!d.Channels.empty()) j["channels"] = d.Channels;
+    if (!d.Interruptible) j["interruptible"] = false;
     j["inputs"] = VarsJson(d.Inputs);
     j["outputs"] = VarsJson(d.Outputs);
     j["locals"] = VarsJson(d.Locals);

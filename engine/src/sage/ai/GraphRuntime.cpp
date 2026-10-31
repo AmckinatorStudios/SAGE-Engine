@@ -52,6 +52,7 @@ std::shared_ptr<CompiledGraph> CompileGraph(std::shared_ptr<const GraphDoc> doc,
         if ((t == "flow.start" || t == "script.on_start") && !g->StartNode) g->StartNode = g->Nodes[i].Node->Id;
         if (t == "event.on") g->EventNodes.push_back(i);
         if (t == "script.on_update") g->UpdateNodes.push_back(i);
+        if (t == "ai.decide") g->ListensAll = true;
     }
     // Узла нет в реестре — чаще всего не загружена библиотека, где он
     // объявлен (свой узел на Lua). Граф с дыркой не запускается вовсе: молча
@@ -77,6 +78,8 @@ GraphTaskDefinition::GraphTaskDefinition(std::shared_ptr<const GraphDoc> doc, Wo
         Signature.Inputs.push_back({v.Name, world.Types().Convert(v.Default, v.Type)});
     for (const GraphVar& v : m_doc->Outputs)
         Signature.Outputs.push_back({v.Name, world.Types().Convert(v.Default, v.Type)});
+    Signature.Channels = m_doc->Channels;
+    Signature.Interruptible = m_doc->Interruptible;
 }
 
 std::unique_ptr<TaskBehavior> GraphTaskDefinition::Create() { return std::make_unique<GraphBehavior>(*this); }
@@ -171,15 +174,35 @@ int GraphExec::Spawn(const std::string& pin) {
     return m_g.NewFiber(target).Id;
 }
 
-void GraphExec::Kill(int fiber) { m_g.KillFiber(fiber); }
+void GraphExec::Kill(int fiber, const std::string& reason) { m_g.KillFiber(fiber, reason); }
+
+uint64_t GraphExec::EventSerial() const { return m_g.m_eventSerial; }
+
+void GraphExec::WaitDecision(double until, int fiber, bool onEvents) {
+    GraphBehavior* g = &m_g;
+    const uint64_t mark = m_g.m_eventSerial;
+    WaitUntil([g, until, fiber, onEvents, mark]() {
+        if (g->m_world && g->m_world->Time() >= until) return true;
+        if (fiber) {
+            Fiber* f = g->FindFiber(fiber);
+            if (!f || f->Done) return true;
+        }
+        return onEvents && g->m_eventSerial != mark;
+    });
+}
+
+void GraphExec::Note(const std::string& kind, const std::string& text) {
+    GraphDebugger& dbg = GraphDebugger::Get();
+    if (dbg.Enabled) dbg.Note(m_g.m_runId, m_g.GraphName(), m_n.Node->Id, kind, text, GetWorld().Time());
+}
 
 bool GraphExec::FiberDone(int fiber) const {
     Fiber* f = m_g.FindFiber(fiber);
     return !f || f->Done;
 }
 
-RunPtr GraphExec::StartTask(const std::string& name, const Blackboard& inputs) {
-    RunPtr run = m_t.Start(name, inputs);
+RunPtr GraphExec::StartTask(const std::string& name, const Blackboard& inputs, int priority) {
+    RunPtr run = m_t.Start(name, inputs, priority);
     if (run->Rejected) Error(run->Error);
     m_g.m_tasks[run->Id] = run;
     return run;
@@ -231,21 +254,24 @@ Fiber* GraphBehavior::FindFiber(int id) {
     return nullptr;
 }
 
-void GraphBehavior::KillFiber(int id) {
+void GraphBehavior::KillFiber(int id, const std::string& reason) {
     Fiber* f = FindFiber(id);
     if (!f || f->Done) return;
     f->Done = true;
     // Ветка, ждавшая задачу, уносит её с собой: «Parallel: любая» отменил
     // проигравшую ветку — её перемещение не должно идти дальше в пустоту.
     if (f->Wait == Fiber::WaitKind::Run && f->Run && f->Run->Status == TaskStatus::Running) {
-        // Отмену делает мир: он знает про детей и про очистку.
-        // Не сразу: убивают ветку изнутри шага другого узла, и отмена с
-        // вызовом чужого cancel посреди него — лишняя вложенность.
-        m_cancelQueue.push_back(f->Run);
+        // Отмену делает мир: он знает про детей и про очистку. СРАЗУ, а не в
+        // конце шага: решение, снявшее ветку, тут же запускает новую задачу,
+        // и та не должна застать старую на тех же каналах — иначе причиной
+        // отмены в отладчике стал бы «спор за канал», а не само решение.
+        f->Run->Error = reason.empty() ? "ветка графа '" + GraphName() + "' снята" : reason;
+        if (m_world) m_world->Cancel(f->Run->Id);
+        else m_cancelQueue.push_back(f->Run);
         f->Run.reset();
     }
     const std::vector<int> waiting = f->Waiting;
-    for (int w : waiting) KillFiber(w);
+    for (int w : waiting) KillFiber(w, reason);
 }
 
 int GraphBehavior::Target(const CompiledNode& n, const std::string& pin) const {
@@ -345,6 +371,7 @@ void GraphBehavior::DeliverEvents(TaskContext& ctx) {
     while (!m_events.empty()) {
         auto [name, payload] = std::move(m_events.front());
         m_events.pop_front();
+        ++m_eventSerial;
         for (auto& f : m_fibers) {
             if (f->Done || f->Wait != Fiber::WaitKind::Event || f->Event != name) continue;
             f->Wait = Fiber::WaitKind::None;
@@ -481,6 +508,7 @@ TaskStatus GraphBehavior::Step(TaskContext& ctx) {
                 auto it = m_g->Nodes[i].Node->Values.find("event");
                 if (it != m_g->Nodes[i].Node->Values.end() && it->second.AsString() == name) want = true;
             }
+            if (m_g->ListensAll) want = true;   // Decide перепроверяет условия на любое событие
             if (want) m_events.emplace_back(name, payload);
             return want;
         };

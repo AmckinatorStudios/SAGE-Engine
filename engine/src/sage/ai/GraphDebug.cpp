@@ -113,6 +113,13 @@ void GraphDebugger::Log(int run, const std::string& graph, int node, const std::
     Push({time, 0, run, graph, node, kind, text});
 }
 
+void GraphDebugger::Note(int run, const std::string& graph, int node, const std::string& kind,
+                         const std::string& text, double time) {
+    if (kind == "decision")
+        if (RunDebug* r = FindRun(run)) r->LastDecision = text;
+    Push({time, 0, run, graph, node, kind, text});
+}
+
 void GraphDebugger::Reset() {
     m_runs.clear();
     m_finished.clear();

@@ -99,8 +99,10 @@ public:
     // неизвестный вход) — оно сразу Failed, Rejected и с причиной в Error.
     // Первый шаг — в ближайшем Tick (в том же, если он уже идёт).
     RunPtr Start(int agent, const std::string& task, const Blackboard& inputs = {},
-                 int parentRun = 0);
-    bool Cancel(int runId);
+                 int parentRun = 0, int priority = 0);
+    // Отменить с причиной — она остаётся в Run::Error и в отладчике: «почему
+    // прервано» видно, а не угадывается.
+    bool Cancel(int runId, const std::string& reason = {});
     // Запустить и сразу шагать, пока выполнение не начнёт ждать или не
     // кончится: функция графа без ожиданий отдаёт результат в тот же вызов
     // (visual.call из Lua). Внутри идущего Tick — обычный Start: шаг будет в
@@ -108,6 +110,17 @@ public:
     RunPtr RunNow(int agent, const std::string& task, const Blackboard& inputs = {});
     RunPtr FindRun(int runId) const;
     size_t ActiveCount() const { return m_byId.size(); }
+
+    // ПРОФИЛЬ: сколько стоит каждая задача (по имени) — запусков, шагов,
+    // времени шагов и чем кончались. Считается всегда: замер шага — пара
+    // чтений часов, а «какой NPC съел кадр» без этого не узнать.
+    struct TaskStats {
+        uint64_t Runs = 0, Steps = 0, Succeeded = 0, Failed = 0, Cancelled = 0;
+        double Seconds = 0.0;
+        double MaxStep = 0.0;   // самый дорогой шаг, секунды
+    };
+    const std::map<std::string, TaskStats>& Stats() const { return m_stats; }
+    void ResetStats() { m_stats.clear(); }
 
     // Разбудить ждущих события. agent = 0 — всех; иначе — только его задачи.
     // Возвращает, скольких разбудило.
@@ -141,6 +154,7 @@ private:
     void Wake(const RunPtr& run);
     void WakeParent(const Run& run);
 
+    std::map<std::string, TaskStats> m_stats;
     TypeRegistry m_types;
     NodeRegistry m_nodes;
     uint64_t m_version = 1;

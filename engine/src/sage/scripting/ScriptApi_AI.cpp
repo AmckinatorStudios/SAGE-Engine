@@ -256,7 +256,7 @@ local AGENTS = setmetatable({}, {__mode = "v"})
 
 function N.make_agent(id, owner, space)
     local a = {id = id, owner = owner, memory = N.memory(id), shared = N.shared(space)}
-    a.start = function(name, inputs) return handle(N.start(id, name, inputs, nil)) end
+    a.start = function(name, inputs, opts) return handle(N.start(id, name, inputs, nil, opts)) end
     a.stop = function() N.stop(id) end
     a.destroy = function() AGENTS[id] = nil; N.destroy(id) end
     a.emit = function(event, data) return N.emit(event, data, id) end
@@ -294,7 +294,7 @@ function N.make_ctx(r, id)
         yield()
         return N.event(r)
     end
-    function t.start(name, inputs) return handle(N.start(id, name, inputs, r)) end
+    function t.start(name, inputs, opts) return handle(N.start(id, name, inputs, r, opts)) end
     function t.wait_for(h)
         N.wait_runs(r, runs_of({h}), true)
         yield()
@@ -313,8 +313,8 @@ function N.make_ctx(r, id)
         yield()
         for _, h in ipairs(list) do if h.done then return h end end
     end
-    function t.run(name, inputs)
-        local h = t.start(name, inputs)
+    function t.run(name, inputs, opts)
+        local h = t.start(name, inputs, opts)
         t.wait_for(h)
         return h.ok, h
     end
@@ -367,10 +367,14 @@ void ScriptEngine::RegisterAiApi() {
     sol::table N = m_lua.create_named_table("__sage_ai");
     m_aiNative = N;
 
-    N["start"] = [this](int agent, const std::string& name, sol::object inputs, sol::object parent) {
+    N["start"] = [this](int agent, const std::string& name, sol::object inputs, sol::object parent,
+                        sol::object opts) {
         int parentId = 0;
         if (parent.is<AiRunRef>()) parentId = parent.as<AiRunRef>().R->Id;
-        RunPtr run = AI().Start(agent, name, ReadInputs(*this, inputs, name), parentId);
+        // Настройки запуска одной таблицей: {priority = 10}.
+        int priority = 0;
+        if (opts.get_type() == sol::type::table) priority = opts.as<sol::table>().get_or("priority", 0);
+        RunPtr run = AI().Start(agent, name, ReadInputs(*this, inputs, name), parentId, priority);
         if (run->Rejected) throw std::runtime_error("ai: " + run->Error);
         return AiRunRef{run};
     };
@@ -460,9 +464,10 @@ void ScriptEngine::RegisterAiApi() {
         if (name.empty()) throw std::runtime_error("ai.task: у задачи должно быть имя");
         for (const auto& kv : spec) {
             const std::string k = kv.first.is<std::string>() ? kv.first.as<std::string>() : "?";
-            if (k != "run" && k != "cancel" && k != "inputs" && k != "outputs")
+            if (k != "run" && k != "cancel" && k != "inputs" && k != "outputs" && k != "channels" &&
+                k != "interruptible")
                 throw std::runtime_error("ai.task('" + name + "'): неизвестное поле '" + k +
-                                         "' (есть: run, cancel, inputs, outputs)");
+                                         "' (есть: run, cancel, inputs, outputs, channels, interruptible)");
         }
         sol::object run = spec["run"];
         if (run.get_type() != sol::type::function)
@@ -477,6 +482,11 @@ void ScriptEngine::RegisterAiApi() {
         def->Origin = "Lua";
         def->Signature.Inputs = ReadParams(*this, spec["inputs"], name, "inputs");
         def->Signature.Outputs = ReadParams(*this, spec["outputs"], name, "outputs");
+        // Каналы персонажа, которые задача занимает, и можно ли её прервать.
+        if (sol::object ch = spec["channels"]; ch.get_type() == sol::type::table)
+            for (const auto& kv : ch.as<sol::table>())
+                if (kv.second.is<std::string>()) def->Signature.Channels.push_back(kv.second.as<std::string>());
+        def->Signature.Interruptible = spec.get_or("interruptible", true);
         AI().RegisterTask(def);
     });
 

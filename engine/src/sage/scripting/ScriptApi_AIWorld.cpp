@@ -7,6 +7,7 @@
 #include "sage/ai/GraphNodesDetail.h"
 #include "sage/core/Log.h"
 #include "sage/lang/SageApi.h"
+#include "sage/physics/PhysicsComponents.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/scene/Scene.h"
 
@@ -189,6 +190,8 @@ void ScriptEngine::RegisterAiWorldNodes() {
     }
     {
         NodeType t = Node("object.set_position", "Set Position", "World/Object", "Moves the object to a point.");
+        // Действие над миром — в задачах и скриптах; AI Graph решает, а не действует.
+        t.Domains = sage::ai::kDomainScript;
         t.Inputs = {X("in"), P("object", type::Object, noObject), P("position", type::Vec3)};
         t.Outputs = {X("then")};
         t.Run = [object](GraphExec& ex) {
@@ -202,6 +205,8 @@ void ScriptEngine::RegisterAiWorldNodes() {
     }
     {
         NodeType t = Node("object.look_at", "Look At", "World/Object", "Turns the object (around the vertical) to a point.");
+        // Действие над миром — в задачах и скриптах; AI Graph решает, а не действует.
+        t.Domains = sage::ai::kDomainScript;
         t.Inputs = {X("in"), P("object", type::Object, noObject), P("point", type::Vec3)};
         t.Outputs = {X("then")};
         t.Run = [object, worldPos](GraphExec& ex) {
@@ -213,6 +218,59 @@ void ScriptEngine::RegisterAiWorldNodes() {
             return NodeResult::Go("then");
         };
         t.Keywords = {"face", "turn", "rotate"};
+        r.Register(std::move(t));
+    }
+    {
+        // ПЕРЕМЕЩЕНИЕ — через системы движка, а не мимо них: у объекта с
+        // контроллером персонажа шаг делает контроллер (лестницы, стены,
+        // склоны — его забота), без контроллера — Transform. Узел ждёт
+        // прибытия кадр за кадром: «иди к двери» запускается один раз.
+        NodeType t = Node("object.move_to", "Move To", "World/Object",
+                          "Moves the object toward a point every frame (its character controller if it has one) and "
+                          "goes on when it arrives or the timeout runs out.");
+        t.Domains = sage::ai::kDomainScript;
+        t.Inputs = {X("in"), P("object", type::Object, noObject), P("target", type::Vec3),
+                    P("speed", type::Float, Value(3.0f)), P("arrive_distance", type::Float, Value(0.5f)),
+                    P("timeout", type::Float, Value(0.0f))};
+        t.Outputs = {X("arrived"), X("failed"), P("distance", type::Float)};
+        t.Run = [this, object, worldPos](GraphExec& ex) {
+            sage::ai::NodeState& s = ex.State();
+            GameObject o = object(ex, "object");
+            if (!o.Valid()) {
+                ex.Out("distance", Value(0.0f));
+                return NodeResult::Go("failed");
+            }
+            const double now = ex.GetWorld().Time();
+            if (!ex.Resumed()) {
+                s.Until = ex.In("timeout").AsFloat() > 0.0f ? now + ex.In("timeout").AsFloat() : 0.0;
+                s.NextEval = now;   // время прошлого шага — для dt
+            }
+            const float dt = (float)(now - s.NextEval);
+            s.NextEval = now;
+            glm::vec3 d = ex.In("target").AsVec3() - worldPos(o);
+            d.y = 0.0f;   // по земле: высоту держит контроллер или сцена
+            const float dist = glm::length(d);
+            ex.Out("distance", Value(dist));
+            if (dist <= ex.In("arrive_distance").AsFloat()) return NodeResult::Go("arrived");
+            if (s.Until > 0.0 && now >= s.Until) return NodeResult::Go("failed");
+            if (dt > 0.0f) {
+                const glm::vec3 v = d / dist * ex.In("speed").AsFloat();
+                if (o.Registry()->all_of<CharacterControllerComponent>(o.Entity())) {
+                    sol::protected_function move = m_lua["sage"]["physics"]["MoveCharacter"];
+                    auto res = move(o, v, dt);
+                    if (!res.valid()) {
+                        sol::error e = res;
+                        ex.Error(e.what());
+                    }
+                } else {
+                    const glm::vec3 step = v * dt;
+                    o.GetTransform().Position += glm::length(step) > dist ? d : step;
+                }
+            }
+            ex.WaitFrame();
+            return NodeResult::Wait();
+        };
+        t.Keywords = {"walk", "go", "navigate", "path", "chase"};
         r.Register(std::move(t));
     }
     {
@@ -386,6 +444,8 @@ void ScriptEngine::RegisterAiWorldNodes() {
     }
     {
         NodeType t = Node("object.set", "Set Property", "World/Object", "Changes a property of the object by path.");
+        // Действие над миром — в задачах и скриптах; AI Graph решает, а не действует.
+        t.Domains = sage::ai::kDomainScript;
         t.Inputs = {X("in"), P("object", type::Object, noObject), P("value", type::Any)};
         t.Outputs = {X("then")};
         t.Settings = {S("path", "string", Value(std::string("Transform.Position")), "Property")};
@@ -404,6 +464,8 @@ void ScriptEngine::RegisterAiWorldNodes() {
     {
         NodeType t = Node("object.call", "Call Script", "World/Object",
                           "Calls a function of the object's script by name and gives what it returned.");
+        // Действие над миром — в задачах и скриптах; AI Graph решает, а не действует.
+        t.Domains = sage::ai::kDomainScript;
         t.Inputs = {X("in"), P("object", type::Object, noObject), P("args", type::Array, Value::Array())};
         t.Outputs = {X("then"), P("result", type::Any)};
         t.Settings = {S("function", "string", Value(std::string()), "Function")};

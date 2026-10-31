@@ -145,6 +145,13 @@ struct NodeState {
     RunPtr Task;
     vars::Value Data;
     std::vector<int> Fibers;
+    // Decide: активный вариант, его ветка, когда перепроверять условия,
+    // пауза перед повтором каждого варианта, метка последнего события.
+    int Active = -1;
+    int ActiveFiber = 0;
+    double NextEval = 0.0;
+    std::vector<double> Cooldown;
+    uint64_t EventMark = 0;
 };
 
 } // namespace sage::ai

@@ -54,12 +54,18 @@ bool HasIssue(const std::vector<GraphIssue>& v, int node, bool error, const std:
 
 TEST(VisualScript_node_domains_split_editors) {
     World w;
-    const NodeType* run = w.Nodes().Find("task.run");
+    const NodeType* run = w.Nodes().Find("task.call");
     const NodeType* branch = w.Nodes().Find("flow.branch");
     const NodeType* update = w.Nodes().Find("script.on_update");
     CHECK_TRUE(run && branch && update);
-    // Задачи ИИ — только в графах ИИ; Branch — везде; On Update — только в скриптах.
-    CHECK_TRUE(NodeAllowed(run->Domains, GraphKind::Task));
+    // Управление задачами — только в AI Graph (Behavior); Branch — везде; On
+    // Update — только в скриптах объектов; Run Task — общий: задача вправе
+    // позвать другую и дождаться её.
+    CHECK_TRUE(NodeAllowed(run->Domains, GraphKind::Behavior));
+    CHECK_FALSE(NodeAllowed(run->Domains, GraphKind::Task));
+    CHECK_TRUE(NodeAllowed(w.Nodes().Find("task.run")->Domains, GraphKind::Task));
+    CHECK_TRUE(NodeAllowed(w.Nodes().Find("task.run")->Domains, GraphKind::Behavior));
+    CHECK_FALSE(NodeAllowed(w.Nodes().Find("script.on_update")->Domains, GraphKind::Task));
     CHECK_FALSE(NodeAllowed(run->Domains, GraphKind::Script));
     CHECK_FALSE(NodeAllowed(run->Domains, GraphKind::Function));
     CHECK_TRUE(NodeAllowed(branch->Domains, GraphKind::Script));
@@ -72,9 +78,9 @@ TEST(VisualScript_node_domains_split_editors) {
     d.Kind = GraphKind::Script;
     d.Name = "Wrong";
     const int start = Add(d, "script.on_start");
-    const int task = Add(d, "task.run", {{"task", Str("X")}});
+    const int task = Add(d, "task.call", {{"task", Str("X")}});
     Exec(d, start, "then", task);
-    CHECK_TRUE(HasIssue(ValidateGraph(d, w), task, true, "не для Visual Scripting"));
+    CHECK_TRUE(HasIssue(ValidateGraph(d, w), task, true, "не для скрипта объекта"));
     std::string err;
     CHECK_TRUE(w.RegisterGraph(d, err));
     RunPtr r = w.Start(w.CreateAgent(), "Wrong");
@@ -146,7 +152,11 @@ TEST(VisualScript_lua_nodes_functions_and_component) {
     )"));
     World& w = se.AI();
     CHECK_TRUE(NodeAllowed(w.Nodes().Find("game.double")->Domains, GraphKind::Script));
-    CHECK_FALSE(NodeAllowed(w.Nodes().Find("game.double")->Domains, GraphKind::Task));
+    CHECK_TRUE(NodeAllowed(w.Nodes().Find("game.double")->Domains, GraphKind::Task));
+    // Действия над миром — в задачах и скриптах; AI Graph решает, а не действует.
+    CHECK_FALSE(NodeAllowed(w.Nodes().Find("object.set_position")->Domains, GraphKind::Behavior));
+    CHECK_TRUE(NodeAllowed(w.Nodes().Find("object.set_position")->Domains, GraphKind::Task));
+    CHECK_FALSE(NodeAllowed(w.Nodes().Find("game.double")->Domains, GraphKind::Behavior));
     CHECK_FALSE(NodeAllowed(w.Nodes().Find("ai.only")->Domains, GraphKind::Script));
     CHECK_TRUE(NodeAllowed(w.Nodes().Find("shared.both")->Domains, GraphKind::Function));
 

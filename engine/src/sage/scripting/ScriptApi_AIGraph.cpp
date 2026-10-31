@@ -104,7 +104,9 @@ void ScriptEngine::RegisterAiGraphApi() {
 
     // Свой узел графа.
     Bind("ai", "node", nullptr, [this](const std::string& id, sol::table spec) {
-        RegisterLuaGraphNode(id, spec, sage::ai::kDomainAI);
+        // Узел ИИ из Lua — и для графа решений, и для графа задачи (Visual
+        // Scripting): действие «атаковать» нужно задаче, а не только решению.
+        RegisterLuaGraphNode(id, spec, sage::ai::kDomainAI | sage::ai::kDomainLogic);
     });
 
     // Свой тип данных — структура с полями: ai.type("Target", {fields = {{"pos", Vec3()}}}).
@@ -221,11 +223,18 @@ int ScriptEngine::LoadAiLibrary(const std::string& directory) {
     std::vector<std::string> dirs = {root};
     // Обход вглубь через vfs: в собранной игре папки на диске нет, она в пакете.
     for (size_t i = 0; i < dirs.size() && i < 256; ++i) {
-        const std::string& d = dirs[i];
-        for (const std::string& f : sage::assets::vfs::ListFiles(d, ".lua")) luaFiles.push_back(f);
-        for (const std::string& f : sage::assets::vfs::ListFiles(d, ".aigraph")) graphFiles.push_back(f);
+        const std::string d = dirs[i];
+        // Путь файла — папка + ИМЯ, а не то, что вернул обход: на диске он
+        // отдаёт путь без ведущего «/», и абсолютная папка проекта (обычный
+        // случай в редакторе) превращалась в несуществующий относительный путь.
+        auto add = [&](const char* ext, std::vector<std::string>& out) {
+            for (const std::string& f : sage::assets::vfs::ListFiles(d, ext))
+                out.push_back(sage::PathToUtf8(sage::PathFromUtf8(d) / sage::PathFromUtf8(f).filename()));
+        };
+        add(".lua", luaFiles);
+        add(".aigraph", graphFiles);
         // Графы Visual Scripting — та же библиотека: функции общие для обоих.
-        for (const std::string& f : sage::assets::vfs::ListFiles(d, ".vgraph")) graphFiles.push_back(f);
+        add(".vgraph", graphFiles);
         for (const std::string& sub : sage::assets::vfs::ListDirs(d))
             dirs.push_back(sage::PathToUtf8(sage::PathFromUtf8(d) / sage::PathFromUtf8(sub)));
     }
@@ -296,14 +305,16 @@ void ScriptEngine::RegisterLuaGraphNode(const std::string& id, sol::table spec, 
     t.Category = spec.get_or<std::string>("category", "Lua");
     t.Description = spec.get_or<std::string>("description", "");
     t.Pure = spec.get_or("pure", false);
-    // Для какого редактора: "ai", "script" или "both". Без указания — для
-    // того, чей это вызов (ai.node — ИИ, visual.node — Visual Scripting).
+    // Для какого графа: "ai" — только AI Graph (решения), "task" — AI Graph и
+    // задачи, "script" — Visual Scripting, "both" — везде. Без указания — для
+    // того, чей это вызов (ai.node — решения и задачи, visual.node — Visual Scripting).
     const std::string domain = spec.get_or<std::string>("domain", "");
     if (domain == "ai") t.Domains = sage::ai::kDomainAI;
+    else if (domain == "task") t.Domains = sage::ai::kDomainAI | sage::ai::kDomainLogic;
     else if (domain == "script") t.Domains = sage::ai::kDomainScript;
     else if (domain == "both") t.Domains = sage::ai::kDomainAll;
     else if (domain.empty()) t.Domains = defaultDomain;
-    else throw std::runtime_error("node('" + id + "'): domain — \"ai\", \"script\" или \"both\"");
+    else throw std::runtime_error("node('" + id + "'): domain — \"ai\", \"task\", \"script\" или \"both\"");
     t.Inputs = ReadPins(*this, spec["inputs"], id);
     t.Outputs = ReadPins(*this, spec["outputs"], id);
     // Узел с потоком без явных пинов потока получает обычные «in/then»:

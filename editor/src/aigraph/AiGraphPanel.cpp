@@ -139,8 +139,10 @@ GraphEditorMode GraphEditorMode::Ai() {
     m.Title = "AI Graph";
     m.Folder = "ai";
     m.Extension = ".aigraph";
-    m.Kinds = {GraphKind::Behavior, GraphKind::Task, GraphKind::Function};
-    m.DefaultKind = GraphKind::Task;
+    // AI Graph только решает: какую задачу и когда. Сами задачи — в Visual
+    // Scripting (граф Task) или на Lua.
+    m.Kinds = {GraphKind::Behavior};
+    m.DefaultKind = GraphKind::Behavior;
     m.AiTools = true;
     return m;
 }
@@ -151,7 +153,7 @@ GraphEditorMode GraphEditorMode::Visual() {
     m.Title = "Visual Script";
     m.Folder = "visual";
     m.Extension = ".vgraph";
-    m.Kinds = {GraphKind::Script, GraphKind::Function};
+    m.Kinds = {GraphKind::Script, GraphKind::Task, GraphKind::Function};
     m.DefaultKind = GraphKind::Script;
     return m;
 }
@@ -298,6 +300,14 @@ void AiGraphPanel::Open(EditorHost& host, const std::string& path) {
         return;
     }
     if (doc.Name.empty()) doc.Name = sage::PathToUtf8(sage::PathFromUtf8(path).stem());
+    // Граф чужого вида — в свой редактор: задачу правят в Visual Script, а
+    // решения — в AI Graph, где бы ни лежал файл (старый проект с задачами в
+    // assets/ai открывается без правки руками).
+    if (std::find(m_mode.Kinds.begin(), m_mode.Kinds.end(), doc.Kind) == m_mode.Kinds.end()) {
+        if (doc.Kind == GraphKind::Behavior) host.OpenAiGraph(path);
+        else host.OpenVisualScript(path);
+        return;
+    }
     m_doc = std::move(doc);
     m_path = path;
     m_hasGraph = true;
@@ -403,8 +413,8 @@ void AiGraphPanel::OpenTaskGraph(EditorHost& host, const std::string& task) {
     // правят палитрой ИИ, и наоборот.
     const bool mine = std::find(m_mode.Kinds.begin(), m_mode.Kinds.end(), kind) != m_mode.Kinds.end();
     if (!mine) {
-        if (kind == GraphKind::Script) host.OpenVisualScript(path);
-        else host.OpenAiGraph(path);
+        if (kind == GraphKind::Behavior) host.OpenAiGraph(path);
+        else host.OpenVisualScript(path);
         return;
     }
     Open(host, path);
@@ -466,13 +476,13 @@ void AiGraphPanel::Draw(EditorHost& host, bool* open) {
 void AiGraphPanel::DrawEmpty(EditorHost& host) {
     ImGui::Spacing();
     if (m_mode.AiTools)
-        ImGui::TextWrapped("%s", T("A graph describes behaviour with nodes and wires: the main behaviour graph "
-                                   "decides what to do, task graphs do it, function graphs are reusable blocks. "
-                                   "Graphs live in assets/ai of the project."));
+        ImGui::TextWrapped("%s", T("AI Graph decides which task a character runs and when to switch: conditions, "
+                                   "priorities (Decide), starting and cancelling tasks, events. The tasks themselves "
+                                   "are made in Visual Script or Lua. AI graphs live in assets/ai of the project."));
     else
-        ImGui::TextWrapped("%s", T("A visual script is game logic of an object made of nodes: On Start, On Update, "
-                                   "events, objects and their components. Function graphs are shared with AI graphs. "
-                                   "Visual scripts live in assets/visual of the project."));
+        ImGui::TextWrapped("%s", T("Visual Script is general visual programming: tasks for AI (how a task is done), "
+                                   "game logic of objects (On Start, On Update) and functions shared with AI Graph. "
+                                   "Graphs live in assets/visual of the project."));
     ImGui::Spacing();
     if (!host.CurrentProject().Loaded()) {
         ImGui::TextDisabled("%s", T("Open a project to work with graphs."));
@@ -493,7 +503,7 @@ void AiGraphPanel::DrawEmpty(EditorHost& host) {
 void AiGraphPanel::DrawToolbar(EditorHost& host) {
     const bool project = host.CurrentProject().Loaded();
     ImGui::BeginDisabled(!project);
-    if (EditorIcons::IconOnlyButton("plus", m_mode.AiTools ? T("New task graph") : T("New visual script")))
+    if (EditorIcons::IconOnlyButton("plus", m_mode.AiTools ? T("New behaviour graph") : T("New visual script")))
         NewGraph(host, m_mode.DefaultKind);
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("open", T("Open a graph of the project"))) m_openRequest = true;

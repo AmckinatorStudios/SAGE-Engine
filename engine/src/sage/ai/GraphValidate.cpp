@@ -10,9 +10,10 @@ namespace {
 
 const char* KindTitle(GraphKind k) {
     switch (k) {
-        case GraphKind::Script: return "Visual Scripting";
-        case GraphKind::Function: return "графе-функции (только общие узлы)";
-        default: return "SAGE AI Graph";
+        case GraphKind::Script: return "скрипта объекта (Visual Scripting)";
+        case GraphKind::Task: return "задачи (Visual Scripting): управление задачами — в AI Graph";
+        case GraphKind::Function: return "графа-функции (только общие узлы)";
+        case GraphKind::Behavior: return "AI Graph: действия описываются в задачах";
     }
 }
 

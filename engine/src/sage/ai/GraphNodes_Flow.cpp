@@ -246,7 +246,6 @@ void RegisterFlow(NodeRegistry& r) {
     {
         NodeType t = Node("flow.parallel", "Parallel", "Flow",
                           "Runs its branches at the same time and waits for all (or the first) of them.");
-        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
         t.Inputs = {X("in")};
         t.Settings = {S("branches", "int", Value(2), "Branches"),
                       S("mode", "choice", Value(std::string("all")), "Wait for", {"all", "any"})};
@@ -270,7 +269,7 @@ void RegisterFlow(NodeRegistry& r) {
             // «Любая»: первая кончилась — остальные снимаются вместе с тем, что
             // они запустили и ждут.
             if (!all)
-                for (int f : s.Fibers) ex.Kill(f);
+                for (int f : s.Fibers) ex.Kill(f, "Parallel: первой кончилась другая ветка");
             s.Fibers.clear();
             return NodeResult::Go("completed");
         };
@@ -358,13 +357,14 @@ void RegisterTasks(NodeRegistry& r) {
     {
         NodeType t = Node("task.call", "Call Task", "Tasks",
                           "Starts a task (graph, Lua or C++) and goes on at once. The task output is its handle.");
-        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
+        t.Domains = kDomainAI;   // управление задачами — только в AI Graph
         t.Inputs = {X("in")};
         t.Outputs = {X("then"), P("task", type::Task, Value(0))};
-        t.Settings = {S("task", "task", Value(std::string()), "Task")};
+        // Приоритет запуска решает спор за каналы персонажа (TaskSignature::Channels).
+        t.Settings = {S("task", "task", Value(std::string()), "Task"), S("priority", "int", Value(0), "Priority")};
         t.Pins = [](const GraphNode& n, const GraphEnv& env, NodePins& p) { TaskPins(n, env, p, true, false); };
         t.Run = [](GraphExec& ex) {
-            RunPtr run = ex.StartTask(ex.SettingText("task"), TaskInputs(ex));
+            RunPtr run = ex.StartTask(ex.SettingText("task"), TaskInputs(ex), ex.SettingInt("priority"));
             ex.Out("task", Value(run->Id));
             return NodeResult::Go("then");
         };
@@ -374,16 +374,16 @@ void RegisterTasks(NodeRegistry& r) {
     {
         NodeType t = Node("task.run", "Run Task", "Tasks",
                           "Starts a task and waits for it: goes on by success or failure with its outputs.");
-        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
         t.Inputs = {X("in")};
         t.Outputs = {X("succeeded"), X("failed"), P("ok", type::Bool, Value(false)),
                      P("error", type::String, Value(std::string()))};
-        t.Settings = {S("task", "task", Value(std::string()), "Task")};
+        // Приоритет запуска решает спор за каналы персонажа (TaskSignature::Channels).
+        t.Settings = {S("task", "task", Value(std::string()), "Task"), S("priority", "int", Value(0), "Priority")};
         t.Pins = [](const GraphNode& n, const GraphEnv& env, NodePins& p) { TaskPins(n, env, p, true, true); };
         t.Run = [](GraphExec& ex) {
             NodeState& s = ex.State();
             if (!ex.Resumed()) {
-                s.Task = ex.StartTask(ex.SettingText("task"), TaskInputs(ex));
+                s.Task = ex.StartTask(ex.SettingText("task"), TaskInputs(ex), ex.SettingInt("priority"));
                 ex.Out("task", Value(s.Task->Id));
                 if (!IsFinished(s.Task->Status)) {
                     ex.WaitRun(s.Task);
@@ -401,7 +401,7 @@ void RegisterTasks(NodeRegistry& r) {
     }
     {
         NodeType t = Node("task.wait", "Wait For Task", "Tasks", "Waits until a started task finishes.");
-        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
+        t.Domains = kDomainAI;   // управление задачами — только в AI Graph
         t.Inputs = {X("in"), P("task", type::Task, Value(0))};
         t.Outputs = {X("succeeded"), X("failed"), P("ok", type::Bool, Value(false)),
                      P("status", type::String, Value(std::string())), P("error", type::String, Value(std::string()))};
@@ -426,7 +426,7 @@ void RegisterTasks(NodeRegistry& r) {
     }
     {
         NodeType t = Node("task.cancel", "Cancel Task", "Tasks", "Cancels a running task and its children.");
-        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
+        t.Domains = kDomainAI;   // управление задачами — только в AI Graph
         t.Inputs = {X("in"), P("task", type::Task, Value(0))};
         t.Outputs = {X("then")};
         t.Run = [](GraphExec& ex) {
@@ -438,7 +438,7 @@ void RegisterTasks(NodeRegistry& r) {
     }
     {
         NodeType t = Node("task.status", "Task Status", "Tasks", "State of a task: running, done, its error.");
-        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
+        t.Domains = kDomainAI;   // управление задачами — только в AI Graph
         t.Pure = true;
         t.Inputs = {P("task", type::Task, Value(0))};
         t.Outputs = {P("status", type::String, Value(std::string())), P("done", type::Bool, Value(false)),
@@ -455,7 +455,7 @@ void RegisterTasks(NodeRegistry& r) {
     }
     {
         NodeType t = Node("task.output", "Task Output", "Tasks", "One output value of a task.");
-        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
+        t.Domains = kDomainAI;   // управление задачами — только в AI Graph
         t.Pure = true;
         t.Inputs = {P("task", type::Task, Value(0))};
         t.Outputs = {P("value", type::Any)};
@@ -499,7 +499,7 @@ void RegisterEvents(NodeRegistry& r) {
     {
         NodeType t = Node("event.emit", "Emit Event", "Events",
                           "Sends an event to every AI, to the AI of one object, or to itself.");
-        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
+        t.Domains = kDomainAI;   // управление задачами — только в AI Graph
         t.Inputs = {X("in"), P("data", type::Any), P("target", type::Object, Value(vars::EntityRef{}))};
         t.Outputs = {X("then")};
         t.Settings = {S("event", "event", Value(std::string()), "Event"),
@@ -601,7 +601,7 @@ void RegisterCalls(NodeRegistry& r) {
     {
         // Входы Visual Scripting: как Start/Update скрипта объекта.
         NodeType t = Node("script.on_start", "On Start", "Events", "Runs once when the object starts in Play.");
-        t.Domains = kDomainScript;
+        t.Domains = kDomainObject;   // вход скрипта объекта
         t.Entry = true;
         t.Outputs = {X("then")};
         t.Run = [](GraphExec&) { return NodeResult::Go("then"); };
@@ -612,7 +612,7 @@ void RegisterCalls(NodeRegistry& r) {
         NodeType t = Node("script.on_update", "On Update", "Events",
                           "Runs every frame; dt — seconds since the previous frame. A frame does not start "
                           "while the previous one still waits.");
-        t.Domains = kDomainScript;
+        t.Domains = kDomainObject;   // вход скрипта объекта
         t.Entry = true;
         t.Outputs = {X("then"), P("dt", type::Float, Value(0.0f))};
         t.Run = [](GraphExec&) { return NodeResult::Go("then"); };
@@ -687,6 +687,7 @@ void RegisterBuiltinNodes(NodeRegistry& nodes) {
     RegisterVars(nodes);
     RegisterCalls(nodes);
     nodes::RegisterDataNodes(nodes);
+    nodes::RegisterDecisionNodes(nodes);
 }
 
 } // namespace sage::ai
