@@ -66,6 +66,10 @@ enum class PolygonMode { Fill, Line }; // Line — каркасный (wireframe
 enum class AttribType {
     Float,     // 32-битные float-компоненты
     UByteNorm, // байты 0..255, нормализуемые в 0..1 (цвета)
+    // 32-битные целые БЕЗ перевода в float (в шейдере — uint/uvec). Нужны своей
+    // упакованной геометрии: вершина вокселя — это биты (позиция в чанке,
+    // сторона, номер текстуры, свет), и через float они дошли бы искажёнными.
+    UInt,
 };
 
 struct VertexAttribute {
@@ -122,6 +126,90 @@ public:
     virtual void SetFloat(const std::string& name, float v) const = 0;
     virtual void SetInt(const std::string& name, int v) const = 0;
 };
+
+// --- Стадии шейдерного конвейера -------------------------------------------
+//
+// Программа описывается НАБОРОМ стадий, а не парой «вершинный + фрагментный»:
+// своему рендереру нужны и геометрический шейдер, и вычислительный, и спросить
+// «что умеет устройство» надо до того, как отдавать ему исходник.
+enum class ShaderStage { Vertex, Fragment, Geometry, Compute };
+const char* ShaderStageName(ShaderStage stage);
+
+struct ShaderStageSource {
+    ShaderStage Stage = ShaderStage::Vertex;
+    std::string Code;
+};
+
+// Программа из любых стадий. Либо вершинная+фрагментная (+ геометрическая),
+// либо одна вычислительная — смешивать их нельзя ни в одном API.
+struct ShaderProgramDesc {
+    std::vector<ShaderStageSource> Stages;
+    std::string Name; // для сообщений: «water», «assets/shaders/chunk.vert»
+};
+
+// Ответ компилятора ПО СТАДИЯМ. Сырой текст драйвера — как есть: разбирать его
+// на строки и файлы — дело движка (render/ShaderLibrary.h), у каждого
+// производителя формат свой.
+struct ShaderBuildLog {
+    bool Ok = false;
+    struct Entry {
+        ShaderStage Stage = ShaderStage::Vertex;
+        bool Link = false; // ошибка сборки программы, а не компиляции стадии
+        std::string Text;
+    };
+    std::vector<Entry> Entries;
+};
+
+// --- GPU-буферы --------------------------------------------------------------
+//
+// Буфер, который шейдер читает и пишет сам: массив чанков, список источников,
+// результат вычислительного прохода. Геометрия (вершины/индексы) живёт в
+// Geometry — это другой путь: там формат известен движку, здесь буфер для
+// движка — просто байты, а смысл им задаёт шейдер.
+enum class BufferUsage {
+    Storage, // layout(std430, binding = N) buffer — чтение и запись из шейдера
+    Uniform, // layout(std140, binding = N) uniform — только чтение, быстрее
+};
+
+struct BufferDesc {
+    size_t Bytes = 0;
+    BufferUsage Usage = BufferUsage::Storage;
+    bool Dynamic = true; // меняется каждый кадр (подсказка драйверу)
+};
+
+// Счёт — вместе с геометрией: это та же память под данные, и отдельный вид
+// учёта ничего бы не добавил к вопросу «течёт ли».
+class GpuBuffer : public CountedResource<ResourceKind::Geometry> {
+public:
+    virtual ~GpuBuffer() = default;
+    virtual size_t Size() const = 0;
+    virtual BufferUsage Usage() const = 0;
+    // Перезаписать часть буфера. false — вышли за размер (ничего не записано).
+    virtual bool Update(const void* data, size_t bytes, size_t offset = 0) = 0;
+    // Прочитать обратно (ждёт GPU — для тестов, отладки и редких выгрузок, не
+    // для каждого кадра). false — бэкенд не умеет или вышли за размер.
+    virtual bool Read(void* out, size_t bytes, size_t offset = 0) const = 0;
+    virtual uint64_t NativeHandle() const = 0;
+};
+
+// Как шейдер обращается к текстуре, привязанной как изображение (imageLoad/
+// imageStore): вычислительный проход пишет в неё напрямую, без кадрового буфера.
+enum class ImageAccess { Read, Write, ReadWrite };
+enum class ImageFormat { RGBA8, RGBA16F, RGBA32F, R32F, R32UI };
+
+// Барьер между проходами: «то, что записали шейдеры, видно ТЕМ, кто читает
+// так-то». В OpenGL запись из шейдера без барьера не обязана быть видна даже
+// следующему вызову отрисовки.
+enum class BarrierBits : uint32_t {
+    Storage = 1u << 0,      // буферы, записанные шейдером
+    Image = 1u << 1,        // imageStore
+    Texture = 1u << 2,      // выборка текстуры после imageStore
+    VertexInput = 1u << 3,  // буфер как вершины после записи шейдером
+    All = 0xFFFFFFFFu,
+};
+inline BarrierBits operator|(BarrierBits a, BarrierBits b) {
+    return (BarrierBits)((uint32_t)a | (uint32_t)b);
+}
 
 // --- Геометрия: вершинный/индексный/инстансный буферы + отрисовка ---
 class Geometry : public CountedResource<ResourceKind::Geometry> {
@@ -186,6 +274,10 @@ struct Texture2DDesc {
     // выцветшей, и вся сцена выглядела блёклой. Данные (нормали, шероховатость,
     // маски) — НЕ цвет, для них флаг не ставится. Только 3 и 4 канала.
     bool Srgb = false;
+    // В текстуру будут ПИСАТЬ шейдеры (imageStore). Хранилище — точного
+    // размера (RGBA8 / RGBA16F при FloatPixels / R32F при Float32), без sRGB:
+    // в sRGB-хранилище запись из шейдера запрещена самим API.
+    bool ShaderWrite = false;
 };
 
 class Texture2D : public CountedResource<ResourceKind::Texture> {

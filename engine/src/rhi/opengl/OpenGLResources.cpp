@@ -114,6 +114,11 @@ void ApplyAttributes(const std::vector<VertexAttribute>& attrs, int stride, bool
                 glVertexAttribPointer(a.Location, a.Components, GL_UNSIGNED_BYTE, GL_TRUE,
                                       stride, (const void*)(intptr_t)a.Offset);
                 break;
+            case AttribType::UInt:
+                // IPointer: целые доходят до шейдера целыми, без перевода в float.
+                glVertexAttribIPointer(a.Location, a.Components, GL_UNSIGNED_INT, stride,
+                                       (const void*)(intptr_t)a.Offset);
+                break;
         }
         if (perInstance) glVertexAttribDivisor(a.Location, 1); // атрибут продвигается раз на инстанс
     }
@@ -321,7 +326,8 @@ GLTexture2D::GLTexture2D(const Texture2DDesc& desc, const void* pixels) {
         // sRGB-хранилище: выборка отдаёт линейный цвет, а мипмапы и
         // билинейная фильтрация усредняют уже линейные значения (см. Srgb).
         GLenum internal = format;
-        if (desc.Srgb && desc.Channels == 4) internal = GL_SRGB8_ALPHA8;
+        if (desc.ShaderWrite) internal = desc.Channels == 4 ? GL_RGBA8 : (desc.Channels == 3 ? GL_RGB8 : GL_R8);
+        else if (desc.Srgb && desc.Channels == 4) internal = GL_SRGB8_ALPHA8;
         else if (desc.Srgb && desc.Channels == 3) internal = GL_SRGB8;
         glTexImage2D(GL_TEXTURE_2D, 0, internal, desc.Width, desc.Height, 0, format, GL_UNSIGNED_BYTE, pixels);
     }

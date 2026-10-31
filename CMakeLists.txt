@@ -495,6 +495,7 @@ endif()
 if (SAGE_BUILD_SAMPLES)
     add_subdirectory(games/sandbox)
     add_subdirectory(games/testgame)
+    add_subdirectory(games/voxelworld)
 endif()
 
 # Модульные тесты (математика/сериализация/анимация) — быстрые, без GL.

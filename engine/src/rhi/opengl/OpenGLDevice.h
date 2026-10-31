@@ -56,6 +56,17 @@ public:
     std::unique_ptr<ShaderProgram> CreateShaderProgram(const std::string& vertexSrc,
                                                        const std::string& fragmentSrc) override;
     std::unique_ptr<Geometry> CreateGeometry(const VertexLayout& layout) override;
+
+    // Свой рендер (OpenGLCompute.cpp).
+    Caps Capabilities() const override;
+    std::unique_ptr<ShaderProgram> CreateProgram(const ShaderProgramDesc& desc,
+                                                 ShaderBuildLog& log) override;
+    std::unique_ptr<GpuBuffer> CreateBuffer(const BufferDesc& desc, const void* data) override;
+    void BindBuffer(int slot, const GpuBuffer* buffer) override;
+    void BindImage(int unit, TextureHandle texture, ImageAccess access, ImageFormat format,
+                   int mip) override;
+    void Dispatch(int groupsX, int groupsY, int groupsZ) override;
+    void ShaderBarrier(BarrierBits bits) override;
     std::unique_ptr<Texture2D> CreateTexture2D(const Texture2DDesc& desc, const void* pixels) override;
     std::unique_ptr<Texture3D> CreateTexture3D(const Texture3DDesc& desc, const float* pixels) override;
     std::unique_ptr<TextureCube> CreateTextureCube(const CubeFacePixels faces[6]) override;

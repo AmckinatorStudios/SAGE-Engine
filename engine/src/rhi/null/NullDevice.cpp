@@ -175,6 +175,69 @@ std::unique_ptr<CubeRenderTarget> NullDevice::CreateCubeRenderTarget(
     return std::make_unique<NullCubeRenderTarget>(desc);
 }
 
+namespace {
+
+class NullBuffer : public GpuBuffer {
+public:
+    NullBuffer(const BufferDesc& desc, const void* data)
+        : m_bytes(desc.Bytes, 0), m_usage(desc.Usage), m_handle(NextHandle()) {
+        if (data) std::memcpy(m_bytes.data(), data, desc.Bytes);
+        ++g_counters.Buffers;
+    }
+    size_t Size() const override { return m_bytes.size(); }
+    BufferUsage Usage() const override { return m_usage; }
+    bool Update(const void* data, size_t bytes, size_t offset) override {
+        if (offset + bytes > m_bytes.size()) return false;
+        std::memcpy(m_bytes.data() + offset, data, bytes);
+        return true;
+    }
+    bool Read(void* out, size_t bytes, size_t offset) const override {
+        if (offset + bytes > m_bytes.size()) return false;
+        std::memcpy(out, m_bytes.data() + offset, bytes);
+        return true;
+    }
+    uint64_t NativeHandle() const override { return m_handle; }
+
+private:
+    std::vector<unsigned char> m_bytes;
+    BufferUsage m_usage;
+    unsigned int m_handle;
+};
+
+} // namespace
+
+GraphicsDevice::Caps NullDevice::Capabilities() const {
+    Caps c;
+    c.ComputeShaders = c.StorageBuffers = c.ImageLoadStore = c.GeometryShaders = true;
+    c.MaxComputeGroupSize[0] = c.MaxComputeGroupSize[1] = c.MaxComputeGroupSize[2] = 1024;
+    c.MaxComputeInvocations = 1024;
+    c.MaxStorageBindings = c.MaxUniformBindings = c.MaxTextureUnits = 16;
+    return c;
+}
+
+std::unique_ptr<ShaderProgram> NullDevice::CreateProgram(const ShaderProgramDesc& desc,
+                                                         ShaderBuildLog& log) {
+    log = {};
+    log.Ok = !desc.Stages.empty();
+    if (!log.Ok) {
+        log.Entries.push_back({ShaderStage::Vertex, true, "у программы нет ни одной стадии"});
+        return nullptr;
+    }
+    return std::make_unique<NullShader>();
+}
+
+std::unique_ptr<GpuBuffer> NullDevice::CreateBuffer(const BufferDesc& desc, const void* data) {
+    if (desc.Bytes == 0) return nullptr;
+    return std::make_unique<NullBuffer>(desc, data);
+}
+
+void NullDevice::BindBuffer(int, const GpuBuffer*) { ++g_counters.StateChanges; }
+void NullDevice::BindImage(int, TextureHandle, ImageAccess, ImageFormat, int) {
+    ++g_counters.StateChanges;
+}
+void NullDevice::Dispatch(int, int, int) { ++g_counters.Dispatches; }
+void NullDevice::ShaderBarrier(BarrierBits) { ++g_counters.StateChanges; }
+
 NullCounters& NullDevice::Counters() { return g_counters; }
 void NullDevice::ResetCounters() { g_counters = NullCounters{}; }
 

@@ -12,6 +12,49 @@ namespace sage::rhi {
 
 static GraphicsDevice* s_current = nullptr;
 
+const char* ShaderStageName(ShaderStage stage) {
+    switch (stage) {
+        case ShaderStage::Vertex: return "vertex";
+        case ShaderStage::Fragment: return "fragment";
+        case ShaderStage::Geometry: return "geometry";
+        case ShaderStage::Compute: return "compute";
+    }
+    return "?";
+}
+
+// Запасной путь для бэкенда, который умеет только пару «вершинный +
+// фрагментный» и сообщает об ошибке исключением (так устроен Vulkan-бэкенд).
+// Всё прочее — честный отказ с причиной, а не тихий nullptr.
+std::unique_ptr<ShaderProgram> GraphicsDevice::CreateProgram(const ShaderProgramDesc& desc,
+                                                             ShaderBuildLog& log) {
+    log = {};
+    const std::string* vs = nullptr;
+    const std::string* fs = nullptr;
+    for (const ShaderStageSource& st : desc.Stages) {
+        if (st.Stage == ShaderStage::Vertex) vs = &st.Code;
+        else if (st.Stage == ShaderStage::Fragment) fs = &st.Code;
+        else {
+            log.Entries.push_back({st.Stage, false,
+                                   std::string("бэкенд ") + BackendName() +
+                                       " не умеет стадию " + ShaderStageName(st.Stage)});
+            return nullptr;
+        }
+    }
+    if (!vs || !fs) {
+        log.Entries.push_back({ShaderStage::Vertex, true,
+                               "программе нужны вершинная и фрагментная стадии"});
+        return nullptr;
+    }
+    try {
+        std::unique_ptr<ShaderProgram> p = CreateShaderProgram(*vs, *fs);
+        log.Ok = p != nullptr;
+        return p;
+    } catch (const std::exception& e) {
+        log.Entries.push_back({ShaderStage::Vertex, true, e.what()});
+        return nullptr;
+    }
+}
+
 std::unique_ptr<GraphicsDevice> GraphicsDevice::Create(Backend backend) {
     switch (backend) {
         case Backend::OpenGL:

@@ -1,0 +1,27 @@
+#version 430
+// Карта света 16×16: x — небесный уровень, y — свой. Пересчитывается каждый
+// кадр: смена дня и ночи и мерцание светокамня — перекраска 256 текселей, а
+// не мира.
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(rgba8, binding = 0) uniform writeonly image2D uLightmap;
+
+uniform float uDaylight;  // 0..1
+uniform vec3 uSkyTint;    // оттенок неба (закат — тёплый)
+uniform float uFlicker;   // 0.9..1.05
+uniform float uGamma;     // яркость игрока: 0 — тускло, 1 — ярко
+
+float curve(float level) {
+    // Каждый шаг от источника — минус пятая часть: свет гаснет плавно, а не
+    // линейно, как и в жизни у точечного источника.
+    float b = pow(0.8, 15.0 - level);
+    return mix(b, 1.0 - pow(1.0 - b, 3.0), uGamma * 0.6);
+}
+
+void main() {
+    ivec2 id = ivec2(gl_GlobalInvocationID.xy);
+    float sky = curve(float(id.x)) * mix(0.06, 1.0, uDaylight);
+    float own = curve(float(id.y)) * uFlicker;
+    vec3 c = sky * uSkyTint + own * vec3(1.0, 0.78, 0.52);
+    c = max(c, vec3(0.018, 0.02, 0.03));
+    imageStore(uLightmap, id, vec4(min(c, vec3(1.0)), 1.0));
+}

@@ -17,6 +17,14 @@ VkFormat AttributeFormat(AttribType type, int components) {
             default: return VK_FORMAT_R8G8B8A8_UNORM;
         }
     }
+    if (type == AttribType::UInt) {
+        switch (components) {
+            case 1: return VK_FORMAT_R32_UINT;
+            case 2: return VK_FORMAT_R32G32_UINT;
+            case 3: return VK_FORMAT_R32G32B32_UINT;
+            default: return VK_FORMAT_R32G32B32A32_UINT;
+        }
+    }
     switch (components) {
         case 1: return VK_FORMAT_R32_SFLOAT;
         case 2: return VK_FORMAT_R32G32_SFLOAT;

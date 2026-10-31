@@ -1,5 +1,6 @@
 #pragma once
 #include "sage/rhi/Resources.h"
+#include <memory>
 #include <unordered_map>
 
 // OpenGL-реализации RHI-ресурсов. Вместе с OpenGLDevice это ЕДИНСТВЕННОЕ место
@@ -10,6 +11,9 @@ namespace sage::rhi {
 class GLShaderProgram : public ShaderProgram {
 public:
     GLShaderProgram(const std::string& vertexSrc, const std::string& fragmentSrc);
+    // Принять уже слинкованную программу (её собрал BuildGLProgram).
+    struct AdoptTag {};
+    GLShaderProgram(AdoptTag, unsigned int linkedProgram) : m_id(linkedProgram) {}
     ~GLShaderProgram() override;
 
     void Use() const override;
@@ -35,6 +39,27 @@ private:
 
     unsigned int m_id = 0;
     mutable std::unordered_map<std::string, int> m_uniformLocations;
+};
+
+// Программа из любых стадий без исключений: ответ драйвера по стадиям — в log
+// (см. GraphicsDevice::CreateProgram). Живёт в OpenGLCompute.cpp.
+std::unique_ptr<ShaderProgram> BuildGLProgram(const ShaderProgramDesc& desc, ShaderBuildLog& log);
+
+class GLGpuBuffer : public GpuBuffer {
+public:
+    GLGpuBuffer(const BufferDesc& desc, const void* data);
+    ~GLGpuBuffer() override;
+    size_t Size() const override { return m_size; }
+    BufferUsage Usage() const override { return m_usage; }
+    bool Update(const void* data, size_t bytes, size_t offset) override;
+    bool Read(void* out, size_t bytes, size_t offset) const override;
+    uint64_t NativeHandle() const override { return m_id; }
+    unsigned int Id() const { return m_id; }
+
+private:
+    unsigned int m_id = 0;
+    size_t m_size = 0;
+    BufferUsage m_usage = BufferUsage::Storage;
 };
 
 class GLGeometry : public Geometry {

@@ -251,6 +251,66 @@ public:
         return nullptr;
     }
 
+    // --- Свой рендер: программы любых стадий, вычисления, буферы ------------
+    //
+    // Всё ниже — для того, кто пишет рендер САМ (render/RenderPipeline.h):
+    // свои шейдеры, свои буферы, свои вычислительные проходы. Вызовы не чисто
+    // виртуальные: бэкенд, который чего-то не умеет, честно говорит об этом в
+    // Capabilities() и возвращает nullptr, а не роняет сборку.
+
+    // Что устройство умеет на ЭТОЙ машине. Спрашивать до того, как строить на
+    // этом кадр: OpenGL 3.3 и macOS (4.1) вычислительных шейдеров не имеют, и
+    // своему рендереру нужен запасной путь, а не чёрный экран.
+    struct Caps {
+        bool ComputeShaders = false;
+        bool StorageBuffers = false;
+        bool ImageLoadStore = false;
+        bool GeometryShaders = false;
+        int MaxComputeGroupSize[3] = {0, 0, 0};
+        int MaxComputeInvocations = 0;
+        int MaxStorageBindings = 0;
+        int MaxUniformBindings = 0;
+        int MaxTextureUnits = 0;
+    };
+    virtual Caps Capabilities() const { return {}; }
+
+    // Программа из любого набора стадий. НЕ бросает исключение: ошибка
+    // компиляции своего шейдера — обычное дело во время работы над ним, и
+    // ответ «что не так» нужен по стадиям, а не одной строкой в логе.
+    // nullptr и log.Ok == false — программы нет, причина в log.Entries.
+    virtual std::unique_ptr<ShaderProgram> CreateProgram(const ShaderProgramDesc& desc,
+                                                         ShaderBuildLog& log);
+
+    virtual std::unique_ptr<GpuBuffer> CreateBuffer(const BufferDesc& desc, const void* data) {
+        (void)desc;
+        (void)data;
+        return nullptr;
+    }
+    // Привязать буфер к точке binding = slot своего вида (Storage/Uniform).
+    // nullptr — отвязать.
+    virtual void BindBuffer(int slot, const GpuBuffer* buffer) {
+        (void)slot;
+        (void)buffer;
+    }
+    // Привязать текстуру как изображение (image2D в шейдере) к юниту unit.
+    virtual void BindImage(int unit, TextureHandle texture, ImageAccess access, ImageFormat format,
+                           int mip = 0) {
+        (void)unit;
+        (void)texture;
+        (void)access;
+        (void)format;
+        (void)mip;
+    }
+    // Запустить привязанную вычислительную программу на сетке групп.
+    virtual void Dispatch(int groupsX, int groupsY = 1, int groupsZ = 1) {
+        (void)groupsX;
+        (void)groupsY;
+        (void)groupsZ;
+    }
+    // Барьер памяти (см. BarrierBits). Не «MemoryBarrier»: так называется
+    // макрос Windows, и имя метода превратилось бы в вызов функции ядра.
+    virtual void ShaderBarrier(BarrierBits bits) { (void)bits; }
+
     // Фабрика бэкенда. Возвращает готовый (но ещё не Init) девайс, либо
     // nullptr, если бэкенд не собран (см. -DSAGE_VULKAN=OFF).
     static std::unique_ptr<GraphicsDevice> Create(Backend backend);
