@@ -612,9 +612,12 @@ void EditorLayer::DrawDockspaceAndMenu() {
         // Ctrl+S работает ВСЕГДА, а не только у сцены с именем: у новой сцены
         // имени нет, и «горячая клавиша молча ничего не делает» — это ровно то,
         // как выглядит потерянная работа.
-        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false)) SaveCurrentScene();
-        if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) Undo();
-        if ((io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) ||
-            (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z))) Redo();
+        if (!hk::Claimed(hk::Key::Save) && io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false))
+            SaveCurrentScene();
+        if (!hk::Claimed(hk::Key::Undo)) {
+            if (io.KeyCtrl && !io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z)) Undo();
+            if ((io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Y)) ||
+                (io.KeyCtrl && io.KeyShift && ImGui::IsKeyPressed(ImGuiKey_Z))) Redo();
+        }
     }
 }

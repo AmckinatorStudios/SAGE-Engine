@@ -26,6 +26,8 @@ namespace sage::editor::hotkeys {
 enum class Key {
     Delete,     // удалить: объект сцены / ключ анимации / файл / элемент
     Duplicate,  // Ctrl+D
+    Undo,       // Ctrl+Z / Ctrl+Y: окно со своей историей (граф ИИ) не отменяет правки сцены
+    Save,       // Ctrl+S: сохранить то, что открыто в окне, а не сцену
     Count,
 };
 

@@ -8,6 +8,7 @@
 #include "sage/input/Keys.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/render/DebugLines.h"
+#include "sage/scripting/ScriptEngine.h"
 #include "sage/scripting/ScriptingSystem.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Prefab.h"
@@ -685,6 +686,19 @@ sol::object Backend::ToLua(const sage::vars::Value& value) {
             return Wrap(scene->Get(ref.Id));
         }
         case K::Asset: return sol::make_object(*m_lua, value.AsAsset().Path);
+        case K::Rotation: return sol::make_object(*m_lua, value.AsRotation());
+        case K::Array: {
+            sol::table t = m_lua->create_table((int)value.Items().size(), 0);
+            int i = 1;
+            for (const sage::vars::Value& x : value.Items()) t[i++] = ToLua(x);
+            return t;
+        }
+        case K::Struct: {
+            sol::table t = m_lua->create_table();
+            if (!value.StructType().empty()) t["_type"] = value.StructType();
+            for (const sage::vars::Field& f : value.Fields()) t[f.first] = ToLua(f.second);
+            return t;
+        }
     }
     return sol::lua_nil;
 }
@@ -710,6 +724,11 @@ sage::vars::Value Backend::FromLua(const sol::object& object) {
         if (d == (double)(int)d) return Value((int)d);
         return Value((float)d);
     }
+    if (object.is<glm::quat>()) return Value(object.as<glm::quat>());
+    // Таблица — тем же правилом, что у прежнего движка (список или структура);
+    // без него — пустое значение, как и раньше.
+    if (object.get_type() == sol::type::table && m_interop)
+        return m_interop->TableToValue(object.as<sol::table>(), 0);
     return Value();
 }
 

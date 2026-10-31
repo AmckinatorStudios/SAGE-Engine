@@ -12,7 +12,7 @@
 // ---------------------------------------------------------------------------
 namespace sage::editor::assetopen {
 
-enum class OpenAs { None, Folder, Scene, Prefab, Clip, Text };
+enum class OpenAs { None, Folder, Scene, Prefab, Clip, Text, AiGraph };
 
 inline OpenAs Of(const std::filesystem::path& path, bool isDir) {
     if (isDir) return OpenAs::Folder;
@@ -21,6 +21,7 @@ inline OpenAs Of(const std::filesystem::path& path, bool isDir) {
     if (ext == ".sage") return OpenAs::Scene;
     if (ext == ".sageprefab") return OpenAs::Prefab;
     if (ext == ".sageclip" || ext == ".sageanim") return OpenAs::Clip;
+    if (ext == ".aigraph") return OpenAs::AiGraph;
     if (ext == ".lua" || ext == ".slua" || ext == ".vert" || ext == ".frag" || ext == ".glsl" || ext == ".txt" ||
         ext == ".md" || ext == ".json")
         return OpenAs::Text;

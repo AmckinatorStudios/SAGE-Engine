@@ -311,7 +311,7 @@ void EditorLayer::CheckTweenFrame() {
 void EditorLayer::CheckLuaTestsFrame() {
     if (m_luaSelfTestStep < 0) return;
     if (!std::getenv("SAGE_EDITOR_SELFTEST")) return;
-    if (!m_tweenChecked || !m_createDialogChecked) return;
+    if (!m_tweenChecked || !m_createDialogChecked || m_aiGraphFrameStep >= 0) return;   // Play — по одному
     namespace fs = std::filesystem;
     if (m_luaSelfTestStep == 0) {
         std::error_code ec;

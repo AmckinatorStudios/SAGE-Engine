@@ -162,6 +162,28 @@ void EditorLayer::RegisterPanels() {
 
     // --- Инструменты: открывают под задачу, в раскладку не входят -----------
     {
+        // SAGE AI Graph и его отладчик — окна под задачу: флаг видимости
+        // держит реестр (Visible = nullptr), окна рисуют себя сами.
+        PanelSpec s;
+        s.Id = "AiGraph";
+        s.Title = "AI Graph";
+        s.Icon = "wire";
+        s.Section = PanelSection::Tools;
+        s.WrapWindow = false;
+        s.Draw = [this](EditorHost&, bool* open, const std::string&) { m_aiGraph.Draw(*this, open); };
+        m_panelRegistry.Register(std::move(s));
+    }
+    {
+        PanelSpec s;
+        s.Id = "AiDebugger";
+        s.Title = "AI Debugger";
+        s.Icon = "debug";
+        s.Section = PanelSection::Tools;
+        s.WrapWindow = false;
+        s.Draw = [this](EditorHost&, bool* open, const std::string&) { m_aiDebug.Draw(*this, open, m_aiGraph); };
+        m_panelRegistry.Register(std::move(s));
+    }
+    {
         PanelSpec s = make(EditorPanel::Profiler, "Profiler", "Profiler", "chart", PanelSection::Tools,
                            [this](EditorHost&, bool* open, const std::string&) { m_profiler.Draw(open); });
         s.Detachable = false;

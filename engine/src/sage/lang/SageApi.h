@@ -23,6 +23,9 @@ struct ApiFunction {
     const char* Ret;      // "number"; "nil"/"any" — ничего определённого
 };
 
+// Все функции таблицы — для тех, кто строит по API свои описания (узлы
+// SAGE AI Graph по каждой функции движка).
+std::vector<const ApiFunction*> AllApiFunctions();
 // Функция API по полному имени; nullptr — такой нет.
 const ApiFunction* FindApiFunction(std::string_view dotted);
 // Есть ли функции с таким префиксом: "sage.noise", "noise", "sage".

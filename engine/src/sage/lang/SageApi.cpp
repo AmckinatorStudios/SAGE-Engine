@@ -49,6 +49,12 @@ bool IsKnownGlobal(std::string_view name) { return TheIndex().Globals.count(name
 
 const std::vector<std::string>& KnownGlobals() { return TheIndex().GlobalList; }
 
+std::vector<const ApiFunction*> AllApiFunctions() {
+    std::vector<const ApiFunction*> out;
+    for (const ApiFunction& f : kApiFunctions) out.push_back(&f);
+    return out;
+}
+
 std::vector<std::string> ApiModuleMembers(std::string_view module) {
     std::vector<std::string> out;
     const std::string prefix = std::string(module) + ".";

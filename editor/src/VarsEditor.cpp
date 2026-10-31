@@ -37,6 +37,9 @@ const char* KindTitle(Kind k) {
         case Kind::Color: return T("Colour");
         case Kind::Entity: return T("Object reference");
         case Kind::Asset: return T("File reference");
+        case Kind::Rotation: return T("Rotation");
+        case Kind::Array: return T("Value list");
+        case Kind::Struct: return T("Structure");
     }
     return "";
 }
@@ -153,6 +156,18 @@ bool DrawValue(EditorHost& host, const char* id, Value& value, const Var* meta,
             }
             break;
         }
+        case Kind::Rotation: {
+            // Углами в градусах: кватернион человеку не прочесть и не набрать.
+            glm::vec3 e = value.AsVec3();
+            if (ImGui::DragFloat3("##v", &e.x, 0.5f)) { value = Value(glm::quat(glm::radians(e))); changed = true; }
+            break;
+        }
+        case Kind::Array:
+        case Kind::Struct:
+            // Составное — только показать: его заводит граф или скрипт, а
+            // правка вложенного одной строкой инспектора не помещается.
+            ImGui::TextDisabled("%s", value.AsString().c_str());
+            break;
     }
     // ОТМЕНА У «РАЗМАЗАННЫХ» ПРАВОК. Перетаскивание ползунка и набор текста
     // меняют значение десятки раз за одно действие человека: снимок на каждое

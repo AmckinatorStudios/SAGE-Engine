@@ -3,15 +3,29 @@
 #include <algorithm>
 
 #include "sage/core/Log.h"
+#include "sage/scene/AiAgentComponent.h"
 #include "sage/scene/Signals.h"
 #include "sage/vars/Refs.h"
 
 namespace sage::scene {
 
 namespace {
+void EnsureBuiltins();
+
 std::vector<ComponentType>& Types() {
     static std::vector<ComponentType> t;
+    EnsureBuiltins();
     return t;
+}
+
+// Встроенные компоненты, описанные реестром, — при первом обращении к нему:
+// статический инициализатор в другом файле статической библиотеки
+// компоновщик вправе выбросить, и компонент молча перестал бы писаться.
+void EnsureBuiltins() {
+    static bool done = false;
+    if (done) return;
+    done = true;
+    RegisterAiAgentComponent();
 }
 } // namespace
 

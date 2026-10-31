@@ -594,7 +594,10 @@ void ScriptEngine::UpdateAll(float deltaTime) {
     UpdateCoroutines(deltaTime);
     // Задачи ИИ — после скриптов кадра: задача, запущенная из OnUpdate, делает
     // первый шаг в этом же кадре, а не в следующем.
-    if (m_ai) m_ai->Tick(deltaTime);
+    if (m_ai) {
+        UpdateAiAgents();
+        m_ai->Tick(deltaTime);
+    }
     // События сети — в ТОМ ЖЕ кадре, в котором пришли. Отложи их до следующего,
     // и ответ на команду игрока опаздывал бы на кадр на ровном месте.
     DispatchNetEvents();

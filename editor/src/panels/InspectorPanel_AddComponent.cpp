@@ -57,6 +57,7 @@
 #include "sage/anim/PropertyAnimator.h"
 #include "sage/anim/Tween.h"
 #include "sage/render/SkinnedModel.h"
+#include "sage/scene/AiAgentComponent.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIIcons.h"
@@ -222,6 +223,10 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
          "Sound of this object: ambience, hum, one-shot", HasComp<AudioSourceComponent>,
          AddComp<AudioSourceComponent>},
 
+        // ИИ — граф поведения SAGE AI и начальная память персонажа.
+        {"AI", "Logic", "wire",
+         "Behaviour graph of SAGE AI and the memory the character starts with",
+         HasComp<AiAgentComponent>, AddComp<AiAgentComponent>},
         {"Script", "Logic", "script",
          "Behaviour written in a script file, with its public variables", HasComp<ScriptComponent>,
          AddComp<ScriptComponent>},

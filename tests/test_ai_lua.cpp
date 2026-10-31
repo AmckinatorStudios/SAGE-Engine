@@ -135,7 +135,11 @@ TEST(AILua_scopes_events_and_errors) {
     CHECK_FALSE(Lua(se, "g1.start('Guardd')"));
     CHECK_FALSE(Lua(se, "ai.task('X', {run = function() end, outptus = {}})"));
     CHECK_FALSE(Lua(se, "ai.task('Y', {inputs = {a = 1}, run = function() end}); g1.start('Y', {b = 2})"));
-    CHECK_FALSE(Lua(se, "g1.memory.x = {1, 2}"));
+    CHECK_FALSE(Lua(se, "g1.memory.x = function() end"));
+    // Таблица — список или структура и возвращается тем же.
+    CHECK_TRUE(Lua(se, "g1.memory.path = {Vec3(1, 0, 0), Vec3(2, 0, 0)}; g1.memory.t = {_type = 'Target', seen = true}"));
+    CHECK_NEAR(Get<float>(se, "g1.memory.path[2].x"), 2.0f, 1e-5f);
+    CHECK_TRUE(Get<bool>(se, "g1.memory.t.seen and g1.memory.t._type == 'Target'"));
     CHECK_FALSE(Lua(se, "local _ = r1.stauts"));
 }
 

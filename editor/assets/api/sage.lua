@@ -1349,24 +1349,44 @@ ai = nil
 ---@param opts? table
 ---@return table
 function sage.ai.agent(owner, opts) end
+---@param entity? any
+---@return any
+function sage.ai.agent_of(entity) end
 ---@param name string
 ---@param ...? ...
 ---@return any
 function sage.ai.call(name, ...) end
+---@param fn function
+function sage.ai.connect_rule(fn) end
+---@param fn function
+function sage.ai.convert_rule(fn) end
 ---@param event string
 ---@param data? any
 ---@param target? any
 ---@return number
 function sage.ai.emit(event, data, target) end
+---@param path string
+---@return string
+function sage.ai.graph(path) end
+---@param dir string
+---@return number
+function sage.ai.load_library(dir) end
 ---@param vars any
 ---@return table
 function sage.ai.names(vars) end
+---@param id string
+---@param spec table
+function sage.ai.node(id, spec) end
+---@return table
+function sage.ai.nodes() end
 ---@param name string
 ---@param fn function
 ---@param spec? table
 function sage.ai.operation(name, fn, spec) end
 ---@return table
 function sage.ai.operations() end
+---@param fn function
+function sage.ai.path_finder(fn) end
 ---@param space? string
 function sage.ai.shared(space) end
 ---@param name string
@@ -1374,6 +1394,9 @@ function sage.ai.shared(space) end
 function sage.ai.task(name, spec) end
 ---@return table
 function sage.ai.tasks() end
+---@param id string
+---@param spec table
+function sage.ai.type(id, spec) end
 
 ---@class sage.anim
 sage.anim = {}

@@ -89,6 +89,9 @@ void ScriptEngine::DispatchEvent(const std::string& name, sol::object payload) {
     e.Arg = ValueFromLua(payload);
     if (payload.valid() && payload.get_type() != sol::type::lua_nil) e.Payload = payload;
     EventBus().Emit(e);
+    // То же событие слышит и ИИ (On Event, Wait For Event): разговор один,
+    // и граф не должен заводить свою шину ради «игрок нажал паузу».
+    if (m_ai) m_ai->Emit(name, e.Arg);
 }
 
 void ScriptEngine::DispatchEvent(const std::string& name, bool flag) {

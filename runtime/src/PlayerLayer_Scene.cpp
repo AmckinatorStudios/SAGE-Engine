@@ -154,6 +154,10 @@ void PlayerLayer::BuildSceneRuntime() {
         LOG_INFO("Player") << "Параметры запуска игры: " << m_launchArgs;
     }
 
+    // Библиотека SAGE AI (assets/ai, из пакета): до скриптов объектов — их
+    // Start вправе запустить граф по имени.
+    m_scripts->LoadAiLibrary("assets/ai");
+
     // Раскладка управления проекта — ПОСЛЕ скриптов, и порядок здесь значащий.
     // Скрипты объявляют СВОИ умолчания (BindAction в OnStart), а input.sageinput
     // — это «как решил автор игры» в редакторе, и он обязан их замещать, а не

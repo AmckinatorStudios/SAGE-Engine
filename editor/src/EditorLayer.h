@@ -42,6 +42,8 @@
 
 namespace sage { class Application; }
 #include "EditorPlaySession.h"
+#include "aigraph/AiDebugPanel.h"
+#include "aigraph/AiGraphPanel.h"
 #include "EditorPanelVisibility.h"
 #include "PanelRegistry.h"
 #include "EditorRecovery.h"
@@ -169,6 +171,10 @@ public:
         m_animation.RequestFocus();
         m_animation.OpenClip(*this, clipPath);
     }
+    void OpenAiGraph(const std::string& graphPath) override {
+        m_panelRegistry.SetVisible("AiGraph", true);
+        m_aiGraph.Open(*this, graphPath);
+    }
     void OpenTween(int objectId, int tweenIndex, TweenOpen what) override {
         m_panels[EditorPanel::Tween] = true;
         m_tween.Open(objectId, tweenIndex,
@@ -231,6 +237,7 @@ public:
     EditorPlayState GetPlayState() const override { return m_play.State(); }
     bool InPlayMode() const override { return m_play.Active(); }
     PhysicsScene* PlayPhysics() override { return m_play.Active() ? m_play.Physics() : nullptr; }
+    ScriptEngine* PlayScripts() override { return m_play.Active() ? m_play.Scripts() : nullptr; }
     void SyncBodyToTransform(GameObject object) override;
     void StartPlay() override;
     void PausePlay() override { m_play.Pause(); }
@@ -448,6 +455,7 @@ private:
     bool SelfTestPlugins();
     bool SelfTestModelHierarchy();
     bool SelfTestPanelRegistry();
+    bool SelfTestAiGraph();          // SAGE AI Graph: библиотека, редактор графов, компонент AI в Play
     bool SelfTestGIBake();           // запекание освещения: разметка, фон, свет по месту, «устарело»    // реестр панелей: встроенные, на ходу, окна плагинов          // плагины на Lua: шаблон, меню, отмена, ошибки, Play
     // Многооконность — проверка В ЖИВОМ КАДРЕ: окно системы заводит платформа,
     // а не флаг, и этот последний шаг ломается молча (см. EditorSelfTest.cpp).
@@ -470,6 +478,9 @@ private:
     // Окно Tween живым кадром: твин объекта играет и сбрасывается общим
     // проигрывателем сцены, окно и секция инспектора рисуются без ошибок.
     void CheckTweenFrame();
+    void CheckAiGraphFrame();
+    int m_aiGraphFrameStep = 0;
+    int m_aiGraphFrameErrors = 0;
     int m_tweenSelfTestStep = 0;
     bool m_tweenChecked = false;
     bool m_createDialogChecked = false;
@@ -735,6 +746,8 @@ private:
     // инструмент под задачу: анимацию правят рядом со сценой и рядом с
     // вёрсткой, поэтому она докуется в обоих пространствах.
     AnimationPanel m_animation;
+    AiGraphPanel m_aiGraph;     // SAGE AI Graph (aigraph/AiGraphPanel.h)
+    AiDebugPanel m_aiDebug;     // отладчик ИИ
     TweenPanel m_tween;
     bool m_showNineSlice = false;
 

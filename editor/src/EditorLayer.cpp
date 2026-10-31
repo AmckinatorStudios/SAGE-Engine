@@ -677,6 +677,7 @@ void EditorLayer::OnRender() {
     CheckUiInspectorFrame();
     CheckEnvironmentFrame();
     CheckTweenFrame();
+    CheckAiGraphFrame();
     CheckCreateDialogFrame();
     CheckLuaTestsFrame();
     if (m_focusInspectorFrames > 0) {
@@ -819,6 +820,7 @@ void EditorLayer::TakeAutoScreenshot(sage::Application& app) {
     // последней в цепочке, но не вечно: зависшая проверка не должна вешать CI,
     // её отсутствие в логе поймает сам smoke-тест.
     if (std::getenv("SAGE_EDITOR_SELFTEST") && (m_luaSelfTestStep >= 0 || m_cursorProbeStep >= 0 ||
+                                               m_aiGraphFrameStep >= 0 ||
                                                m_colliderProbeStep >= 0)) {
         using Clock = std::chrono::steady_clock;
         if (!m_shotWaitStarted) { m_shotWaitStart = Clock::now(); m_shotWaitStarted = true; }

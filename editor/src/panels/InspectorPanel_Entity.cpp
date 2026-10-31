@@ -17,6 +17,7 @@
 #include "EditorTheme.h"
 #include "ui/UI.h"
 #include "InspectorPanel.h"
+#include "sage/scene/AiAgentComponent.h"
 #include "../SignalLinksEditor.h"
 #include "../UIElementProperties.h"
 
@@ -652,6 +653,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     DrawEffectSections(host, obj, reg, rm);
 
+    DrawAiSection(host, obj, reg, rm);
+
     // ИНТЕРФЕЙС И ЭЛЕМЕНТ — РАЗНЫЕ РАЗДЕЛЫ, и это главное разделение этого
     // окна. Интерфейс — граница: что показывать, в каком порядке и под какой
     // экран верстать. Элемент — прямоугольник внутри него: цвет, текст,
@@ -800,6 +803,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     if (rm.Emitter) {
         host.PushUndoSnapshot();
         reg.remove<ParticleEmitterComponent>(obj.Entity());
+    }
+
+    if (rm.Ai) {
+        host.PushUndoSnapshot();
+        reg.remove<AiAgentComponent>(obj.Entity());
     }
 
     if (rm.Audio) {
