@@ -240,6 +240,8 @@ local function handle(r)
     })
 end
 
+N.handle = handle
+
 local function runs_of(list)
     local out = {}
     for i, h in ipairs(list) do
@@ -580,4 +582,5 @@ void ScriptEngine::RegisterAiApi() {
     }
     RegisterAiGraphApi();
     RegisterAiWorldNodes();
+    RegisterVisualApi();
 }

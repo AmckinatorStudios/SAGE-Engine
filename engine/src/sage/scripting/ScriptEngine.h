@@ -452,6 +452,9 @@ private:
     void UpdateAiAgents();
     std::string ResolveAiPath(const std::string& path) const;
     std::string LoadAiGraphFile(const std::string& fullPath, const std::string& key);
+    void RegisterLuaGraphNode(const std::string& id, sol::table spec, unsigned defaultDomain);
+    void RegisterVisualApi();      // visual.* — Visual Scripting из Lua (ScriptApi_Visual.cpp)
+    void UpdateVisualScripts();    // компонент Visual Script объектов сцены
 
     // Доставляет события сети (сообщения и подключения) в хуки скриптов.
     // Зовётся из UpdateAll: сеть прокачивается кадром, и её события обязаны
@@ -567,6 +570,8 @@ private:
     std::map<std::string, std::string> m_aiGraphs;   // путь -> имя задачи
     std::map<int, int> m_aiAgents;                   // объект -> экземпляр (компонент AI)
     std::set<int> m_aiFailed;                        // объекты, чей граф не запустился
+    std::map<int, int> m_vsAgents;                   // объект -> выполнение Visual Script
+    std::set<int> m_vsFailed;
     sol::protected_function m_aiPathFinder;
 
     // Мост к скриптам объектов (см. SetMessageSink). ПОСЛЕ m_lua намеренно:

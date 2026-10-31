@@ -102,9 +102,10 @@ std::string TypeOfValue(const GraphEnv& env, const Value& v) {
 namespace {
 
 // Пины по подписи задачи: входы — входами узла, выходы — выходами.
-void TaskPins(const GraphNode& n, const GraphEnv& env, NodePins& p, bool inputs, bool outputs) {
+void TaskPins(const GraphNode& n, const GraphEnv& env, NodePins& p, bool inputs, bool outputs,
+              const char* key = "task") {
     if (!env.W) return;
-    TaskDefinitionPtr def = env.W->FindTask(SettingOf(n, "task"));
+    TaskDefinitionPtr def = env.W->FindTask(SettingOf(n, key));
     if (!def) return;
     if (inputs)
         for (const Param& in : def->Signature.Inputs)
@@ -245,6 +246,7 @@ void RegisterFlow(NodeRegistry& r) {
     {
         NodeType t = Node("flow.parallel", "Parallel", "Flow",
                           "Runs its branches at the same time and waits for all (or the first) of them.");
+        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
         t.Inputs = {X("in")};
         t.Settings = {S("branches", "int", Value(2), "Branches"),
                       S("mode", "choice", Value(std::string("all")), "Wait for", {"all", "any"})};
@@ -356,6 +358,7 @@ void RegisterTasks(NodeRegistry& r) {
     {
         NodeType t = Node("task.call", "Call Task", "Tasks",
                           "Starts a task (graph, Lua or C++) and goes on at once. The task output is its handle.");
+        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
         t.Inputs = {X("in")};
         t.Outputs = {X("then"), P("task", type::Task, Value(0))};
         t.Settings = {S("task", "task", Value(std::string()), "Task")};
@@ -371,6 +374,7 @@ void RegisterTasks(NodeRegistry& r) {
     {
         NodeType t = Node("task.run", "Run Task", "Tasks",
                           "Starts a task and waits for it: goes on by success or failure with its outputs.");
+        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
         t.Inputs = {X("in")};
         t.Outputs = {X("succeeded"), X("failed"), P("ok", type::Bool, Value(false)),
                      P("error", type::String, Value(std::string()))};
@@ -397,6 +401,7 @@ void RegisterTasks(NodeRegistry& r) {
     }
     {
         NodeType t = Node("task.wait", "Wait For Task", "Tasks", "Waits until a started task finishes.");
+        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
         t.Inputs = {X("in"), P("task", type::Task, Value(0))};
         t.Outputs = {X("succeeded"), X("failed"), P("ok", type::Bool, Value(false)),
                      P("status", type::String, Value(std::string())), P("error", type::String, Value(std::string()))};
@@ -421,6 +426,7 @@ void RegisterTasks(NodeRegistry& r) {
     }
     {
         NodeType t = Node("task.cancel", "Cancel Task", "Tasks", "Cancels a running task and its children.");
+        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
         t.Inputs = {X("in"), P("task", type::Task, Value(0))};
         t.Outputs = {X("then")};
         t.Run = [](GraphExec& ex) {
@@ -432,6 +438,7 @@ void RegisterTasks(NodeRegistry& r) {
     }
     {
         NodeType t = Node("task.status", "Task Status", "Tasks", "State of a task: running, done, its error.");
+        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
         t.Pure = true;
         t.Inputs = {P("task", type::Task, Value(0))};
         t.Outputs = {P("status", type::String, Value(std::string())), P("done", type::Bool, Value(false)),
@@ -448,6 +455,7 @@ void RegisterTasks(NodeRegistry& r) {
     }
     {
         NodeType t = Node("task.output", "Task Output", "Tasks", "One output value of a task.");
+        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
         t.Pure = true;
         t.Inputs = {P("task", type::Task, Value(0))};
         t.Outputs = {P("value", type::Any)};
@@ -491,6 +499,7 @@ void RegisterEvents(NodeRegistry& r) {
     {
         NodeType t = Node("event.emit", "Emit Event", "Events",
                           "Sends an event to every AI, to the AI of one object, or to itself.");
+        t.Domains = kDomainAI;   // задачи ИИ — только в SAGE AI Graph
         t.Inputs = {X("in"), P("data", type::Any), P("target", type::Object, Value(vars::EntityRef{}))};
         t.Outputs = {X("then")};
         t.Settings = {S("event", "event", Value(std::string()), "Event"),
@@ -555,6 +564,61 @@ void RegisterVars(NodeRegistry& r) {
 }
 
 void RegisterCalls(NodeRegistry& r) {
+    {
+        // ОБЩИЙ вызов переиспользуемого графа: граф-функция — библиотека для
+        // обоих редакторов, и звать её одинаково должны и ИИ, и Visual
+        // Scripting. Под капотом — то же выполнение задачи, но только графа
+        // вида function: «Run Task» с задачами ИИ остаётся в SAGE AI Graph.
+        NodeType t = Node("graph.call", "Call Function", "Functions",
+                          "Runs a function graph with its inputs and goes on when it returns, with its outputs.");
+        t.Inputs = {X("in")};
+        t.Outputs = {X("then"), X("failed"), P("error", type::String, Value(std::string()))};
+        t.Settings = {S("function", "function", Value(std::string()), "Function")};
+        t.Pins = [](const GraphNode& n, const GraphEnv& env, NodePins& p) {
+            TaskPins(n, env, p, true, true, "function");
+        };
+        t.Run = [](GraphExec& ex) {
+            NodeState& s = ex.State();
+            if (!ex.Resumed()) {
+                const std::string name = ex.SettingText("function");
+                std::shared_ptr<const GraphDoc> g = ex.GetWorld().FindGraph(name);
+                if (!g || g->Kind != GraphKind::Function) ex.Error("«" + name + "» — не граф-функция");
+                s.Task = ex.StartTask(name, TaskInputs(ex));
+                if (!IsFinished(s.Task->Status)) {
+                    ex.WaitRun(s.Task);
+                    return NodeResult::Wait();
+                }
+            }
+            RunPtr run = s.Task;
+            s.Task.reset();
+            if (!run) return NodeResult::Go("failed");
+            TaskResult(ex, run);
+            return NodeResult::Go(run->Status == TaskStatus::Succeeded ? "then" : "failed");
+        };
+        t.Keywords = {"subgraph", "macro", "reuse", "library"};
+        r.Register(std::move(t));
+    }
+    {
+        // Входы Visual Scripting: как Start/Update скрипта объекта.
+        NodeType t = Node("script.on_start", "On Start", "Events", "Runs once when the object starts in Play.");
+        t.Domains = kDomainScript;
+        t.Entry = true;
+        t.Outputs = {X("then")};
+        t.Run = [](GraphExec&) { return NodeResult::Go("then"); };
+        t.Keywords = {"begin", "start", "init"};
+        r.Register(std::move(t));
+    }
+    {
+        NodeType t = Node("script.on_update", "On Update", "Events",
+                          "Runs every frame; dt — seconds since the previous frame. A frame does not start "
+                          "while the previous one still waits.");
+        t.Domains = kDomainScript;
+        t.Entry = true;
+        t.Outputs = {X("then"), P("dt", type::Float, Value(0.0f))};
+        t.Run = [](GraphExec&) { return NodeResult::Go("then"); };
+        t.Keywords = {"tick", "frame", "update"};
+        r.Register(std::move(t));
+    }
     {
         NodeType t = Node("call.op", "Call Operation", "Functions",
                           "Calls an operation by name — C++, Lua or engine API — and gives its results.");

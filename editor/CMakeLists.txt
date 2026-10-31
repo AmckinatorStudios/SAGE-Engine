@@ -46,6 +46,7 @@ add_executable(SageEditor WIN32
     src/selftest/SelfTestPanels.cpp
     src/selftest/SelfTestGIBake.cpp
     src/selftest/SelfTestAiGraph.cpp
+    src/selftest/SelfTestVisualScript.cpp
     src/selftest/SelfTestAiGraphFrame.cpp
     src/selftest/SelfTestCursorLock.cpp
     src/selftest/SelfTestColliderHandles.cpp
@@ -109,6 +110,7 @@ add_executable(SageEditor WIN32
     src/panels/InspectorPanel_Ai.cpp
     src/aigraph/AiGraphPanel.cpp
     src/aigraph/AiGraphPanel_Sides.cpp
+    src/aigraph/AiGraphPanel_Check.cpp
     src/aigraph/AiGraphCanvas.cpp
     src/aigraph/AiDebugPanel.cpp
     src/aigraph/AiGraphExtensions.cpp

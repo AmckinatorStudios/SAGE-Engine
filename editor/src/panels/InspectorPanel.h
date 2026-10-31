@@ -53,6 +53,7 @@ struct EntityRemovals {
     bool Emitter = false;
     bool Audio = false;
     bool Ai = false;
+    bool VisualScript = false;
 };
 
 class InspectorPanel {
@@ -234,6 +235,7 @@ private:
     void DrawAnimationSections(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm);
     void DrawEffectSections(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm);
     void DrawAiSection(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm);
+    void DrawVisualScriptSection(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm);
     void DrawAddComponentMenu(EditorHost& host, GameObject obj);
     char m_addComponentFilter[64] = ""; // поиск в списке компонентов
     bool m_addComponentFocus = false;   // поставить курсор в поиск при открытии

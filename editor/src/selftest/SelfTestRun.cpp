@@ -59,6 +59,7 @@ void EditorLayer::RunSelfTest() {
         ok = SelfTestPanelRegistry() && ok;
         ok = SelfTestGIBake() && ok;
         ok = SelfTestAiGraph() && ok;
+        ok = SelfTestVisualScript() && ok;
     }
 
     if (ok) LOG_INFO("Editor") << "SELFTEST: PASS (project + scene + undo/redo + assets + "
@@ -70,7 +71,7 @@ void EditorLayer::RunSelfTest() {
                                << "project-scripts + broken-scripts + replay + error-flood + panels + sidecars + "
                                << "all-components-roundtrip + ui-layout-tools + panel-flags + multi-window + editor-prefs + material-assign + "
                                << "vars-refs-events + prefab-refs + templates + themes + input-mapping + audio + "
-                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + cover-aspect + preview-for-every-asset + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw + model-import + object-picker + prefab-drop + plugins + panel-registry + gi-bake + ai-graph, "
+                               << "render-stability + camera-preview + ui-backdrop + property-anim + anim-owner + editor-font + config-dir + lights-are-objects + interface-context + interface-open-button + cover-aspect + preview-for-every-asset + post-on-camera + build-needs-scene + gizmo-after-post + ui-type-l10n + play-in-interface + nine-slice + folder-marks + scene-switch + start-scene + debug-draw + model-import + object-picker + prefab-drop + plugins + panel-registry + gi-bake + ai-graph + visual-script, "
                                << before << " entities)";
     else LOG_ERROR("Editor") << "SELFTEST: FAIL";
 }

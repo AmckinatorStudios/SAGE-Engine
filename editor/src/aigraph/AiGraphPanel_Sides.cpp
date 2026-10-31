@@ -38,6 +38,7 @@ const char* KindTitle(GraphKind k) {
         case GraphKind::Behavior: return T("Behaviour graph");
         case GraphKind::Task: return T("Task graph");
         case GraphKind::Function: return T("Function graph");
+        case GraphKind::Script: return T("Visual script");
     }
     return "";
 }
@@ -50,12 +51,20 @@ void AiGraphPanel::DrawGraphSide(EditorHost& host) {
     ImGui::SetNextItemWidth(-1.0f);
     if (InputStr("##gname", name, T("Name — the task is called by it"))) {
         EditBegin();
+        // Точки останова — по имени графа: переезжают вместе с ним.
+        sage::ai::GraphDebugger& dbg = sage::ai::GraphDebugger::Get();
+        const auto breaks = dbg.Breakpoints();
+        for (const auto& [g, node] : breaks)
+            if (g == m_doc.Name) {
+                dbg.ToggleBreakpoint(g, node);
+                dbg.ToggleBreakpoint(name, node);
+            }
         m_doc.Name = name;
         MarkChanged();
     }
     ImGui::SetNextItemWidth(-1.0f);
     if (ImGui::BeginCombo("##gkind", KindTitle(m_doc.Kind))) {
-        for (GraphKind k : {GraphKind::Behavior, GraphKind::Task, GraphKind::Function})
+        for (GraphKind k : m_mode.Kinds)
             if (ImGui::Selectable(KindTitle(k), m_doc.Kind == k)) {
                 PushUndo();
                 m_doc.Kind = k;
@@ -84,8 +93,12 @@ void AiGraphPanel::DrawGraphSide(EditorHost& host) {
     DrawVarList(host, T("Outputs"), m_doc.Outputs, "out");
     DrawVarList(host, T("Local variables"), m_doc.Locals, "loc");
     ImGui::Spacing();
-    ImGui::TextWrapped("%s", T("Instance (the memory of the character) and Shared variables are read and written "
-                               "by name with Get/Set Variable."));
+    if (m_mode.AiTools)
+        ImGui::TextWrapped("%s", T("Instance (the memory of the character) and Shared variables are read and written "
+                                   "by name with Get/Set Variable."));
+    else
+        ImGui::TextWrapped("%s", T("Instance — variables of the object (the Visual Script component), Shared — data "
+                                   "shared by all scripts; read and written by name with Get/Set Variable."));
     if (!m_libError.empty()) ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", m_libError.c_str());
 }
 
@@ -125,6 +138,10 @@ void AiGraphPanel::DrawNodeSide(EditorHost& host) {
             bool changed = false;
             std::vector<std::string> choices = st.Choices;
             if (st.Kind == "task") choices = lib->TaskNames();
+            else if (st.Kind == "function") {
+                for (const std::string& t : lib->TaskNames())
+                    if (auto g = lib->FindGraph(t); g && g->Kind == GraphKind::Function) choices.push_back(t);
+            }
             else if (st.Kind == "operation") choices = lib->OperationNames();
             else if (st.Kind == "type") {
                 for (const sage::ai::TypeInfo* t : lib->Types().All())
@@ -217,10 +234,8 @@ void AiGraphPanel::DrawNodeSide(EditorHost& host) {
     sage::ai::GraphDebugger& dbg = sage::ai::GraphDebugger::Get();
     bool bp = dbg.HasBreakpoint(m_doc.Name, n->Id);
     if (ImGui::Checkbox(T("Breakpoint (F9)"), &bp)) dbg.ToggleBreakpoint(m_doc.Name, n->Id);
-    if ((n->Type == "task.run" || n->Type == "task.call") && n->Values.count("task")) {
-        const std::string task = n->Values.at("task").AsString();
-        if (lib->FindGraph(task) && EditorIcons::Button("open", T("Open the task graph"))) OpenTaskGraph(host, task);
-    }
+    if (const std::string g = LinkedGraph(*n); !g.empty() && EditorIcons::Button("open", T("Open the graph")))
+        OpenTaskGraph(host, g);
 
     // Отладка: значения пинов этого узла в показанном выполнении.
     if (sage::ai::RunDebug* rd = dbg.FindRun(m_debugRun)) {
@@ -261,6 +276,9 @@ void AiGraphPanel::DrawPaletteList(sage::ai::World& libRef) {
     // Узлы по разделам, с учётом провода и поиска.
     std::map<std::string, std::vector<const NodeType*>> byCat;
     for (const NodeType* t : lib->Nodes().All()) {
+        // Только узлы этого вида графа: задачи ИИ не предлагаются в Visual
+        // Scripting, On Update — в графе ИИ, в функции — только общие.
+        if (!sage::ai::NodeAllowed(t->Domains, m_doc.Kind)) continue;
         if (!query.empty()) {
             std::string hay = Lower(t->Id + " " + t->Title + " " + t->Category + " " + Tr(t->Title) + " " +
                                     TrPath(t->Category));
@@ -348,9 +366,8 @@ void AiGraphPanel::DrawNodeMenu(EditorHost& host) {
                               m_doc.Links.end());
             MarkChanged();
         }
-        if ((n->Type == "task.run" || n->Type == "task.call") && n->Values.count("task") && Library() &&
-            Library()->FindGraph(n->Values.at("task").AsString()) && EditorIcons::MenuItem("open", T("Open the task graph")))
-            OpenTaskGraph(host, n->Values.at("task").AsString());
+        if (const std::string g = LinkedGraph(*n); !g.empty() && EditorIcons::MenuItem("open", T("Open the graph")))
+            OpenTaskGraph(host, g);
         if (EditorIcons::MenuItem("trash", T("Delete"), "Del")) DeleteSelection();
     }
     ImGui::EndPopup();
@@ -363,7 +380,8 @@ void AiGraphPanel::DrawOpenPopup(EditorHost& host) {
     }
     Sage::UI::MenuScope menu;
     if (!ImGui::BeginPopup("###AiGraphOpen")) return;
-    ImGui::TextDisabled("%s", T("Graphs of the project (assets/ai)"));
+    ImGui::TextDisabled("%s", m_mode.AiTools ? T("Graphs of the project (assets/ai)")
+                                             : T("Visual scripts of the project (assets/visual)"));
     const std::string dir = AiDir(host);
     int count = 0;
     std::error_code ec;
@@ -371,7 +389,7 @@ void AiGraphPanel::DrawOpenPopup(EditorHost& host) {
         for (auto it = fs::recursive_directory_iterator(sage::PathFromUtf8(dir), ec);
              it != fs::recursive_directory_iterator(); it.increment(ec)) {
             if (ec) break;
-            if (it->path().extension() != ".aigraph") continue;
+            if (sage::PathToUtf8(it->path().extension()) != m_mode.Extension) continue;
             ++count;
             const std::string rel = sage::PathToUtf8(fs::relative(it->path(), sage::PathFromUtf8(dir), ec));
             if (EditorIcons::MenuItem("wire", rel.c_str())) {
@@ -391,7 +409,8 @@ void AiGraphPanel::DrawSaveAsPopup(EditorHost& host) {
     }
     Sage::UI::MenuScope menu;
     if (!ImGui::BeginPopup("###AiGraphSaveAs")) return;
-    ImGui::TextUnformatted(T("Graph name (the file goes to assets/ai)"));
+    ImGui::TextUnformatted(m_mode.AiTools ? T("Graph name (the file goes to assets/ai)")
+                                          : T("Script name (the file goes to assets/visual)"));
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
     ImGui::SetNextItemWidth(260.0f);
     const bool enter = ImGui::InputText("##aig_name", m_saveName, sizeof(m_saveName),

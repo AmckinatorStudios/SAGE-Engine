@@ -43,10 +43,28 @@ namespace sage::ai { class World; }
 // ветки, обведены, у пинов — последние значения. Точка останова — F9 или
 // красная метка в заголовке узла.
 // ---------------------------------------------------------------------------
+// РЕЖИМ РЕДАКТОРА — то, чем SAGE AI Graph отличается от Visual Scripting.
+// Холст, палитра, проверка, переменные, отладка на холсте — общие; разные —
+// виды графов, папка и расширение файлов и, главное, набор узлов (назначение
+// узла, sage::ai::NodeDomain): задачи ИИ в Visual Scripting не предлагаются, а
+// On Update объекта — в SAGE AI Graph.
+struct GraphEditorMode {
+    std::string WindowId;     // имя окна и панели в реестре
+    std::string Title;        // заголовок (переводится T())
+    std::string Folder;       // папка в assets
+    std::string Extension;    // расширение файлов
+    std::vector<sage::ai::GraphKind> Kinds;
+    sage::ai::GraphKind DefaultKind = sage::ai::GraphKind::Task;
+    bool AiTools = false;     // инструменты ИИ: кнопка «Отладчик ИИ», задачи
+    static GraphEditorMode Ai();
+    static GraphEditorMode Visual();
+};
+
 class AiGraphPanel {
 public:
-    AiGraphPanel();
+    explicit AiGraphPanel(GraphEditorMode mode = GraphEditorMode::Ai());
     ~AiGraphPanel();
+    const GraphEditorMode& Mode() const { return m_mode; }
 
     void Draw(EditorHost& host, bool* open);
     // Открыть файл графа (путь на диске).
@@ -61,7 +79,8 @@ public:
     const sage::ai::GraphDoc& Doc() const { return m_doc; }
     // Для самопроверки и инструментов: выделить узел и показать его.
     void FocusNode(int nodeId);
-    // Открыть граф проекта по имени задачи (assets/ai).
+    // Открыть граф проекта по имени задачи (assets/ai и assets/visual). Граф
+    // вида, которого этот редактор не ведёт, открывается в своём редакторе.
     void OpenTaskGraph(EditorHost& host, const std::string& task);
     // Отладчик: какой экземпляр показывать на холсте (номер выполнения).
     void SetDebugRun(int run) { m_debugRun = run; }
@@ -72,6 +91,12 @@ private:
     bool Save(EditorHost& host);
     bool SaveAs(EditorHost& host, const std::string& name);
     std::string AiDir(EditorHost& host) const;
+    // Найти файл графа проекта по имени (в обеих папках графов).
+    std::string FindGraphFile(EditorHost& host, const std::string& name, sage::ai::GraphKind* kind) const;
+    void Revalidate();
+    void DrawBottom(EditorHost& host);
+    // Переименование переменной графа: узлы, которые её читают и пишут, — за ней.
+    void RenameVar(const std::string& scope, const std::string& from, const std::string& to);
     void PushUndo();
     // Снимок отмены на начало правки поля, а не на каждое изменение.
     void EditBegin();
@@ -107,6 +132,8 @@ private:
     };
     sage::ai::NodePins PinsOf(const sage::ai::GraphNode& n) const;
     const sage::ai::NodeType* TypeOf(const sage::ai::GraphNode& n) const;
+    // Граф, который узел зовёт (Run Task, Call Function), если это граф проекта.
+    std::string LinkedGraph(const sage::ai::GraphNode& n) const;
     ImVec2 ToScreen(float x, float y) const;
     ImVec2 ToGraph(ImVec2 screen) const;
     void Layout(const sage::ai::GraphNode& n, NodeLayout& out) const;
@@ -166,5 +193,12 @@ private:
 
     std::string m_clipboard;
     bool m_editUndo = false;
+
+    GraphEditorMode m_mode;
+    // Проверка графа (sage/ai/GraphValidate.h) — пересчёт при изменении.
+    bool m_issuesDirty = true;
+    std::vector<std::pair<int, std::pair<bool, std::string>>> m_issues;   // узел, (ошибка?, текст)
+    int m_bottomTab = 0;   // 0 — проблемы, 1 — вывод выполнения
+    bool m_bottomOpen = true;
     int m_debugRun = 0;
 };

@@ -50,6 +50,7 @@ struct CompiledGraph {
     std::map<int, size_t> Index;
     int StartNode = 0;
     std::vector<size_t> EventNodes;   // On Event
+    std::vector<size_t> UpdateNodes;  // On Update (Visual Scripting)
     std::string Problem;              // почему граф нельзя выполнить
     const CompiledNode* Find(int id) const {
         auto it = Index.find(id);
@@ -200,6 +201,12 @@ private:
     int m_runId = 0;
     bool m_paused = false;
     bool m_stepPause = false;
+    // On Update: кадр, в котором ветки уже заведены, и ветка прошлого кадра
+    // каждого узла — новый кадр не заводится, пока прошлый не дошёл до конца.
+    uint64_t m_updateFrame = 0;
+    double m_updateTime = -1.0;
+    std::map<int, int> m_updateFiber;
+    void StartUpdates(TaskContext& ctx);
 };
 
 } // namespace sage::ai

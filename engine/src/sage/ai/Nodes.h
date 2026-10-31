@@ -96,6 +96,8 @@ struct NodeType {
     std::vector<SettingSpec> Settings;
     bool Pure = false;
     bool Entry = false;       // точка входа (Start, On Event): у неё нет входа потока
+    // Для какого редактора узел (NodeDomain в Graph.h): общий — обоим.
+    unsigned Domains = kDomainAll;
     uint32_t Color = 0;       // 0 — цвет раздела
     std::vector<std::string> Keywords;   // для поиска в палитре
 

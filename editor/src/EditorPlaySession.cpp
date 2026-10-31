@@ -98,6 +98,8 @@ int EditorPlaySession::BuildRuntime(const PlayContext& ctx, Scene& scene) {
     sage::ai::GraphDebugger::Get().Enabled = true;
     m_scripts->SetAiRoot(sage::PathToUtf8(ctx.ProjectDir));
     m_scripts->LoadAiLibrary("assets/ai");
+    // Visual Scripting: графы объектов и общие функции (assets/visual).
+    m_scripts->LoadAiLibrary("assets/visual");
 
     // Физика: строим мир по сущностям с RigidBodyComponent. Бэкенд по умолчанию —
     // Jolt, если собран, иначе встроенный движок (см. PhysicsWorld::DefaultBackend).

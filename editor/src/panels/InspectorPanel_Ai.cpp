@@ -13,6 +13,7 @@
 #include "../VarsEditor.h"
 #include "sage/core/Paths.h"
 #include "sage/scene/AiAgentComponent.h"
+#include "sage/scene/VisualScriptComponent.h"
 
 // ---------------------------------------------------------------------------
 // Секция «AI»: какой граф ведёт объект и с какой памятью он начинает.
@@ -55,4 +56,24 @@ void InspectorPanel::DrawAiSection(EditorHost& host, GameObject obj, entt::regis
     }
     ImGui::TextUnformatted(T("Memory at start (Instance)"));
     varsui::DrawTable(host, obj, ai.Memory, &m_preview);
+}
+
+// Секция «Visual Script»: граф игровой логики объекта и его переменные.
+void InspectorPanel::DrawVisualScriptSection(EditorHost& host, GameObject obj, entt::registry& reg,
+                                             EntityRemovals& rm) {
+    if (!reg.all_of<VisualScriptComponent>(obj.Entity())) return;
+    if (!EditorTheme::SectionHeader("wire", T("Visual Script" "###VisualScriptSection"), ImGuiTreeNodeFlags_DefaultOpen,
+                                    &rm.VisualScript))
+        return;
+    VisualScriptComponent& vs = reg.get<VisualScriptComponent>(obj.Entity());
+    const assetslot::Result r = assetslot::Draw(host, "vgraph", assetslot::Kind::VisualScript, vs.Graph, &m_preview,
+                                                T("Drop a .vgraph here"));
+    if (r.Changed) {
+        host.PushUndoSnapshot();
+        vs.Graph = r.Path;
+    }
+    if (!vs.Graph.empty() && EditorIcons::Button("wire", T("Open in Visual Script")))
+        host.OpenVisualScript(sage::PathToUtf8(host.CurrentProject().Dir() / sage::PathFromUtf8(vs.Graph)));
+    ImGui::TextUnformatted(T("Variables of the object (Instance)"));
+    varsui::DrawTable(host, obj, vs.Vars, &m_preview);
 }

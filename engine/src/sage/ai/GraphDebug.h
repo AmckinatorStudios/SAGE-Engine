@@ -47,6 +47,9 @@ struct RunDebug {
     std::string Graph;     // пусто — задача не графом (Lua, C++)
     std::string Origin;
     std::string Status = "running";
+    // Граф Visual Scripting, а не задача ИИ: отладчик ИИ его не показывает,
+    // а редактор Visual Script — показывает.
+    bool Script = false;
     std::string Error;
     double Started = 0.0, Ended = 0.0;
     std::map<int, uint64_t> NodeFrame;                      // узел -> кадр последнего шага

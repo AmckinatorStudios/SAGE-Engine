@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include "../EditorHost.h"
+#include "../PanelRegistry.h"
 #include "../Project.h"
 #include "../EditorIcons.h"
 #include "../EditorTheme.h"
@@ -44,6 +45,17 @@ bool InputStr(const char* id, std::string& text, const char* hint) {
 }
 
 const char* Tr(const std::string& key) { return key.empty() ? "" : T(key.c_str()); }
+
+std::string ClipUtf8(const std::string& s, size_t max) {
+    size_t chars = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (((unsigned char)s[i] & 0xC0) != 0x80) {
+            if (chars == max) return s.substr(0, i) + "…";
+            ++chars;
+        }
+    }
+    return s;
+}
 
 std::string TrPath(const std::string& category) {
     std::string out, part;
@@ -121,14 +133,37 @@ bool ValueField(EditorHost& host, const char* id, const std::string& type, Value
 
 } // namespace sage::editor::aigraph
 
-AiGraphPanel::AiGraphPanel() = default;
+GraphEditorMode GraphEditorMode::Ai() {
+    GraphEditorMode m;
+    m.WindowId = "AiGraph";
+    m.Title = "AI Graph";
+    m.Folder = "ai";
+    m.Extension = ".aigraph";
+    m.Kinds = {GraphKind::Behavior, GraphKind::Task, GraphKind::Function};
+    m.DefaultKind = GraphKind::Task;
+    m.AiTools = true;
+    return m;
+}
+
+GraphEditorMode GraphEditorMode::Visual() {
+    GraphEditorMode m;
+    m.WindowId = "VisualScript";
+    m.Title = "Visual Script";
+    m.Folder = "visual";
+    m.Extension = ".vgraph";
+    m.Kinds = {GraphKind::Script, GraphKind::Function};
+    m.DefaultKind = GraphKind::Script;
+    return m;
+}
+
+AiGraphPanel::AiGraphPanel(GraphEditorMode mode) : m_mode(std::move(mode)) {}
 AiGraphPanel::~AiGraphPanel() = default;
 
 sage::ai::World* AiGraphPanel::Library() const { return m_lib ? &m_lib->AI() : nullptr; }
 
 std::string AiGraphPanel::AiDir(EditorHost& host) const {
     if (!host.CurrentProject().Loaded()) return {};
-    return sage::PathToUtf8(host.CurrentProject().AssetsDir() / "ai");
+    return sage::PathToUtf8(host.CurrentProject().AssetsDir() / sage::PathFromUtf8(m_mode.Folder));
 }
 
 void AiGraphPanel::ReloadLibrary(EditorHost& host) {
@@ -139,7 +174,11 @@ void AiGraphPanel::ReloadLibrary(EditorHost& host) {
     if (!host.CurrentProject().Loaded()) return;
     m_libProject = sage::PathToUtf8(host.CurrentProject().Dir());
     m_lib->SetAiRoot(m_libProject);
+    // Обе папки графов: графы-функции — общая библиотека двух редакторов, и
+    // палитра каждого видит функции, сделанные в другом.
     m_lib->LoadAiLibrary("assets/ai");
+    m_lib->LoadAiLibrary("assets/visual");
+    m_issuesDirty = true;
     // Открытый граф — тоже в библиотеку: его подпись нужна, чтобы его же
     // Return показал выходы, а соседние графы — его входы.
     if (m_hasGraph && !m_doc.Name.empty()) {
@@ -150,6 +189,7 @@ void AiGraphPanel::ReloadLibrary(EditorHost& host) {
 
 void AiGraphPanel::MarkChanged() {
     m_dirty = true;
+    m_issuesDirty = true;
     if (m_lib && !m_doc.Name.empty()) {
         std::string err;
         m_lib->AI().RegisterGraph(m_doc, err);
@@ -160,6 +200,28 @@ void AiGraphPanel::PushUndo() {
     m_undo.push_back(sage::ai::SaveGraph(m_doc));
     if (m_undo.size() > 100) m_undo.erase(m_undo.begin());
     m_redo.clear();
+}
+
+void AiGraphPanel::RenameVar(const std::string& scope, const std::string& from, const std::string& to) {
+    for (GraphNode& n : m_doc.Nodes) {
+        if (n.Type != "var.get" && n.Type != "var.set") continue;
+        auto sc = n.Values.find("scope");
+        const std::string s = sc == n.Values.end() ? "local" : sc->second.AsString();
+        auto nm = n.Values.find("name");
+        if (s == scope && nm != n.Values.end() && nm->second.AsString() == from) nm->second = Value(to);
+    }
+    // Входы и выходы — ещё и пины Return и вызовов этого графа.
+    if (scope == "output")
+        for (GraphNode& n : m_doc.Nodes)
+            if (n.Type == "flow.return") {
+                for (sage::ai::GraphLink& l : m_doc.Links)
+                    if (l.To.Node == n.Id && l.To.Pin == from) l.To.Pin = to;
+                auto v = n.Values.find(from);
+                if (v != n.Values.end()) {
+                    n.Values[to] = v->second;
+                    n.Values.erase(from);
+                }
+            }
 }
 
 void AiGraphPanel::EditBegin() {
@@ -192,8 +254,17 @@ void AiGraphPanel::NewGraph(EditorHost& host, GraphKind kind) {
     if (!m_lib) ReloadLibrary(host);
     m_doc = GraphDoc();
     m_doc.Kind = kind;
-    m_doc.Name = kind == GraphKind::Behavior ? "NewBehavior" : kind == GraphKind::Function ? "NewFunction" : "NewTask";
-    m_doc.AddNode("flow.start", 0.0f, 0.0f);
+    m_doc.Name = kind == GraphKind::Behavior   ? "NewBehavior"
+                 : kind == GraphKind::Function ? "NewFunction"
+                 : kind == GraphKind::Script   ? "NewScript"
+                                               : "NewTask";
+    if (kind == GraphKind::Script) {
+        m_doc.AddNode("script.on_start", 0.0f, 0.0f);
+        m_doc.AddNode("script.on_update", 0.0f, 140.0f);
+    } else {
+        m_doc.AddNode("flow.start", 0.0f, 0.0f);
+    }
+    m_issuesDirty = true;
     m_path.clear();
     m_hasGraph = true;
     m_dirty = true;
@@ -206,6 +277,16 @@ void AiGraphPanel::NewGraph(EditorHost& host, GraphKind kind) {
 }
 
 void AiGraphPanel::Open(EditorHost& host, const std::string& path) {
+    // Несохранённое не теряется молча: открыть другой граф — значит сначала
+    // сохранить этот (у безымянного — спросить имя и не открывать).
+    if (m_hasGraph && m_dirty && path != m_path) {
+        if (m_path.empty()) {
+            Save(host);
+            m_status = T("Save the new graph first — it has no file yet");
+            return;
+        }
+        Save(host);
+    }
     if (!m_lib || m_libProject != sage::PathToUtf8(host.CurrentProject().Dir())) ReloadLibrary(host);
     std::ifstream f(sage::PathFromUtf8(path), std::ios::binary);
     std::stringstream ss;
@@ -225,6 +306,7 @@ void AiGraphPanel::Open(EditorHost& host, const std::string& path) {
     m_redo.clear();
     m_selected.clear();
     m_frameRequest = true;
+    m_issuesDirty = true;
     m_status.clear();
     std::string e2;
     m_lib->AI().RegisterGraph(m_doc, e2);
@@ -259,8 +341,20 @@ bool AiGraphPanel::SaveAs(EditorHost& host, const std::string& name) {
     for (char c : name)
         if (std::isalnum((unsigned char)c) || c == '_' || c == '-' || (unsigned char)c >= 0x80) clean += c;
     if (clean.empty()) return false;
+    const std::string path = sage::PathToUtf8(sage::PathFromUtf8(dir) / (clean + m_mode.Extension));
+    // Чужой файл с тем же именем не перезаписывается: два графа с одним
+    // именем — ещё и две задачи с одним именем, и одна молча заменит другую.
+    std::error_code ec;
+    if (path != m_path && fs::exists(sage::PathFromUtf8(path), ec)) {
+        m_status = std::string(T("A graph with this name already exists: ")) + clean;
+        return false;
+    }
+    if (Library() && Library()->FindGraph(clean) && clean != m_doc.Name) {
+        m_status = std::string(T("A graph with this name already exists: ")) + clean;
+        return false;
+    }
     m_doc.Name = clean;
-    m_path = sage::PathToUtf8(sage::PathFromUtf8(dir) / (clean + ".aigraph"));
+    m_path = path;
     return Save(host);
 }
 
@@ -272,29 +366,48 @@ void AiGraphPanel::FocusNode(int nodeId) {
     RequestFocus();
 }
 
-void AiGraphPanel::OpenTaskGraph(EditorHost& host, const std::string& task) {
-    // Граф задачи лежит в assets/ai под своим именем — ищем там.
-    const std::string dir = AiDir(host);
-    if (dir.empty()) return;
-    std::error_code ec;
-    for (auto it = fs::recursive_directory_iterator(sage::PathFromUtf8(dir), ec);
-         it != fs::recursive_directory_iterator(); it.increment(ec)) {
-        if (ec) break;
-        if (it->path().extension() != ".aigraph") continue;
-        std::ifstream f(it->path(), std::ios::binary);
-        std::stringstream ss;
-        ss << f.rdbuf();
-        GraphDoc d;
-        std::string err;
-        if (!sage::ai::LoadGraph(ss.str(), d, err)) continue;
-        const std::string name = d.Name.empty() ? sage::PathToUtf8(it->path().stem()) : d.Name;
-        if (name == task) {
-            if (m_dirty) Save(host);
-            Open(host, sage::PathToUtf8(it->path()));
-            return;
+std::string AiGraphPanel::FindGraphFile(EditorHost& host, const std::string& name, GraphKind* kind) const {
+    if (!host.CurrentProject().Loaded()) return {};
+    for (const char* folder : {"ai", "visual"}) {
+        const fs::path dir = host.CurrentProject().AssetsDir() / folder;
+        std::error_code ec;
+        if (!fs::exists(dir, ec)) continue;
+        for (auto it = fs::recursive_directory_iterator(dir, ec); it != fs::recursive_directory_iterator();
+             it.increment(ec)) {
+            if (ec) break;
+            const fs::path ext = it->path().extension();
+            if (ext != ".aigraph" && ext != ".vgraph") continue;
+            std::ifstream f(it->path(), std::ios::binary);
+            std::stringstream ss;
+            ss << f.rdbuf();
+            GraphDoc d;
+            std::string err;
+            if (!sage::ai::LoadGraph(ss.str(), d, err)) continue;
+            const std::string n = d.Name.empty() ? sage::PathToUtf8(it->path().stem()) : d.Name;
+            if (n != name) continue;
+            if (kind) *kind = d.Kind;
+            return sage::PathToUtf8(it->path());
         }
     }
-    m_status = std::string(T("Task is not a graph of this project: ")) + task;
+    return {};
+}
+
+void AiGraphPanel::OpenTaskGraph(EditorHost& host, const std::string& task) {
+    GraphKind kind = GraphKind::Task;
+    const std::string path = FindGraphFile(host, task, &kind);
+    if (path.empty()) {
+        m_status = std::string(T("Task is not a graph of this project: ")) + task;
+        return;
+    }
+    // Граф чужого вида — в свой редактор: граф объекта Visual Scripting не
+    // правят палитрой ИИ, и наоборот.
+    const bool mine = std::find(m_mode.Kinds.begin(), m_mode.Kinds.end(), kind) != m_mode.Kinds.end();
+    if (!mine) {
+        if (kind == GraphKind::Script) host.OpenVisualScript(path);
+        else host.OpenAiGraph(path);
+        return;
+    }
+    Open(host, path);
 }
 
 // ---------------------------------------------------------------------------
@@ -306,8 +419,9 @@ void AiGraphPanel::Draw(EditorHost& host, bool* open) {
         --m_focusFrames;
     }
     ImGui::SetNextWindowSize(ImVec2(1100, 650), ImGuiCond_FirstUseEver);
-    const std::string title = std::string(T("AI Graph")) + (m_hasGraph ? " — " + m_doc.Name : std::string()) +
-                              (m_dirty ? " *" : "") + "###AiGraph";
+    const std::string title = std::string(T(m_mode.Title.c_str())) +
+                              (m_hasGraph ? " — " + m_doc.Name : std::string()) + (m_dirty ? " *" : "") + "###" +
+                              m_mode.WindowId;
     if (!ImGui::Begin(title.c_str(), open)) {
         ImGui::End();
         return;
@@ -325,10 +439,18 @@ void AiGraphPanel::Draw(EditorHost& host, bool* open) {
         ImGui::EndChild();
         ImGui::SameLine();
         const float avail = ImGui::GetContentRegionAvail().x;
-        ImGui::BeginChild("##aig_canvas", ImVec2(std::max(200.0f, avail - side - 8.0f), 0), ImGuiChildFlags_Borders,
-                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+        // Центр: холст и под ним — проблемы графа и вывод выполнения.
+        const float centerW = std::max(200.0f, avail - side - 8.0f);
+        ImGui::BeginGroup();
+        const float bottomH = m_bottomOpen ? 150.0f : ImGui::GetFrameHeightWithSpacing() + 8.0f;
+        ImGui::BeginChild("##aig_canvas", ImVec2(centerW, std::max(120.0f, ImGui::GetContentRegionAvail().y - bottomH)),
+                          ImGuiChildFlags_Borders, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         DrawCanvas(host);
         ImGui::EndChild();
+        ImGui::BeginChild("##aig_bottom", ImVec2(centerW, 0), ImGuiChildFlags_Borders);
+        DrawBottom(host);
+        ImGui::EndChild();
+        ImGui::EndGroup();
         ImGui::SameLine();
         ImGui::BeginChild("##aig_node", ImVec2(0, 0), ImGuiChildFlags_Borders);
         DrawNodeSide(host);
@@ -343,20 +465,27 @@ void AiGraphPanel::Draw(EditorHost& host, bool* open) {
 
 void AiGraphPanel::DrawEmpty(EditorHost& host) {
     ImGui::Spacing();
-    ImGui::TextWrapped("%s", T("A graph describes behaviour with nodes and wires: the main behaviour graph "
-                               "decides what to do, task graphs do it, function graphs are reusable blocks. "
-                               "Graphs live in assets/ai of the project."));
+    if (m_mode.AiTools)
+        ImGui::TextWrapped("%s", T("A graph describes behaviour with nodes and wires: the main behaviour graph "
+                                   "decides what to do, task graphs do it, function graphs are reusable blocks. "
+                                   "Graphs live in assets/ai of the project."));
+    else
+        ImGui::TextWrapped("%s", T("A visual script is game logic of an object made of nodes: On Start, On Update, "
+                                   "events, objects and their components. Function graphs are shared with AI graphs. "
+                                   "Visual scripts live in assets/visual of the project."));
     ImGui::Spacing();
     if (!host.CurrentProject().Loaded()) {
-        ImGui::TextDisabled("%s", T("Open a project to work with AI graphs."));
+        ImGui::TextDisabled("%s", T("Open a project to work with graphs."));
         return;
     }
-    if (EditorIcons::Button("plus", T("New behaviour graph"))) NewGraph(host, GraphKind::Behavior);
-    ImGui::SameLine();
-    if (EditorIcons::Button("plus", T("New task graph"))) NewGraph(host, GraphKind::Task);
-    ImGui::SameLine();
-    if (EditorIcons::Button("plus", T("New function graph"))) NewGraph(host, GraphKind::Function);
-    ImGui::SameLine();
+    for (GraphKind k : m_mode.Kinds) {
+        const char* label = k == GraphKind::Behavior   ? T("New behaviour graph")
+                            : k == GraphKind::Task     ? T("New task graph")
+                            : k == GraphKind::Script   ? T("New visual script")
+                                                       : T("New function graph");
+        if (EditorIcons::Button("plus", label)) NewGraph(host, k);
+        ImGui::SameLine();
+    }
     if (EditorIcons::Button("open", T("Open…"))) m_openRequest = true;
     if (!m_status.empty()) ImGui::TextDisabled("%s", m_status.c_str());
 }
@@ -364,7 +493,8 @@ void AiGraphPanel::DrawEmpty(EditorHost& host) {
 void AiGraphPanel::DrawToolbar(EditorHost& host) {
     const bool project = host.CurrentProject().Loaded();
     ImGui::BeginDisabled(!project);
-    if (EditorIcons::IconOnlyButton("plus", T("New task graph"))) NewGraph(host, GraphKind::Task);
+    if (EditorIcons::IconOnlyButton("plus", m_mode.AiTools ? T("New task graph") : T("New visual script")))
+        NewGraph(host, m_mode.DefaultKind);
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("open", T("Open a graph of the project"))) m_openRequest = true;
     ImGui::SameLine();
@@ -396,13 +526,22 @@ void AiGraphPanel::DrawToolbar(EditorHost& host) {
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("refresh", T("Reload the AI library of the project (Lua nodes, tasks, graphs)")))
         ReloadLibrary(host);
+    // Инструменты ИИ — только у SAGE AI Graph: задачи и их состояния к
+    // Visual Scripting отношения не имеют.
+    if (m_mode.AiTools) {
+        ImGui::SameLine();
+        if (EditorIcons::IconOnlyButton("debug", T("AI Debugger: running tasks and their states")))
+            host.Panels().SetVisible("AiDebugger", true);
+    }
     ImGui::EndDisabled();
 
     // Инструменты плагинов (editor.graph_tool).
+    const std::string editorKey = m_mode.AiTools ? "ai" : "visual";
     for (const ToolExt& tool : Tools()) {
+        if (!tool.Editor.empty() && tool.Editor != editorKey) continue;
         ImGui::SameLine();
         if (ImGui::Button(tool.Title.c_str()) && m_hasGraph) {
-            ToolContext ctx{m_path, m_doc.Name, std::vector<int>(m_selected.begin(), m_selected.end())};
+            ToolContext ctx{m_path, m_doc.Name, editorKey, std::vector<int>(m_selected.begin(), m_selected.end())};
             tool.Run(ctx);
         }
     }
@@ -449,8 +588,15 @@ void AiGraphPanel::DrawVarList(EditorHost& host, const char* title, std::vector<
             ImGui::PushID((int)i);
             ImGui::SetNextItemWidth(110.0f);
             std::string name = v.Name;
-            if (InputStr("##name", name)) {
+            // Занятое имя не применяется: две переменные с одним именем —
+            // одна молча прячет другую.
+            if (InputStr("##name", name) && !name.empty() &&
+                std::none_of(vars.begin(), vars.end(), [&](const GraphVar& o) { return &o != &v && o.Name == name; })) {
                 EditBegin();
+                // Узлы Get/Set Variable идут за переименованием: иначе
+                // переименованная переменная молча ломала бы весь граф.
+                const std::string scope = std::string(id) == "in" ? "input" : std::string(id) == "out" ? "output" : "local";
+                RenameVar(scope, v.Name, name);
                 v.Name = name;
                 MarkChanged();
             }

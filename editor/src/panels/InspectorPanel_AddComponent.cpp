@@ -58,6 +58,7 @@
 #include "sage/anim/Tween.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/scene/AiAgentComponent.h"
+#include "sage/scene/VisualScriptComponent.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIIcons.h"
@@ -227,6 +228,10 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         {"AI", "Logic", "wire",
          "Behaviour graph of SAGE AI and the memory the character starts with",
          HasComp<AiAgentComponent>, AddComp<AiAgentComponent>},
+        // Visual Script — игровая логика объекта графом (Visual Scripting).
+        {"Visual Script", "Logic", "wire",
+         "Game logic of this object made of nodes: On Start, On Update, events",
+         HasComp<VisualScriptComponent>, AddComp<VisualScriptComponent>},
         {"Script", "Logic", "script",
          "Behaviour written in a script file, with its public variables", HasComp<ScriptComponent>,
          AddComp<ScriptComponent>},

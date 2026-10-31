@@ -31,12 +31,14 @@ struct PinEditorExt {
 struct ToolContext {
     std::string Path;
     std::string Name;
+    std::string Editor;   // "ai" или "visual"
     std::vector<int> Selected;
 };
 
 struct ToolExt {
     std::string Owner;
     std::string Title;
+    std::string Editor;   // "ai", "visual" или пусто — оба редактора графов
     std::function<void(const ToolContext&)> Run;
 };
 

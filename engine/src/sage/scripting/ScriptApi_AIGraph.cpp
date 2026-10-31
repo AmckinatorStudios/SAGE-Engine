@@ -104,92 +104,7 @@ void ScriptEngine::RegisterAiGraphApi() {
 
     // Свой узел графа.
     Bind("ai", "node", nullptr, [this](const std::string& id, sol::table spec) {
-        if (id.empty()) throw std::runtime_error("ai.node: у узла должно быть имя (id)");
-        sage::ai::NodeType t;
-        t.Id = id;
-        t.Origin = "Lua";
-        t.Title = spec.get_or<std::string>("title", id);
-        t.Category = spec.get_or<std::string>("category", "Lua");
-        t.Description = spec.get_or<std::string>("description", "");
-        t.Pure = spec.get_or("pure", false);
-        t.Inputs = ReadPins(*this, spec["inputs"], id);
-        t.Outputs = ReadPins(*this, spec["outputs"], id);
-        // Узел с потоком без явных пинов потока получает обычные «in/then»:
-        // писать их руками в каждом узле — шум.
-        if (!t.Pure) {
-            if (!HasExec(t.Inputs)) t.Inputs.insert(t.Inputs.begin(), sage::ai::nodes::X("in"));
-            if (!HasExec(t.Outputs)) t.Outputs.insert(t.Outputs.begin(), sage::ai::nodes::X("then"));
-        }
-        if (sol::object st = spec["settings"]; st.get_type() == sol::type::table) {
-            for (const auto& kv : st.as<sol::table>()) {
-                if (kv.second.get_type() != sol::type::table) continue;
-                sol::table s = kv.second;
-                sage::ai::SettingSpec set;
-                set.Name = s.get_or<std::string>(1, "");
-                set.Kind = s.get_or<std::string>(2, "string");
-                if (sol::object d = s[3]; d.valid() && d.get_type() != sol::type::lua_nil)
-                    set.Default = AiValue(*this, d, "ai.node('" + id + "')");
-                if (sol::object ch = s[4]; ch.get_type() == sol::type::table)
-                    for (const auto& c : ch.as<sol::table>())
-                        if (c.second.is<std::string>()) set.Choices.push_back(c.second.as<std::string>());
-                if (!set.Name.empty()) t.Settings.push_back(std::move(set));
-            }
-        }
-        sol::object run = spec["run"];
-        if (run.get_type() != sol::type::function)
-            throw std::runtime_error("ai.node('" + id + "'): нужна функция run(n)");
-        sol::protected_function fn = run.as<sol::protected_function>();
-        const bool pure = t.Pure;
-        t.Run = [this, fn, pure](GraphExec& ex) -> NodeResult {
-            auto call = std::make_shared<NodeCall>();
-            call->Ex = &ex;
-            sol::table n = m_lua.create_table();
-            n["inputs"] = AiNodeIn{call};
-            n["outputs"] = AiNodeOut{call};
-            n["settings"] = AiNodeSettings{call};
-            const int owner = ex.Task().Owner();
-            n["self"] = owner > 0 ? ValueToLua(Value(sage::vars::EntityRef{owner})) : sol::object(sol::lua_nil);
-            n["instance"] = AiVars{ex.GetWorld().FindAgent(ex.Task().Agent())
-                                       ? ex.GetWorld().FindAgent(ex.Task().Agent())->Memory
-                                       : std::make_shared<sage::ai::Blackboard>()};
-            n["agent"] = ex.Task().Agent();
-            auto r = fn(n);
-            call->Ex = nullptr;
-            if (!r.valid()) {
-                sol::error e = r;
-                ex.Error(e.what());
-            }
-            if (pure) return NodeResult::Go("");
-            // Узел вернул имя выхода — идти по нему; ничего — по первому.
-            if (r.return_count() > 0) {
-                sol::object out = r.get<sol::object>(0);
-                if (out.is<std::string>()) return NodeResult::Go(out.as<std::string>());
-            }
-            for (const PinSpec& p : ex.Pins().Outputs)
-                if (p.Type == sage::ai::type::Exec) return NodeResult::Go(p.Name);
-            return NodeResult::Go("");
-        };
-        if (sol::object c = spec["connect"]; c.get_type() == sol::type::function) {
-            sol::protected_function check = c.as<sol::protected_function>();
-            t.CanConnect = [check](const sage::ai::GraphNode&, const std::string& pin, const std::string& other,
-                                   std::string& why) {
-                auto r = check(pin, other);
-                if (!r.valid()) {
-                    sol::error e = r;
-                    why = e.what();
-                    return false;
-                }
-                sol::object ok = r.get<sol::object>(0);
-                if (ok.is<bool>() && !ok.as<bool>()) {
-                    if (r.return_count() > 1 && r.get<sol::object>(1).is<std::string>())
-                        why = r.get<std::string>(1);
-                    if (why.empty()) why = "узел не принимает такой провод";
-                    return false;
-                }
-                return true;
-            };
-        }
-        AI().Nodes().Register(std::move(t));
+        RegisterLuaGraphNode(id, spec, sage::ai::kDomainAI);
     });
 
     // Свой тип данных — структура с полями: ai.type("Target", {fields = {{"pos", Vec3()}}}).
@@ -309,6 +224,8 @@ int ScriptEngine::LoadAiLibrary(const std::string& directory) {
         const std::string& d = dirs[i];
         for (const std::string& f : sage::assets::vfs::ListFiles(d, ".lua")) luaFiles.push_back(f);
         for (const std::string& f : sage::assets::vfs::ListFiles(d, ".aigraph")) graphFiles.push_back(f);
+        // Графы Visual Scripting — та же библиотека: функции общие для обоих.
+        for (const std::string& f : sage::assets::vfs::ListFiles(d, ".vgraph")) graphFiles.push_back(f);
         for (const std::string& sub : sage::assets::vfs::ListDirs(d))
             dirs.push_back(sage::PathToUtf8(sage::PathFromUtf8(d) / sage::PathFromUtf8(sub)));
     }
@@ -334,6 +251,7 @@ int ScriptEngine::LoadAiLibrary(const std::string& directory) {
 
 void ScriptEngine::UpdateAiAgents() {
     if (!m_scene || !m_ai) return;
+    UpdateVisualScripts();
     entt::registry& reg = m_scene->Registry();
     auto view = reg.view<AiAgentComponent>();
     for (entt::entity e : view) {
@@ -366,4 +284,102 @@ void ScriptEngine::UpdateAiAgents() {
         if (!m_scene->Get(it->first).Valid()) it = m_aiAgents.erase(it);
         else ++it;
     }
+}
+
+// Свой узел графа из Lua — общий для ai.node и visual.node.
+void ScriptEngine::RegisterLuaGraphNode(const std::string& id, sol::table spec, unsigned defaultDomain) {
+    if (id.empty()) throw std::runtime_error("ai.node: у узла должно быть имя (id)");
+    sage::ai::NodeType t;
+    t.Id = id;
+    t.Origin = "Lua";
+    t.Title = spec.get_or<std::string>("title", id);
+    t.Category = spec.get_or<std::string>("category", "Lua");
+    t.Description = spec.get_or<std::string>("description", "");
+    t.Pure = spec.get_or("pure", false);
+    // Для какого редактора: "ai", "script" или "both". Без указания — для
+    // того, чей это вызов (ai.node — ИИ, visual.node — Visual Scripting).
+    const std::string domain = spec.get_or<std::string>("domain", "");
+    if (domain == "ai") t.Domains = sage::ai::kDomainAI;
+    else if (domain == "script") t.Domains = sage::ai::kDomainScript;
+    else if (domain == "both") t.Domains = sage::ai::kDomainAll;
+    else if (domain.empty()) t.Domains = defaultDomain;
+    else throw std::runtime_error("node('" + id + "'): domain — \"ai\", \"script\" или \"both\"");
+    t.Inputs = ReadPins(*this, spec["inputs"], id);
+    t.Outputs = ReadPins(*this, spec["outputs"], id);
+    // Узел с потоком без явных пинов потока получает обычные «in/then»:
+    // писать их руками в каждом узле — шум.
+    if (!t.Pure) {
+        if (!HasExec(t.Inputs)) t.Inputs.insert(t.Inputs.begin(), sage::ai::nodes::X("in"));
+        if (!HasExec(t.Outputs)) t.Outputs.insert(t.Outputs.begin(), sage::ai::nodes::X("then"));
+    }
+    if (sol::object st = spec["settings"]; st.get_type() == sol::type::table) {
+        for (const auto& kv : st.as<sol::table>()) {
+            if (kv.second.get_type() != sol::type::table) continue;
+            sol::table s = kv.second;
+            sage::ai::SettingSpec set;
+            set.Name = s.get_or<std::string>(1, "");
+            set.Kind = s.get_or<std::string>(2, "string");
+            if (sol::object d = s[3]; d.valid() && d.get_type() != sol::type::lua_nil)
+                set.Default = AiValue(*this, d, "ai.node('" + id + "')");
+            if (sol::object ch = s[4]; ch.get_type() == sol::type::table)
+                for (const auto& c : ch.as<sol::table>())
+                    if (c.second.is<std::string>()) set.Choices.push_back(c.second.as<std::string>());
+            if (!set.Name.empty()) t.Settings.push_back(std::move(set));
+        }
+    }
+    sol::object run = spec["run"];
+    if (run.get_type() != sol::type::function)
+        throw std::runtime_error("ai.node('" + id + "'): нужна функция run(n)");
+    sol::protected_function fn = run.as<sol::protected_function>();
+    const bool pure = t.Pure;
+    t.Run = [this, fn, pure](GraphExec& ex) -> NodeResult {
+        auto call = std::make_shared<NodeCall>();
+        call->Ex = &ex;
+        sol::table n = m_lua.create_table();
+        n["inputs"] = AiNodeIn{call};
+        n["outputs"] = AiNodeOut{call};
+        n["settings"] = AiNodeSettings{call};
+        const int owner = ex.Task().Owner();
+        n["self"] = owner > 0 ? ValueToLua(Value(sage::vars::EntityRef{owner})) : sol::object(sol::lua_nil);
+        n["instance"] = AiVars{ex.GetWorld().FindAgent(ex.Task().Agent())
+                                   ? ex.GetWorld().FindAgent(ex.Task().Agent())->Memory
+                                   : std::make_shared<sage::ai::Blackboard>()};
+        n["agent"] = ex.Task().Agent();
+        auto r = fn(n);
+        call->Ex = nullptr;
+        if (!r.valid()) {
+            sol::error e = r;
+            ex.Error(e.what());
+        }
+        if (pure) return NodeResult::Go("");
+        // Узел вернул имя выхода — идти по нему; ничего — по первому.
+        if (r.return_count() > 0) {
+            sol::object out = r.get<sol::object>(0);
+            if (out.is<std::string>()) return NodeResult::Go(out.as<std::string>());
+        }
+        for (const PinSpec& p : ex.Pins().Outputs)
+            if (p.Type == sage::ai::type::Exec) return NodeResult::Go(p.Name);
+        return NodeResult::Go("");
+    };
+    if (sol::object c = spec["connect"]; c.get_type() == sol::type::function) {
+        sol::protected_function check = c.as<sol::protected_function>();
+        t.CanConnect = [check](const sage::ai::GraphNode&, const std::string& pin, const std::string& other,
+                               std::string& why) {
+            auto r = check(pin, other);
+            if (!r.valid()) {
+                sol::error e = r;
+                why = e.what();
+                return false;
+            }
+            sol::object ok = r.get<sol::object>(0);
+            if (ok.is<bool>() && !ok.as<bool>()) {
+                if (r.return_count() > 1 && r.get<sol::object>(1).is<std::string>())
+                    why = r.get<std::string>(1);
+                if (why.empty()) why = "узел не принимает такой провод";
+                return false;
+            }
+            return true;
+        };
+    }
+    AI().Nodes().Register(std::move(t));
 }

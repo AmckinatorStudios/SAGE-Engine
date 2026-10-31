@@ -29,9 +29,26 @@
 // ---------------------------------------------------------------------------
 namespace sage::ai {
 
-enum class GraphKind { Behavior, Task, Function };
+// Script — граф Visual Scripting: игровая логика объекта (On Start, On
+// Update, события), без задач ИИ. Behavior и Task — графы SAGE AI. Function —
+// общая библиотека: её зовут оба редактора, поэтому в ней только общие узлы.
+enum class GraphKind { Behavior, Task, Function, Script };
 const char* GraphKindId(GraphKind kind);
 bool ParseGraphKind(const std::string& id, GraphKind& out);
+
+// НАЗНАЧЕНИЕ УЗЛА. Общая основа графов одна (документ, выполнение, типы,
+// переменные), но наборы узлов у редакторов свои: узлы задач ИИ работают с
+// системой задач SAGE AI и в Visual Scripting не нужны, а «On Update»
+// объекта — не поведение ИИ. Branch, циклы, математика — общие.
+enum NodeDomain : unsigned {
+    kDomainAI = 1u,
+    kDomainScript = 2u,
+    kDomainAll = kDomainAI | kDomainScript,
+};
+// Можно ли узлу с таким назначением стоять в графе этого вида.
+bool NodeAllowed(unsigned nodeDomains, GraphKind kind);
+// Назначение графа этого вида (функция — обоим).
+unsigned GraphDomain(GraphKind kind);
 
 struct GraphPinRef {
     int Node = 0;

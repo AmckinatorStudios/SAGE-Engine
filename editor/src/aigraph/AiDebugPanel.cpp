@@ -72,6 +72,8 @@ void AiDebugPanel::Draw(EditorHost& host, bool* open, AiGraphPanel& graph) {
     std::map<int, std::vector<int>> children;
     std::vector<int> roots;
     for (const auto& [id, r] : dbg.Runs()) {
+        // Только ИИ: графы Visual Scripting отлаживаются в своём редакторе.
+        if (r.Script) continue;
         if (r.Parent && dbg.Runs().count(r.Parent)) children[r.Parent].push_back(id);
         else roots.push_back(id);
     }
@@ -126,9 +128,11 @@ void AiDebugPanel::Draw(EditorHost& host, bool* open, AiGraphPanel& graph) {
         if (!r->Graph.empty() && EditorIcons::Button("wire", T("Show in the graph editor"))) {
             graph.SetDebugRun(r->Run);
             if (graph.Doc().Name != r->Graph) graph.OpenTaskGraph(host, r->Graph);
-            host.Panels().SetVisible("AiGraph", true);
-            graph.RequestFocus();
-            if (r->Paused) graph.FocusNode(r->PausedNode);
+            if (graph.Doc().Name == r->Graph) {
+                host.Panels().SetVisible("AiGraph", true);
+                graph.RequestFocus();
+                if (r->Paused) graph.FocusNode(r->PausedNode);
+            }
         }
         // Живые переменные — пока выполнение идёт.
         sage::ai::RunPtr live = world ? world->FindRun(r->Run) : nullptr;

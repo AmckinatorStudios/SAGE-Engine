@@ -1333,6 +1333,7 @@ function Script:OnAnimationEvent(name) end
 ---@field time sage.time
 ---@field tween sage.tween
 ---@field ui sage.ui
+---@field visual sage.visual
 ---@field volumetric sage.volumetric
 sage = {}
 
@@ -2518,6 +2519,34 @@ function sage.ui.SetValue(entity, value) end
 function sage.ui.SpawnDemo(name) end
 ---@return number
 function sage.ui.SpawnShowcase() end
+
+---@class sage.visual
+sage.visual = {}
+
+---Короткое имя того же модуля: `visual.X()` — это ТОТ ЖЕ объект,
+---что `sage.visual`, а не копия. Движок ставит его, только если имя
+---свободно: игра, объявившая своё, остаётся при своём.
+---@type sage.visual
+visual = nil
+
+---@param name string
+---@param inputs? table
+---@return any
+function sage.visual.call(name, inputs) end
+---@return table
+function sage.visual.functions() end
+---@param path string
+---@return string
+function sage.visual.graph(path) end
+---@param id string
+---@param spec table
+function sage.visual.node(id, spec) end
+---@param entity? any
+---@return any
+function sage.visual.of(entity) end
+---@param id string
+---@param spec table
+function sage.visual.type(id, spec) end
 
 ---@class sage.volumetric
 sage.volumetric = {}
