@@ -1,9 +1,12 @@
+#include <fstream>
 #include <string>
 #include <vector>
 
 #include <sol/sol.hpp>
 
+#include "LogicKinds.h"
 #include "aigraph/AiGraphExtensions.h"
+#include "sage/core/Paths.h"
 #include "sage/core/Log.h"
 #include "sage/vars/Value.h"
 
@@ -151,6 +154,60 @@ void BindGraphApi(sol::table& ed, const std::string& id) {
             }
         };
         sage::editor::aigraph::AddTool(std::move(t));
+    });
+
+    // --- Свой вид логики в окне «Создать…» --------------------------------------
+    //
+    //   editor.logic_kind("fennel", {title = "Fennel (.fnl)", ext = ".fnl", folder = "scripts",
+    //                     note = "Lisp поверх Lua", template = ";; {name}\n"})
+    //
+    // Файл создаётся из template, «{name}» заменяется именем. Выгрузка плагина
+    // убирает вид (LogicKinds::RemoveOwner).
+    ed.set_function("logic_kind", [id](const std::string& kindId, sol::table spec) {
+        auto str = [&spec](const char* key, const std::string& def) {
+            sol::optional<std::string> v = spec[key];
+            return v ? *v : def;
+        };
+        sage::editor::logic::Kind k;
+        k.Id = id + "." + kindId;
+        k.Owner = id;
+        k.Title = str("title", kindId);
+        k.Note = str("note", "");
+        k.Ext = str("ext", "." + kindId);
+        if (k.Ext.empty() || k.Ext[0] != '.') k.Ext = "." + k.Ext;
+        k.Folder = str("folder", "scripts");
+        k.Slot = str("slot", "");
+        k.Icon = str("icon", "script");
+        const std::string tpl = str("template", "");
+        const std::string ext = k.Ext;
+        k.Create = [tpl, ext](const std::string& name, const std::filesystem::path& dir,
+                              std::filesystem::path& created, std::string& err) {
+            if (name.empty()) {
+                err = "Name must not be empty";
+                return false;
+            }
+            std::filesystem::path target = dir / sage::PathFromUtf8(name);
+            if (target.extension() != ext) target += ext;
+            std::error_code ec;
+            if (std::filesystem::exists(target, ec)) {
+                err = "Already exists: " + sage::PathToUtf8(target.filename());
+                return false;
+            }
+            std::filesystem::create_directories(dir, ec);
+            std::string text = tpl;
+            const std::string stem = sage::PathToUtf8(target.stem());
+            for (size_t at = text.find("{name}"); at != std::string::npos; at = text.find("{name}", at + stem.size()))
+                text.replace(at, 6, stem);
+            std::ofstream f(target, std::ios::binary);
+            f << text;
+            if (!f) {
+                err = "Could not write " + sage::PathToUtf8(target);
+                return false;
+            }
+            created = target;
+            return true;
+        };
+        sage::editor::logic::Register(std::move(k));
     });
 
 }

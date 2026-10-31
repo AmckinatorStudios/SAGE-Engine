@@ -3399,6 +3399,14 @@
     "Rest after an option ends (s)": "Пауза после конца варианта (с)",
     "Re-check on every event": "Перепроверять на каждое событие",
     "Move To": "Идти к точке",
-    "Moves the object toward a point every frame (its character controller if it has one) and goes on when it arrives or the timeout runs out.": "Каждый кадр ведёт объект к точке (через контроллер персонажа, если он есть) и идёт дальше, когда объект дошёл или вышло время."
+    "Moves the object toward a point every frame (its character controller if it has one) and goes on when it arrives or the timeout runs out.": "Каждый кадр ведёт объект к точке (через контроллер персонажа, если он есть) и идёт дальше, когда объект дошёл или вышло время.",
+    "Choose a language": "Выберите язык",
+    "No kinds of logic for this slot": "Для этого слота нет видов логики",
+    "Script or graph...": "Скрипт или граф…",
+    "The scene file was deleted: the scene stays open, save it to keep it": "Файл сцены удалён: сцена осталась открытой — сохраните её, чтобы не потерять",
+    "Object logic made of nodes: On Start, On Update, events": "Логика объекта из узлов: On Start, On Update, события",
+    "How an AI task is done, in nodes: AI Graph runs it by name": "Как выполняется задача ИИ — узлами; AI Graph запускает её по имени",
+    "Decisions of a character: which task to run and when to switch": "Решения персонажа: какую задачу выполнять и когда сменить",
+    "Task for AI (.vgraph)": "Задача для ИИ (.vgraph)"
   }
 }

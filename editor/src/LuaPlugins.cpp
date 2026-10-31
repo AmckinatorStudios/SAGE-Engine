@@ -1,4 +1,5 @@
 #include "LuaPlugins.h"
+#include "LogicKinds.h"
 
 #include "aigraph/AiGraphExtensions.h"
 
@@ -544,6 +545,7 @@ void UnregisterPanels(Entry& e) {
     // Поля и инструменты графа ИИ держат функции Lua этого плагина — уходят
     // вместе с ним, зарегистрированы ли окна или нет.
     sage::editor::aigraph::RemoveOwner(e.Info.Manifest.Id);
+    sage::editor::logic::RemoveOwner(e.Info.Manifest.Id);
     if (!e.Registered) return;
     for (size_t i = 0; i < e.Panels.size(); ++i) e.Registered->Panels().Unregister(PanelKey(e, i));
     e.Registered = nullptr;

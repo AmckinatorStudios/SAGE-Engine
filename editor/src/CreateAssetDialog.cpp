@@ -9,6 +9,8 @@
 #include "EditorIcons.h"
 #include "EditorPrefs.h"
 #include "FolderColors.h"
+#include "LogicKinds.h"
+#include "sage/core/Paths.h"
 #include "Localization.h"
 #include "Project.h"
 #include "panels/AssetsPanel.h"
@@ -25,7 +27,7 @@ struct State {
     bool Open = false;
     Request Req;
     char Name[128] = {0};
-    Language Lang = Language::Lua;
+    std::string Logic = "lua";   // id вида логики (LogicKinds.h)
     int Color = -1;         // номер цвета палитры; -1 — без цвета
     std::string Error;
     bool CloseRequested = false;   // закрыть снаружи (самопроверка)
@@ -39,15 +41,23 @@ State& S() {
 
 constexpr const char* kPopup = "###create_asset_dialog";
 
-AssetsPanel::CreateKind KindFor(What kind, Language lang) {
+AssetsPanel::CreateKind KindFor(What kind) {
     switch (kind) {
         case What::Folder: return AssetsPanel::CreateKind::Folder;
         case What::Scene: return AssetsPanel::CreateKind::Scene;
         case What::Material: return AssetsPanel::CreateKind::Material;
         case What::TextFile: return AssetsPanel::CreateKind::TextFile;
-        case What::Script:
-        default: return lang == Language::SageLua ? AssetsPanel::CreateKind::SageScript : AssetsPanel::CreateKind::Script;
+        default: return AssetsPanel::CreateKind::None;   // логика — через свой вид
     }
+}
+
+// Выбранный вид логики — из тех, что предлагаются этому запросу; запомненный
+// выбор не годится слоту (слоту Script не предложить граф) — первый из своих.
+const logic::Kind* LogicOf(const State& s) {
+    const std::vector<const logic::Kind*> offered = logic::ForSlot(s.Req.Slot);
+    for (const logic::Kind* k : offered)
+        if (k->Id == s.Logic) return k;
+    return offered.empty() ? nullptr : offered.front();
 }
 
 const char* TitleOf(What kind) {
@@ -72,14 +82,19 @@ const char* IconOf(What kind) {
     }
 }
 
-// Выбор одного из двух — карточкой с объяснением: «Lua» и «SAGE Lua» по одному
+// Выбор вида — карточкой с объяснением: «Lua» и «SAGE Lua» по одному
 // названию не различить, а разница в том, ЧТО проверяется до запуска.
+//
+// NoAutoClosePopups ОБЯЗАТЕЛЕН: Selectable прямо в модальном окне по
+// умолчанию закрывает это окно. Щелчок по языку не выбирал его, а захлопывал
+// «Новый скрипт» — выбрать язык было нельзя вовсе.
 bool Choice(const char* id, const char* title, const char* note, bool selected) {
     ImGui::PushID(id);
     const float w = ImGui::GetContentRegionAvail().x;
     const float h = ImGui::GetTextLineHeightWithSpacing() * 2.0f + ImGui::GetStyle().FramePadding.y * 2.0f;
     const ImVec2 at = ImGui::GetCursorScreenPos();
-    const bool pressed = ImGui::Selectable("##choice", selected, 0, ImVec2(w, h));
+    const bool pressed =
+        ImGui::Selectable("##choice", selected, ImGuiSelectableFlags_NoAutoClosePopups, ImVec2(w, h));
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float pad = ImGui::GetStyle().FramePadding.x;
     dl->AddText(ImVec2(at.x + pad, at.y + ImGui::GetStyle().FramePadding.y), ImGui::GetColorU32(ImGuiCol_Text), title);
@@ -99,8 +114,7 @@ void Open(const Request& request) {
     s.Color = -1;
     std::snprintf(s.Name, sizeof(s.Name), "%s", request.Name.c_str());
     // Язык скрипта — привычка человека, а не свойство проекта: запоминается.
-    s.Lang = sage::editor::prefs::GetString("create.script_language", "lua") == "slua" ? Language::SageLua
-                                                                                         : Language::Lua;
+    s.Logic = sage::editor::prefs::GetString("create.script_language", "lua");
 }
 
 bool IsOpen() { return S().Open || S().Pending; }
@@ -122,9 +136,23 @@ void Draw(EditorHost& host) {
         return;
     }
 
+    const logic::Kind* lk = s.Req.Kind == What::Script ? LogicOf(s) : nullptr;
     fs::path dir = s.Req.Dir;
-    if (dir.empty() && host.CurrentProject().Loaded())
-        dir = DefaultDir(host.CurrentProject().AssetsDir(), s.Req.Kind);
+    if (host.CurrentProject().Loaded()) {
+        const fs::path assets = host.CurrentProject().AssetsDir();
+        if (lk && !lk->Folder.empty()) {
+            const fs::path own = assets / sage::PathFromUtf8(lk->Folder);
+            // Своя папка у вида — по умолчанию; у графа, которого ищут по
+            // имени, — всегда (вне её библиотека ИИ его не найдёт).
+            bool inside = false;
+            std::error_code ec;
+            const fs::path rel = fs::relative(dir, own, ec);
+            if (!dir.empty() && !ec && !rel.empty() && *rel.begin() != "..") inside = true;
+            if (dir.empty() || (lk->OwnFolderOnly && !inside)) dir = own;
+        } else if (dir.empty()) {
+            dir = DefaultDir(assets, s.Req.Kind);
+        }
+    }
 
     EditorIcons::Inline(IconOf(s.Req.Kind));
     ImGui::SameLine(0.0f, 0.0f);
@@ -145,13 +173,12 @@ void Draw(EditorHost& host) {
     if (s.Req.Kind == What::Script) {
         ImGui::Spacing();
         ImGui::TextDisabled("%s", T("Language"));
-        if (Choice("lua", "Lua (.lua)", T("Plain Lua: quick to write, errors show up while the game runs"),
-                   s.Lang == Language::Lua))
-            s.Lang = Language::Lua;
-        if (Choice("slua", "SAGE Lua (.slua)",
-                   T("Lua with types and classes: mistakes are caught before the script runs"),
-                   s.Lang == Language::SageLua))
-            s.Lang = Language::SageLua;
+        for (const logic::Kind* k : logic::ForSlot(s.Req.Slot))
+            if (Choice(k->Id.c_str(), T(k->Title.c_str()), T(k->Note.c_str()), lk == k)) {
+                s.Logic = k->Id;
+                lk = k;
+            }
+        if (!lk) ImGui::TextDisabled("%s", T("No kinds of logic for this slot"));
     }
 
     if (s.Req.Kind == What::Folder) {
@@ -183,7 +210,7 @@ void Draw(EditorHost& host) {
 
     // Что получится и где — до нажатия: расширение и папку видно заранее.
     ImGui::Spacing();
-    const std::string file = FileName(s.Req.Kind, s.Lang, s.Name[0] ? s.Name : "…");
+    const std::string file = FileName(s.Req.Kind, lk ? lk->Ext : std::string(), s.Name[0] ? s.Name : "…");
     std::string where = dir.filename().string();
     if (host.CurrentProject().Loaded()) {
         std::error_code ec;
@@ -202,9 +229,15 @@ void Draw(EditorHost& host) {
         std::error_code mk;
         fs::create_directories(dir, mk);
         fs::path created;
-        if (AssetsPanel::CreateAsset(KindFor(s.Req.Kind, s.Lang), s.Name, dir, created, s.Error)) {
-            if (s.Req.Kind == What::Script)
-                sage::editor::prefs::SetString("create.script_language", s.Lang == Language::SageLua ? "slua" : "lua");
+        bool made = false;
+        if (s.Req.Kind == What::Script) {
+            if (!lk || !lk->Create) s.Error = T("Choose a language");
+            else made = lk->Create(s.Name, dir, created, s.Error);
+        } else {
+            made = AssetsPanel::CreateAsset(KindFor(s.Req.Kind), s.Name, dir, created, s.Error);
+        }
+        if (made) {
+            if (lk) sage::editor::prefs::SetString("create.script_language", lk->Id);
             if (s.Req.Kind == What::Folder && s.Color >= 0) {
                 const auto palette = sage::editor::foldercolors::Palette();
                 if (s.Color < (int)palette.size())
@@ -215,6 +248,7 @@ void Draw(EditorHost& host) {
             if (host.CurrentProject().Loaded())
                 sage::AssetDatabase::Instance().ScanProject(host.CurrentProject().Dir().string());
             if (s.Req.Done) s.Req.Done(created);
+            if (lk && lk->Open && s.Req.OpenAfter) lk->Open(host, created);
             host.SetStatusMessage(T("Created: ") + created.filename().string());
             s.Open = false;
             ImGui::CloseCurrentPopup();

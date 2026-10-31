@@ -199,6 +199,9 @@ bool Project::SetStartScene(const std::string& name, std::string& error) {
             }
         }
     }
+    // Файла нет (удалили руками) или в нём не объект — начинаем с пустого:
+    // value() у null бросает исключение и ронял редактор целиком.
+    if (!j.is_object()) j = json::object();
     j["sage_project_version"] = j.value("sage_project_version", 1);
     j["name"] = m_name;
     j["startScene"] = name;
