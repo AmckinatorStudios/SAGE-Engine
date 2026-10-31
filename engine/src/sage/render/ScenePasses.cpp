@@ -21,6 +21,7 @@ namespace sage::render {
 void RenderShadowDepth(ShadowMap& shadows, Scene& scene, sage::ecs::RenderBatch& batch,
                        int screenWidth, int screenHeight, const DepthDrawCallback& extra) {
     SAGE_PROFILE("Тени");
+    shadows.SetSunAngle(scene.Lighting.Shadows.SunAngle);
 
     for (int c = 0; c < shadows.CascadeCount(); ++c) {
         shadows.BeginRender(c);

@@ -177,6 +177,39 @@ void TestShadowSoftness(FrameRenderer& r, Scene& scene) {
     Check(smoothShare > 85.0, "кромка тени фильтруется, а не ступенчатая");
 }
 
+// --- Полутень по расстоянию до заслона --------------------------------------
+//
+// Раньше фильтр тени был одного радиуса везде и от размера солнца не зависел:
+// тень одинаково мылилась у основания предмета и вдали. Теперь ширина полутени
+// = расстояние до заслона × угловой размер солнца. Проверка: при большом солнце
+// плавных переходов в кадре заметно больше, чем при нулевом, а у основания
+// (там, где предмет касается земли) кромка остаётся резкой.
+int SoftEdgePixels(const Image& frame) {
+    int soft = 0;
+    for (int y = frame.Height / 2; y < frame.Height; ++y)
+        for (int x = 0; x + 1 < frame.Width; ++x) {
+            const int a = frame.Pixels[(size_t)(y * frame.Width + x) * 3];
+            const int b = frame.Pixels[(size_t)(y * frame.Width + x + 1) * 3];
+            const int d = std::abs(a - b);
+            if (d >= 3 && d <= 18) ++soft;
+        }
+    return soft;
+}
+
+void TestContactHardening(FrameRenderer& r, Scene& scene) {
+    r.Shadow.SetSunAngle(0.0f);
+    const Image hard = RenderFrame(r, scene, PerspectiveProj(), BaseChain(), kW, kH, nullptr, 12.0f);
+    r.Shadow.SetSunAngle(3.0f);
+    const Image soft = RenderFrame(r, scene, PerspectiveProj(), BaseChain(), kW, kH, nullptr, 12.0f);
+    r.Shadow.SetSunAngle(0.8f);
+    const int h = SoftEdgePixels(hard), s = SoftEdgePixels(soft);
+    std::printf("    полутень: плавных переходов при солнце 0° — %d, при 3° — %d\n", h, s);
+    // Предметы сцены невысокие, и до заслона недалеко: полутень растёт заметно,
+    // но не в разы. Старый фильтр от размера солнца не зависел вовсе — числа
+    // совпадали, поэтому порог в 5% честно отделяет одно от другого.
+    Check(s * 20 > h * 21, "большое солнце даёт широкую полутень вдали от заслона");
+}
+
 // --- Каскадные тени --------------------------------------------------------
 
 // Длинная сцена: три широкие стены на разной дальности, каждая кладёт на землю
@@ -515,6 +548,7 @@ void TestFoliageShadows(FrameRenderer& r) {
 
 void RunShadowChecks(FrameRenderer& r, Scene& scene) {
     TestShadowSoftness(r, scene);
+    TestContactHardening(r, scene);
     TestShadowCascades(r);
     TestLocalShadows(r);
     TestManyAndWeakLamps(r);

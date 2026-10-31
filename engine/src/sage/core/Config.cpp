@@ -126,11 +126,11 @@ const Profile& ProfileOf(QualityPreset p) {
     // проходов геометрии. Объём профиль не включает — его включает игра, — но
     // задаёт его цену (сторона буфера и шаги марша).
     static const Profile table[kQualityPresetCount] = {
-        /* Minimal */ {false, 512, 1, 60.0f, false, 512, 0, 0.5f, false, false, false, 0.5f, 16, 24},
-        /* Low     */ {false, 512, 1, 80.0f, false, 512, 0, 0.75f, false, true, false, 0.5f, 20, 32},
-        /* Medium  */ {true, 1024, 1, 100.0f, false, 1024, 0, 1.0f, true, true, true, 0.5f, 28, 40},
-        /* High    */ {true, 2048, 3, 120.0f, true, 2048, 0, 1.0f, true, true, true, 1.0f, 32, 48},
-        /* Ultra   */ {true, 4096, 3, 200.0f, true, 4096, 4, 1.0f, true, true, true, 1.0f, 48, 64},
+        /* Minimal */ {false, 512, 1, 60.0f, false, 512, 0, 0.5f, false, false, false, 0.5f, 12, 16},
+        /* Low     */ {false, 512, 1, 80.0f, false, 512, 0, 0.75f, false, true, false, 0.5f, 16, 24},
+        /* Medium  */ {true, 1024, 1, 100.0f, false, 1024, 0, 1.0f, true, true, true, 0.5f, 20, 32},
+        /* High    */ {true, 2048, 3, 120.0f, true, 2048, 0, 1.0f, true, true, true, 0.5f, 24, 40},
+        /* Ultra   */ {true, 4096, 3, 200.0f, true, 4096, 4, 1.0f, true, true, true, 1.0f, 32, 56},
     };
     return table[std::clamp((int)p, 0, kQualityPresetCount - 1)];
 }
@@ -304,6 +304,7 @@ bool EngineConfig::LoadFile(const std::string& path) {
     DebugView          = pp.value("debugView", DebugView);
     VolumetricMaxDistance = pp.value("volumetricMaxDistance", VolumetricMaxDistance);
     VolumetricHeightFalloff = pp.value("volumetricHeightFalloff", VolumetricHeightFalloff);
+    VolumetricSkyScatter = pp.value("volumetricSkyScatter", VolumetricSkyScatter);
     CloudSteps         = pp.value("cloudSteps", CloudSteps);
     CloudCoverage      = pp.value("cloudCoverage", CloudCoverage);
     CloudBottom        = pp.value("cloudBottom", CloudBottom);
@@ -358,6 +359,7 @@ std::string EngineConfig::ToJsonString() const {
         {"volumetricIntensity", VolumetricIntensity}, {"volumetricSteps", VolumetricSteps},
         {"volumetricMaxDistance", VolumetricMaxDistance},
         {"volumetricHeightFalloff", VolumetricHeightFalloff},
+        {"volumetricSkyScatter", VolumetricSkyScatter},
         {"cloudSteps", CloudSteps}, {"cloudCoverage", CloudCoverage},
         {"cloudBottom", CloudBottom}, {"cloudTop", CloudTop},
         {"volumetricScale", VolumetricScale},
