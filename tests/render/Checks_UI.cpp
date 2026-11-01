@@ -24,6 +24,9 @@
 #include <memory>
 
 #include "sage/render/Framebuffer.h"
+#include "sage/render/RenderTexture.h"
+#include "sage/render/ResourceManager.h"
+#include "sage/render/Texture.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Scene.h"
 #include "sage/ui/UI.h"
@@ -624,6 +627,53 @@ void CheckImageRotates(UIRenderer& ui) {
     fs::remove_all(dir, ec);
 }
 
+// Картинка в sRGB-формате (холст, собранный кодом, текстура материала) в
+// интерфейсе — того же цвета, что её пиксели. Выборка из sRGB-текстуры отдаёт
+// линейные значения, а интерфейс пишет в кадр без кодирования: серый 128 без
+// обратного перевода выходил примерно 55 — иконки предметов темнели.
+void CheckSrgbImageKeepsItsColour(UIRenderer& ui) {
+    const int W = 8, H = 8;
+    std::vector<unsigned char> px((size_t)W * H * 4);
+    for (size_t i = 0; i < px.size(); i += 4) {
+        px[i] = 128;
+        px[i + 1] = 200;
+        px[i + 2] = 60;
+        px[i + 3] = 255;
+    }
+    const std::string name = "rendertest_srgb_probe";
+    ResourceManager::Instance().RegisterTexture(
+        name, std::make_shared<Texture>(px.data(), W, H, TextureFilter::Nearest, false, /*srgb=*/true));
+    Scene scene("srgb");
+    GameObject e = Screen(scene, "Pic", {60.0f, 60.0f});
+    sage::ui::Image img;
+    img.Path = name;
+    scene.Registry().emplace<sage::ui::Image>(e.Entity(), img);
+    const Image shot = RenderUI(ui, scene);
+    const size_t i = ((size_t)30 * shot.Width + 30) * 3;
+    const int r = shot.Pixels[i], g = shot.Pixels[i + 1], b = shot.Pixels[i + 2];
+    std::printf("    sRGB-картинка в интерфейсе: %d %d %d (ждём 128 200 60)\n", r, g, b);
+    Check(std::abs(r - 128) <= 6 && std::abs(g - 200) <= 6 && std::abs(b - 60) <= 6,
+          "sRGB-картинка в интерфейсе того же цвета, что её пиксели");
+}
+
+// Картинка из съёмки в текстуру ("rt:<имя>") остаётся съёмкой и после того,
+// как интерфейс пересинхронизирует картинку элемента. Раньше пересинхронизация
+// искала её файлом на диске и подменяла белой заглушкой.
+void CheckRenderTextureImageSurvivesResync(UIRenderer& ui) {
+    sage::render::RenderTexture* rt = &sage::render::RenderTextureRegistry::Instance().GetOrCreate("rendertest_rt_image", 16, 16);
+    Scene scene("rt");
+    GameObject e = Screen(scene, "Pic", {40.0f, 40.0f});
+    sage::ui::Image img;
+    img.Path = "rt:rendertest_rt_image";
+    scene.Registry().emplace<sage::ui::Image>(e.Entity(), img);
+    RenderUI(ui, scene);
+    const auto& after = scene.Registry().get<sage::ui::Image>(e.Entity());
+    const auto expected = sage::render::RenderTextureRegistry::Resolve("rt:rendertest_rt_image");
+    std::printf("    картинка rt: после синхронизации — %s\n",
+                after.Tex && after.Tex == expected ? "съёмка" : "НЕ съёмка");
+    Check(rt != nullptr && after.Tex && after.Tex == expected, "картинка rt: остаётся съёмкой");
+}
+
 } // namespace
 
 // --- Тень и обводка текста ---------------------------------------------------
@@ -796,6 +846,8 @@ void RunUIChecks() {
     CheckFontSizeMatchesTheNumber(ui);
     CheckSharpFontStillFollowsTheSize(ui);
     CheckImageRotates(ui);
+    CheckSrgbImageKeepsItsColour(ui);
+    CheckRenderTextureImageSurvivesResync(ui);
     CheckLabelShadowAndOutline(ui);
     CheckPressedLookReplacesFill(ui);
     CheckNineSliceCornersKeepTheirSize(ui);

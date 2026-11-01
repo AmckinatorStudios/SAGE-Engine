@@ -237,6 +237,9 @@ public:
                         const std::vector<glm::mat4>& bones,
                         const std::vector<float>* morphWeights = nullptr) const;
 
+    // Подмеши с материалами из файла (только чтение: проверки и инструменты).
+    const std::vector<SkinnedSubMesh>& SubMeshes() const { return m_subMeshes; }
+
 private:
     // Сборка модели из уже разобранных данных (ModelData). Частный член, а не
     // свободная функция: только отсюда заполняются приватные поля, и открывать

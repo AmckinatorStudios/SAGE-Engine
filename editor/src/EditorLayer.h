@@ -72,6 +72,7 @@ namespace sage { class Application; }
 #include "panels/AnimationPanel.h"
 #include "panels/TweenPanel.h"
 #include "panels/NineSlicePanel.h"
+#include "panels/SpriteSheetPanel.h"
 #include "ui/CommandPalette.h"
 #include "ui/Commands.h"
 #include "panels/DialogsPanel.h"
@@ -752,6 +753,8 @@ private:
     // Редактор девятины (см. panels/NineSlicePanel.h) — отдельный инструмент:
     // нарезку подбирают подолгу и по самой картинке, а не по числам вслепую.
     NineSlicePanel m_nineSlice;
+    // Нарезка листа спрайтов (panels/SpriteSheetPanel.h) — окно из реестра.
+    SpriteSheetPanel m_spriteSheet;
 
     // Инструмент анимации (см. panels/AnimationPanel.h). Панель раскладки, а не
     // инструмент под задачу: анимацию правят рядом со сценой и рядом с

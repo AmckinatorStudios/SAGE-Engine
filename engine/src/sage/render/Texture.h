@@ -85,6 +85,12 @@ public:
     // Цвет в sRGB (декодируется на выборке). ReplacePixels его сохраняет.
     bool Srgb() const { return m_srgb; }
 
+    // Строки снизу вверх (так движок кладёт картинки файлов и холсты — под
+    // UV, где v=0 внизу). false — картинка как в файле, сверху вниз: так её
+    // берёт модель со скелетом, читающая UV glTF без переворота.
+    bool FlippedRows() const { return m_flippedRows; }
+    void SetFlippedRows(bool on) { m_flippedRows = on; }
+
     // Максимальный уровень анизотропии, который поддерживает текущая
     // видеокарта/драйвер (обычно 4, 8 или 16).
     static float MaxSupportedAnisotropy();
@@ -108,5 +114,6 @@ private:
     int m_width = 0, m_height = 0, m_channels = 0;
     bool m_hasMipmaps = true;
     bool m_srgb = false;
+    bool m_flippedRows = true;
     TextureFilter m_filter = TextureFilter::Trilinear;
 };

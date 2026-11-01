@@ -39,6 +39,7 @@
 #include "sage/render/ShadowMap.h"
 #include "sage/gi/GI.h"
 #include "sage/render/SkinnedModel.h"
+#include "sage/render/Texture.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/rhi/Conformance.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -776,8 +777,42 @@ void TestSparseMorphLoads() {
     fs::remove_all(dir, ec);
 }
 
+// Картинки модели со скелетом лежат сверху вниз (под UV glTF), картинки
+// движка — снизу вверх. Материал сущности, назначенный такой модели, обязан
+// знать разницу: без неё скин персонажа ложился вверх ногами (лицо — на
+// затылке, рубашка — на ногах).
+void TestSkinnedTexturesKnowTheirRowOrder() {
+    std::unique_ptr<sage::render::SkinnedModel> model;
+    try {
+        model = sage::render::SkinnedModel::Load(
+#ifdef SAGE_TEST_MODEL
+            SAGE_TEST_MODEL
+#else
+            "assets/test_model.glb"
+#endif
+        );
+    } catch (const std::exception& e) {
+        std::printf("       SkinnedModel::Load: %s\n", e.what());
+    }
+    if (!model) { Check(false, "тестовая модель загрузилась"); return; }
+    bool anyTexture = false, allTopDown = true;
+    for (const auto& sub : model->SubMeshes()) {
+        if (!sub.Material.Albedo) continue;
+        anyTexture = true;
+        if (sub.Material.Albedo->FlippedRows()) allTopDown = false;
+    }
+    const unsigned char px[4] = {255, 255, 255, 255};
+    Texture canvas(px, 1, 1);
+    std::printf("       текстуры модели: %s, холст движка снизу вверх: %s\n",
+                anyTexture ? (allTopDown ? "сверху вниз" : "ПЕРЕВЁРНУТЫ") : "нет",
+                canvas.FlippedRows() ? "да" : "нет");
+    Check(!anyTexture || allTopDown, "картинки модели со скелетом помечены «сверху вниз»");
+    Check(canvas.FlippedRows(), "картинка движка помечена «снизу вверх»");
+}
+
 void RunAnimationChecks(FrameRenderer& r) {
     TestSparseMorphLoads();
+    TestSkinnedTexturesKnowTheirRowOrder();
     TestMorphTargets(r);
     TestAnimationUsesMeshModel(r);
     TestSkinnedDebugView(r);

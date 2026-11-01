@@ -57,6 +57,15 @@ in vec2 vParams;
 out vec4 FragColor;
 uniform sampler2D uTex;
 uniform int uMode; // 0 — сплошные квады + глифы шрифта; 1 — текстурная картинка
+// Картинка хранится в sRGB-формате (цвет, собранный кодом, текстура
+// материала): выборка отдаёт ЛИНЕЙНЫЕ значения, а интерфейс пишет в кадр как
+// есть, без кодирования. Без обратного перевода такая картинка в интерфейсе
+// заметно темнее себя самой.
+uniform int uTexSrgb;
+vec3 LinearToSrgb(vec3 c) {
+    c = clamp(c, 0.0, 1.0);
+    return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
+}
 
 // Знаковое расстояние до контура прямоугольника с радиусом скругления r:
 // отрицательное внутри, ноль на контуре.
@@ -68,7 +77,9 @@ float RoundedBoxSDF(vec2 p, vec2 halfSize, float r) {
 void main() {
     vec4 col = vColor;
     if (uMode == 1) {
-        col *= texture(uTex, vUV);            // картинка с тонированием
+        vec4 t = texture(uTex, vUV);
+        if (uTexSrgb == 1) t.rgb = LinearToSrgb(t.rgb);
+        col *= t;                              // картинка с тонированием
     } else if (vUV.x >= 0.0) {
         col.a *= texture(uTex, vUV).r;        // глиф: покрытие из атласа
     }
@@ -751,6 +762,7 @@ void UIRenderer::End() {
         }
         if (seg.Image) {
             m_shader.SetInt("uMode", 1);
+            m_shader.SetInt("uTexSrgb", seg.Image->Srgb() ? 1 : 0);
             seg.Image->Bind(0);
         } else {
             m_shader.SetInt("uMode", 0);

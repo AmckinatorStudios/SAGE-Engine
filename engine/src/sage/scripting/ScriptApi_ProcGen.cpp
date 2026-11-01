@@ -306,6 +306,18 @@ function grid(width, depth, cols, rows, height)
     return wrap_mesh(MESH.Grid(width, depth or width, cols, rows or cols, height))
 end
 
+---Объёмный спрайт: кусок картинки, выдавленный в толщину по альфе (меч,
+---ключ, листок). source — холст texture(...)/texture.load или путь;
+---opts = {x, y, w, h, depth = 1, cutoff = 0.5}, кусок — от левого верхнего угла.
+---Меш: длинная сторона = 1, центр в нуле, лицом к +Z. Материал — с вырезом по альфе.
+---@param source Texture|string
+---@param opts? table
+---@return Mesh
+function extrude(source, opts)
+    local src = type(source) == "table" and rawget(source, "_canvas") or source
+    return wrap_mesh(MESH.Extrude(src, opts))
+end
+
 ---Коробка: одно число — куб, три — размеры по осям.
 ---@param w number
 ---@param h? number
@@ -359,6 +371,7 @@ local function wrap_texture(c, name)
     t.get = function(x, y) return c:GetPixel(x, y) end
     t.apply = function() c:Apply(); dirty = false end
     rawset(t, "_flush", function() if dirty then c:Apply(); dirty = false end end)
+    rawset(t, "_canvas", c)
     return setmetatable(t, {
         __index = function(_, k)
             if k == "name" then return name end

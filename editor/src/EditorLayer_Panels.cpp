@@ -184,6 +184,17 @@ void EditorLayer::RegisterPanels() {
         m_panelRegistry.Register(std::move(s));
     }
     {
+        // Нарезка листа спрайтов — своё окно (рисует себя само).
+        PanelSpec s;
+        s.Id = "SpriteSheet";
+        s.Title = "Sprite sheet";
+        s.Icon = "grid";
+        s.Section = PanelSection::Tools;
+        s.WrapWindow = false;
+        s.Draw = [this](EditorHost& host, bool* open, const std::string&) { m_spriteSheet.Draw(host, open); };
+        m_panelRegistry.Register(std::move(s));
+    }
+    {
         PanelSpec s;
         s.Id = "AiDebugger";
         s.Title = "AI Debugger";

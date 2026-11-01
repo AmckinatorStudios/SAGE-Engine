@@ -276,4 +276,71 @@ MeshBuilder MeshBuilder::Cylinder(float radius, float height, int segments, bool
     return b;
 }
 
+MeshBuilder MeshBuilder::ExtrudeImage(const unsigned char* rgba, int W, int H, bool rowsBottomUp, int rx,
+                                      int ry, int rw, int rh, float depthPixels, float alphaCutoff) {
+    MeshBuilder b;
+    rx = std::max(0, rx);
+    ry = std::max(0, ry);
+    rw = std::min(rw, W - rx);
+    rh = std::min(rh, H - ry);
+    if (!rgba || rw <= 0 || rh <= 0) return b;
+    const unsigned char cut = (unsigned char)std::clamp(alphaCutoff * 255.0f, 0.0f, 255.0f);
+    // Пиксель куска (px, py) — px вправо, py вниз от верхнего угла куска.
+    auto row = [&](int py) { return rowsBottomUp ? (H - 1 - (ry + py)) : (ry + py); };
+    auto solid = [&](int px, int py) {
+        if (px < 0 || py < 0 || px >= rw || py >= rh) return false;
+        return rgba[((size_t)row(py) * W + (rx + px)) * 4 + 3] >= cut;
+    };
+    // UV: v считается так же, как строки текстуры на видеокарте.
+    auto uvOf = [&](float px, float py) {
+        const float u = (rx + px) / (float)W;
+        const float imgY = ry + py;   // от верха картинки
+        const float v = rowsBottomUp ? 1.0f - imgY / (float)H : imgY / (float)H;
+        return glm::vec2(u, v);
+    };
+    const float s = 1.0f / (float)std::max(rw, rh);
+    const float hx = rw * 0.5f, hy = rh * 0.5f;
+    const float hz = depthPixels * 0.5f;
+    auto P = [&](float px, float py, float z) { return glm::vec3((px - hx) * s, (hy - py) * s, z * s); };
+
+    // Лицо и оборот — по всему куску.
+    {
+        const glm::vec3 n(0, 0, 1);
+        unsigned a = b.AddVertex(P(0, rh, hz), n, uvOf(0, rh));
+        unsigned c = b.AddVertex(P(rw, rh, hz), n, uvOf(rw, rh));
+        unsigned d = b.AddVertex(P(rw, 0, hz), n, uvOf(rw, 0));
+        unsigned e = b.AddVertex(P(0, 0, hz), n, uvOf(0, 0));
+        b.AddQuad(a, c, d, e);
+        const glm::vec3 m(0, 0, -1);
+        a = b.AddVertex(P(rw, rh, -hz), m, uvOf(rw, rh));
+        c = b.AddVertex(P(0, rh, -hz), m, uvOf(0, rh));
+        d = b.AddVertex(P(0, 0, -hz), m, uvOf(0, 0));
+        e = b.AddVertex(P(rw, 0, -hz), m, uvOf(rw, 0));
+        b.AddQuad(a, c, d, e);
+    }
+    // Бока: грань пикселя наружу, если соседа нет. UV — середина самого
+    // пикселя, чтобы торец был его цвета, а не полосой соседей.
+    for (int py = 0; py < rh; ++py) {
+        for (int px = 0; px < rw; ++px) {
+            if (!solid(px, py)) continue;
+            const glm::vec2 uv = uvOf(px + 0.5f, py + 0.5f);
+            auto side = [&](const glm::vec3& n, glm::vec3 p0, glm::vec3 p1) {
+                // p0 -> p1 — ребро на лице; квад тянется до оборота.
+                const glm::vec3 back(0, 0, -2.0f * hz * s);
+                unsigned a = b.AddVertex(p0 + back, n, uv);
+                unsigned c = b.AddVertex(p1 + back, n, uv);
+                unsigned d = b.AddVertex(p1, n, uv);
+                unsigned e = b.AddVertex(p0, n, uv);
+                b.AddQuad(a, c, d, e);
+            };
+            const float x0 = (float)px, x1 = (float)px + 1, y0 = (float)py, y1 = (float)py + 1;
+            if (!solid(px, py - 1)) side({0, 1, 0}, P(x1, y0, hz), P(x0, y0, hz));    // верх
+            if (!solid(px, py + 1)) side({0, -1, 0}, P(x0, y1, hz), P(x1, y1, hz));   // низ
+            if (!solid(px - 1, py)) side({-1, 0, 0}, P(x0, y0, hz), P(x0, y1, hz));   // лево
+            if (!solid(px + 1, py)) side({1, 0, 0}, P(x1, y1, hz), P(x1, y0, hz));    // право
+        }
+    }
+    return b;
+}
+
 } // namespace sage::render

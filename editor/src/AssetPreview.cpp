@@ -325,7 +325,10 @@ uint64_t AssetPreview::RenderModelCover(const std::string& path, int size, const
     return Render(mesh, materials, size, BoundingRadius(*mesh), key);
 }
 
-void AssetPreview::ReleaseTarget(const std::string& key) { m_targets.erase(key); }
+void AssetPreview::ReleaseTarget(const std::string& key) {
+    m_targets.erase(key);
+    m_outputs.erase(key);
+}
 
 Framebuffer& AssetPreview::TargetFor(const std::string& key, int size) {
     if (key.empty()) {
@@ -340,6 +343,7 @@ Framebuffer& AssetPreview::TargetFor(const std::string& key, int size) {
 // Смена проекта: все именованные буферы — прочь (см. заголовок).
 void AssetPreview::ForgetProject() {
     m_targets.clear();
+    m_outputs.clear();
     // Разборы моделей старого проекта: пути у нового проекта свои, и ответ
     // для «assets/tree.fbx» прошлого проекта лёг бы обложкой чужому файлу.
     m_modelJobs.clear();
@@ -477,6 +481,24 @@ uint64_t AssetPreview::RenderScene(Scene& scene, int size, float fitRadius,
 
     sage::render::RenderSceneColor(scene, m_batch, input);
 
+    // Вывод — как у вьюпорта: тон-маппинг и sRGB. Пустой тракт означает
+    // «только тон-маппинг» (PostChain::Completed).
+    Framebuffer* out = nullptr;
+    if (key.empty()) {
+        if (!m_outFbo) m_outFbo.emplace(size, size);
+        out = &*m_outFbo;
+    } else {
+        auto it = m_outputs.find(key);
+        if (it == m_outputs.end()) it = m_outputs.emplace(key, Framebuffer(size, size)).first;
+        out = &it->second;
+    }
+    out->Resize(size, size);
+    if (!m_post) m_post = std::make_unique<sage::render::PostFX>();
+    out->Bind();
+    m_post->ResetHistory();
+    m_post->Render(target.ColorTexture(), target.DepthTexture(), size, size, proj, view,
+                   sage::render::PostChain{}, out, 0, 0, size, size);
+
     device.BindDefaultFramebuffer();
-    return target.NativeColorTexture();
+    return out->NativeColorTexture();
 }

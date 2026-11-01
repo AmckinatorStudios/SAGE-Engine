@@ -169,3 +169,23 @@ TEST(Paths_root_working_dir_moves_to_a_writable_one) {
 #endif
     fs::remove_all(cfg, ec);
 }
+
+// Плеер, распакованный рядом с папкой игры, находит её сам: проект — в
+// самой папке или в единственной подпапке. Две игры рядом — не угадывает.
+TEST(Paths_find_project_near_the_player) {
+    namespace fs = std::filesystem;
+    const fs::path root = fs::temp_directory_path() / "sage_find_project";
+    fs::remove_all(root);
+    fs::create_directories(root / "game");
+    fs::create_directories(root / "other");
+    { std::ofstream(root / "game" / "project.sageproj") << "{}"; }
+    CHECK_TRUE(sage::FindProjectNear(root) == root / "game");
+    { std::ofstream(root / "project.sageproj") << "{}"; }
+    CHECK_TRUE(sage::FindProjectNear(root) == root);   // своя папка — первой
+    fs::remove(root / "project.sageproj");
+    fs::create_directories(root / "second");
+    { std::ofstream(root / "second" / "project.sageproj") << "{}"; }
+    CHECK_TRUE(sage::FindProjectNear(root).empty());   // две игры — не угадываем
+    CHECK_TRUE(sage::FindProjectNear(root / "nope").empty());
+    fs::remove_all(root);
+}

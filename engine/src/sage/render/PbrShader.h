@@ -86,6 +86,9 @@ uniform vec3 uAlbedoFactor;
 // сдвиг задают в плитках («на треть плитки правее»), а не в долях грани, —
 // иначе смысл числа менялся бы при каждой смене повтора.
 uniform vec2 uUVOffset;
+// 1 — перевернуть v: модель со скелетом читает UV glTF как есть (v=0 —
+// верх картинки), а текстуры движка лежат строками снизу вверх.
+uniform int uFlipV;
 uniform float uMetallic;
 uniform float uRoughness;
 uniform sampler2D uAlbedoMap;
@@ -128,6 +131,7 @@ uniform bool uHasEmissive;
 )") + kPbrSharedGlsl + R"(
 void main() {
     vec2 uv = TexCoords + uUVOffset;
+    if (uFlipV == 1) uv.y = 1.0 - uv.y;
     vec4 base = vec4(uAlbedoFactor, 1.0);
     if (uHasAlbedo) base *= texture(uAlbedoMap, uv);
     // Отсечение по альфе — ДО всей остальной работы: отброшенный пиксель не

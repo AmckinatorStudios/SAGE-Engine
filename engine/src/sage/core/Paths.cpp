@@ -300,4 +300,18 @@ fs::path DefaultProjectsDir() {
     return fs::current_path(ec);
 }
 
+fs::path FindProjectNear(const fs::path& dir) {
+    std::error_code ec;
+    if (dir.empty()) return {};
+    if (fs::exists(dir / "project.sageproj", ec)) return dir;
+    fs::path found;
+    for (fs::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+        if (!it->is_directory(ec)) continue;
+        if (!fs::exists(it->path() / "project.sageproj", ec)) continue;
+        if (!found.empty()) return {};   // две игры рядом — не угадываем
+        found = it->path();
+    }
+    return found;
+}
+
 } // namespace sage

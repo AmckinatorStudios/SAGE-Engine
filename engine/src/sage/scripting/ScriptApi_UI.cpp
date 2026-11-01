@@ -10,6 +10,10 @@
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPresets.h"
+#include "sage/ui/SpriteSheet.h"
+#include "sage/assets/AssetDatabase.h"
+#include "sage/assets/Pack.h"
+#include <stb_image.h>
 #include "sage/scene/SceneLegacyUI.h"
 
 #include <algorithm>
@@ -191,6 +195,30 @@ glm::vec4 PaddingFrom(const sol::object& value, glm::vec4 fallback) {
     return fallback;
 }
 
+} // namespace
+
+namespace {
+// Лист спрайтов для скрипта: путь картинки и её описание.
+struct SheetRef {
+    std::string Path;
+    sage::ui::SpriteSheet Sheet;
+};
+// Описание листа — рядом с НАСТОЯЩИМ файлом картинки (путь проекта ->
+// путь на диске): и прочитать, и записать его надо там, где лежит картинка.
+std::string SheetSidecar(const std::string& path) {
+    return sage::ui::SpriteSheet::SidecarPath(sage::AssetDatabase::Instance().LocatePath(path));
+}
+// Пиксели картинки листа (строки сверху вниз) — для нарезки.
+std::vector<unsigned char> SheetPixels(const std::string& path, int& w, int& h) {
+    int ch = 0;
+    stbi_set_flip_vertically_on_load_thread(false);
+    unsigned char* data =
+        sage::assets::vfs::LoadImage(sage::AssetDatabase::Instance().LocatePath(path), &w, &h, &ch, 4);
+    if (!data) throw std::runtime_error("sprite_sheet: не удалось прочитать картинку '" + path + "'");
+    std::vector<unsigned char> px(data, data + (size_t)w * h * 4);
+    stbi_image_free(data);
+    return px;
+}
 } // namespace
 
 void ScriptEngine::RegisterUIApi() {
@@ -580,6 +608,126 @@ void ScriptEngine::RegisterUIApi() {
         if (!sage::ui::NineSlice::LoadFile(sage::ui::NineSlice::SidecarPath(im->Path), slice, err))
             return false;
         im->SetSlice(slice);
+        return true;
+    });
+
+    // --- Лист спрайтов (sage/ui/SpriteSheet.h) ---------------------------------
+    //
+    // sheet = sprite_sheet("assets/ui/gui.png") — описание из gui.png.sagesheet
+    // (или пустое). Методы через точку: names(), rect(name), grid{...},
+    // auto{...}, set(name, x, y, w, h, slice?), rename, remove, save().
+    // SetUISpriteNamed(obj, path, name) — картинка, кусок и его девятина разом.
+    m_lua.new_usertype<SheetRef>(
+        "SpriteSheetRef", sol::no_constructor,
+        "Names", [](const SheetRef& r, sol::this_state ts) {
+            sol::state_view L(ts);
+            sol::table out = L.create_table();
+            int i = 1;
+            for (const auto& reg : r.Sheet.Regions) out[i++] = reg.Name;
+            return out;
+        },
+        "Count", [](const SheetRef& r) { return (int)r.Sheet.Regions.size(); },
+        "Rect", [](const SheetRef& r, const std::string& name, sol::this_state ts) {
+            sol::state_view L(ts);
+            const sage::ui::SpriteRegion* reg = r.Sheet.Find(name);
+            if (!reg) return sol::make_object(L, sol::lua_nil);
+            sol::table out = L.create_table();
+            out["x"] = reg->Rect.x; out["y"] = reg->Rect.y; out["w"] = reg->Rect.z; out["h"] = reg->Rect.w;
+            if (reg->Slice != glm::vec4(0.0f)) {
+                sol::table sl = L.create_table();
+                for (int k = 0; k < 4; ++k) sl[k + 1] = reg->Slice[k];
+                out["slice"] = sl;
+            }
+            return sol::make_object(L, out);
+        },
+        "Set", [](SheetRef& r, const std::string& name, int x, int y, int w, int h, sol::optional<sol::table> slice) {
+            sage::ui::SpriteRegion reg{name, {x, y, w, h}, glm::vec4(0.0f)};
+            if (slice)
+                for (int k = 0; k < 4; ++k) reg.Slice[k] = slice->get_or(k + 1, 0.0f);
+            r.Sheet.Set(reg);
+        },
+        "Rename", [](SheetRef& r, const std::string& a, const std::string& b) { return r.Sheet.Rename(a, b); },
+        "Remove", [](SheetRef& r, const std::string& a) { return r.Sheet.Remove(a); },
+        "Grid", [](SheetRef& r, sol::table o) {
+            int w = 0, h = 0;
+            const std::vector<unsigned char> px = SheetPixels(r.Path, w, h);
+            sage::ui::SpriteGrid g;
+            g.CellW = o.get_or("w", g.CellW);
+            g.CellH = o.get_or("h", g.CellW);
+            g.PadX = o.get_or("pad_x", o.get_or("pad", 0));
+            g.PadY = o.get_or("pad_y", o.get_or("pad", 0));
+            g.OffX = o.get_or("x", 0);
+            g.OffY = o.get_or("y", 0);
+            g.Prefix = o.get_or("prefix", g.Prefix);
+            g.SkipEmpty = o.get_or("skip_empty", true);
+            return r.Sheet.SliceGrid(w, h, g, px.data(), false);
+        },
+        "Auto", [](SheetRef& r, sol::optional<sol::table> o) {
+            int w = 0, h = 0;
+            const std::vector<unsigned char> px = SheetPixels(r.Path, w, h);
+            const float cut = o ? o->get_or("cutoff", 0.05f) : 0.05f;
+            const int minSize = o ? o->get_or("min", 2) : 2;
+            const std::string prefix = o ? o->get_or("prefix", std::string("sprite")) : std::string("sprite");
+            return r.Sheet.SliceAuto(px.data(), w, h, false, cut, minSize, prefix);
+        },
+        "Save", [](const SheetRef& r) {
+            std::string e;
+            if (!r.Sheet.SaveFile(SheetSidecar(r.Path), e))
+                throw std::runtime_error("sprite_sheet.save: " + e);
+            return true;
+        });
+    Bind("ui", "Sheet", nullptr, [](const std::string& path) {
+        SheetRef r;
+        r.Path = path;
+        std::string err;
+        sage::ui::SpriteSheet::LoadFile(SheetSidecar(path), r.Sheet, err);
+        return r;
+    });
+    // Стиль SAGE — методы через точку: тонкая обёртка над объектом C++.
+    m_lua.script(R"LUA(
+function sprite_sheet(path)
+    local r = sage.ui.Sheet(path)
+    return {
+        path = path,
+        names = function() return r:Names() end,
+        count = function() return r:Count() end,
+        rect = function(name) return r:Rect(name) end,
+        set = function(name, x, y, w, h, slice) r:Set(name, x, y, w, h, slice) end,
+        rename = function(a, b) return r:Rename(a, b) end,
+        remove = function(a) return r:Remove(a) end,
+        grid = function(o) return r:Grid(o) end,
+        auto = function(o) return r:Auto(o) end,
+        save = function() return r:Save() end,
+    }
+end
+)LUA");
+    // Кусок листа по имени — на элемент: картинка, прямоугольник и девятина
+    // (если она у куска есть, картинка ложится девятиной). false — нет куска.
+    Bind("ui", "SetSpriteNamed", "SetUISpriteNamed", [](GameObject& obj, const std::string& path,
+                                                       const std::string& name, sol::optional<bool> sharp) {
+        if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return false;
+        sage::ui::SpriteSheet sheet;
+        std::string err;
+        if (!sage::ui::SpriteSheet::LoadFile(SheetSidecar(path), sheet, err)) return false;
+        const sage::ui::SpriteRegion* r = sheet.Find(name);
+        if (!r) return false;
+        sage::ui::Image& im = obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity());
+        if (im.Path != path) {
+            im.Path = path;
+            im.Filtering = sharp.value_or(true) ? sage::ui::TextureFiltering::Nearest
+                                                : sage::ui::TextureFiltering::Smooth;
+            im.Tex = im.Sharp() ? ResourceManager::Instance().GetTexture(path, TextureFilter::Nearest, false)
+                                : ResourceManager::Instance().GetTexture(path);
+        }
+        im.Sprite = glm::vec4(r->Rect);
+        if (r->Slice != glm::vec4(0.0f)) {
+            sage::ui::NineSlice slice;
+            slice.SetBorder(r->Slice);
+            im.SetSlice(slice);
+            im.Fit = sage::ui::Image::Mode::NineSlice;   // кусок-рамка тянется девятиной
+        } else if (im.Fit == sage::ui::Image::Mode::NineSlice) {
+            im.Fit = sage::ui::Image::Mode::Normal;      // прежняя рамка не держит новый кусок
+        }
         return true;
     });
 

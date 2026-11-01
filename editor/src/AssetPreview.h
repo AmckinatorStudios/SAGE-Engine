@@ -10,6 +10,7 @@
 
 #include "sage/ecs/RenderBatch.h"
 #include "sage/render/Framebuffer.h"
+#include "sage/render/PostFX.h"
 #include "sage/render/Reflection.h"
 #include "sage/render/SkyRenderer.h"
 
@@ -169,6 +170,13 @@ private:
 
     std::optional<Framebuffer> m_fbo;                       // общий, для key == ""
     std::unordered_map<std::string, Framebuffer> m_targets;  // именованные
+    // Готовая картинка превью: HDR-кадр сцены после тон-маппинга и перевода в
+    // sRGB (тот же вывод, что у вьюпорта). Без него обложки и превью
+    // материалов показывали ЛИНЕЙНЫЙ цвет как есть — заметно темнее, чем тот
+    // же материал в сцене.
+    std::optional<Framebuffer> m_outFbo;
+    std::unordered_map<std::string, Framebuffer> m_outputs;
+    std::unique_ptr<sage::render::PostFX> m_post;
     sage::ecs::RenderBatch m_batch;
     // Своё окружение для превью. Без него металл в превью ЧЁРНЫЙ: физически это
     // верно (металлу нечего отражать в пустоте), но бесполезно — а материал

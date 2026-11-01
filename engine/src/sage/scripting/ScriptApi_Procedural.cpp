@@ -8,6 +8,7 @@
 
 #include <stb_image.h>
 
+#include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Pack.h"
 #include "sage/assets/format/MeshFormat.h"
 #include "sage/core/Noise.h"
@@ -503,6 +504,39 @@ void ScriptEngine::RegisterProceduralApi() {
             return true;
         });
     Bind("mesh", "New", nullptr, []() { return MeshBuilder(); });
+    // Объёмный спрайт из картинки: источник — холст (texture(...), texture.load)
+    // или путь к картинке; opts = {x, y, w, h, depth, cutoff} — кусок в
+    // пикселях от левого верхнего угла (по умолчанию вся картинка), толщина в
+    // пикселях, порог альфы.
+    Bind("mesh", "Extrude", nullptr, [](const sol::object& source, sol::optional<sol::table> opts) {
+        std::vector<unsigned char> loaded;
+        const unsigned char* px = nullptr;
+        int W = 0, H = 0;
+        if (source.is<TextureCanvas>()) {
+            const TextureCanvas& c = source.as<const TextureCanvas&>();
+            px = c.Px.data();
+            W = c.W;
+            H = c.H;
+        } else if (source.is<std::string>()) {
+            const std::string path = source.as<std::string>();
+            int ch = 0;
+            stbi_set_flip_vertically_on_load_thread(true);
+            unsigned char* data =
+                sage::assets::vfs::LoadImage(sage::AssetDatabase::Instance().LocatePath(path), &W, &H, &ch, 4);
+            if (!data) throw std::runtime_error("mesh.Extrude: не удалось прочитать '" + path + "'");
+            loaded.assign(data, data + (size_t)W * H * 4);
+            stbi_image_free(data);
+            px = loaded.data();
+        } else {
+            throw std::runtime_error("mesh.Extrude: источник — холст текстуры или путь к картинке");
+        }
+        const sol::table t = opts ? *opts : sol::table();
+        auto num = [&](const char* k, double def) { return opts ? t.get_or(k, def) : def; };
+        const int x = (int)num("x", 0), y = (int)num("y", 0);
+        const int w = (int)num("w", W - x), h = (int)num("h", H - y);
+        return MeshBuilder::ExtrudeImage(px, W, H, true, x, y, w, h, (float)num("depth", 1.0),
+                                         (float)num("cutoff", 0.5));
+    });
     Bind("mesh", "Grid", nullptr, [](float sx, float sz, int rx, int rz, sol::optional<sol::protected_function> h) {
         if (!h) return MeshBuilder::Grid(sx, sz, rx, rz);
         sol::protected_function fn = *h;
@@ -602,7 +636,10 @@ void ScriptEngine::RegisterProceduralApi() {
     Bind("texture", "Load", nullptr, [](const std::string& path, sol::optional<std::string> name) {
         int w = 0, h = 0, ch = 0;
         stbi_set_flip_vertically_on_load_thread(true);
-        unsigned char* data = sage::assets::vfs::LoadImage(path, &w, &h, &ch, 4);
+        // Путь проекта ("assets/...") — как у любой текстуры движка: в
+        // редакторе текущий каталог процесса — не папка проекта.
+        unsigned char* data = sage::assets::vfs::LoadImage(sage::AssetDatabase::Instance().LocatePath(path), &w, &h,
+                                                           &ch, 4);
         if (!data) {
             // Причины может не быть вовсе (файла нет — до stb дело не дошло):
             // nullptr в строку — это падение процесса, а не ошибка скрипта.
