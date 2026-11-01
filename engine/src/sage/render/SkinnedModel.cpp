@@ -349,7 +349,8 @@ void SkinnedModel::Draw(const glm::mat4& entityModel, const glm::mat4& view, con
                         const ShadowBinding& shadows,
                         const sage::render::ReflectionBinding* reflections,
                         const std::vector<float>* morphWeights, int shadingMode,
-                        const sage::render::LightClusters* clusters, sage::gi::GIState* gi) const {
+                        const sage::render::LightClusters* clusters, sage::gi::GIState* gi,
+                        const SkinnedMaterial* overrideMaterial) const {
     const glm::mat4 model = entityModel * m_import;   // настройки импорта (см. SetImportTransform)
     Shader& shader = SkinShader();
     shader.Use();
@@ -407,7 +408,9 @@ void SkinnedModel::Draw(const glm::mat4& entityModel, const glm::mat4& view, con
 
     // Один подмеш: материал на юниты, состояние отсечения — и рисуем.
     auto drawSub = [&](const SkinnedSubMesh& sub) {
-        const SkinnedMaterial& m = sub.Material;
+        // Материал сущности, если он назначен, заменяет материал из файла
+        // целиком: скин персонажа меняется так же, как материал куба.
+        const SkinnedMaterial& m = overrideMaterial ? *overrideMaterial : sub.Material;
         UploadMorphs(shader, sub, morphWeights);
 
         // Двусторонний материал рисуется без отсечения задних граней. У

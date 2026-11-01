@@ -50,8 +50,12 @@ Texture::Texture(const std::string& path, TextureFilter filter, bool generateMip
     unsigned char* data =
         sage::assets::vfs::LoadImage(path, &m_width, &m_height, &m_channels, 0);
     if (!data) {
-        LOG_ERROR("Texture") << "Не удалось загрузить текстуру: " << path << " (" << stbi_failure_reason() << ")";
-        throw std::runtime_error("Не удалось загрузить текстуру: " + path + " (" + stbi_failure_reason() + ")");
+        // Причины может не быть: файла нет — stb его и не открывал. nullptr в
+        // поток и в строку — падение процесса вместо понятной ошибки.
+        const char* why = stbi_failure_reason();
+        const std::string reason = why ? why : "файл не найден или не читается";
+        LOG_ERROR("Texture") << "Не удалось загрузить текстуру: " << path << " (" << reason << ")";
+        throw std::runtime_error("Не удалось загрузить текстуру: " + path + " (" + reason + ")");
     }
 
     Texture2DDesc desc;

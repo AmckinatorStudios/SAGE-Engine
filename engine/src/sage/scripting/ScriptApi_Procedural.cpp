@@ -6,6 +6,9 @@
 #include <memory>
 #include <stdexcept>
 
+#include <stb_image.h>
+
+#include "sage/assets/Pack.h"
 #include "sage/assets/format/MeshFormat.h"
 #include "sage/core/Noise.h"
 #include "sage/render/Material.h"
@@ -134,6 +137,60 @@ struct TextureCanvas {
     }
 };
 
+// Числа поля массива подряд; нет поля — пусто. Ошибка называет поле и место:
+// пачка из тысяч чисел, в которой одно — строка, иначе не найти.
+std::vector<float> ReadFloats(const sol::table& t, const char* field) {
+    std::vector<float> out;
+    sol::optional<sol::table> arr = t[field];
+    if (!arr) return out;
+    const size_t n = arr->size();
+    out.resize(n);
+    for (size_t i = 1; i <= n; ++i) {
+        sol::optional<double> v = arr->raw_get<sol::optional<double>>(i);
+        if (!v) throw std::runtime_error(std::string("mesh.arrays: в '") + field + "' элемент " + std::to_string(i) +
+                                         " не число");
+        out[i - 1] = (float)*v;
+    }
+    return out;
+}
+
+int AddMeshArrays(MeshBuilder& b, const sol::table& t) {
+    const std::vector<float> pos = ReadFloats(t, "position");
+    const std::vector<float> nrm = ReadFloats(t, "normal");
+    const std::vector<float> uv = ReadFloats(t, "uv");
+    const std::vector<float> uv2 = ReadFloats(t, "uv2");
+    const std::vector<float> idx = ReadFloats(t, "index");
+    if (pos.size() % 3 != 0) throw std::runtime_error("mesh.arrays: в 'position' число чисел не кратно трём");
+    const size_t n = pos.size() / 3;
+    auto check = [n](const std::vector<float>& a, size_t per, const char* name) {
+        if (!a.empty() && a.size() != n * per)
+            throw std::runtime_error(std::string("mesh.arrays: в '") + name + "' " + std::to_string(a.size()) +
+                                     " чисел, а вершин " + std::to_string(n) + " (нужно " + std::to_string(n * per) +
+                                     ")");
+    };
+    check(nrm, 3, "normal");
+    check(uv, 2, "uv");
+    check(uv2, 2, "uv2");
+    std::vector<Vertex> verts(n);
+    for (size_t i = 0; i < n; ++i) {
+        Vertex& v = verts[i];
+        v.Position = glm::vec3(pos[i * 3], pos[i * 3 + 1], pos[i * 3 + 2]);
+        if (!nrm.empty()) v.Normal = glm::vec3(nrm[i * 3], nrm[i * 3 + 1], nrm[i * 3 + 2]);
+        if (!uv.empty()) v.TexCoords = glm::vec2(uv[i * 2], uv[i * 2 + 1]);
+        if (!uv2.empty()) v.TexCoords2 = glm::vec2(uv2[i * 2], uv2[i * 2 + 1]);
+    }
+    std::vector<unsigned int> indices(idx.size());
+    for (size_t i = 0; i < idx.size(); ++i) {
+        const float f = idx[i];
+        if (f < 1.0f || f > (float)n) throw std::runtime_error("mesh.arrays: индекс " + std::to_string((long long)f) +
+                                                               " вне пачки из " + std::to_string(n) + " вершин");
+        indices[i] = (unsigned int)f - 1u;
+    }
+    const int first = (int)b.VertexCount() + 1;
+    if (!b.AddArrays(verts, indices)) throw std::runtime_error("mesh.arrays: число индексов не кратно трём");
+    return first;
+}
+
 glm::vec4 ToColor(const sol::object& o) {
     if (o.is<glm::vec4>()) return o.as<glm::vec4>();
     if (o.is<glm::vec3>()) return glm::vec4(o.as<glm::vec3>(), 1.0f);
@@ -234,6 +291,35 @@ void ScriptEngine::RegisterProceduralApi() {
         "Hash", [](const NoiseGen& g, int x, sol::optional<int> y, sol::optional<int> z) {
             return g.Src.Hash(x, y.value_or(0), z.value_or(0));
         },
+        // Шум сразу сеткой: nx×ny×nz точек с шагом step от (x, y, z); порядок —
+        // x быстрее всего, затем y, затем z. Рельеф участка или поле пещер —
+        // один вызов вместо десятков тысяч: на таких объёмах переход Lua -> C++
+        // на каждую точку стоил дороже самого шума.
+        // mode: "fbm" (по умолчанию, как вызов генератора), "ridged", "raw".
+        "Grid", [](sol::this_state ts, const NoiseGen& g, float x0, float y0, float z0, int nx, int ny, int nz,
+                   sol::optional<float> step, sol::optional<std::string> mode) {
+            if (nx < 1 || ny < 1 || nz < 1 || (long long)nx * ny * nz > 4'000'000)
+                throw std::runtime_error("noise.grid: размер сетки от 1 до 4 миллионов точек");
+            const float st = step.value_or(1.0f);
+            const std::string m = mode.value_or("fbm");
+            const int kind = m == "fbm" ? 0 : m == "ridged" ? 1 : m == "raw" ? 2 : -1;
+            if (kind < 0) throw std::runtime_error("noise.grid: неизвестный режим '" + m + "' (fbm/ridged/raw)");
+            sol::state_view L(ts);
+            sol::table out = L.create_table(nx * ny * nz, 0);
+            int i = 1;
+            for (int k = 0; k < nz; ++k)
+                for (int j = 0; j < ny; ++j)
+                    for (int a = 0; a < nx; ++a) {
+                        const glm::vec3 p = g.P(x0 + a * st, y0 + j * st, z0 + k * st);
+                        float v;
+                        if (kind == 0) v = sage::noise::Fbm(g.Src, g.Type, p, g.Frac);
+                        else if (kind == 1) v = sage::noise::Ridged(g.Src, g.Type, p, g.Frac);
+                        else v = g.Src.Sample(g.Type, p.x * g.Frac.Frequency, p.y * g.Frac.Frequency,
+                                              p.z * g.Frac.Frequency);
+                        out.raw_set(i++, v);
+                    }
+            return out;
+        },
         "seed", sol::property([](const NoiseGen& g) { return (int)g.Src.Seed(); },
                               [](NoiseGen& g, int s) { g.Src.Reseed((uint32_t)s); }),
         "octaves", sol::property([](const NoiseGen& g) { return g.Frac.Octaves; },
@@ -327,9 +413,19 @@ void ScriptEngine::RegisterProceduralApi() {
     // --- Меш, собранный кодом ---------------------------------------------------
     m_lua.new_usertype<MeshBuilder>(
         "MeshBuilder", sol::no_constructor,
-        "Vertex", [](MeshBuilder& b, const glm::vec3& p, sol::optional<glm::vec3> n, sol::optional<glm::vec2> uv) {
-            return (int)b.AddVertex(p, n.value_or(glm::vec3(0.0f)), uv.value_or(glm::vec2(0.0f))) + 1;
+        "Vertex", [](MeshBuilder& b, const glm::vec3& p, sol::optional<glm::vec3> n, sol::optional<glm::vec2> uv,
+                     sol::optional<glm::vec2> uv2) {
+            Vertex v{};
+            v.Position = p;
+            v.Normal = n.value_or(glm::vec3(0.0f));
+            v.TexCoords = uv.value_or(glm::vec2(0.0f));
+            v.TexCoords2 = uv2.value_or(glm::vec2(0.0f));
+            return (int)b.AddVertex(v) + 1;
         },
+        // Пачка массивами: {position = {x,y,z, ...}, normal = {...}, uv = {...},
+        // uv2 = {...}, index = {1,2,3, ...}}; индексы — с единицы от первой
+        // вершины пачки. Возвращает номер первой вершины пачки в меше.
+        "Arrays", [](MeshBuilder& b, const sol::table& t) { return AddMeshArrays(b, t); },
         "Triangle", [](MeshBuilder& b, int a, int c, int d) {
             if (!b.AddTriangle((unsigned)(a - 1), (unsigned)(c - 1), (unsigned)(d - 1)))
                 throw std::runtime_error("mesh:Triangle: номер вершины вне меша");
@@ -353,6 +449,9 @@ void ScriptEngine::RegisterProceduralApi() {
         },
         "SetUV", [](MeshBuilder& b, int i, const glm::vec2& uv) {
             if (i >= 1 && (size_t)i <= b.VertexCount()) b.At((unsigned)(i - 1)).TexCoords = uv;
+        },
+        "SetUV2", [](MeshBuilder& b, int i, const glm::vec2& uv) {
+            if (i >= 1 && (size_t)i <= b.VertexCount()) b.At((unsigned)(i - 1)).TexCoords2 = uv;
         },
         "RecalculateNormals", [](MeshBuilder& b, sol::optional<bool> smooth) { b.RecalculateNormals(smooth.value_or(true)); },
         "Deform", [](MeshBuilder& b, sol::protected_function fn) {
@@ -494,6 +593,29 @@ void ScriptEngine::RegisterProceduralApi() {
         c.W = w;
         c.H = h;
         c.Px.assign((size_t)w * h * 4, 255);
+        return c;
+    });
+    // Картинка с диска на холст: её пиксели читаются (GetPixel) и правятся —
+    // атлас из отдельных картинок, иконка из граней, перекраска по маске.
+    // Строки — снизу вверх, как у холста из New: загруженная и сразу
+    // отправленная на видеокарту картинка выглядит так же, как исходная.
+    Bind("texture", "Load", nullptr, [](const std::string& path, sol::optional<std::string> name) {
+        int w = 0, h = 0, ch = 0;
+        stbi_set_flip_vertically_on_load_thread(true);
+        unsigned char* data = sage::assets::vfs::LoadImage(path, &w, &h, &ch, 4);
+        if (!data) {
+            // Причины может не быть вовсе (файла нет — до stb дело не дошло):
+            // nullptr в строку — это падение процесса, а не ошибка скрипта.
+            const char* why = stbi_failure_reason();
+            throw std::runtime_error("texture.Load: не удалось прочитать '" + path + "'" +
+                                     (why ? std::string(" (") + why + ")" : std::string()));
+        }
+        TextureCanvas c;
+        c.Name = name.value_or(path);
+        c.W = w;
+        c.H = h;
+        c.Px.assign(data, data + (size_t)w * h * 4);
+        stbi_image_free(data);
         return c;
     });
 }

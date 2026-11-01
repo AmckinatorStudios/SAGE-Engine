@@ -134,6 +134,7 @@ local function make_noise(opts)
         turbulence = function(x, y, z) return g:Turbulence(x, y or 0, z or 0) end,
         raw = function(x, y, z) return g:Sample(x, y, z) end,
         hash = function(x, y, z) return g:Hash(x, y, z) end,
+        grid = function(x, y, z, nx, ny, nz, step, mode) return g:Grid(x, y, z, nx, ny, nz, step, mode) end,
     }
     return setmetatable(o, {
         __call = function(_, x, y, z) return g:Fbm(x, y or 0, z or 0) end,
@@ -156,6 +157,7 @@ setmetatable(N, { __call = function(_, opts) return make_noise(opts) end })
 ---@field turbulence fun(x:number, y?:number, z?:number): number
 ---@field raw fun(x:number, y?:number, z?:number): number
 ---@field hash fun(x:integer, y?:integer, z?:integer): number
+---@field grid fun(x:number, y:number, z:number, nx:integer, ny:integer, nz:integer, step?:number, mode?:string): number[]
 ---@overload fun(x:number, y?:number, z?:number): number
 
 -- Свой генератор шума: noise{kind = "simplex", seed = 42, octaves = 5, scale = 0.02}
@@ -233,7 +235,8 @@ function formula(expr, args) return M.Formula(expr, args) end
 ---@class Mesh
 ---@field vertices integer
 ---@field triangles integer
----@field vertex fun(x:number|Vec3, y?:number|Vec3, z?:number|Vec2): integer
+---@field vertex fun(x:number|Vec3, y?:number|Vec3, z?:number|Vec2, normal?:Vec3, uv?:Vec2, uv2?:Vec2): integer
+---@field arrays fun(data:{position:number[], normal?:number[], uv?:number[], uv2?:number[], index:integer[]}): integer
 ---@field triangle fun(a:integer, b:integer, c:integer)
 ---@field quad fun(a:integer, b:integer, c:integer, d:integer)
 ---@field material fun(slot:integer)
@@ -241,6 +244,7 @@ function formula(expr, args) return M.Formula(expr, args) end
 ---@field set_position fun(i:integer, x:number|Vec3, y?:number, z?:number)
 ---@field set_normal fun(i:integer, x:number|Vec3, y?:number, z?:number)
 ---@field set_uv fun(i:integer, u:number, v:number)
+---@field set_uv2 fun(i:integer, u:number, v:number)
 ---@field normals fun(smooth?:boolean)
 ---@field deform fun(fn:fun(p:Vec3, n:Vec3, uv:Vec2): Vec3)
 ---@field move fun(x:number|Vec3, y?:number, z?:number)
@@ -253,10 +257,11 @@ function formula(expr, args) return M.Formula(expr, args) end
 
 local function wrap_mesh(b)
     local m = {}
-    m.vertex = function(x, y, z, normal, uv)
-        if type(x) == "number" then return b:Vertex(Vec3(x, y or 0, z or 0), normal, uv) end
-        return b:Vertex(x, y, z)   -- vertex(pos, normal, uv)
+    m.vertex = function(x, y, z, normal, uv, uv2)
+        if type(x) == "number" then return b:Vertex(Vec3(x, y or 0, z or 0), normal, uv, uv2) end
+        return b:Vertex(x, y, z, normal)   -- vertex(pos, normal, uv, uv2)
     end
+    m.arrays = function(data) return b:Arrays(data) end
     m.triangle = function(a, c, d) b:Triangle(a, c, d) end
     m.quad = function(a, c, d, e) b:Quad(a, c, d, e) end
     m.material = function(slot) b:Material(slot) end
@@ -264,6 +269,7 @@ local function wrap_mesh(b)
     m.set_position = function(i, x, y, z) b:SetPosition(i, vec(x, y, z)) end
     m.set_normal = function(i, x, y, z) b:SetNormal(i, vec(x, y, z)) end
     m.set_uv = function(i, u, v) b:SetUV(i, Vec2(u, v)) end
+    m.set_uv2 = function(i, u, v) b:SetUV2(i, Vec2(u, v)) end
     m.normals = function(smooth) b:RecalculateNormals(smooth ~= false) end
     m.deform = function(fn) b:Deform(fn) end
     m.move = function(x, y, z) b:Translate(vec(x, y, z)) end
@@ -375,6 +381,13 @@ end
 setmetatable(TEX, { __call = function(_, name, width, height)
     return wrap_texture(TEX.New(name, width, height or width), name)
 end })
+
+---Картинка с диска, пиксели которой читаются и правятся: texture.load("assets/a.png").
+---Строки снизу вверх, как у texture(...). name — имя для материала (по умолчанию путь).
+---@param path string
+---@param name? string
+---@return Texture
+function TEX.load(path, name) return wrap_texture(TEX.Load(path, name), name or path) end
 
 -- ---------------------------------------------------------------- материал
 

@@ -258,3 +258,148 @@ TEST(script_procgen_is_a_module_that_can_be_removed_cleanly) {
     CHECK_TRUE(se.Lua().script("return perlin == nil and grid == nil and rgb == nil").get<bool>());
     CHECK_TRUE(se.Lua().script("return type(sage.noise.Perlin(0.5, 0.5)) == 'number'").get<bool>());
 }
+
+// Меш, который пересобирают на ходу (участок мира, рельеф, след), скрипт
+// отдаёт массивами за один вызов, а свои данные вершины — вторым UV-каналом:
+// без него свой шейдер не получал от меша ничего, кроме позиции, нормали и UV.
+#include <filesystem>
+#include <stb_image_write.h>
+TEST(script_mesh_arrays_and_uv2_reach_the_vertices) {
+    ScriptEngine se;
+    Scene scene("P");
+    se.BindScene(scene);
+    se.Lua().script(R"LUA(
+        m = mesh()
+        first = m.arrays{
+            position = {0,0,0,  1,0,0,  1,1,0,  0,1,0},
+            normal   = {0,0,1,  0,0,1,  0,0,1,  0,0,1},
+            uv       = {0,0,  1,0,  1,1,  0,1},
+            uv2      = {0.25,0.5,  0.25,0.5,  1,0,  0,1},
+            index    = {1,2,3,  1,3,4},
+        }
+        second = m.arrays{position = {5,5,5, 6,5,5, 5,6,5}, index = {1,2,3}}
+        v = m.vertex(2, 2, 2, Vec3(0, 1, 0), Vec2(0.5, 0.5), Vec2(0.75, 0.125))
+        m.set_uv2(1, 0.5, 0.25)
+        verts, tris = m.vertices, m.triangles
+        ok_bad_index = pcall(function() m.arrays{position = {0,0,0}, index = {1,1,2}} end)
+        ok_bad_len = pcall(function() m.arrays{position = {0,0,0, 1,1,1}, uv = {0,0}, index = {1,2,2}} end)
+        after_bad = m.vertices
+    )LUA");
+    sol::state& L = se.Lua();
+    CHECK_EQ(L["first"].get<int>(), 1);
+    CHECK_EQ(L["second"].get<int>(), 5);
+    CHECK_EQ(L["v"].get<int>(), 8);
+    CHECK_EQ(L["verts"].get<int>(), 8);
+    CHECK_EQ(L["tris"].get<int>(), 3);
+    CHECK_FALSE(L["ok_bad_index"].get<bool>());
+    CHECK_FALSE(L["ok_bad_len"].get<bool>());
+    // Битая пачка не оставляет в меше половину себя.
+    CHECK_EQ(L["after_bad"].get<int>(), 8);
+
+    sol::table m = L["m"];
+    const sage::render::MeshBuilder& b = m.raw_get<sage::render::MeshBuilder&>("_builder");
+    CHECK_NEAR(b.At(0).TexCoords2.x, 0.5f, 1e-6f);
+    CHECK_NEAR(b.At(0).TexCoords2.y, 0.25f, 1e-6f);
+    CHECK_NEAR(b.At(2).TexCoords2.x, 1.0f, 1e-6f);
+    CHECK_NEAR(b.At(2).TexCoords.y, 1.0f, 1e-6f);
+    CHECK_NEAR(b.At(4).Position.x, 5.0f, 1e-6f);
+    CHECK_NEAR(b.At(7).TexCoords2.x, 0.75f, 1e-6f);
+    // Индексы второй пачки сдвинуты на её начало, а не указывают на первую.
+    const sage::render::MeshData d = b.ToMeshData();
+    bool foundSecond = false;
+    for (size_t i = 0; i + 2 < d.Indices.size(); i += 3)
+        if (d.Indices[i] == 4 && d.Indices[i + 1] == 5 && d.Indices[i + 2] == 6) foundSecond = true;
+    CHECK_TRUE(foundSecond);
+    // Второй канал доходит до готовых данных меша (их грузит видеокарта).
+    CHECK_NEAR(d.Vertices[7].TexCoords2.y, 0.125f, 1e-6f);
+}
+
+// Картинка с диска читается по пикселям — атлас и иконки собираются кодом.
+TEST(script_texture_load_reads_pixels_bottom_up) {
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "sage_tex_load_test";
+    std::filesystem::create_directories(dir);
+    const std::string file = (dir / "two_rows.png").string();
+    // Верхняя строка красная, нижняя синяя (в файле строки сверху вниз).
+    const unsigned char px[] = {255, 0, 0, 255, 255, 0, 0, 255, 0, 0, 255, 255, 0, 0, 255, 128};
+    CHECK_TRUE(stbi_write_png(file.c_str(), 2, 2, 4, px, 8) != 0);
+    ScriptEngine se;
+    Scene scene("P");
+    se.BindScene(scene);
+    sol::state& L = se.Lua();
+    L["file"] = file;
+    se.Lua().script(R"LUA(
+        t = texture.load(file, "test_tex")
+        w, h, name = t.width, t.height, t.name
+        bottom = t.get(0, 0)
+        top = t.get(1, 1)
+        alpha = t.get(1, 0).w
+        ok_missing = pcall(function() texture.load(file .. ".nope") end)
+    )LUA");
+    CHECK_EQ(L["w"].get<int>(), 2);
+    CHECK_EQ(L["h"].get<int>(), 2);
+    CHECK_TRUE(L["name"].get<std::string>() == "test_tex");
+    const glm::vec4 bottom = L["bottom"];
+    const glm::vec4 top = L["top"];
+    CHECK_NEAR(bottom.z, 1.0f, 1e-3f);
+    CHECK_NEAR(top.x, 1.0f, 1e-3f);
+    CHECK_NEAR(L["alpha"].get<float>(), 128.0f / 255.0f, 1e-3f);
+    CHECK_FALSE(L["ok_missing"].get<bool>());
+    std::filesystem::remove_all(dir);
+}
+
+// Отсутствующая картинка — ошибка, а не падение процесса. У stb причина
+// ошибки своя на поток; в новом потоке её нет вовсе (файл до stb не дошёл),
+// и прежний код собирал строку из nullptr — игра со скином, которого нет,
+// падала целиком.
+#include <thread>
+#include "sage/render/Texture.h"
+TEST(missing_image_is_an_error_not_a_crash_in_a_fresh_thread) {
+    bool scriptFailedCleanly = false;
+    bool textureThrew = false;
+    std::thread([&] {
+        ScriptEngine se;
+        Scene scene("P");
+        se.BindScene(scene);
+        se.Lua().script(R"LUA(
+            ok, err = pcall(function() texture.load("нет/такого/файла.png") end)
+        )LUA");
+        sol::state& L = se.Lua();
+        scriptFailedCleanly = !L["ok"].get<bool>() &&
+                              L["err"].get<std::string>().find("нет/такого/файла.png") != std::string::npos;
+    }).join();
+    std::thread([&] {
+        try {
+            Texture t("нет/такой/текстуры.png");
+        } catch (const std::exception& e) {
+            textureThrew = std::string(e.what()).find("нет/такой/текстуры.png") != std::string::npos;
+        }
+    }).join();
+    CHECK_TRUE(scriptFailedCleanly);
+    CHECK_TRUE(textureThrew);
+}
+
+// Шум сеткой совпадает с поточечным и идёт в описанном порядке (x, y, z).
+TEST(script_noise_grid_matches_point_samples) {
+    ScriptEngine se;
+    Scene scene("P");
+    se.BindScene(scene);
+    se.Lua().script(R"LUA(
+        n = noise{kind = "simplex", seed = 7, octaves = 3, scale = 0.05}
+        g = n.grid(10, 20, 30, 4, 3, 2, 0.5)
+        r = n.grid(1, 2, 3, 2, 1, 1, 1, "ridged")
+        count = #g
+        same = true
+        local i = 1
+        for k = 0, 1 do for j = 0, 2 do for a = 0, 3 do
+            if math.abs(g[i] - n(10 + a * 0.5, 20 + j * 0.5, 30 + k * 0.5)) > 1e-5 then same = false end
+            i = i + 1
+        end end end
+        ridged_same = math.abs(r[2] - n.ridged(2, 2, 3)) < 1e-5
+        bad_mode = pcall(function() n.grid(0, 0, 0, 1, 1, 1, 1, "nope") end)
+    )LUA");
+    sol::state& L = se.Lua();
+    CHECK_EQ(L["count"].get<int>(), 24);
+    CHECK_TRUE(L["same"].get<bool>());
+    CHECK_TRUE(L["ridged_same"].get<bool>());
+    CHECK_FALSE(L["bad_mode"].get<bool>());
+}

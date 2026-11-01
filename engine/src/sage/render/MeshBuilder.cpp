@@ -17,6 +17,26 @@ unsigned int MeshBuilder::AddVertex(const glm::vec3& pos, const glm::vec3& norma
     return (unsigned int)m_vertices.size() - 1;
 }
 
+unsigned int MeshBuilder::AddVertex(const Vertex& v) {
+    m_vertices.push_back(v);
+    return (unsigned int)m_vertices.size() - 1;
+}
+
+bool MeshBuilder::AddArrays(const std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices) {
+    // Проверка ДО добавления: битая пачка не должна оставить в меше вершины
+    // без треугольников или треугольники наполовину.
+    if (indices.size() % 3 != 0) return false;
+    const unsigned int n = (unsigned int)vertices.size();
+    for (unsigned int i : indices)
+        if (i >= n) return false;
+    const unsigned int base = (unsigned int)m_vertices.size();
+    m_vertices.insert(m_vertices.end(), vertices.begin(), vertices.end());
+    std::vector<unsigned int>& slot = m_slots[(size_t)m_current];
+    slot.reserve(slot.size() + indices.size());
+    for (unsigned int i : indices) slot.push_back(base + i);
+    return true;
+}
+
 bool MeshBuilder::AddTriangle(unsigned int a, unsigned int b, unsigned int c) {
     const unsigned int n = (unsigned int)m_vertices.size();
     if (a >= n || b >= n || c >= n) return false;
