@@ -72,23 +72,9 @@ void PlayerLayer::OnRender() {
 
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     LightingEnvironment env = sage::ecs::CollectLighting(*m_scene);
-    // Флаги качества из конфига переопределяют настройки сцены.
-    //
-    // НО СВЕТ ПРИ ЭТОМ ОСТАЁТСЯ. Настройка качества выключает ОТРИСОВКУ неба, а
-    // не солнце над миром: «поставил пресет полегче — мир погас» было бы не
-    // оптимизацией, а поломкой. Поэтому посчитанный от неба ambient
-    // замораживается своими значениями, и дальше сцена освещена ровно так же,
-    // как при включённом небе. (Автор, выключивший небо В СЦЕНЕ, получает
-    // темноту намеренно — см. LightingEnvironment::ResolveAmbient.)
-    if (!cfg.Skybox && env.Skybox.Enabled) {
-        glm::vec3 ambientSky, ambientGround;
-        env.ResolveAmbient(ambientSky, ambientGround);
-        env.SkyColor = ambientSky;
-        env.GroundColor = ambientGround;
-        env.AmbientMode = LightingEnvironment::AmbientSource::Custom;
-        env.Skybox.Enabled = false;
-    }
-    if (!cfg.Fog) env.Fog.Enabled = false;
+    // Флаги качества из конфига переопределяют настройки сцены (небо гаснет,
+    // а свет от него остаётся — см. ApplyQualityToEnvironment).
+    sage::render::ApplyQualityToEnvironment(cfg, env);
 
     // --- Соотношение сторон: letterbox-viewport по центру окна (или весь экран) ---
     int vpX, vpY, vpW, vpH;

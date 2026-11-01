@@ -3,6 +3,8 @@
 
 #include "imgui.h"
 
+#include "../../EditorTheme.h"
+
 // ---------------------------------------------------------------------------
 // ЭЛЕМЕНТЫ ОКНА «НАСТРОЙКИ ИГРЫ» — один стиль на все разделы.
 //
@@ -77,6 +79,9 @@ void EndRow(Ctx& c, const RowOpts& o);
 // Переключатель-«таблетка» (как в системных настройках): состояние читается
 // издалека, в отличие от квадратика флажка.
 bool Toggle(const char* id, bool* v, const char* caption = nullptr);
+// Цвет дорожки переключателя. Отдельно — ради проверки: выключенная дорожка
+// обязана быть видна на фоне карточки в каждой теме.
+EditorTheme::Role ToggleTrackRole(bool on);
 // Ползунок с числом рядом: ввод числа — щелчком по числу (точность).
 bool SliderFloat(const char* id, float* v, float lo, float hi, const char* fmt, float step = 0.0f);
 bool SliderInt(const char* id, int* v, int lo, int hi, const char* fmt);

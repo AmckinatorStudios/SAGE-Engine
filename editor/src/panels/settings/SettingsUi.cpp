@@ -49,6 +49,11 @@ void Mark(const char* text, EditorTheme::Role role, const char* icon, const char
     const float w = ImGui::CalcTextSize(text).x + ui.SpacingSM * 2.0f;
     const float room = ImGui::GetContentRegionMax().x - reserve - ImGui::GetCursorPosX();
     if (w <= room) {
+        // Подпись слева выровнена по отступу поля (AlignTextToFramePadding),
+        // а бейдж ниже поля ростом: без сдвига он вставал к верху строки и
+        // висел над текстом подписи.
+        const float bh = ImGui::GetFontSize() + 4.0f;
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + std::floor((ImGui::GetFrameHeight() - bh) * 0.5f));
         Sage::UI::Badge(text, role);
     } else {
         const float s = ImGui::GetFontSize();
@@ -207,6 +212,8 @@ void EndRow(Ctx& c, const RowOpts& o) {
     (void)c;
 }
 
+EditorTheme::Role ToggleTrackRole(bool on) { return on ? EditorTheme::Role::Accent : EditorTheme::Role::LineStrong; }
+
 bool Toggle(const char* id, bool* v, const char* caption) {
     const float h = ImGui::GetFrameHeight() * 0.8f;
     const float w = h * 1.8f;
@@ -218,13 +225,22 @@ bool Toggle(const char* id, bool* v, const char* caption) {
     const bool hovered = ImGui::IsItemHovered();
     const bool disabled = ImGui::GetItemFlags() & ImGuiItemFlags_Disabled;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec4 bg = *v ? EditorTheme::Color(EditorTheme::Role::Accent) : EditorTheme::Color(EditorTheme::Role::Input);
+    // Выключенная дорожка — цветом заметной рамки, а не поля ввода: поле
+    // почти совпадает с фоном карточки, и выключенный переключатель выглядел
+    // одинокой белой точкой без «таблетки» вокруг.
+    ImVec4 bg = EditorTheme::Color(ToggleTrackRole(*v));
     if (hovered && !disabled) bg = ImVec4(bg.x * 1.12f, bg.y * 1.12f, bg.z * 1.12f, bg.w);
     if (disabled) bg.w *= 0.5f;
     dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), ImGui::ColorConvertFloat4ToU32(bg), h * 0.5f);
     const float r = h * 0.5f - 2.5f;
     const float cx = *v ? p.x + w - h * 0.5f : p.x + h * 0.5f;
-    dl->AddCircleFilled(ImVec2(cx, p.y + h * 0.5f), r, IM_COL32(245, 247, 250, disabled ? 140 : 255), 20);
+    // Бегунок светлый; на тёмной теме выключенный — цвета текста, чуть
+    // глуше белого: так «выкл» отличается от «вкл» не только положением.
+    const bool dark = EditorTheme::Current().Dark;
+    ImVec4 knob = (*v || !dark) ? ImVec4(0.98f, 0.98f, 0.99f, 1.0f) : EditorTheme::Color(EditorTheme::Role::Text);
+    if (disabled) knob.w *= 0.55f;
+    dl->AddCircleFilled(ImVec2(std::floor(cx) + 0.5f, std::floor(p.y + h * 0.5f) + 0.5f), r,
+                        ImGui::ColorConvertFloat4ToU32(knob), 24);
     if (ImGui::IsItemFocused())
         dl->AddRect(ImVec2(p.x - 2, p.y - 2), ImVec2(p.x + w + 2, p.y + h + 2),
                     EditorTheme::Color32(EditorTheme::Role::Accent), h * 0.5f + 2, 0, 1.5f);
@@ -260,7 +276,10 @@ void Note(const char* text) {
     const float s = ImGui::GetFontSize();
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const ImVec4 dim = EditorTheme::Color(EditorTheme::Role::TextDim);
-    EditorIcons::Overlay(ImGui::GetWindowDrawList(), p.x, p.y + 2.0f, s, "info", glm::vec3(dim.x, dim.y, dim.z));
+    // Значок — по центру первой строки текста, а не «на глаз» плюс два пикселя.
+    const float line = ImGui::GetTextLineHeight();
+    EditorIcons::Overlay(ImGui::GetWindowDrawList(), p.x, p.y + std::floor((line - s) * 0.5f), s, "info",
+                         glm::vec3(dim.x, dim.y, dim.z));
     ImGui::Dummy(ImVec2(s, s));
     ImGui::SameLine(0.0f, 6.0f);
     ImGui::PushTextWrapPos(0.0f);

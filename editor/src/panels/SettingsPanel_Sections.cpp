@@ -154,6 +154,23 @@ void SettingsPanel::DrawQuality(EditorHost& host, ui::Ctx& ctx) {
     }
     ui::EndGroup(ctx);
 
+    // Детали сцены — то, что игрок выключает на слабой машине, не трогая
+    // саму сцену: туман и небо остаются в «Среде», здесь только «рисовать ли».
+    ui::BeginGroup(ctx, T("Scene details"));
+    {
+        ui::RowOpts o;
+        o.Keywords = "fog haze туман дымка";
+        o.Tooltip = T("In the Game view and the built game. The scene view shows the environment as authored");
+        ToggleRow(ctx, T("Fog"), c.Fog, Def().Fog, T("Distance and height fog of the scene"), o);
+    }
+    {
+        ui::RowOpts o;
+        o.Keywords = "sky skybox небо скайбокс";
+        o.Tooltip = T("In the Game view and the built game. Lighting from the sky stays the same");
+        ToggleRow(ctx, T("Sky"), c.Skybox, Def().Skybox, T("Procedural sky; off — a solid sky color"), o);
+    }
+    ui::EndGroup(ctx);
+
     ui::BeginGroup(ctx, T("Performance"));
     {
         ui::RowOpts o;
@@ -273,6 +290,100 @@ static void DrawShadowGroups(sage::EngineConfig& c, ui::Ctx& ctx) {
     ui::EndGroup(ctx);
 }
 
+// Объёмный свет и облака: включает игра, а цена и вид — здесь. Все поля —
+// настоящие поля sage.cfg (render/Volumetrics.h), видны во вьюпорте сразу.
+static void DrawVolumetricGroup(sage::EngineConfig& c, ui::Ctx& ctx) {
+    ui::BeginGroup(ctx, T("Volumetric light and clouds"),
+                   T("Light shafts in the air and volumetric clouds. The most expensive pass of the frame — "
+                     "check it on your target hardware."));
+    {
+        ui::RowOpts o;
+        o.Keywords = "volumetric light shafts god rays fog объёмный свет лучи";
+        o.Price = ui::Cost::Heavy;
+        ToggleRow(ctx, T("Volumetric light"), c.Volumetrics, Def().Volumetrics, T("Air scatters sunlight and sky"), o);
+    }
+    const bool off = !c.Volumetrics;
+    auto gated = [&](ui::RowOpts o) {
+        o.Disabled = off;
+        o.DisabledWhy = T("Volumetric light is off");
+        return o;
+    };
+    {
+        ui::RowOpts o = gated({});
+        o.Keywords = "shafts rays лучи";
+        ToggleRow(ctx, T("Light shafts"), c.VolumetricShafts, Def().VolumetricShafts, T("Sun rays through gaps"), o);
+    }
+    {
+        ui::RowOpts o = gated({});
+        o.Keywords = "clouds облака";
+        ToggleRow(ctx, T("Clouds"), c.VolumetricClouds, Def().VolumetricClouds, T("Volumetric cloud layer"), o);
+    }
+    {
+        ui::RowOpts o = gated({});
+        o.Keywords = "volumetric resolution half full разрешение объёма";
+        o.Modified = std::abs(c.VolumetricScale - Def().VolumetricScale) > 1e-3f;
+        o.Price = c.VolumetricScale > 0.75f ? ui::Cost::Heavy : ui::Cost::Normal;
+        o.Tooltip = T("Half resolution is four times cheaper; edges stay clean thanks to depth-aware upscaling");
+        bool reset = false;
+        if (ui::Row(ctx, T("Resolution"), o, &reset)) {
+            const float gap = Sage::UI::Get().SpacingXS;
+            const float bw = (ImGui::GetContentRegionAvail().x - gap) * 0.5f;
+            const bool half = c.VolumetricScale < 0.75f;
+            if (Sage::UI::Button(T("Half"), half ? Sage::UI::ButtonStyle::Primary : Sage::UI::ButtonStyle::Secondary,
+                                 ImVec2(bw, 0)))
+                c.VolumetricScale = 0.5f;
+            ImGui::SameLine(0.0f, gap);
+            if (Sage::UI::Button(T("Full"), half ? Sage::UI::ButtonStyle::Secondary : Sage::UI::ButtonStyle::Primary,
+                                 ImVec2(bw, 0)))
+                c.VolumetricScale = 1.0f;
+            if (reset) c.VolumetricScale = Def().VolumetricScale;
+            ui::EndRow(ctx, o);
+        }
+    }
+    auto sliderI = [&](const char* label, const char* keys, int& v, int def, int lo, int hi, const char* fmt,
+                       const char* tip) {
+        ui::RowOpts o = gated({});
+        o.Keywords = keys;
+        o.Tooltip = tip;
+        o.Modified = v != def;
+        bool reset = false;
+        if (ui::Row(ctx, label, o, &reset)) {
+            ui::SliderInt("##v", &v, lo, hi, fmt);
+            if (reset) v = def;
+            ui::EndRow(ctx, o);
+        }
+    };
+    auto sliderF = [&](const char* label, const char* keys, float& v, float def, float lo, float hi,
+                       const char* fmt, float step, const char* tip) {
+        ui::RowOpts o = gated({});
+        o.Keywords = keys;
+        o.Tooltip = tip;
+        o.Modified = std::abs(v - def) > 1e-5f;
+        bool reset = false;
+        if (ui::Row(ctx, label, o, &reset)) {
+            ui::SliderFloat("##v", &v, lo, hi, fmt, step);
+            if (reset) v = def;
+            ui::EndRow(ctx, o);
+        }
+    };
+    sliderI(T("Light steps"), "steps quality шаги качество лучей", c.VolumetricSteps, Def().VolumetricSteps, 8, 64,
+            "%d", T("More steps — smoother shafts, slower frame"));
+    sliderF(T("Density"), "density thickness плотность дымки", c.VolumetricDensity, Def().VolumetricDensity, 0.0f,
+            0.1f, "%.3f", 0.001f, T("How thick the air is near the ground"));
+    sliderF(T("Brightness"), "intensity brightness яркость лучей", c.VolumetricIntensity, Def().VolumetricIntensity,
+            0.0f, 4.0f, "%.2f", 0.05f, T("Strength of the light scattered by the air"));
+    sliderF(T("Sky light in haze"), "sky scatter ambient небо в дымке", c.VolumetricSkyScatter,
+            Def().VolumetricSkyScatter, 0.0f, 1.5f, "%.2f", 0.05f,
+            T("How much of the sky the haze scatters — even in shadow"));
+    sliderF(T("Distance"), "max distance дальность объёма", c.VolumetricMaxDistance, Def().VolumetricMaxDistance,
+            20.0f, 500.0f, T("%.0f m"), 5.0f, T("Air farther away is not marched"));
+    sliderI(T("Cloud steps"), "cloud steps quality шаги облаков", c.CloudSteps, Def().CloudSteps, 8, 96, "%d",
+            T("More steps — denser cloud detail, slower frame"));
+    sliderF(T("Cloud coverage"), "cloud coverage облачность", c.CloudCoverage, Def().CloudCoverage, 0.0f, 1.0f,
+            "%.2f", 0.01f, T("0 — clear sky, 1 — overcast"));
+    ui::EndGroup(ctx);
+}
+
 void SettingsPanel::DrawLighting(EditorHost& host, ui::Ctx& ctx) {
     sage::EngineConfig& c = host.Settings();
     DrawShadowGroups(c, ctx);
@@ -303,6 +414,7 @@ void SettingsPanel::DrawLighting(EditorHost& host, ui::Ctx& ctx) {
                   T("Mirrors and water: the scene is drawn a second time"), o);
     }
     ui::EndGroup(ctx);
+    DrawVolumetricGroup(c, ctx);
     if (ctx.Filter.empty())
         ui::Note(T("Ambient occlusion, bloom and other effects of the frame belong to the Post Processing "
                    "component of the camera; sky and fog — to the Environment window."));
@@ -381,7 +493,10 @@ void SettingsPanel::DrawAdvanced(EditorHost& host, ui::Ctx& ctx) {
 // Язык и программа для кода — настройки ЧЕЛОВЕКА, а не проекта: проект,
 // навязывающий соавтору свой язык или свою IDE, — не то, чего ждут от проекта.
 void SettingsPanel::DrawGeneral(EditorHost& host, ui::Ctx& ctx) {
-    ui::BeginGroup(ctx, T("Editor"));
+    // Карточка называлась «Редактор» — тем же словом, что заголовок группы
+    // разделов слева, и раздел «Общие» выглядел пустой обёрткой вокруг
+    // второго «Редактора». Теперь у каждой карточки своё дело.
+    ui::BeginGroup(ctx, T("Language and tools"));
     {
         ui::RowOpts o;
         o.Keywords = "language interface russian english язык интерфейса русский английский";
@@ -508,6 +623,8 @@ void SettingsPanel::ResetCategory(EditorHost& host, Category cat) {
             break;
         case Category::Quality:
             c.ApplyPreset(sage::QualityPreset::High);
+            c.Fog = d.Fog;
+            c.Skybox = d.Skybox;
             c.OcclusionCulling = d.OcclusionCulling;
             c.MultithreadedRender = d.MultithreadedRender;
             c.WorkerThreads = d.WorkerThreads;
@@ -517,6 +634,12 @@ void SettingsPanel::ResetCategory(EditorHost& host, Category cat) {
             c.ShadowDistance = d.ShadowDistance; c.LocalShadows = d.LocalShadows;
             c.LocalShadowResolution = d.LocalShadowResolution;
             c.ScreenSpaceGI = d.ScreenSpaceGI; c.Reflections = d.Reflections; c.PlanarReflections = d.PlanarReflections;
+            c.Volumetrics = d.Volumetrics; c.VolumetricShafts = d.VolumetricShafts;
+            c.VolumetricClouds = d.VolumetricClouds; c.VolumetricScale = d.VolumetricScale;
+            c.VolumetricSteps = d.VolumetricSteps; c.VolumetricDensity = d.VolumetricDensity;
+            c.VolumetricIntensity = d.VolumetricIntensity; c.VolumetricSkyScatter = d.VolumetricSkyScatter;
+            c.VolumetricMaxDistance = d.VolumetricMaxDistance; c.CloudSteps = d.CloudSteps;
+            c.CloudCoverage = d.CloudCoverage;
             break;
         case Category::Advanced:
             c.Backend = d.Backend;

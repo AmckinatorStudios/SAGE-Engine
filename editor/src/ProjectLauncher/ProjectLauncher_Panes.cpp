@@ -255,7 +255,12 @@ void ProjectLauncher::DrawSettings(ProjectDatabase& db) {
     ImGui::TextUnformatted(T("Interface scale"));
     float scale = EditorTheme::UiScale();
     ImGui::SetNextItemWidth(fieldW);
-    if (ImGui::SliderFloat("##scale", &scale, 0.75f, 2.0f, "%.2fx")) EditorTheme::SetUiScale(scale);
+    // Процентами и с шагом 5% — так же, как в «Настройки → Оформление»: два
+    // вида одного и того же числа («1.00x» и «100%») читались как две разные
+    // настройки.
+    float pct = scale * 100.0f;
+    if (ImGui::SliderFloat("##scale", &pct, 75.0f, 200.0f, "%.0f%%", ImGuiSliderFlags_AlwaysClamp))
+        EditorTheme::SetUiScale(std::round(pct / 5.0f) * 5.0f / 100.0f);
 
     ImGui::Dummy(ImVec2(0.0f, ui.SpacingMD));
     ImGui::TextUnformatted(T("Where new projects go"));

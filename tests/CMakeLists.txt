@@ -43,6 +43,7 @@ add_executable(sage_tests
     test_framegraph.cpp
     test_render_pipeline.cpp
     test_shadow_stability.cpp
+    test_editor_theme.cpp
     test_lod.cpp
     test_resources.cpp
     test_sagelua.cpp
@@ -117,6 +118,7 @@ add_executable(sage_tests
     ../editor/src/ui/UI.cpp
     ../editor/src/ui/UIStyle.cpp
     ../editor/src/EditorTheme.cpp
+    ../editor/src/panels/settings/SettingsUi.cpp
     ../editor/src/EditorIcons.cpp
     ../editor/src/EditorPrefs.cpp
     ../editor/src/Localization.cpp

@@ -293,7 +293,9 @@ void Badge(const char* text, Role role) {
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(col.x, col.y, col.z, 0.16f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(col.x, col.y, col.z, 0.16f));
     ImGui::PushStyleColor(ImGuiCol_Text, col);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ui.SpacingSM, 0.0f));
+    // Два пикселя по вертикали: без них буквы касались краёв подложки, и
+    // бейдж выглядел обрезанным снизу.
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(ui.SpacingSM, 2.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, ui.CornerRadiusSmall);
     ImGui::Button(text);
     ImGui::PopStyleVar(2);
