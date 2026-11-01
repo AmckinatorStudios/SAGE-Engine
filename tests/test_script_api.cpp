@@ -244,3 +244,170 @@ TEST(Languages_custom_language_plugs_in_everywhere) {
     CHECK_EQ(UnregisterLanguages("test:null"), 1);
     CHECK_FALSE(IsScriptPath("enemy.nul"));
 }
+
+// --- Язык во внешнем процессе ----------------------------------------------------
+
+#include <filesystem>
+#include <fstream>
+#include "sage/scene/ScriptComponent.h"
+#include "sage/scripting/ProcessLanguage.h"
+#include "sage/core/ChildProcess.h"
+#include <chrono>
+
+namespace {
+namespace fs = std::filesystem;
+
+void WriteText(const fs::path& p, const std::string& text) {
+    fs::create_directories(p.parent_path());
+    std::ofstream(p, std::ios::binary) << text;
+}
+
+// Проект с языком Python (эталонный адаптер из editor/assets/languages).
+fs::path MakePythonProject(const std::string& name, const std::string& extra = {}) {
+    const fs::path dir = fs::temp_directory_path() / name;
+    fs::remove_all(dir);
+    const fs::path runner = fs::path(SAGE_TEST_DATA_DIR) / ".." / ".." / "editor" / "assets" / "languages" /
+                            "python" / "sage_python.py";
+    WriteText(dir / "scripting" / "languages.json",
+              R"({"languages": [{"id": "python", "name": "Python", "extensions": [".py"],
+                  "command": ["python3", ")" + fs::absolute(runner).generic_string() + R"("]})" + extra + "]}");
+    return dir;
+}
+
+bool HavePython() {
+    sage::ChildProcess p;
+    std::string err;
+    return p.Start({"python3", "-c", "print(1)"}, "", err);
+}
+} // namespace
+
+// Python — без строки C++: описание в файле проекта. Поля видит инспектор,
+// скрипт зовёт API движка по каталогу, Lua зовёт метод Python и получает ответ.
+TEST(ProcessLanguage_python_script_lives_in_the_scene) {
+    if (!HavePython()) {
+        std::printf("    python3 не найден — проверка пропущена\n");
+        return;
+    }
+    using namespace sage::scripting;
+    const fs::path project = MakePythonProject("sage_proc_lang");
+    WriteText(project / "assets" / "enemy.py", R"PY(
+max_hp = 10
+speed = 2.5
+
+def start(self):
+    self.hp = self.max_hp
+    self.clamped = sage.math.Clamp(self.speed * 4, 0, 7)
+
+def update(self, dt):
+    self.ticks = getattr(self, "ticks", 0) + 1
+
+def take_damage(self, n):
+    self.hp -= n
+    return self.hp
+
+def report(self):
+    return self.hp, self.clamped, self.ticks
+)PY");
+    WriteText(project / "assets" / "caller.lua", R"LUA(
+local Caller = {}
+function Caller:Start()
+    local enemy = Scene.find("Enemy")
+    self.got = enemy:Call("take_damage", 3)
+    Events.emit("lua_got", self.got)
+end
+return Caller
+)LUA");
+
+    CHECK_EQ(LoadProjectLanguages(project), 1);
+    // Поля из текста — без запуска файла.
+    const sage::vars::Table fields = ParseFields("assets/enemy.py", "max_hp = 10\nspeed = 2.5\n");
+    CHECK_TRUE(fields.Find("max_hp") && fields.Find("max_hp")->Data.AsInt() == 10);
+    CHECK_TRUE(fields.Find("speed") != nullptr);
+
+    ScriptEngine engine;
+    Scene scene("S");
+    engine.BindScene(scene);
+    GameObject enemy = scene.CreateObject("Enemy");
+    sage::vars::Table overrides;
+    overrides.Set("max_hp", Value(20));                    // значение из инспектора
+    scene.Registry().emplace<ScriptComponent>(enemy.Entity(), ScriptComponent{"assets/enemy.py", overrides});
+    GameObject caller = scene.CreateObject("Caller");
+    scene.Registry().emplace<ScriptComponent>(caller.Entity(), ScriptComponent{"assets/caller.lua", {}});
+
+    ScriptingSystem sys;
+    sys.SetProjectDir(project);
+    CHECK_EQ(AttachLanguages(sys, {&engine, project}), 2);  // Lua и Python
+    ScriptServices services;
+    services.ScenePtr = &scene;
+    sys.Bind(services);
+    float luaGot = -1.0f;
+    scene.Events.Connect(0, "lua_got", [&](const sage::events::Event& e) { luaGot = e.Arg.AsFloat(); });
+    CHECK_EQ(sys.AttachScene(scene), 2);
+    sys.Update(1.0f / 60.0f);
+
+    std::vector<Value> out;
+    CHECK_TRUE(sys.Runtime().Invoke(enemy.Entity(), "report", {}, out));
+    CHECK_EQ((int)out.size(), 3);
+    if (out.size() == 3) {
+        CHECK_EQ(out[0].AsInt(), 17);                       // 20 из инспектора − 3 от Lua
+        CHECK_NEAR(out[1].AsFloat(), 7.0f, 1e-5f);          // Clamp(10, 0, 7) — API движка
+        CHECK_TRUE(out[2].AsInt() >= 1);                    // Update пришёл
+    }
+    CHECK_NEAR(luaGot, 17.0f, 1e-5f);                       // Lua получил ответ Python
+    UnregisterLanguages("project");
+    fs::remove_all(project);
+}
+
+// Зависший или упавший язык не вешает и не роняет движок: ошибка вызова
+// с причиной, а не замерший кадр.
+TEST(ProcessLanguage_hung_or_broken_language_is_an_error_not_a_hang) {
+    if (!HavePython()) return;
+    using namespace sage::scripting;
+    const fs::path project = fs::temp_directory_path() / "sage_proc_hang";
+    fs::remove_all(project);
+    WriteText(project / "scripting" / "languages.json",
+              R"J({"languages": [{"id": "mute", "name": "Mute", "extensions": [".mute"], "start_timeout": 0.5,
+                  "command": ["python3", "-c", "import sys, time\nfor l in sys.stdin: time.sleep(30)"]}]})J");
+    WriteText(project / "assets" / "a.mute", "x");
+    CHECK_EQ(LoadProjectLanguages(project), 1);
+    ScriptEngine engine;
+    Scene scene("S");
+    GameObject obj = scene.CreateObject("A");
+    scene.Registry().emplace<ScriptComponent>(obj.Entity(), ScriptComponent{"assets/a.mute", {}});
+    ScriptingSystem sys;
+    sys.SetProjectDir(project);
+    AttachLanguages(sys, {&engine, project});
+    ScriptServices services;
+    services.ScenePtr = &scene;
+    sys.Bind(services);
+    const auto t0 = std::chrono::steady_clock::now();
+    CHECK_EQ(sys.AttachScene(scene), 0);
+    const double waited = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    CHECK_TRUE(waited < 5.0);
+    UnregisterLanguages("project");
+
+    // Ошибка в скрипте Python — с номером строки, следующий кадр жив.
+    const fs::path py = MakePythonProject("sage_proc_broken");
+    WriteText(py / "assets" / "bad.py", "def start(self):\n    x = 1\n    raise ValueError('сломано')\n");
+    LoadProjectLanguages(py);
+    Scene s2("S2");
+    GameObject b = s2.CreateObject("B");
+    s2.Registry().emplace<ScriptComponent>(b.Entity(), ScriptComponent{"assets/bad.py", {}});
+    ScriptingSystem sys2;
+    sys2.SetProjectDir(py);
+    AttachLanguages(sys2, {&engine, py});
+    ScriptServices s2services;
+    s2services.ScenePtr = &s2;
+    sys2.Bind(s2services);
+    std::vector<ScriptError> errors;
+    sys2.Runtime().SetErrorSink([&](const ScriptError& e) { errors.push_back(e); });
+    sys2.AttachScene(s2);
+    sys2.Update(1.0f / 60.0f);
+    bool sawLine = false;
+    for (const ScriptError& e : errors)
+        if (e.Line == 3 && e.Message.find("сломано") != std::string::npos) sawLine = true;
+    CHECK_TRUE(sawLine);
+    UnregisterLanguages("project");
+    fs::remove_all(project);
+    fs::remove_all(py);
+}

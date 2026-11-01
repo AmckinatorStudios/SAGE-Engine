@@ -7,6 +7,7 @@
 
 #include "sage/core/Log.h"
 #include "sage/lang/SageCompiler.h"
+#include "sage/scripting/ProcessLanguage.h"
 #include "sage/scripting/ScriptFields.h"
 #include "sage/scripting/ScriptingSystem.h"
 #include "sage/scripting/lua/LuaBackend.h"
@@ -174,6 +175,9 @@ std::vector<std::string> ScriptExtensions() {
 }
 
 int AttachLanguages(ScriptingSystem& system, const LanguageHost& host) {
+    // Языки проекта (scripting/languages.json) — свежие на каждый запуск:
+    // описание правят, пока игра остановлена.
+    if (!host.ProjectDir.empty()) LoadProjectLanguages(host.ProjectDir);
     int made = 0;
     for (const Language& l : Languages()) {
         if (!l.CreateBackend) continue;

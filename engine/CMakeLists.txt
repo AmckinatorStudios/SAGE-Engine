@@ -64,6 +64,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/JobSystem.cpp
     src/sage/core/Log.cpp
     src/sage/core/Paths.cpp
+    src/sage/core/ChildProcess.cpp
     src/sage/core/FormatVersion.cpp
     src/sage/core/Stats.cpp
     src/sage/core/Systems.cpp
@@ -206,6 +207,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptModules.cpp
     src/sage/scripting/ScriptApi.cpp
     src/sage/scripting/Languages.cpp
+    src/sage/scripting/ProcessLanguage.cpp
     src/sage/scripting/ScriptLint.cpp
     src/sage/lang/SageLexer.cpp
     src/sage/lang/SageParser.cpp
