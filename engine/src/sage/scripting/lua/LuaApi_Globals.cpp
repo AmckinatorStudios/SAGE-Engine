@@ -1,5 +1,6 @@
 #include "sage/scripting/lua/LuaInternal.h"
 
+#include <chrono>
 #include <vector>
 
 #include "sage/audio/AudioEngine.h"
@@ -642,16 +643,36 @@ void RegisterGlobals(Backend& backend) {
 
     // Время — функциями: Time.delta() читается одинаково в любом месте файла.
     // Прежние поля (Time.deltaTime) остаются полями.
+    //
+    // Запись — raw_set, мимо метатаблицы: её __newindex пропускает только
+    // timeScale, и обычный set_function молча выбрасывал ВСЕ функции раздела —
+    // Time.delta() был nil у любого скрипта.
+    // Замыкание собирается в обычной таблице (set_function делает из лямбды
+    // настоящую функцию Lua), а в Time кладётся уже готовым значением.
+    auto timeFn = [&lua, &time](const char* name, auto fn) {
+        sol::table tmp = lua.create_table();
+        tmp.set_function(name, fn);
+        time.raw_set(name, tmp.raw_get<sol::object>(name));
+    };
     auto clockOf = [self]() -> ScriptClock& {
         ScriptClock* c = self->Clock();
         if (!c) throw std::runtime_error("Time: часы не привязаны");
         return *c;
     };
-    time.set_function("delta", [clockOf](sol::variadic_args) { return clockOf().Delta; });
-    time.set_function("fixed_delta", [clockOf](sol::variadic_args) { return clockOf().FixedDelta; });
-    time.set_function("total", [clockOf](sol::variadic_args) { return clockOf().Time; });
-    time.set_function("scale", [clockOf](sol::variadic_args) { return clockOf().Scale; });
-    time.set_function("set_scale", [clockOf](sol::variadic_args va) {
+    timeFn("delta", [clockOf](sol::variadic_args) { return clockOf().Delta; });
+    timeFn("fixed_delta", [clockOf](sol::variadic_args) { return clockOf().FixedDelta; });
+    timeFn("total", [clockOf](sol::variadic_args) { return clockOf().Time; });
+    timeFn("scale", [clockOf](sol::variadic_args) { return clockOf().Scale; });
+    // Настоящие часы (секунды, монотонные), а не игровое время: им скрипт
+    // делит тяжёлую работу по кадрам («строить, пока не истекли 5 мс»).
+    // Игровое время внутри кадра стоит на месте и для этого не годится, а
+    // os.clock скриптам закрыт.
+    timeFn("clock", [](sol::variadic_args) {
+        using namespace std::chrono;
+        static const steady_clock::time_point start = steady_clock::now();
+        return duration<double>(steady_clock::now() - start).count();
+    });
+    timeFn("set_scale", [clockOf](sol::variadic_args va) {
         const float k = Num(va, Skip(va), 1.0f);
         clockOf().Scale = k < 0.0f ? 0.0f : k;
     });

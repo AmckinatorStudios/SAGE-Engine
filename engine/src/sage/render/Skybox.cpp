@@ -65,7 +65,7 @@ Skybox::Skybox(const std::array<std::string, 6>& faces) {
             pixels[i] = sage::assets::vfs::LoadImage(faces[i], &width, &height, &channels, 0);
             if (!pixels[i]) {
                 throw std::runtime_error("Не удалось загрузить грань skybox: " + faces[i] +
-                                         " (" + stbi_failure_reason() + ")");
+                                         " (" + (stbi_failure_reason() ? stbi_failure_reason() : "файл не найден") + ")");
             }
             cubeFaces[i] = {width, height, channels, pixels[i]};
         }

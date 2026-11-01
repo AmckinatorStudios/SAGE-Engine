@@ -212,7 +212,8 @@ public:
               const std::vector<float>* morphWeights = nullptr,
               int shadingMode = 0,
               const sage::render::LightClusters* clusters = nullptr,
-              sage::gi::GIState* gi = nullptr) const;
+              sage::gi::GIState* gi = nullptr,
+              const SkinnedMaterial* overrideMaterial = nullptr) const;
 
     // Рисует геометрию ТОЛЬКО в глубину для карты теней, со скиннингом в текущей
     // позе — чтобы анимированная модель ОТБРАСЫВАЛА тень. Вызывается внутри

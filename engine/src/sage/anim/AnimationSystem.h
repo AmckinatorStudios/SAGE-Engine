@@ -6,7 +6,8 @@
 
 class Scene;
 struct LightingEnvironment;
-namespace sage::render { class LightClusters; }
+namespace sage::render { class LightClusters; struct SkinnedMaterial; }
+struct Material;
 
 // ---------------------------------------------------------------------------
 // Система скелетной анимации — связывает ECS со скелетным пайплайном (аналог
@@ -19,6 +20,10 @@ namespace sage::render { class LightClusters; }
 // Вызывается и редактором (в Play-режиме и для превью), и рантаймом SagePlayer.
 // ---------------------------------------------------------------------------
 namespace sage::anim {
+
+// Материал сцены в материал модели со скелетом (им сущность перекрашивает
+// модель вместо материалов файла).
+sage::render::SkinnedMaterial SkinnedMaterialFromScene(const Material& mat);
 
 // Инициализирует (при первом вызове) и продвигает анимации всех сущностей с
 // AnimationComponent. Безопасно вызывать каждый кадр.

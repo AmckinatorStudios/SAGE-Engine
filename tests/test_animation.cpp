@@ -1150,3 +1150,30 @@ TEST(Animation_rotation_takes_the_short_way_around) {
     const float half = glm::degrees(glm::angle(glm::normalize(q)));
     CHECK_TRUE(half < 100.0f);
 }
+
+// Материал сущности перекрашивает модель со скелетом. Раньше его не читал
+// никто: персонажу нельзя было сменить скин или сделать неосвещённым, хотя
+// любому другому объекту это одна строка SetMaterial.
+#include "sage/anim/AnimationSystem.h"
+#include "sage/render/Material.h"
+#include "sage/render/SkinnedModel.h"
+TEST(Skinned_entity_material_becomes_the_model_material) {
+    Material mat;
+    mat.Albedo = glm::vec3(0.5f, 0.25f, 1.0f);
+    mat.Render.Unlit = true;
+    mat.Render.AlphaCutoff = 0.1f;
+    mat.Render.Cull = CullFaces::None;
+    const sage::render::SkinnedMaterial m = sage::anim::SkinnedMaterialFromScene(mat);
+    CHECK_NEAR(m.Tint.y, 0.25f, 1e-6f);
+    CHECK_TRUE(m.Unlit);
+    CHECK_TRUE(m.DoubleSided);
+    CHECK_TRUE(m.Mode == sage::render::SkinnedMaterial::Alpha::Mask);
+    CHECK_NEAR(m.AlphaCutoff, 0.1f, 1e-6f);
+
+    Material glassy;
+    glassy.Opacity = 0.5f;
+    const sage::render::SkinnedMaterial g = sage::anim::SkinnedMaterialFromScene(glassy);
+    CHECK_TRUE(g.Mode == sage::render::SkinnedMaterial::Alpha::Blend);
+    CHECK_FALSE(g.Unlit);
+    CHECK_FALSE(g.DoubleSided);
+}

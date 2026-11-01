@@ -781,6 +781,9 @@ function Time.fixed_delta() end
 function Time.total() end
 ---@return number
 function Time.scale() end
+---Настоящие часы в секундах (монотонные): делить тяжёлую работу по кадрам.
+---@return number
+function Time.clock() end
 ---@param scale number 0 — пауза, 0.5 — замедление
 function Time.set_scale(scale) end
 

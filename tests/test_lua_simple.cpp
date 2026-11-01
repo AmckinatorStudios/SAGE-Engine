@@ -450,3 +450,29 @@ TEST(LuaSimple_hot_reload_keeps_inspector_values) {
     CHECK_NEAR(w.Global<float>(o, "seen"), 14.0f, 1e-6f);
     CHECK_TRUE(w.errors.empty());
 }
+
+// Настоящие часы: скрипт делит тяжёлую работу по кадрам («строить, пока не
+// истекли 5 мс»). Игровое время внутри кадра стоит, os.clock закрыт — без
+// Time.clock такой бюджет на Lua не написать.
+TEST(LuaSimple_time_clock_is_real_and_monotonic) {
+    World w;
+    GameObject o = w.Spawn("Worker", "worker", R"(
+function Start()
+    a = Time.clock()
+    local x = 0
+    for i = 1, 2000000 do x = x + i end
+    b = Time.clock()
+    frozen = Time.total() == Time.total()
+    has_delta = type(Time.delta) == "function"
+end
+)");
+    w.Start();
+    w.Frame();
+    CHECK_TRUE(w.errors.empty());
+    const double a = w.Global<double>(o, "a");
+    const double b = w.Global<double>(o, "b");
+    CHECK_TRUE(b > a);
+    CHECK_TRUE(w.Global<bool>(o, "frozen"));
+    // Прежде ВСЕ функции раздела Time пропадали (метатаблица глотала запись).
+    CHECK_TRUE(w.Global<bool>(o, "has_delta"));
+}

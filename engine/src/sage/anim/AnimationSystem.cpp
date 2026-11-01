@@ -359,6 +359,30 @@ void UpdateAnimators(Scene& scene, float dt) {
     }
 }
 
+// Материал сцены -> материал модели со скелетом: те же поля, что понимает
+// шейдер скиннинга (альбедо с картой, вырез, две стороны, без освещения).
+sage::render::SkinnedMaterial SkinnedMaterialFromScene(const Material& mat) {
+    using sage::render::SkinnedMaterial;
+    SkinnedMaterial m;
+    m.Name = "override";
+    m.Tint = mat.Albedo;
+    m.Opacity = mat.Opacity;
+    m.Metallic = mat.Metallic;
+    m.Roughness = mat.Roughness;
+    m.Emissive = mat.Emissive * mat.EmissiveStrength;
+    m.Unlit = mat.Render.Unlit;
+    m.DoubleSided = mat.Render.Cull == CullFaces::None;
+    if (mat.Render.AlphaCutoff > 0.0f) {
+        m.Mode = SkinnedMaterial::Alpha::Mask;
+        m.AlphaCutoff = mat.Render.AlphaCutoff;
+    } else if (mat.Opacity < 0.999f) {
+        m.Mode = SkinnedMaterial::Alpha::Blend;
+    }
+    if (mat.AlbedoTex) m.Albedo = mat.AlbedoTex;
+    else if (!mat.TexturePath.empty()) m.Albedo = ResourceManager::Instance().GetTexture(mat.TexturePath);
+    return m;
+}
+
 void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
                         const glm::vec3& viewPos, const LightingEnvironment& env,
                         const ShadowBinding& shadows,
@@ -370,8 +394,20 @@ void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& pr
     for (auto e : v) {
         AnimationComponent& am = v.get<AnimationComponent>(e);
         if (!am.Model) continue;
+        // Материал, назначенный сущности (инспектор, SetMaterial из скрипта),
+        // красит модель вместо материалов файла. Раньше он молча
+        // игнорировался: персонажу нельзя было сменить скин или сделать его
+        // неосвещённым, хотя у любого другого объекта это одна строка.
+        sage::render::SkinnedMaterial override;
+        const sage::render::SkinnedMaterial* overridePtr = nullptr;
+        if (const auto* mr = scene.Registry().try_get<MeshRendererComponent>(e)) {
+            if (mr->MaterialPtr) {
+                override = SkinnedMaterialFromScene(*mr->MaterialPtr);
+                overridePtr = &override;
+            }
+        }
         am.Model->Draw(scene.WorldMatrix(e), view, proj, viewPos, env, am.Anim.BoneMatrices(),
-                       shadows, reflections, &am.MorphWeights, shadingMode, clusters, gi);
+                       shadows, reflections, &am.MorphWeights, shadingMode, clusters, gi, overridePtr);
     }
 }
 

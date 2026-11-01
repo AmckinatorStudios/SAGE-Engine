@@ -650,6 +650,9 @@ function Time.fixed_delta() end
 function Time.total() end
 ---@return number
 function Time.scale() end
+---Настоящие часы в секундах (монотонные): делить тяжёлую работу по кадрам.
+---@return number
+function Time.clock() end
 ---@param scale number 0 — пауза, 0.5 — замедление
 function Time.set_scale(scale) end
 
@@ -2366,6 +2369,9 @@ texture = nil
 ---@param t table
 ---@return string
 function sage.texture.Generate(name, t) end
+---@param path string
+---@param name? string
+function sage.texture.Load(path, name) end
 ---@param name string
 ---@param w number
 ---@param h number
@@ -3120,6 +3126,7 @@ function set_seed(seed) end
 ---@field turbulence fun(x:number, y?:number, z?:number): number
 ---@field raw fun(x:number, y?:number, z?:number): number
 ---@field hash fun(x:integer, y?:integer, z?:integer): number
+---@field grid fun(x:number, y:number, z:number, nx:integer, ny:integer, nz:integer, step?:number, mode?:string): number[]
 ---@overload fun(x:number, y?:number, z?:number): number
 ---Число из диапазона [a, b] — в диапазон [c, d].
 ---@return number
@@ -3187,7 +3194,8 @@ function formula(expr, args) end
 ---@class Mesh
 ---@field vertices integer
 ---@field triangles integer
----@field vertex fun(x:number|Vec3, y?:number|Vec3, z?:number|Vec2): integer
+---@field vertex fun(x:number|Vec3, y?:number|Vec3, z?:number|Vec2, normal?:Vec3, uv?:Vec2, uv2?:Vec2): integer
+---@field arrays fun(data:{position:number[], normal?:number[], uv?:number[], uv2?:number[], index:integer[]}): integer
 ---@field triangle fun(a:integer, b:integer, c:integer)
 ---@field quad fun(a:integer, b:integer, c:integer, d:integer)
 ---@field material fun(slot:integer)
@@ -3195,6 +3203,7 @@ function formula(expr, args) end
 ---@field set_position fun(i:integer, x:number|Vec3, y?:number, z?:number)
 ---@field set_normal fun(i:integer, x:number|Vec3, y?:number, z?:number)
 ---@field set_uv fun(i:integer, u:number, v:number)
+---@field set_uv2 fun(i:integer, u:number, v:number)
 ---@field normals fun(smooth?:boolean)
 ---@field deform fun(fn:fun(p:Vec3, n:Vec3, uv:Vec2): Vec3)
 ---@field move fun(x:number|Vec3, y?:number, z?:number)
@@ -3250,6 +3259,11 @@ function cylinder(r, h, segments, caps) end
 ---Текстура, нарисованная кодом: texture("noise", 256, 256).
 ---@class sage.texture
 ---@overload fun(name: string, width: integer, height?: integer): Texture
+---Картинка с диска, пиксели которой читаются и правятся: texture.load("assets/a.png").
+---Строки снизу вверх, как у texture(...). name — имя для материала (по умолчанию путь).
+---@param path string
+---@param name? string
+---@return Texture
 ---@class Material
 ---@field name string
 ---@field color Vec3
