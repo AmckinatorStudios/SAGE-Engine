@@ -50,13 +50,13 @@ TEST(AIGraphLua_custom_nodes_types_and_tasks_both_ways) {
     ScriptEngine se;
     CHECK_TRUE(Lua(se, R"(
         ai.type("Target", {fields = {{"pos", Vec3(0, 0, 0)}, {"seen", false}}})
-        visual.node("my.double", {
+        ai.node("my.double", {
             title = "Double", category = "My game", pure = true,
             inputs = {{"x", "float", 1}}, outputs = {{"y", "float"}},
             run = function(n) n.outputs.y = n.inputs.x * 2 end,
             connect = function(pin, other) if other == "string" then return false, "только числа" end end,
         })
-        visual.node("my.pick", {
+        ai.node("my.pick", {
             inputs = {{"good", "bool", true}}, outputs = {{"yes", "exec"}, {"no", "exec"}},
             run = function(n) if n.inputs.good then return "yes" end return "no" end,
         })
@@ -77,23 +77,27 @@ TEST(AIGraphLua_custom_nodes_types_and_tasks_both_ways) {
     CHECK_TRUE(why == "только числа");
     CHECK_TRUE(w.Types().IsStruct("Target"));
 
-    // GraphCalc: result = LuaAdd(double(x), 1) — граф зовёт Lua-узел и Lua-задачу.
+    // AI Graph GraphCalc: result = LuaAdd(double(x), 1) — граф зовёт свои
+    // узлы ИИ на Lua и задачу на Lua, Lua зовёт граф.
     GraphDoc d;
+    d.Kind = GraphKind::Behavior;
     d.Name = "GraphCalc";
     d.Inputs = {{"x", "float", Value(0.0f), ""}};
     d.Outputs = {{"result", "float", Value(0.0f), ""}};
-    const int start = Add(d, "flow.start");
-    const int x = Add(d, "var.get", {{"scope", Str("input")}, {"name", Str("x")}});
+    const int start = Add(d, "ai.task_start");
+    const int x = Add(d, "ai.get_param", {{"scope", Str("input")}, {"name", Str("x")}});
     const int dbl2 = Add(d, "my.double");
     const int pick = Add(d, "my.pick");
     const int run = Add(d, "task.run", {{"task", Str("LuaAdd")}, {"b", Value(1)}});
-    const int ret = Add(d, "flow.return");
+    const int out = Add(d, "ai.set_param", {{"scope", Str("output")}, {"name", Str("result")}});
+    const int ok = Add(d, "ai.succeed");
     Exec(d, start, "then", pick);
     Exec(d, pick, "yes", run);
     Data(d, x, "value", dbl2, "x");
     Data(d, dbl2, "y", run, "a");
-    Exec(d, run, "succeeded", ret);
-    Data(d, run, "sum", ret, "result");
+    Exec(d, run, "succeeded", out);
+    Data(d, run, "sum", out, "value");
+    Exec(d, out, "then", ok);
     std::string err;
     CHECK_TRUE(w.RegisterGraph(d, err));
     CHECK_TRUE(Lua(se, "h = ai.agent().start('AskGraph')"));
@@ -113,38 +117,25 @@ TEST(AIGraphLua_api_nodes_file_component_and_events) {
     CHECK_TRUE(se.AI().Nodes().Find("api.scene.Find") != nullptr);
     CHECK_TRUE(se.AI().Nodes().Find("world.in_view") != nullptr);
 
-    // Задача (Visual Scripting): найти пост и встать туда. Действует задача, а
-    // не граф поведения — тот только решает.
-    GraphDoc task;
-    task.Kind = GraphKind::Task;
-    task.Name = "GoToPost";
-    {
-        const int s = Add(task, "flow.start");
-        const int find = Add(task, "api.scene.Find", {{"name", Str("Post")}});
-        const int info = Add(task, "object.info");
-        const int self = Add(task, "world.self");
-        const int move = Add(task, "object.set_position");
-        Exec(task, s, "then", find);
-        Exec(task, find, "then", move);
-        Data(task, find, "result", info, "object");
-        Data(task, self, "object", move, "object");
-        Data(task, info, "position", move, "position");
-    }
-    std::string terr;
-    CHECK_TRUE(se.AI().RegisterGraph(task, terr));
-    // AI Graph: выполнить задачу, дождаться события «alarm» (пришедшего через
-    // sage.events), записать в память.
+    // AI Graph: найти пост (Find Target), дойти до него (Move To Target —
+    // кадр за кадром), дождаться события «alarm» (пришедшего через
+    // sage.events) и запомнить его данные в памяти персонажа.
+    CHECK_TRUE(se.AI().Nodes().Find("ai.move_to") != nullptr);
     GraphDoc d;
     d.Kind = GraphKind::Behavior;
     d.Name = "GuardBrain";
-    const int start = Add(d, "flow.start");
-    const int go = Add(d, "task.run", {{"task", Str("GoToPost")}});
-    const int wait = Add(d, "event.wait", {{"event", Str("alarm")}});
-    const int mem = Add(d, "var.set", {{"scope", Str("instance")}, {"name", Str("alarm_level")}});
-    Exec(d, start, "then", go);
-    Exec(d, go, "succeeded", wait);
-    Exec(d, wait, "received", mem);
+    const int start = Add(d, "ai.task_start");
+    const int find = Add(d, "ai.find_target", {{"name_contains", Str("Post")}, {"radius", Value(50.0f)}});
+    const int go = Add(d, "ai.move_to", {{"speed", Value(100.0f)}, {"arrive_distance", Value(0.01f)}});
+    const int wait = Add(d, "ai.wait_event", {{"event", Str("alarm")}});
+    const int mem = Add(d, "ai.set_param", {{"scope", Str("instance")}, {"name", Str("alarm_level")}});
+    const int done = Add(d, "ai.succeed");
+    Exec(d, start, "then", find);
+    Exec(d, find, "success", go);
+    Exec(d, go, "success", wait);
+    Exec(d, wait, "success", mem);
     Data(d, wait, "data", mem, "value");
+    Exec(d, mem, "then", done);
     const std::string path = "sage_ai_guard.aigraph";
     {
         std::ofstream f(path, std::ios::binary);
@@ -156,16 +147,17 @@ TEST(AIGraphLua_api_nodes_file_component_and_events) {
     c.Memory.Set("post_name", Value(std::string("Post")));
     scene.Registry().emplace<AiAgentComponent>(guard.Entity(), c);
 
-    se.UpdateAll(0.016f);
-    se.UpdateAll(0.016f);
-    CHECK_NEAR(guard.GetTransform().Position.x, 4.0f, 1e-5f);
+    // Шаг 1.6 м за кадр: дойти — три кадра, ещё кадр — встать ждать события.
+    for (int i = 0; i < 8; ++i) se.UpdateAll(0.016f);
+    CHECK_NEAR(guard.GetTransform().Position.x, 4.0f, 1e-4f);
+    CHECK_NEAR(guard.GetTransform().Position.z, 2.0f, 1e-4f);
     se.Lua()["guard_obj"] = guard;
     CHECK_TRUE(Lua(se, "brain = ai.agent_of(guard_obj)"));
     CHECK_TRUE(Get<std::string>(se, "brain.memory.post_name") == "Post");
     CHECK_TRUE(Lua(se, "sage.events.Emit('alarm', 3)"));
     se.UpdateAll(0.016f);
     CHECK_EQ(Get<int>(se, "brain.memory.alarm_level"), 3);
-    CHECK_EQ(Get<int>(se, "brain.running()"), 0);   // граф дошёл до конца
+    CHECK_EQ(Get<int>(se, "brain.running()"), 0);   // поведение завершилось успехом
 
     // Объект удалили — ИИ уходит с ним.
     scene.RemoveObject(guard.Id());

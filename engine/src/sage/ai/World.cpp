@@ -372,6 +372,37 @@ RunPtr World::Start(int agentId, const std::string& task, const Blackboard& inpu
     return run;
 }
 
+bool World::CanStart(int agentId, const std::string& task, int priority, int parentRun, std::string& why) const {
+    why.clear();
+    if (!m_agents.count(agentId)) {
+        why = "нет экземпляра ИИ #" + std::to_string(agentId);
+        return false;
+    }
+    TaskDefinitionPtr def = FindTask(task);
+    if (!def) {
+        why = "нет задачи '" + task + "'";
+        return false;
+    }
+    if (def->Signature.Channels.empty()) return true;
+    std::set<int> ancestors;
+    for (RunPtr p = parentRun ? FindRun(parentRun) : nullptr; p; p = p->Parent ? FindRun(p->Parent) : nullptr)
+        ancestors.insert(p->Id);
+    for (const RunPtr& other : m_active) {
+        if (other->Status != TaskStatus::Running || other->Agent != agentId || ancestors.count(other->Id)) continue;
+        if (!other->Definition) continue;
+        for (const std::string& c : def->Signature.Channels)
+            for (const std::string& oc : other->Definition->Signature.Channels) {
+                if (c != oc) continue;
+                if (priority > other->Priority && other->Definition->Signature.Interruptible) continue;
+                why = "канал '" + c + "' занят задачей '" + other->Task + "' (приоритет " +
+                      std::to_string(other->Priority) +
+                      (other->Definition->Signature.Interruptible ? "" : ", непрерываемая") + ")";
+                return false;
+            }
+    }
+    return true;
+}
+
 RunPtr World::FindRun(int runId) const {
     auto it = m_byId.find(runId);
     return it == m_byId.end() ? nullptr : it->second;

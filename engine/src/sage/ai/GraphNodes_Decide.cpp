@@ -38,7 +38,7 @@ std::string Num(int i) { return std::to_string(i); }
 } // namespace
 
 void RegisterDecisionNodes(NodeRegistry& r) {
-    NodeType t = Node("ai.decide", "Decide", "Decisions",
+    NodeType t = Node("ai.decide", "Decide", "Behavior Control",
                       "Runs the branch of the most important option whose condition holds; switches when a more "
                       "important one becomes true and the current one may be interrupted.");
     t.Domains = kDomainAI;

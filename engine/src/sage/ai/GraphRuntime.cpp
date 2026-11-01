@@ -14,6 +14,11 @@ namespace {
 
 bool IsLoop(const std::string& id) { return id == "flow.while" || id == "flow.for" || id == "flow.for_each"; }
 
+// Выход неудачи: ушли по нему, а он ни с чем не соединён, — ветка неудачна.
+bool IsFailurePin(const std::string& pin) { return pin == "failure" || pin == "failed"; }
+
+bool IsStart(const std::string& t) { return t == "flow.start" || t == "script.on_start" || t == "ai.task_start"; }
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -47,10 +52,18 @@ std::shared_ptr<CompiledGraph> CompileGraph(std::shared_ptr<const GraphDoc> doc,
         if (exec) from.ExecOut[l.From.Pin] = l.To.Node;
         else to.DataIn[l.To.Pin] = &l;
     }
+    int starts = 0;
     for (size_t i = 0; i < g->Nodes.size(); ++i) {
-        const std::string& t = g->Nodes[i].Node->Type;
-        if ((t == "flow.start" || t == "script.on_start") && !g->StartNode) g->StartNode = g->Nodes[i].Node->Id;
-        if (t == "event.on") g->EventNodes.push_back(i);
+        const CompiledNode& c = g->Nodes[i];
+        const std::string& t = c.Node->Type;
+        if (IsStart(t)) {
+            ++starts;
+            if (!g->StartNode) g->StartNode = c.Node->Id;
+        }
+        if (c.Type && c.Type->ListensTo) {
+            g->EventNodes.push_back(i);
+            g->EventNames.push_back(c.Type->ListensTo(*c.Node));
+        }
         if (t == "script.on_update") g->UpdateNodes.push_back(i);
         if (t == "ai.decide") g->ListensAll = true;
     }
@@ -62,6 +75,10 @@ std::shared_ptr<CompiledGraph> CompileGraph(std::shared_ptr<const GraphDoc> doc,
     // правила назначения одни для палитры, проверки и выполнения.
     else if (!foreign.empty())
         g->Problem = "в графе '" + d.Name + "' узел " + foreign + " не для этого вида графа";
+    // AI Graph — задача поведения: у неё ровно одно начало, Task Start.
+    else if (d.Kind == GraphKind::Behavior && starts != 1)
+        g->Problem = starts == 0 ? "в AI Graph '" + d.Name + "' нет узла Task Start — поведению неоткуда начаться"
+                                 : "в AI Graph '" + d.Name + "' несколько узлов Task Start — начало должно быть одно";
     else if (!g->StartNode && g->EventNodes.empty() && g->UpdateNodes.empty())
         g->Problem = "в графе '" + d.Name + "' нет ни узла Start, ни обработчика событий";
     return g;
@@ -201,6 +218,64 @@ bool GraphExec::FiberDone(int fiber) const {
     return !f || f->Done;
 }
 
+bool GraphExec::FiberResult(int fiber, bool& ok, std::string& reason) {
+    if (Fiber* f = m_g.FindFiber(fiber)) {
+        if (!f->Done) return false;
+        ok = !f->Failed;
+        reason = f->Reason;
+        f->Failed = false;   // прочитан — при уборке не запоминается
+        f->Reason.clear();
+        return true;
+    }
+    auto it = m_g.m_results.find(fiber);
+    if (it == m_g.m_results.end()) {
+        ok = true;   // ветки не было (выход ни с чем не соединён) — пустая ветка успешна
+        reason.clear();
+        return true;
+    }
+    ok = it->second.first;
+    reason = it->second.second;
+    m_g.m_results.erase(it);
+    return true;
+}
+
+NodeResult GraphExec::EndBranch(bool ok, const std::string& reason) {
+    Fiber& f = Need("закончить ветку");
+    f.Failed = !ok;
+    f.Reason = ok ? std::string() : reason;
+    return NodeResult::End();
+}
+
+void GraphExec::FailReason(const std::string& reason) {
+    if (m_f) m_f->Reason = reason;
+}
+
+void GraphExec::SetLastResult(bool ok, const std::string& what, const std::string& reason) {
+    m_g.m_lastOk = ok;
+    m_g.m_lastWhat = what;
+    m_g.m_lastReason = reason;
+}
+
+void GraphExec::LastResult(bool& ok, std::string& what, std::string& reason) const {
+    ok = m_g.m_lastOk;
+    what = m_g.m_lastWhat;
+    reason = m_g.m_lastReason;
+}
+
+void GraphExec::Abort(const std::string& reason) {
+    m_t.GetRun().Error = reason.empty() ? "поведение прервано графом" : reason;
+    m_g.m_finished = true;
+    m_g.m_ok = false;
+    m_g.m_reason = m_t.GetRun().Error;
+    // Отмену делает мир (дети, cancel-обработчики); из шага — отложенно.
+    m_t.GetWorld().Cancel(m_t.GetRun().Id);
+}
+
+void GraphExec::Report(const std::string& state) {
+    GraphDebugger& dbg = GraphDebugger::Get();
+    if (dbg.Enabled) dbg.NodeOutcome(m_g.m_runId, m_n.Node->Id, state);
+}
+
 RunPtr GraphExec::StartTask(const std::string& name, const Blackboard& inputs, int priority) {
     RunPtr run = m_t.Start(name, inputs, priority);
     if (run->Rejected) Error(run->Error);
@@ -258,6 +333,8 @@ void GraphBehavior::KillFiber(int id, const std::string& reason) {
     Fiber* f = FindFiber(id);
     if (!f || f->Done) return;
     f->Done = true;
+    f->Failed = true;
+    f->Reason = reason.empty() ? "ветка снята" : reason;
     // Ветка, ждавшая задачу, уносит её с собой: «Parallel: любая» отменил
     // проигравшую ветку — её перемещение не должно идти дальше в пустоту.
     if (f->Wait == Fiber::WaitKind::Run && f->Run && f->Run->Status == TaskStatus::Running) {
@@ -361,6 +438,13 @@ vars::Value GraphBehavior::Eval(TaskContext& ctx, const CompiledNode& n, const s
     return op ? op->Default : vars::Value();
 }
 
+void GraphBehavior::Remember(const Fiber& f) {
+    // Результат ждёт узел, запустивший ветку; бесхозные (ветки On Event) не
+    // копятся без конца.
+    if (m_results.size() > 256) m_results.erase(m_results.begin());
+    m_results[f.Id] = {!f.Failed, f.Reason};
+}
+
 void GraphBehavior::Fail(const std::string& reason) {
     m_finished = true;
     m_ok = false;
@@ -369,6 +453,20 @@ void GraphBehavior::Fail(const std::string& reason) {
 
 void GraphBehavior::DeliverEvents(TaskContext& ctx) {
     while (!m_events.empty()) {
+        // Обработчик без наложения, чья ветка прошлого срабатывания ещё не
+        // начала шагать: событие ждёт следующего прохода этого же кадра —
+        // три шага физики дают три срабатывания On Fixed Update, а не одно.
+        {
+            const std::string& next = m_events.front().first;
+            for (size_t k = 0; k < m_g->EventNodes.size(); ++k) {
+                if (m_g->EventNames[k] != next) continue;
+                const CompiledNode& n = m_g->Nodes[m_g->EventNodes[k]];
+                if (!n.Type->NoOverlap) continue;
+                auto prev = m_updateFiber.find(n.Node->Id);
+                if (prev == m_updateFiber.end()) continue;
+                if (Fiber* pf = FindFiber(prev->second); pf && !pf->Done && !pf->Ran) return;
+            }
+        }
         auto [name, payload] = std::move(m_events.front());
         m_events.pop_front();
         ++m_eventSerial;
@@ -378,12 +476,24 @@ void GraphBehavior::DeliverEvents(TaskContext& ctx) {
             f->TimedOut = false;
             f->Payload = payload;
         }
-        for (size_t i : m_g->EventNodes) {
-            const CompiledNode& n = m_g->Nodes[i];
-            auto it = n.Node->Values.find("event");
-            if (it == n.Node->Values.end() || it->second.AsString() != name) continue;
-            m_state[n.Node->Id].Outputs["data"] = payload;
-            if (const int target = Target(n, "fired")) NewFiber(target);
+        for (size_t k = 0; k < m_g->EventNodes.size(); ++k) {
+            if (m_g->EventNames[k] != name) continue;
+            const CompiledNode& n = m_g->Nodes[m_g->EventNodes[k]];
+            const int id = n.Node->Id;
+            // Обработчик без наложения (On Fixed Update): прошлое срабатывание
+            // ещё ждёт — новое не заводится, как и у On Update.
+            if (n.Type->NoOverlap) {
+                auto prev = m_updateFiber.find(id);
+                if (prev != m_updateFiber.end())
+                    if (Fiber* pf = FindFiber(prev->second); pf && !pf->Done) continue;
+            }
+            m_state[id].Outputs[n.Type->EventData] = payload;
+            if (n.Type->EventRunsSelf) {
+                NewFiber(id);
+            } else if (const int target = Target(n, n.Type->EventExec)) {
+                const int fid = NewFiber(target).Id;
+                if (n.Type->NoOverlap) m_updateFiber[id] = fid;
+            }
             GraphDebugger& dbg = GraphDebugger::Get();
             if (dbg.Enabled) {
                 dbg.NodeStepped(m_runId, GraphName(), n.Node->Id, ctx.GetWorld().Frame(), ctx.GetWorld().Time());
@@ -428,6 +538,7 @@ void GraphBehavior::RunFiber(TaskContext& ctx, Fiber& f) {
         }
         f.SkipBreak = false;
         if (--m_budget < 0) return;
+        f.Ran = true;
 
         const bool resumed = f.Resume, reentered = f.Reentered;
         f.Resume = false;
@@ -456,7 +567,19 @@ void GraphBehavior::RunFiber(TaskContext& ctx, Fiber& f) {
             f.Payload = vars::Value();
         }
         switch (r.Kind) {
-            case Flow::Next: f.Node = Target(*n, r.Pin); break;
+            case Flow::Next:
+                f.Node = Target(*n, r.Pin);
+                // Ушли по выходу неудачи в никуда — ветка неудачна, а не
+                // «просто кончилась»: Sequence задач должен об этом узнать.
+                if (!f.Node && IsFailurePin(r.Pin) && f.Stack.empty()) {
+                    f.Failed = true;
+                    if (f.Reason.empty())
+                        f.Reason = n->Type->Title + " (#" + std::to_string(n->Node->Id) + "): неудача";
+                    f.Done = true;
+                    return;
+                }
+                if (f.Node) f.Reason.clear();
+                break;
             case Flow::Push:
                 f.Stack.push_back(n->Node->Id);
                 f.Node = Target(*n, r.Pin);
@@ -497,17 +620,15 @@ TaskStatus GraphBehavior::Step(TaskContext& ctx) {
         if (!m_g->Problem.empty()) return ctx.Fail(m_g->Problem);
         const TypeRegistry& types = ctx.GetWorld().Types();
         for (const GraphVar& v : m_g->Doc->Locals) ctx.Locals().Declare(v.Name, types.Convert(v.Default, v.Type));
-        if (m_g->StartNode) NewFiber(m_g->StartNode);
+        if (m_g->StartNode) m_root = NewFiber(m_g->StartNode).Id;
         // События слышны всегда, а не только когда ветка ждёт: обработчик On
         // Event — это «когда бы ни случилось», а не «если сейчас стою и жду».
         run.Listener = [this](const std::string& name, const vars::Value& payload) {
             bool want = false;
             for (auto& f : m_fibers)
                 if (!f->Done && f->Wait == Fiber::WaitKind::Event && f->Event == name) want = true;
-            for (size_t i : m_g->EventNodes) {
-                auto it = m_g->Nodes[i].Node->Values.find("event");
-                if (it != m_g->Nodes[i].Node->Values.end() && it->second.AsString() == name) want = true;
-            }
+            for (const std::string& e : m_g->EventNames)
+                if (e == name) want = true;
             if (m_g->ListensAll) want = true;   // Decide перепроверяет условия на любое событие
             if (want) m_events.emplace_back(name, payload);
             return want;
@@ -532,21 +653,48 @@ TaskStatus GraphBehavior::Step(TaskContext& ctx) {
     DeliverEvents(ctx);
     StartUpdates(ctx);
     m_budget = kMaxNodesPerStep;
-    for (size_t i = 0; i < m_fibers.size() && !m_finished && !m_paused; ++i) {
-        Fiber& f = *m_fibers[i];
-        if (f.Done || !Ready(f)) continue;
-        RunFiber(ctx, f);
-        if (m_budget < 0) {
-            Fail("граф '" + GraphName() + "' выполнил больше " + std::to_string(kMaxNodesPerStep) +
-                 " узлов за один кадр без ожидания — похоже на бесконечный цикл");
-            break;
+    // Проходы, пока кто-то сдвинулся: ветка-родитель (Sequence, Selector)
+    // стоит в списке раньше дочерней и иначе узнала бы о её конце только в
+    // следующем кадре — цепочка из пяти мгновенных шагов шла бы пять кадров.
+    for (int pass = 0; pass < 32 && !m_finished && !m_paused && m_budget >= 0; ++pass) {
+        bool moved = false;
+        if (pass > 0 && !m_events.empty()) {
+            const size_t before = m_events.size();
+            DeliverEvents(ctx);
+            moved = m_events.size() != before;
         }
+        for (size_t i = 0; i < m_fibers.size() && !m_finished && !m_paused; ++i) {
+            Fiber& f = *m_fibers[i];
+            if (f.Done || !Ready(f)) continue;
+            moved = true;
+            RunFiber(ctx, f);
+            if (m_budget < 0) {
+                Fail("граф '" + GraphName() + "' выполнил больше " + std::to_string(kMaxNodesPerStep) +
+                     " узлов за один кадр без ожидания — похоже на бесконечный цикл");
+                break;
+            }
+        }
+        if (!moved) break;
     }
     while (!m_cancelQueue.empty()) {
         RunPtr r = m_cancelQueue.front();
         m_cancelQueue.pop_front();
         ctx.GetWorld().Cancel(r->Id);
     }
+    // AI Graph — задача поведения: она кончается результатом корневой ветки.
+    // Остальные ветки (их держали узлы корневой) снимаются вместе с задачами.
+    if (!m_finished && m_g->Doc->Kind == GraphKind::Behavior && m_root) {
+        Fiber* root = FindFiber(m_root);
+        if (!root || root->Done) {
+            m_finished = true;
+            m_ok = root ? !root->Failed : true;
+            m_reason = root ? root->Reason : std::string();
+            for (auto& f : m_fibers)
+                if (!f->Done) KillFiber(f->Id, "поведение '" + GraphName() + "' завершено");
+        }
+    }
+    for (auto& f : m_fibers)
+        if (f->Done) Remember(*f);
     m_fibers.erase(std::remove_if(m_fibers.begin(), m_fibers.end(), [](const auto& f) { return f->Done; }),
                    m_fibers.end());
 

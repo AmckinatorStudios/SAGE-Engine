@@ -244,7 +244,11 @@ bool EditorPlaySession::SwitchScene(const PlayContext& ctx, const std::string& s
 }
 
 void EditorPlaySession::StepScripts(Scene& scene, float dt) {
-    if (m_scripts) m_scripts->UpdateAll(dt);
+    // Тот же порядок, что у кадра (RegisterCoreSystems): постоянный шаг, затем Update.
+    if (m_scripts) {
+        m_scripts->UpdateFixed(dt);
+        m_scripts->UpdateAll(dt);
+    }
     if (!m_scripting) return;
     // Столкновения прошлого шага — до Update, как и в обычном кадре.
     if (m_physics) m_scripting->DispatchPhysicsEvents(*m_physics, scene);

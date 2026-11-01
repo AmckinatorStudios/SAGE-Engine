@@ -140,18 +140,22 @@ TEST(AIGraph_long_task_waits_without_restarting) {
         t.Outputs().Set("arrived", Value(true));
         return TaskStatus::Succeeded;
     }));
+    // AI Graph: Task Start -> Run Task MoveTo -> выход задачи в выход графа -> Succeed.
     GraphDoc d;
+    d.Kind = GraphKind::Behavior;
     d.Name = "Go";
     d.Outputs = {{"done", "bool", Value(false), ""}};
-    const int start = Add(d, "flow.start");
+    const int start = Add(d, "ai.task_start");
     const int run = Add(d, "task.run", {{"task", Value(std::string("MoveTo"))}});
-    const int ret = Add(d, "flow.return");
+    const int out = Add(d, "ai.set_param", {{"scope", Value(std::string("output"))}, {"name", Value(std::string("done"))}});
+    const int ok = Add(d, "ai.succeed");
     Exec(d, start, "then", run);
-    Exec(d, run, "succeeded", ret);
-    Data(d, run, "arrived", ret, "done");
+    Exec(d, run, "succeeded", out);
+    Data(d, run, "arrived", out, "value");
+    Exec(d, out, "then", ok);
     RunPtr r = StartGraph(w, d);
     for (int i = 0; i < 4; ++i) w.Tick(0.1f);
-    CHECK_EQ(starts, 1);
+    CHECK_EQ(starts, 1);   // долгая задача не перезапускается каждый кадр
     CHECK_TRUE(r->Status == TaskStatus::Running);
     for (int i = 0; i < 3; ++i) w.Tick(0.1f);
     CHECK_EQ(starts, 1);
@@ -159,29 +163,61 @@ TEST(AIGraph_long_task_waits_without_restarting) {
     CHECK_TRUE(r->Outputs->Get("done").AsBool());
 }
 
-TEST(AIGraph_parallel_any_cancels_the_loser) {
+TEST(AIGraph_false_condition_interrupts_and_cancels_the_task) {
     World w;
     int cancelled = 0;
     w.RegisterTask(MakeTask("Forever", {}, [](TaskContext& t) {
         t.WaitEvent("never");
         return TaskStatus::Running;
     }, [&](TaskContext&) { ++cancelled; }));
+    // If Condition (go) следит за условием, пока идёт его ветка.
     GraphDoc d;
+    d.Kind = GraphKind::Behavior;
+    d.Name = "Guarded";
+    const int start = Add(d, "ai.task_start");
+    const int guard = Add(d, "ai.guard");
+    const int go = Add(d, "ai.compare", {{"scope", Value(std::string("instance"))}, {"name", Value(std::string("go"))},
+                                         {"op", Value(std::string("=="))}, {"value", Value(true)}});
+    const int run = Add(d, "task.run", {{"task", Value(std::string("Forever"))}});
+    Exec(d, start, "then", guard);
+    Data(d, go, "result", guard, "condition");
+    Exec(d, guard, "do", run);
+    std::string err;
+    CHECK_TRUE(w.RegisterGraph(d, err));
+    const int agent = w.CreateAgent();
+    w.FindAgent(agent)->Memory->Set("go", Value(true));
+    RunPtr r = w.Start(agent, "Guarded");
+    for (int i = 0; i < 3; ++i) w.Tick(0.1f);
+    CHECK_TRUE(r->Status == TaskStatus::Running);
+    CHECK_EQ(cancelled, 0);
+    w.FindAgent(agent)->Memory->Set("go", Value(false));
+    for (int i = 0; i < 2; ++i) w.Tick(0.1f);
+    CHECK_EQ(cancelled, 1);   // задача снятой ветки отменена, а не брошена
+    CHECK_TRUE(r->Status == TaskStatus::Failed);
+    CHECK_TRUE(r->Error.find("перестало выполняться") != std::string::npos);
+    CHECK_EQ((int)w.ActiveCount(), 0);
+}
+
+TEST(ScriptGraph_parallel_any_finishes_with_the_first_branch) {
+    World w;
+    // Parallel — поток Script Graph (функция): «первая из веток» кончает узел.
+    GraphDoc d;
+    d.Kind = GraphKind::Function;
     d.Name = "Race";
+    d.Outputs = {{"winner", "int", Value(-1), ""}};
     const int start = Add(d, "flow.start");
     const int par = Add(d, "flow.parallel", {{"mode", Value(std::string("any"))}});
-    const int wait = Add(d, "flow.wait", {{"seconds", Value(0.2f)}});
-    const int run = Add(d, "task.run", {{"task", Value(std::string("Forever"))}});
-    const int ret = Add(d, "flow.return");
+    const int fast = Add(d, "flow.wait", {{"seconds", Value(0.1f)}});
+    const int slow = Add(d, "flow.wait", {{"seconds", Value(5.0f)}});
+    const int ret = Add(d, "flow.return", {{"winner", Value(0)}});
     Exec(d, start, "then", par);
-    Exec(d, par, "branch 0", wait);
-    Exec(d, par, "branch 1", run);
+    Exec(d, par, "branch 0", fast);
+    Exec(d, par, "branch 1", slow);
     Exec(d, par, "completed", ret);
     RunPtr r = StartGraph(w, d);
     for (int i = 0; i < 4; ++i) w.Tick(0.1f);
     CHECK_TRUE(r->Status == TaskStatus::Succeeded);
-    CHECK_EQ(cancelled, 1);
-    CHECK_EQ((int)w.ActiveCount(), 0);
+    CHECK_EQ(r->Outputs->Get("winner").AsInt(), 0);
 }
 
 TEST(AIGraph_event_handlers_and_endless_loop_guard) {

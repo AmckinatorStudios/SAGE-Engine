@@ -10,11 +10,12 @@ namespace {
 
 const char* KindTitle(GraphKind k) {
     switch (k) {
-        case GraphKind::Script: return "скрипта объекта (Visual Scripting)";
-        case GraphKind::Task: return "задачи (Visual Scripting): управление задачами — в AI Graph";
-        case GraphKind::Function: return "графа-функции (только общие узлы)";
-        case GraphKind::Behavior: return "AI Graph: действия описываются в задачах";
+        case GraphKind::Script: return "Script Graph: узлы ИИ (задачи, условия, управление поведением) — в AI Graph";
+        case GraphKind::Task: return "устаревшего графа задачи: задачи теперь собираются в AI Graph";
+        case GraphKind::Function: return "функции Script Graph: в ней нет событий объекта и узлов ИИ";
+        case GraphKind::Behavior: return "AI Graph: игровая логика (Branch, циклы, игровые действия) — в Script Graph";
     }
+    return "";
 }
 
 std::string Setting(const GraphNode& n, const char* key) {
@@ -40,10 +41,10 @@ std::vector<GraphIssue> ValidateGraph(const GraphDoc& doc, const World& world) {
         if (!NodeAllowed(t->Domains, doc.Kind))
             add(n.Id, true, "узел «" + t->Title + "» не для " + KindTitle(doc.Kind));
         if (t->Entry) entries.insert(n.Id);
-        if (n.Type == "flow.start" || n.Type == "script.on_start") ++starts;
+        if (n.Type == "flow.start" || n.Type == "script.on_start" || n.Type == "ai.task_start") ++starts;
 
         // Настройки, без которых узел не работает.
-        if (n.Type == "task.run" || n.Type == "task.call") {
+        if (n.Type == "task.run" || n.Type == "task.call" || n.Type == "ai.can_run") {
             const std::string task = Setting(n, "task");
             if (task.empty()) add(n.Id, true, "не выбрана задача");
             else if (!world.FindTask(task)) add(n.Id, true, "нет задачи '" + task + "'");
@@ -73,6 +74,11 @@ std::vector<GraphIssue> ValidateGraph(const GraphDoc& doc, const World& world) {
         }
         if ((n.Type == "event.on" || n.Type == "event.wait" || n.Type == "event.emit") && Setting(n, "event").empty())
             add(n.Id, false, "не задано имя события");
+        if ((n.Type == "ai.wait_event" || n.Type == "ai.remember_event") && Setting(n, "event").empty())
+            add(n.Id, true, "не задано имя события");
+        if ((n.Type == "ai.get_param" || n.Type == "ai.set_param" || n.Type == "ai.compare") &&
+            Setting(n, "name").empty())
+            add(n.Id, true, "не задано имя параметра");
     }
 
     // Провода: к существующим пинам и совместимых типов.
@@ -113,10 +119,16 @@ std::vector<GraphIssue> ValidateGraph(const GraphDoc& doc, const World& world) {
         if (hasExecIn && !reached.count(n.Id)) add(n.Id, false, "к узлу не ведёт поток — он не выполнится");
     }
 
-    if (entries.empty())
-        add(0, true, doc.Kind == GraphKind::Script ? "нет входа: On Start, On Update или On Event"
-                                                   : "нет ни узла Start, ни обработчика событий");
-    if (starts > 1) add(0, false, "узлов Start больше одного — выполнится первый");
+    if (doc.Kind == GraphKind::Behavior) {
+        // У задачи поведения одно начало: результат его ветки и есть результат.
+        if (starts == 0) add(0, true, "нет узла Task Start — поведению неоткуда начаться");
+        if (starts > 1) add(0, true, "узлов Task Start больше одного — у поведения одно начало");
+    } else {
+        if (entries.empty())
+            add(0, true, doc.Kind == GraphKind::Script ? "нет события: On Start, On Update, On Signal или On Event"
+                                                       : "нет ни узла Start, ни обработчика событий");
+        if (starts > 1) add(0, false, "узлов Start больше одного — выполнится первый");
+    }
     return out;
 }
 

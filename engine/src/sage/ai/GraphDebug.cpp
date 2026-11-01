@@ -92,6 +92,10 @@ void GraphDebugger::NodeStepped(int run, const std::string& graph, int node, uin
     Push({time, 0, run, graph, node, "node", {}});
 }
 
+void GraphDebugger::NodeOutcome(int run, int node, const std::string& state) {
+    if (RunDebug* r = FindRun(run)) r->Outcomes[node] = state;
+}
+
 void GraphDebugger::PinValue(int run, int node, const std::string& pin, const std::string& value) {
     m_runs[run].Pins[{node, pin}] = value;
 }

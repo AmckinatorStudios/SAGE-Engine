@@ -109,6 +109,10 @@ public:
     // этом же проходе.
     RunPtr RunNow(int agent, const std::string& task, const Blackboard& inputs = {});
     RunPtr FindRun(int runId) const;
+    // Запустилась бы задача СЕЙЧАС: есть ли она и не займут ли её каналы
+    // более важные или непрерываемые задачи этого персонажа. Те же правила,
+    // что у Start, но ничего не запускает и не прерывает (условие Can Run Task).
+    bool CanStart(int agent, const std::string& task, int priority, int parentRun, std::string& why) const;
     size_t ActiveCount() const { return m_byId.size(); }
 
     // ПРОФИЛЬ: сколько стоит каждая задача (по имени) — запусков, шагов,
