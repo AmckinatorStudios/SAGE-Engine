@@ -24,6 +24,7 @@
 #include <memory>
 
 #include "sage/render/Framebuffer.h"
+#include "sage/render/RenderTexture.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Texture.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -655,6 +656,24 @@ void CheckSrgbImageKeepsItsColour(UIRenderer& ui) {
           "sRGB-картинка в интерфейсе того же цвета, что её пиксели");
 }
 
+// Картинка из съёмки в текстуру ("rt:<имя>") остаётся съёмкой и после того,
+// как интерфейс пересинхронизирует картинку элемента. Раньше пересинхронизация
+// искала её файлом на диске и подменяла белой заглушкой.
+void CheckRenderTextureImageSurvivesResync(UIRenderer& ui) {
+    sage::render::RenderTexture* rt = &sage::render::RenderTextureRegistry::Instance().GetOrCreate("rendertest_rt_image", 16, 16);
+    Scene scene("rt");
+    GameObject e = Screen(scene, "Pic", {40.0f, 40.0f});
+    sage::ui::Image img;
+    img.Path = "rt:rendertest_rt_image";
+    scene.Registry().emplace<sage::ui::Image>(e.Entity(), img);
+    RenderUI(ui, scene);
+    const auto& after = scene.Registry().get<sage::ui::Image>(e.Entity());
+    const auto expected = sage::render::RenderTextureRegistry::Resolve("rt:rendertest_rt_image");
+    std::printf("    картинка rt: после синхронизации — %s\n",
+                after.Tex && after.Tex == expected ? "съёмка" : "НЕ съёмка");
+    Check(rt != nullptr && after.Tex && after.Tex == expected, "картинка rt: остаётся съёмкой");
+}
+
 } // namespace
 
 // --- Тень и обводка текста ---------------------------------------------------
@@ -828,6 +847,7 @@ void RunUIChecks() {
     CheckSharpFontStillFollowsTheSize(ui);
     CheckImageRotates(ui);
     CheckSrgbImageKeepsItsColour(ui);
+    CheckRenderTextureImageSurvivesResync(ui);
     CheckLabelShadowAndOutline(ui);
     CheckPressedLookReplacesFill(ui);
     CheckNineSliceCornersKeepTheirSize(ui);

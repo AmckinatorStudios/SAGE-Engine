@@ -3,6 +3,7 @@
 #include <string>
 
 #include "sage/scene/Signals.h"
+#include "sage/render/RenderTexture.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Texture.h"
 #include "sage/scene/SceneJson.h"
@@ -191,9 +192,16 @@ void ResolveImageTextureImpl(sage::ui::Image& im) {
     // Резкая фильтрация грузится ближайшим соседом и без мипмапов — иначе
     // набор спрайтов размывается, а мипмапы ЛИСТА подмешивают в края соседний
     // спрайт.
-    im.Tex = im.Sharp() ? ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Nearest,
-                                                                 /*mipmaps=*/false)
-                        : ResourceManager::Instance().GetTexture(im.Path);
+    // "rt:<имя>" — картинка, которую рисует сам движок (съёмка в текстуру).
+    // Её нет на диске: без этой ветки пересинхронизация картинки заменяла
+    // уже найденную съёмку белой заглушкой «файл не найден».
+    if (auto rt = sage::render::RenderTextureRegistry::Resolve(im.Path)) {
+        im.Tex = rt;
+    } else {
+        im.Tex = im.Sharp() ? ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Nearest,
+                                                                     /*mipmaps=*/false)
+                            : ResourceManager::Instance().GetTexture(im.Path);
+    }
     im.TexPath = im.Path;
     im.TexFiltering = im.Filtering;
 }
