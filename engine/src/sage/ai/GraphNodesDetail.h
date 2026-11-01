@@ -26,5 +26,8 @@ std::string TypeOfValue(const GraphEnv& env, const vars::Value& v);
 void RegisterDataNodes(NodeRegistry& nodes);
 // Решение с приоритетами (Decide) — AI Graph.
 void RegisterDecisionNodes(NodeRegistry& nodes);
+// AI Graph: жизненный цикл задачи, управление поведением, условия, контекст.
+void RegisterBehaviorNodes(NodeRegistry& nodes);
+void RegisterAiContextNodes(NodeRegistry& nodes);
 
 } // namespace sage::ai::nodes

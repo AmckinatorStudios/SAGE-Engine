@@ -448,6 +448,9 @@ private:
     void RegisterAiApi();         // ai.* — задачи и экземпляры ИИ (ScriptApi_AI.cpp)
     void RegisterAiGraphApi();    // граф: ai.node, ai.type, узлы мира (ScriptApi_AIGraph.cpp)
     void RegisterAiWorldNodes();  // узлы мира движка и API (ScriptApi_AIWorld.cpp)
+    void RegisterAiBehaviorNodes();  // задачи ИИ в мире, цель (ScriptApi_AIBehavior.cpp)
+    void ConnectVisualSignals(int object, int agent, const sage::ai::GraphDoc& graph);
+    void EmitVisualFixedStep(float step);
     // Компонент AI объектов сцены: завести экземпляр и запустить граф.
     void UpdateAiAgents();
     std::string ResolveAiPath(const std::string& path) const;
@@ -572,6 +575,8 @@ private:
     std::set<int> m_aiFailed;                        // объекты, чей граф не запустился
     std::map<int, int> m_vsAgents;                   // объект -> выполнение Visual Script
     std::set<int> m_vsFailed;
+    std::set<int> m_vsFixed;    // выполнения Script Graph с On Fixed Update
+    bool m_slPrelude = false;   // runtime SAGE Lua поставлен (библиотека ИИ из .slua)
     sol::protected_function m_aiPathFinder;
 
     // Мост к скриптам объектов (см. SetMessageSink). ПОСЛЕ m_lua намеренно:

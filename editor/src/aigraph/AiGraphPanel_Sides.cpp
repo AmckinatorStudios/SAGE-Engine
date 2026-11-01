@@ -35,10 +35,10 @@ std::string Lower(std::string s) {
 
 const char* KindTitle(GraphKind k) {
     switch (k) {
-        case GraphKind::Behavior: return T("Behaviour graph");
-        case GraphKind::Task: return T("Task graph");
-        case GraphKind::Function: return T("Function graph");
-        case GraphKind::Script: return T("Visual script");
+        case GraphKind::Behavior: return T("AI Graph");
+        case GraphKind::Task: return T("Task (old format)");
+        case GraphKind::Function: return T("Function");
+        case GraphKind::Script: return T("Script Graph of an object");
     }
     return "";
 }
@@ -62,15 +62,25 @@ void AiGraphPanel::DrawGraphSide(EditorHost& host) {
         m_doc.Name = name;
         MarkChanged();
     }
-    ImGui::SetNextItemWidth(-1.0f);
-    if (ImGui::BeginCombo("##gkind", KindTitle(m_doc.Kind))) {
-        for (GraphKind k : m_mode.Kinds)
-            if (ImGui::Selectable(KindTitle(k), m_doc.Kind == k)) {
-                PushUndo();
-                m_doc.Kind = k;
-                MarkChanged();
-            }
-        ImGui::EndCombo();
+    // Вид меняется только в пределах файла: Script Graph объекта <-> функция
+    // (оба .sgraph). AI Graph и устаревшая задача — подписью: их вид задан
+    // расширением файла и редактором, а не списком.
+    const bool switchable = m_doc.Kind == GraphKind::Script || m_doc.Kind == GraphKind::Function;
+    if (switchable) {
+        ImGui::SetNextItemWidth(-1.0f);
+        if (ImGui::BeginCombo("##gkind", KindTitle(m_doc.Kind))) {
+            for (GraphKind k : {GraphKind::Script, GraphKind::Function})
+                if (ImGui::Selectable(KindTitle(k), m_doc.Kind == k)) {
+                    PushUndo();
+                    m_doc.Kind = k;
+                    MarkChanged();
+                }
+            ImGui::EndCombo();
+        }
+    } else {
+        ImGui::TextUnformatted(KindTitle(m_doc.Kind));
+        if (m_doc.Kind == GraphKind::Task)
+            ImGui::TextWrapped("%s", T("An old task graph: it keeps working. New tasks are built in AI Graph."));
     }
     std::string desc = m_doc.Description;
     ImGui::SetNextItemWidth(-1.0f);
@@ -79,7 +89,7 @@ void AiGraphPanel::DrawGraphSide(EditorHost& host) {
         m_doc.Description = desc;
         MarkChanged();
     }
-    if (m_doc.Kind == GraphKind::Task) {
+    if (m_doc.Kind == GraphKind::Task || m_doc.Kind == GraphKind::Behavior) {
         // Каналы персонажа, которые задача занимает (через запятую), и можно ли
         // её прервать — правила параллельного выполнения (TaskSignature).
         std::string channels;
@@ -123,10 +133,10 @@ void AiGraphPanel::DrawGraphSide(EditorHost& host) {
     DrawVarList(host, T("Local variables"), m_doc.Locals, "loc");
     ImGui::Spacing();
     if (m_mode.AiTools)
-        ImGui::TextWrapped("%s", T("Instance (the memory of the character) and Shared variables are read and written "
-                                   "by name with Get/Set Variable."));
+        ImGui::TextWrapped("%s", T("Instance (the memory of the character) and Shared parameters are read and "
+                                   "written by name with Get/Set Parameter."));
     else
-        ImGui::TextWrapped("%s", T("Instance — variables of the object (the Visual Script component), Shared — data "
+        ImGui::TextWrapped("%s", T("Instance — variables of the object (the Script Graph component), Shared — data "
                                    "shared by all scripts; read and written by name with Get/Set Variable."));
     if (!m_libError.empty()) ImGui::TextColored(ImVec4(1, 0.5f, 0.4f, 1), "%s", m_libError.c_str());
 }
@@ -409,8 +419,8 @@ void AiGraphPanel::DrawOpenPopup(EditorHost& host) {
     }
     Sage::UI::MenuScope menu;
     if (!ImGui::BeginPopup("###AiGraphOpen")) return;
-    ImGui::TextDisabled("%s", m_mode.AiTools ? T("Graphs of the project (assets/ai)")
-                                             : T("Visual scripts of the project (assets/visual)"));
+    ImGui::TextDisabled("%s", m_mode.AiTools ? T("AI graphs of the project (assets/ai)")
+                                             : T("Script graphs of the project (assets/visual)"));
     const std::string dir = AiDir(host);
     int count = 0;
     std::error_code ec;
@@ -418,7 +428,9 @@ void AiGraphPanel::DrawOpenPopup(EditorHost& host) {
         for (auto it = fs::recursive_directory_iterator(sage::PathFromUtf8(dir), ec);
              it != fs::recursive_directory_iterator(); it.increment(ec)) {
             if (ec) break;
-            if (sage::PathToUtf8(it->path().extension()) != m_mode.Extension) continue;
+            const std::string ext = sage::PathToUtf8(it->path().extension());
+            // Script Graph видит и свои старые файлы .vgraph — их не бросают.
+            if (ext != m_mode.Extension && !(!m_mode.AiTools && ext == ".vgraph")) continue;
             ++count;
             const std::string rel = sage::PathToUtf8(fs::relative(it->path(), sage::PathFromUtf8(dir), ec));
             if (EditorIcons::MenuItem("wire", rel.c_str())) {
@@ -439,7 +451,7 @@ void AiGraphPanel::DrawSaveAsPopup(EditorHost& host) {
     Sage::UI::MenuScope menu;
     if (!ImGui::BeginPopup("###AiGraphSaveAs")) return;
     ImGui::TextUnformatted(m_mode.AiTools ? T("Graph name (the file goes to assets/ai)")
-                                          : T("Script name (the file goes to assets/visual)"));
+                                          : T("Graph name (the file goes to assets/visual)"));
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
     ImGui::SetNextItemWidth(260.0f);
     const bool enter = ImGui::InputText("##aig_name", m_saveName, sizeof(m_saveName),

@@ -1,4 +1,5 @@
 #include "ScriptApiAIDetail.h"
+#include "sage/lang/SageCompiler.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -104,9 +105,8 @@ void ScriptEngine::RegisterAiGraphApi() {
 
     // Свой узел графа.
     Bind("ai", "node", nullptr, [this](const std::string& id, sol::table spec) {
-        // Узел ИИ из Lua — и для графа решений, и для графа задачи (Visual
-        // Scripting): действие «атаковать» нужно задаче, а не только решению.
-        RegisterLuaGraphNode(id, spec, sage::ai::kDomainAI | sage::ai::kDomainLogic);
+        // Узел ИИ из Lua — для AI Graph: своё условие, своя задача поведения.
+        RegisterLuaGraphNode(id, spec, sage::ai::kDomainAI);
     });
 
     // Свой тип данных — структура с полями: ai.type("Target", {fields = {{"pos", Vec3()}}}).
@@ -207,6 +207,13 @@ std::string ScriptEngine::LoadAiGraphFile(const std::string& full, const std::st
         LOG_ERROR("AI") << "Граф " << full << ": " << err;
         return {};
     }
+    // Расширение решает вид: .aigraph — только AI Graph, .sgraph — только
+    // Script Graph. Файл, правленный руками, не обойдёт правила узлов, выдав
+    // себя за граф другого вида.
+    if (!sage::ai::CheckGraphFile(full, doc.Kind, err)) {
+        LOG_ERROR("AI") << "Граф " << err;
+        return {};
+    }
     // Без имени граф зовётся по файлу: «guard.aigraph» — задача «guard».
     if (doc.Name.empty()) doc.Name = sage::PathToUtf8(sage::PathFromUtf8(full).stem());
     if (!AI().RegisterGraph(doc, err)) {
@@ -219,7 +226,7 @@ std::string ScriptEngine::LoadAiGraphFile(const std::string& full, const std::st
 
 int ScriptEngine::LoadAiLibrary(const std::string& directory) {
     const std::string root = ResolveAiPath(directory);
-    std::vector<std::string> luaFiles, graphFiles;
+    std::vector<std::string> luaFiles, sluaFiles, graphFiles;
     std::vector<std::string> dirs = {root};
     // Обход вглубь через vfs: в собранной игре папки на диске нет, она в пакете.
     for (size_t i = 0; i < dirs.size() && i < 256; ++i) {
@@ -232,19 +239,50 @@ int ScriptEngine::LoadAiLibrary(const std::string& directory) {
                 out.push_back(sage::PathToUtf8(sage::PathFromUtf8(d) / sage::PathFromUtf8(f).filename()));
         };
         add(".lua", luaFiles);
+        add(".slua", sluaFiles);
         add(".aigraph", graphFiles);
-        // Графы Visual Scripting — та же библиотека: функции общие для обоих.
-        add(".vgraph", graphFiles);
+        add(".sgraph", graphFiles);
+        add(".vgraph", graphFiles);   // устаревшие файлы Visual Script — загружаются как были
         for (const std::string& sub : sage::assets::vfs::ListDirs(d))
             dirs.push_back(sage::PathToUtf8(sage::PathFromUtf8(d) / sage::PathFromUtf8(sub)));
     }
     std::sort(luaFiles.begin(), luaFiles.end());
+    std::sort(sluaFiles.begin(), sluaFiles.end());
     std::sort(graphFiles.begin(), graphFiles.end());
     int loaded = 0;
     for (const std::string& f : luaFiles) {
         std::string text;
         if (!sage::assets::vfs::ReadText(f, text)) continue;
         auto r = m_lua.safe_script(text, sol::script_pass_on_error, "@" + f);
+        if (!r.valid()) {
+            sol::error e = r;
+            LOG_ERROR("AI") << "Библиотека ИИ: " << e.what();
+            continue;
+        }
+        ++loaded;
+    }
+    // SAGE Lua — основной язык: задачи (ai.task), свои узлы и типы пишутся на
+    // нём так же, как на Lua. Компиляция с проверкой типов — ошибка в файле
+    // называет строку, а не всплывает посреди игры.
+    for (const std::string& f : sluaFiles) {
+        std::string text;
+        if (!sage::assets::vfs::ReadText(f, text)) continue;
+        auto compiled = sage::lang::CompileForEngine(f, text);
+        if (!compiled->Ok) {
+            const sage::lang::Diagnostic* d = compiled->FirstError();
+            LOG_ERROR("AI") << "Библиотека ИИ: " << (d ? d->Format() : f + ": не собрался");
+            continue;
+        }
+        if (!m_slPrelude) {
+            auto pre = m_lua.safe_script(sage::lang::PreludeSource(), sol::script_pass_on_error, "@sage_prelude");
+            if (!pre.valid()) {
+                sol::error e = pre;
+                LOG_ERROR("AI") << "SAGE Lua: " << e.what();
+                continue;
+            }
+            m_slPrelude = true;
+        }
+        auto r = m_lua.safe_script(compiled->Lua, sol::script_pass_on_error, "@" + f);
         if (!r.valid()) {
             sol::error e = r;
             LOG_ERROR("AI") << "Библиотека ИИ: " << e.what();
@@ -280,6 +318,15 @@ void ScriptEngine::UpdateAiAgents() {
             m_aiFailed.insert(id);
             continue;
         }
+        // Компонент AI запускает только AI Graph: Script Graph — логика объекта,
+        // у него свой компонент и свой жизненный цикл.
+        std::shared_ptr<const sage::ai::GraphDoc> g = m_ai->FindGraph(task);
+        if (g && g->Kind != sage::ai::GraphKind::Behavior) {
+            LOG_ERROR("AI") << "ИИ объекта '" << obj.Name() << "': '" << task
+                            << "' — не AI Graph (Script Graph ставится компонентом Script Graph)";
+            m_aiFailed.insert(id);
+            continue;
+        }
         sage::ai::RunPtr run = m_ai->Start(agent, task);
         if (run->Rejected) {
             LOG_ERROR("AI") << "ИИ объекта '" << obj.Name() << "': " << run->Error;
@@ -305,12 +352,12 @@ void ScriptEngine::RegisterLuaGraphNode(const std::string& id, sol::table spec, 
     t.Category = spec.get_or<std::string>("category", "Lua");
     t.Description = spec.get_or<std::string>("description", "");
     t.Pure = spec.get_or("pure", false);
-    // Для какого графа: "ai" — только AI Graph (решения), "task" — AI Graph и
-    // задачи, "script" — Visual Scripting, "both" — везде. Без указания — для
-    // того, чей это вызов (ai.node — решения и задачи, visual.node — Visual Scripting).
+    // Для какого графа: "ai" — AI Graph, "script" — Script Graph, "both" — оба
+    // ("task" — прежнее имя "ai"). Без указания — для того, чей это вызов:
+    // ai.node — AI Graph, visual.node — Script Graph.
     const std::string domain = spec.get_or<std::string>("domain", "");
     if (domain == "ai") t.Domains = sage::ai::kDomainAI;
-    else if (domain == "task") t.Domains = sage::ai::kDomainAI | sage::ai::kDomainLogic;
+    else if (domain == "task") t.Domains = sage::ai::kDomainAI;
     else if (domain == "script") t.Domains = sage::ai::kDomainScript;
     else if (domain == "both") t.Domains = sage::ai::kDomainAll;
     else if (domain.empty()) t.Domains = defaultDomain;

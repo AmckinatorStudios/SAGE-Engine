@@ -247,13 +247,19 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
             const ImVec2 at = ImGui::GetCursorPos();
             ImGui::Dummy(ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing()));
             DrawCategory(host, (Category)i, ctx);
+            // ПОСЛЕ SetCursorPos — ЭЛЕМЕНТ (Dummy). ImGui 1.92 запрещает
+            // двигать курсор, раздвигая окно, и ничего не подать: в поиске это
+            // давало красное «Code uses SetCursorPos() to extend window
+            // boundaries» поверх окна «Настройки».
             if (ctx.Shown > before) {
                 const ImVec2 end = ImGui::GetCursorPos();
                 ImGui::SetCursorPos(at);
                 Sage::UI::TextSecondary("%s", Info((Category)i).Name);
                 ImGui::SetCursorPos(end);
+                ImGui::Dummy(ImVec2(0.0f, 0.0f));
             } else {
                 ImGui::SetCursorPos(at);
+                ImGui::Dummy(ImVec2(0.0f, 0.0f));
             }
             ImGui::PopID();
         }

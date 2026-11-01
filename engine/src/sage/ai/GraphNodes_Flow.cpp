@@ -342,6 +342,7 @@ void RegisterFlow(NodeRegistry& r) {
     }
     {
         NodeType t = Node("flow.reroute", "Reroute", "Flow", "A bend in a wire: passes the value as is.");
+        t.Domains = kDomainAll;   // излом провода, не логика — нужен обоим графам
         t.Pure = true;
         t.Inputs = {P("value", type::Any)};
         t.Outputs = {P("value", type::Any)};
@@ -355,7 +356,7 @@ void RegisterFlow(NodeRegistry& r) {
 
 void RegisterTasks(NodeRegistry& r) {
     {
-        NodeType t = Node("task.call", "Call Task", "Tasks",
+        NodeType t = Node("task.call", "Start Task", "Behavior Control",
                           "Starts a task (graph, Lua or C++) and goes on at once. The task output is its handle.");
         t.Domains = kDomainAI;   // управление задачами — только в AI Graph
         t.Inputs = {X("in")};
@@ -372,8 +373,10 @@ void RegisterTasks(NodeRegistry& r) {
         r.Register(std::move(t));
     }
     {
-        NodeType t = Node("task.run", "Run Task", "Tasks",
-                          "Starts a task and waits for it: goes on by success or failure with its outputs.");
+        NodeType t = Node("task.run", "Run Task", "Behavior Tasks",
+                          "Runs a task (SAGE Lua, C++ or another AI Graph) and waits for it: goes on by success "
+                          "or failure with its outputs.");
+        t.Domains = kDomainAI;
         t.Inputs = {X("in")};
         t.Outputs = {X("succeeded"), X("failed"), P("ok", type::Bool, Value(false)),
                      P("error", type::String, Value(std::string()))};
@@ -386,6 +389,7 @@ void RegisterTasks(NodeRegistry& r) {
                 s.Task = ex.StartTask(ex.SettingText("task"), TaskInputs(ex), ex.SettingInt("priority"));
                 ex.Out("task", Value(s.Task->Id));
                 if (!IsFinished(s.Task->Status)) {
+                    ex.Report("running");
                     ex.WaitRun(s.Task);
                     return NodeResult::Wait();
                 }
@@ -394,13 +398,17 @@ void RegisterTasks(NodeRegistry& r) {
             s.Task.reset();
             if (!run) return NodeResult::Go("failed");
             TaskResult(ex, run);
-            return NodeResult::Go(run->Status == TaskStatus::Succeeded ? "succeeded" : "failed");
+            const bool ok = run->Status == TaskStatus::Succeeded;
+            ex.Report(ok ? "succeeded" : "failed");
+            ex.SetLastResult(ok, run->Task, run->Error);
+            if (!ok) ex.FailReason("задача '" + run->Task + "': " + (run->Error.empty() ? StatusName(run->Status) : run->Error));
+            return NodeResult::Go(ok ? "succeeded" : "failed");
         };
-        t.Keywords = {"call", "await", "subgraph", "function"};
+        t.Keywords = {"call", "await", "action", "perform"};
         r.Register(std::move(t));
     }
     {
-        NodeType t = Node("task.wait", "Wait For Task", "Tasks", "Waits until a started task finishes.");
+        NodeType t = Node("task.wait", "Wait For Task", "Behavior Control", "Waits until a started task finishes.");
         t.Domains = kDomainAI;   // управление задачами — только в AI Graph
         t.Inputs = {X("in"), P("task", type::Task, Value(0))};
         t.Outputs = {X("succeeded"), X("failed"), P("ok", type::Bool, Value(false)),
@@ -425,7 +433,7 @@ void RegisterTasks(NodeRegistry& r) {
         r.Register(std::move(t));
     }
     {
-        NodeType t = Node("task.cancel", "Cancel Task", "Tasks", "Cancels a running task and its children.");
+        NodeType t = Node("task.cancel", "Cancel Task", "Behavior Control", "Cancels a running task and its children.");
         t.Domains = kDomainAI;   // управление задачами — только в AI Graph
         t.Inputs = {X("in"), P("task", type::Task, Value(0))};
         t.Outputs = {X("then")};
@@ -437,7 +445,7 @@ void RegisterTasks(NodeRegistry& r) {
         r.Register(std::move(t));
     }
     {
-        NodeType t = Node("task.status", "Task Status", "Tasks", "State of a task: running, done, its error.");
+        NodeType t = Node("task.status", "Task Status", "AI Context", "State of a task: running, done, its error.");
         t.Domains = kDomainAI;   // управление задачами — только в AI Graph
         t.Pure = true;
         t.Inputs = {P("task", type::Task, Value(0))};
@@ -454,7 +462,7 @@ void RegisterTasks(NodeRegistry& r) {
         r.Register(std::move(t));
     }
     {
-        NodeType t = Node("task.output", "Task Output", "Tasks", "One output value of a task.");
+        NodeType t = Node("task.output", "Task Output", "AI Context", "One output value of a task.");
         t.Domains = kDomainAI;   // управление задачами — только в AI Graph
         t.Pure = true;
         t.Inputs = {P("task", type::Task, Value(0))};
@@ -476,6 +484,7 @@ void RegisterEvents(NodeRegistry& r) {
         t.Entry = true;
         t.Outputs = {X("fired"), P("data", type::Any)};
         t.Settings = {S("event", "event", Value(std::string()), "Event")};
+        t.ListensTo = [](const GraphNode& n) { return SettingOf(n, "event"); };
         t.Run = [](GraphExec&) { return NodeResult::Go("fired"); };
         t.Keywords = {"listen", "subscribe", "handler"};
         r.Register(std::move(t));
@@ -497,7 +506,7 @@ void RegisterEvents(NodeRegistry& r) {
         r.Register(std::move(t));
     }
     {
-        NodeType t = Node("event.emit", "Emit Event", "Events",
+        NodeType t = Node("event.emit", "Send AI Event", "Behavior Tasks",
                           "Sends an event to every AI, to the AI of one object, or to itself.");
         t.Domains = kDomainAI;   // управление задачами — только в AI Graph
         t.Inputs = {X("in"), P("data", type::Any), P("target", type::Object, Value(vars::EntityRef{}))};
@@ -688,6 +697,7 @@ void RegisterBuiltinNodes(NodeRegistry& nodes) {
     RegisterCalls(nodes);
     nodes::RegisterDataNodes(nodes);
     nodes::RegisterDecisionNodes(nodes);
+    nodes::RegisterBehaviorNodes(nodes);
 }
 
 } // namespace sage::ai

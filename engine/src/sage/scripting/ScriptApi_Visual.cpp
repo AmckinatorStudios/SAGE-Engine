@@ -5,6 +5,7 @@
 #include "sage/ai/GraphNodesDetail.h"
 #include "sage/core/Log.h"
 #include "sage/scene/Scene.h"
+#include "sage/scene/Signals.h"
 #include "sage/scene/VisualScriptComponent.h"
 
 // ---------------------------------------------------------------------------
@@ -34,6 +35,19 @@ using sage::vars::Value;
 using namespace sage::ai::nodes;
 namespace type = sage::ai::type;
 
+constexpr const char* kFixedEvent = "__script.fixed_update";
+std::string SignalEvent(const std::string& signal) { return "__signal:" + signal; }
+
+// Сигнал объекта, который слушает узел Script Graph ("" — не слушает).
+std::string SignalOf(const sage::ai::GraphNode& n) {
+    if (n.Type == "script.on_collision") return sage::signals::kCollision;
+    if (n.Type == "script.on_collision_exit") return sage::signals::kCollisionEnded;
+    if (n.Type == "script.on_trigger_enter") return sage::signals::kTriggerEntered;
+    if (n.Type == "script.on_trigger_exit") return sage::signals::kTriggerExited;
+    if (n.Type == "script.on_signal") return sage::ai::nodes::SettingOf(n, "signal");
+    return {};
+}
+
 } // namespace
 
 void ScriptEngine::RegisterVisualApi() {
@@ -50,6 +64,72 @@ void ScriptEngine::RegisterVisualApi() {
             return NodeResult::Go("then");
         };
         t.Keywords = {"send", "broadcast", "signal"};
+        AI().Nodes().Register(std::move(t));
+    }
+
+    // --- События объекта для Script Graph ------------------------------------
+    //
+    // Те же события, что получают скрипты: постоянный шаг (OnFixedUpdate) и
+    // сигналы объекта — удар, вход в зону, щелчок по кнопке. Сигналы
+    // приходят по шине объекта (Scene::Events), как и `crate.collision:connect`
+    // из скрипта; узел их только слушает. On Destroy здесь нет: граф объекта
+    // выполняется миром ИИ, а удалённому объекту исполнять уже нечем.
+    {
+        NodeType t = Node("script.on_fixed_update", "On Fixed Update", "Events",
+                          "Runs every fixed physics step; dt — the step. A step does not start while the previous "
+                          "one still waits.");
+        t.Domains = sage::ai::kDomainObject;
+        t.Entry = true;
+        t.Outputs = {X("then"), P("dt", type::Float, Value(0.0f))};
+        t.ListensTo = [](const sage::ai::GraphNode&) { return std::string(kFixedEvent); };
+        t.EventData = "dt";
+        t.EventExec = "then";
+        t.NoOverlap = true;
+        t.Run = [](GraphExec&) { return NodeResult::Go("then"); };
+        t.Keywords = {"physics", "step", "tick"};
+        AI().Nodes().Register(std::move(t));
+    }
+    struct SignalNode {
+        const char* Id;
+        const char* Title;
+        const char* Signal;
+        const char* Help;
+    };
+    const SignalNode signalNodes[] = {
+        {"script.on_collision", "On Collision Enter", sage::signals::kCollision,
+         "Runs when the object hits another; other — the object it hit."},
+        {"script.on_collision_exit", "On Collision Exit", sage::signals::kCollisionEnded,
+         "Runs when a contact with another object ends; other — that object."},
+        {"script.on_trigger_enter", "On Trigger Enter", sage::signals::kTriggerEntered,
+         "Runs when something enters the object's trigger zone (or the object enters one); other — who."},
+        {"script.on_trigger_exit", "On Trigger Exit", sage::signals::kTriggerExited,
+         "Runs when something leaves the trigger zone; other — who (empty if it was removed)."},
+    };
+    for (const SignalNode& sn : signalNodes) {
+        NodeType t = Node(sn.Id, sn.Title, "Events", sn.Help);
+        t.Domains = sage::ai::kDomainObject;
+        t.Entry = true;
+        t.Outputs = {X("then"), P("other", type::Object)};
+        const std::string ev = SignalEvent(sn.Signal);
+        t.ListensTo = [ev](const sage::ai::GraphNode&) { return ev; };
+        t.EventData = "other";
+        t.EventExec = "then";
+        t.Run = [](GraphExec&) { return NodeResult::Go("then"); };
+        t.Keywords = {"physics", "hit", "contact", "zone", "overlap"};
+        AI().Nodes().Register(std::move(t));
+    }
+    {
+        NodeType t = Node("script.on_signal", "On Signal", "Events",
+                          "Runs when the object sends a signal: clicked, pressed, value_changed, collision, "
+                          "trigger_entered, or a signal of its script.");
+        t.Domains = sage::ai::kDomainObject;
+        t.Entry = true;
+        t.Outputs = {X("then"), P("data", type::Any)};
+        t.Settings = {S("signal", "string", Value(std::string(sage::signals::kClicked)), "Signal")};
+        t.ListensTo = [](const sage::ai::GraphNode& n) { return SignalEvent(SettingOf(n, "signal")); };
+        t.EventExec = "then";
+        t.Run = [](GraphExec&) { return NodeResult::Go("then"); };
+        t.Keywords = {"click", "button", "ui", "signal", "pressed"};
         AI().Nodes().Register(std::move(t));
     }
 
@@ -149,19 +229,51 @@ void ScriptEngine::UpdateVisualScripts() {
         const std::string task = known != m_aiGraphs.end() ? known->second : LoadAiGraph(c.Graph);
         std::shared_ptr<const sage::ai::GraphDoc> g = task.empty() ? nullptr : m_ai->FindGraph(task);
         if (!g || g->Kind != sage::ai::GraphKind::Script) {
-            if (g) LOG_ERROR("Script") << "Visual Script объекта '" << obj.Name() << "': '" << task
-                                       << "' — не граф Visual Scripting";
+            if (g) LOG_ERROR("Script") << "Script Graph объекта '" << obj.Name() << "': '" << task
+                                       << "' — не Script Graph (AI Graph ставится компонентом AI)";
             m_vsFailed.insert(id);
             continue;
         }
         sage::ai::RunPtr run = m_ai->Start(agent, task);
         if (run->Rejected) {
-            LOG_ERROR("Script") << "Visual Script объекта '" << obj.Name() << "': " << run->Error;
+            LOG_ERROR("Script") << "Script Graph объекта '" << obj.Name() << "': " << run->Error;
             m_vsFailed.insert(id);
+            continue;
         }
+        ConnectVisualSignals(id, agent, *g);
     }
     for (auto it = m_vsAgents.begin(); it != m_vsAgents.end();) {
-        if (!m_scene->Get(it->first).Valid()) it = m_vsAgents.erase(it);
-        else ++it;
+        if (!m_scene->Get(it->first).Valid()) {
+            m_vsFixed.erase(it->second);
+            it = m_vsAgents.erase(it);
+        } else {
+            ++it;
+        }
     }
+}
+
+// Сигналы объекта -> события его Script Graph. Подписка — на шине сцены, с
+// объектом-владельцем: удалили объект — подписки ушли вместе с ним.
+void ScriptEngine::ConnectVisualSignals(int object, int agent, const sage::ai::GraphDoc& graph) {
+    std::set<std::string> signals;
+    for (const sage::ai::GraphNode& n : graph.Nodes) {
+        if (n.Type == "script.on_fixed_update") m_vsFixed.insert(agent);
+        const std::string sig = SignalOf(n);
+        if (!sig.empty()) signals.insert(sig);
+    }
+    for (const std::string& sig : signals) {
+        sage::events::ConnectOptions opt;
+        opt.Owner = object;
+        const std::string ev = SignalEvent(sig);
+        m_scene->Events.Connect(object, sig, [this, agent, ev](const sage::events::Event& e) {
+            if (m_ai) m_ai->Emit(ev, e.Arg, agent);
+        }, opt);
+    }
+}
+
+// Постоянный шаг для Script Graph: столько срабатываний On Fixed Update,
+// сколько шагов сделал OnFixedUpdate скриптов в этом кадре.
+void ScriptEngine::EmitVisualFixedStep(float step) {
+    if (!m_ai) return;
+    for (int agent : m_vsFixed) m_ai->Emit(kFixedEvent, Value(step), agent);
 }

@@ -35,19 +35,18 @@ bool EditorLayer::SelfTestVisualScript() {
     d.Link({step, "vector"}, {sum, "b"}, false);
     d.Link({sum, "result"}, {move, "position"}, false);
     d.Link({self, "object"}, {move, "object"}, false);
-    const fs::path path = dir / "SelftestMover.vgraph";
+    const fs::path path = dir / "SelftestMover.sgraph";
     std::ofstream(path, std::ios::binary) << sage::ai::SaveGraph(d);
 
     m_visualScript.ReloadLibrary(*this);
     sage::ai::World* lib = m_visualScript.Library();
     if (!lib) fail("нет библиотеки у редактора Visual Script");
     else {
-        // Управление задачами — дело AI Graph; Run Task — общий узел.
-        if (sage::ai::NodeAllowed(lib->Nodes().Find("task.cancel")->Domains, sage::ai::GraphKind::Script) ||
-            sage::ai::NodeAllowed(lib->Nodes().Find("task.cancel")->Domains, sage::ai::GraphKind::Task))
-            fail("узел управления задачами ИИ предлагается в Visual Scripting");
-        if (!sage::ai::NodeAllowed(lib->Nodes().Find("task.run")->Domains, sage::ai::GraphKind::Task))
-            fail("Run Task не доступен графу задачи");
+        // Узлы ИИ (задачи, управление поведением) — только в AI Graph.
+        for (const char* id : {"task.cancel", "task.run", "ai.sequence", "ai.move_to", "ai.decide"})
+            if (const sage::ai::NodeType* t = lib->Nodes().Find(id);
+                !t || sage::ai::NodeAllowed(t->Domains, sage::ai::GraphKind::Script))
+                fail(std::string("узел ИИ ") + id + " предлагается в Script Graph");
         if (!sage::ai::NodeAllowed(lib->Nodes().Find("flow.branch")->Domains, sage::ai::GraphKind::Script))
             fail("общего узла Branch нет в Visual Scripting");
         for (const sage::ai::GraphIssue& i : sage::ai::ValidateGraph(d, *lib))
@@ -60,7 +59,7 @@ bool EditorLayer::SelfTestVisualScript() {
     GameObject box = m_scene->CreateObject("VS Probe");
     const int boxId = box.Id();
     VisualScriptComponent c;
-    c.Graph = "assets/visual/SelftestMover.vgraph";
+    c.Graph = "assets/visual/SelftestMover.sgraph";
     m_scene->Registry().emplace<VisualScriptComponent>(box.Entity(), c);
     StartPlay();
     for (int i = 0; i < 6; ++i) m_systems.Run(*m_scene, 0.1f);

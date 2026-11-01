@@ -7,9 +7,13 @@
 class EditorHost;
 
 // ---------------------------------------------------------------------------
-// ВИДЫ ЛОГИКИ — список языков и графов, которыми в проекте пишут поведение:
-// Lua, SAGE Lua, Visual Script, задача Visual Scripting, AI Graph — и всё, что
-// добавит плагин (editor.logic_kind).
+// ВИДЫ ЛОГИКИ — то, чем в проекте пишут поведение. Встроенных три:
+//   SAGE Lua (.slua)      — текстовая игровая логика;
+//   Script Graph (.sgraph) — визуальная игровая логика объектов;
+//   AI Graph (.aigraph)   — визуальное поведение ИИ.
+// Плюс то, что добавит плагин (editor.logic_kind). Обычный Lua (.lua) и
+// Visual Script / задача (.vgraph) больше не создаются: старые файлы
+// открываются и работают, но новых в этих форматах не бывает.
 //
 // ЗАЧЕМ СПИСКОМ. Окно «Создать…» знало ровно два языка, зашитых веткой
 // switch: третий (визуальный скрипт, граф ИИ) создавался только в своём окне,
@@ -18,16 +22,20 @@ class EditorHost;
 // а не правка трёх мест.
 //
 // Slot — какой слот ассета принимает созданное ("script" — компонент Script,
-// "visual" — Visual Script, "ai" — компонент AI, "task" — задача, которую
-// зовут по имени). Слот «+» предлагает только свои виды.
+// "visual" — компонент Script Graph, "ai" — компонент AI). Слот «+»
+// предлагает только свои виды. Group — раздел окна: "scripts" (игровая
+// логика) или "ai" (поведение ИИ) — инструменты разного назначения стоят
+// раздельно.
 // ---------------------------------------------------------------------------
 namespace sage::editor::logic {
 
 struct Kind {
-    std::string Id;        // "lua", "slua", "visual", "task", "ai", "<плагин>.<имя>"
-    std::string Title;     // название: «Lua (.lua)»; ключ перевода T() (имена языков — как есть)
-    std::string Note;      // одна строка, чем он хорош; английский ключ перевода T()
-    std::string Ext;       // ".lua"
+    std::string Id;        // "slua", "sgraph", "aigraph", "<плагин>.<имя>"
+    std::string Title;     // название: «Script Graph»; ключ перевода T()
+    std::string Note;      // несколько слов о назначении; ключ перевода T()
+    std::string Group = "scripts";   // "scripts" или "ai"
+    std::string DefaultName = "NewScript";
+    std::string Ext;       // ".slua"
     std::string Folder;    // папка от assets/ по умолчанию: "scripts", "visual", "ai"
     // Создаётся только в своей папке: граф задачи и AI Graph ищутся
     // библиотекой ИИ по имени в assets/visual и assets/ai, а не где угодно.
@@ -43,7 +51,7 @@ struct Kind {
     std::function<void(EditorHost&, const std::filesystem::path&)> Open;
 };
 
-// Встроенные (Lua, SAGE Lua, Visual Script, задача, AI Graph) — редактор
+// Встроенные (SAGE Lua, Script Graph, AI Graph) — редактор
 // регистрирует при запуске (LogicKindsBuiltin.cpp).
 void RegisterBuiltins();
 // Тот же Id второй раз — замена записи (перезагрузка плагина).

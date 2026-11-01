@@ -54,39 +54,91 @@ bool HasIssue(const std::vector<GraphIssue>& v, int node, bool error, const std:
 
 TEST(VisualScript_node_domains_split_editors) {
     World w;
-    const NodeType* run = w.Nodes().Find("task.call");
-    const NodeType* branch = w.Nodes().Find("flow.branch");
-    const NodeType* update = w.Nodes().Find("script.on_update");
-    CHECK_TRUE(run && branch && update);
-    // Управление задачами — только в AI Graph (Behavior); Branch — везде; On
-    // Update — только в скриптах объектов; Run Task — общий: задача вправе
-    // позвать другую и дождаться её.
-    CHECK_TRUE(NodeAllowed(run->Domains, GraphKind::Behavior));
-    CHECK_FALSE(NodeAllowed(run->Domains, GraphKind::Task));
-    CHECK_TRUE(NodeAllowed(w.Nodes().Find("task.run")->Domains, GraphKind::Task));
-    CHECK_TRUE(NodeAllowed(w.Nodes().Find("task.run")->Domains, GraphKind::Behavior));
-    CHECK_FALSE(NodeAllowed(w.Nodes().Find("script.on_update")->Domains, GraphKind::Task));
-    CHECK_FALSE(NodeAllowed(run->Domains, GraphKind::Script));
-    CHECK_FALSE(NodeAllowed(run->Domains, GraphKind::Function));
-    CHECK_TRUE(NodeAllowed(branch->Domains, GraphKind::Script));
-    CHECK_TRUE(NodeAllowed(branch->Domains, GraphKind::Function));
-    CHECK_TRUE(NodeAllowed(update->Domains, GraphKind::Script));
-    CHECK_FALSE(NodeAllowed(update->Domains, GraphKind::Behavior));
+    auto allowed = [&](const char* id, GraphKind k) {
+        const NodeType* t = w.Nodes().Find(id);
+        CHECK_TRUE(t != nullptr);
+        return t && NodeAllowed(t->Domains, k);
+    };
+    // AI Graph — только узлы ИИ: никакого Branch, Sequence потока, циклов,
+    // переменных Script Graph и событий объекта.
+    for (const char* id : {"ai.task_start", "ai.sequence", "ai.selector", "ai.guard", "ai.repeat", "ai.decide",
+                           "ai.succeed", "ai.fail", "ai.abort", "ai.check", "ai.compare", "ai.get_param",
+                           "ai.set_param", "ai.wait_event", "task.run", "task.call", "ai.can_run"}) {
+        CHECK_TRUE(allowed(id, GraphKind::Behavior));
+        CHECK_FALSE(allowed(id, GraphKind::Script));
+        CHECK_FALSE(allowed(id, GraphKind::Function));
+    }
+    for (const char* id : {"flow.start", "flow.branch", "flow.sequence", "flow.while", "flow.parallel", "flow.wait",
+                           "var.get", "var.set", "math.add", "graph.call", "event.on", "script.on_start",
+                           "script.on_update", "debug.log"}) {
+        CHECK_FALSE(allowed(id, GraphKind::Behavior));
+        CHECK_TRUE(allowed(id, GraphKind::Script));
+    }
+    // События объекта — не в функции: у функции нет своего объекта.
+    CHECK_FALSE(allowed("script.on_update", GraphKind::Function));
+    CHECK_TRUE(allowed("flow.branch", GraphKind::Function));
+    // Излом провода нужен обоим.
+    CHECK_TRUE(allowed("flow.reroute", GraphKind::Behavior));
+    CHECK_TRUE(allowed("flow.reroute", GraphKind::Script));
 
-    // Узел чужого редактора: проверка говорит о нём, запуск не начинается.
+    // Узел ИИ в Script Graph: проверка называет узел, запуск не начинается.
     GraphDoc d;
     d.Kind = GraphKind::Script;
     d.Name = "Wrong";
     const int start = Add(d, "script.on_start");
     const int task = Add(d, "task.call", {{"task", Str("X")}});
     Exec(d, start, "then", task);
-    CHECK_TRUE(HasIssue(ValidateGraph(d, w), task, true, "не для скрипта объекта"));
+    CHECK_TRUE(HasIssue(ValidateGraph(d, w), task, true, "не для Script Graph"));
     std::string err;
     CHECK_TRUE(w.RegisterGraph(d, err));
     RunPtr r = w.Start(w.CreateAgent(), "Wrong");
     w.Tick(0.016f);
     CHECK_TRUE(r->Status == TaskStatus::Failed);
     CHECK_TRUE(r->Error.find("не для этого вида графа") != std::string::npos);
+
+    // Узел игровой логики в AI Graph — то же самое.
+    GraphDoc ai;
+    ai.Kind = GraphKind::Behavior;
+    ai.Name = "WrongAi";
+    const int as = Add(ai, "ai.task_start");
+    const int br = Add(ai, "flow.branch");
+    Exec(ai, as, "then", br);
+    CHECK_TRUE(HasIssue(ValidateGraph(ai, w), br, true, "не для AI Graph"));
+    CHECK_TRUE(w.RegisterGraph(ai, err));
+    RunPtr r2 = w.Start(w.CreateAgent(), "WrongAi");
+    w.Tick(0.016f);
+    CHECK_TRUE(r2->Status == TaskStatus::Failed);
+    CHECK_TRUE(r2->Error.find("Branch") != std::string::npos);
+
+    // Без Task Start AI Graph не запускается; два начала — тоже ошибка.
+    GraphDoc none;
+    none.Kind = GraphKind::Behavior;
+    none.Name = "NoStart";
+    Add(none, "ai.succeed");
+    CHECK_TRUE(HasIssue(ValidateGraph(none, w), 0, true, "Task Start"));
+    CHECK_TRUE(w.RegisterGraph(none, err));
+    RunPtr r3 = w.Start(w.CreateAgent(), "NoStart");
+    w.Tick(0.016f);
+    CHECK_TRUE(r3->Status == TaskStatus::Failed && r3->Error.find("Task Start") != std::string::npos);
+}
+
+TEST(VisualScript_file_extension_decides_the_graph_kind) {
+    std::string err;
+    // Расширение и вид совпадают.
+    CHECK_TRUE(CheckGraphFile("brain.aigraph", GraphKind::Behavior, err));
+    CHECK_TRUE(CheckGraphFile("door.sgraph", GraphKind::Script, err));
+    CHECK_TRUE(CheckGraphFile("dmg.sgraph", GraphKind::Function, err));
+    CHECK_TRUE(CheckGraphFile("old.vgraph", GraphKind::Task, err));   // устаревший файл — как был
+    // Ручная правка вида в файле не обходит правила.
+    CHECK_FALSE(CheckGraphFile("brain.aigraph", GraphKind::Script, err));
+    CHECK_TRUE(err.find("не совпадают") != std::string::npos);
+    CHECK_FALSE(CheckGraphFile("door.sgraph", GraphKind::Behavior, err));
+    CHECK_FALSE(CheckGraphFile("door.sgraph", GraphKind::Task, err));
+    CHECK_FALSE(CheckGraphFile("x.vgraph", GraphKind::Behavior, err));
+    CHECK_FALSE(CheckGraphFile("notes.txt", GraphKind::Script, err));
+    CHECK_TRUE(std::string(GraphFileExt(GraphKind::Behavior)) == ".aigraph");
+    CHECK_TRUE(std::string(GraphFileExt(GraphKind::Script)) == ".sgraph");
+    CHECK_TRUE(IsGraphFile("A.SGRAPH") && IsGraphFile("b.aigraph") && !IsGraphFile("c.slua"));
 }
 
 TEST(VisualScript_validation_finds_problems_before_play) {
@@ -100,7 +152,7 @@ TEST(VisualScript_validation_finds_problems_before_play) {
     const int br = Add(d, "flow.branch");
     d.Link({vec, "vector"}, {br, "condition"}, false);   // вектор в условие — нельзя
     const std::vector<GraphIssue> issues = ValidateGraph(d, w);
-    CHECK_TRUE(HasIssue(issues, 0, true, "нет входа"));
+    CHECK_TRUE(HasIssue(issues, 0, true, "нет события"));
     CHECK_TRUE(HasIssue(issues, set, true, "нет переменной 'missing'"));
     CHECK_TRUE(HasIssue(issues, run, true, "не выбрана функция"));
     CHECK_TRUE(HasIssue(issues, br, true, "не подходит"));
@@ -207,7 +259,7 @@ TEST(VisualScript_lua_nodes_functions_and_component) {
         Data(vs, sum, "result", move, "position");
         Data(vs, self, "object", move, "object");
     }
-    const std::string path = "sage_vs_mover.vgraph";
+    const std::string path = "sage_vs_mover.sgraph";
     std::ofstream(path, std::ios::binary) << SaveGraph(vs);
     GameObject box = scene.CreateObject("Box");
     VisualScriptComponent c;
