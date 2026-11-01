@@ -179,7 +179,8 @@ public:
                   sage::scripting::ScriptError&) override { return true; }
     bool CallNamed(sage::scripting::InstanceId, sage::scripting::Hook, const std::string&,
                    sage::scripting::ScriptError&) override { return true; }
-    bool Invoke(sage::scripting::InstanceId, const std::string&, const std::vector<Value>&,
+    using LanguageBackend::Invoke;
+    bool Invoke(sage::scripting::InstanceId, const std::string&, const std::vector<Value>&, std::vector<Value>&,
                 sage::scripting::ScriptError&) override { return true; }
     bool HasMethod(sage::scripting::InstanceId, const std::string&) const override { return false; }
     bool InvokeEvent(sage::scripting::InstanceId, const std::string&, const sage::events::Event&,

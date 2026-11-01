@@ -1,4 +1,5 @@
 #include "sage/scripting/lua/LuaInternal.h"
+#include "sage/scripting/ScriptingSystem.h"
 
 #include <cstdio>
 #include <cctype>
@@ -570,8 +571,8 @@ bool Backend::CallNamed(InstanceId id, Hook hook, const std::string& name, Scrip
     return CallHook(id, hook, sol::make_object(*m_lua, name), err);
 }
 
-bool Backend::Invoke(InstanceId id, const std::string& method,
-                     const std::vector<sage::vars::Value>& args, ScriptError& err) {
+bool Backend::Invoke(InstanceId id, const std::string& method, const std::vector<sage::vars::Value>& args,
+                     std::vector<sage::vars::Value>& results, ScriptError& err) {
     Instance* inst = Get(id);
     if (!inst) return false;
     sol::protected_function call = MethodOf(*inst, method);
@@ -584,9 +585,12 @@ bool Backend::Invoke(InstanceId id, const std::string& method,
     CurrentScope scope(*this, id);
     sol::protected_function_result result =
         inst->Simple ? call(sol::as_args(converted)) : call(inst->Self, sol::as_args(converted));
-    if (result.valid()) return true;
-    Explain(result, std::string(), err);
-    return false;
+    if (!result.valid()) {
+        Explain(result, std::string(), err);
+        return false;
+    }
+    for (int i = 0; i < result.return_count(); ++i) results.push_back(FromLua(result.get<sol::object>(i)));
+    return true;
 }
 
 bool Backend::HasMethod(InstanceId id, const std::string& method) const {
@@ -674,7 +678,16 @@ sol::object Backend::InvokeOn(GameObject object, const std::string& method,
                               sol::variadic_args args) {
     if (!object.Valid()) return sol::lua_nil;
     auto it = m_byEntity.find((uint32_t)entt::to_integral(object.Entity()));
-    if (it == m_byEntity.end()) return sol::lua_nil;
+    if (it == m_byEntity.end()) {
+        // Скрипт объекта — на другом языке: вызов идёт через рантайм, значения
+        // — общим словарём движка (vars::Value) туда и обратно.
+        if (!m_services.System) return sol::lua_nil;
+        std::vector<sage::vars::Value> in, out;
+        for (const sol::stack_proxy& a : args) in.push_back(FromLua(sol::object(a)));
+        if (!m_services.System->Runtime().Invoke(object.Entity(), method, in, out) || out.empty())
+            return sol::lua_nil;
+        return ToLua(out.front());
+    }
     Instance* inst = Get(it->second);
     if (!inst) return sol::lua_nil;
     sol::protected_function call = MethodOf(*inst, method);

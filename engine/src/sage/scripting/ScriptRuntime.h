@@ -115,6 +115,10 @@ public:
     // же самое из C++ — одна дорога.
     bool Invoke(entt::entity entity, const std::string& method,
                 const std::vector<sage::vars::Value>& args);
+    // То же с ответом метода — так разговаривают скрипты на РАЗНЫХ языках:
+    // `enemy:Call("TakeDamage", 20)` из Lua доходит до скрипта на любом языке.
+    bool Invoke(entt::entity entity, const std::string& method, const std::vector<sage::vars::Value>& args,
+                std::vector<sage::vars::Value>& results);
 
     // Метод скрипта объекта как обработчик сигнала (связи инспектора).
     bool InvokeEvent(entt::entity entity, const std::string& method, const sage::events::Event& event);

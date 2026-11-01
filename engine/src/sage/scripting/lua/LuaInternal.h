@@ -128,8 +128,9 @@ public:
     bool Call(InstanceId id, Hook hook, float dt, ScriptError& err) override;
     bool CallWith(InstanceId id, Hook hook, GameObject other, ScriptError& err) override;
     bool CallNamed(InstanceId id, Hook hook, const std::string& name, ScriptError& err) override;
-    bool Invoke(InstanceId id, const std::string& method,
-                const std::vector<sage::vars::Value>& args, ScriptError& err) override;
+    using LanguageBackend::Invoke;
+    bool Invoke(InstanceId id, const std::string& method, const std::vector<sage::vars::Value>& args,
+                std::vector<sage::vars::Value>& results, ScriptError& err) override;
     bool HasMethod(InstanceId id, const std::string& method) const override;
     bool InvokeEvent(InstanceId id, const std::string& method, const sage::events::Event& event,
                      ScriptError& err) override;
