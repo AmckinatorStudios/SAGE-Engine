@@ -33,15 +33,16 @@ void EditorLayer::CheckAiGraphFrame() {
             sage::ai::GraphDoc d;
             d.Kind = sage::ai::GraphKind::Behavior;
             d.Name = "SelftestFrame";
-            const int start = d.AddNode("flow.start", 0, 0).Id;
-            const int loop = d.AddNode("flow.while", 220, 0).Id;
-            d.FindNode(loop)->Values["condition"] = sage::vars::Value(true);
-            const int wait = d.AddNode("flow.wait", 440, 0).Id;
+            // Поведение без конца: Repeat (никогда не останавливаться) с
+            // ожиданием внутри — на холсте видны итоги задач (выполняется/успех).
+            const int start = d.AddNode("ai.task_start", 0, 0).Id;
+            const int loop = d.AddNode("ai.repeat", 220, 0).Id;
+            d.FindNode(loop)->Values["stop_on"] = sage::vars::Value(std::string("never"));
+            const int wait = d.AddNode("ai.wait", 440, 0).Id;
             d.FindNode(wait)->Values["seconds"] = sage::vars::Value(0.05f);
-            const int dist = d.AddNode("object.distance", 220, 180).Id;
+            d.AddNode("ai.target", 220, 180);
             d.Link({start, "then"}, {loop, "in"}, true);
             d.Link({loop, "body"}, {wait, "in"}, true);
-            (void)dist;
             d.AddGroup("Selftest", -40, -60, 720, 340);
             std::ofstream(graphPath, std::ios::binary) << sage::ai::SaveGraph(d);
             GameObject probe = m_scene->CreateObject("AI Frame Probe");
@@ -49,7 +50,7 @@ void EditorLayer::CheckAiGraphFrame() {
             c.Graph = "assets/ai/SelftestFrame.aigraph";
             m_scene->Registry().emplace<AiAgentComponent>(probe.Entity(), c);
             OpenAiGraph(sage::PathToUtf8(graphPath));
-            // Редактор Visual Script — та же основа в своём режиме: рисуется рядом.
+            // Редактор Script Graph — та же основа в своём режиме: рисуется рядом.
             m_panelRegistry.SetVisible("VisualScript", true);
             m_panelRegistry.SetVisible("AiDebugger", true);
             m_aiGraphFrameErrors = m_console.ErrorCount();

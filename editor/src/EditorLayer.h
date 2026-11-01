@@ -492,6 +492,9 @@ private:
     int m_tweenSelfTestStep = 0;
     bool m_tweenChecked = false;
     bool m_createDialogChecked = false;
+    bool m_createScriptFits = false;   // окно «Новый скрипт» помещается в экран
+    float m_createScriptHeight = 0.0f;
+    int m_settingsErrors = 0;          // ошибки ImGui окна «Настройки» с поиском
     int m_createDialogStep = 0;
     float m_createDialogWidth = 0.0f;
     int m_focusInspectorFrames = 0;   // хуки скриншотов: вывести Инспектор поверх Environment

@@ -38,6 +38,7 @@ add_executable(sage_tests
     test_ai_graph_lua.cpp
     test_visual_script.cpp
     test_ai_concept.cpp
+    test_ai_behavior.cpp
     test_input.cpp
     test_eventbus.cpp
     test_framegraph.cpp

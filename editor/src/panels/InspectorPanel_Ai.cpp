@@ -58,21 +58,21 @@ void InspectorPanel::DrawAiSection(EditorHost& host, GameObject obj, entt::regis
     varsui::DrawTable(host, obj, ai.Memory, &m_preview);
 }
 
-// Секция «Visual Script»: граф игровой логики объекта и его переменные.
+// Секция «Script Graph»: граф игровой логики объекта и его переменные.
 void InspectorPanel::DrawVisualScriptSection(EditorHost& host, GameObject obj, entt::registry& reg,
                                              EntityRemovals& rm) {
     if (!reg.all_of<VisualScriptComponent>(obj.Entity())) return;
-    if (!EditorTheme::SectionHeader("wire", T("Visual Script" "###VisualScriptSection"), ImGuiTreeNodeFlags_DefaultOpen,
+    if (!EditorTheme::SectionHeader("wire", T("Script Graph" "###VisualScriptSection"), ImGuiTreeNodeFlags_DefaultOpen,
                                     &rm.VisualScript))
         return;
     VisualScriptComponent& vs = reg.get<VisualScriptComponent>(obj.Entity());
     const assetslot::Result r = assetslot::Draw(host, "vgraph", assetslot::Kind::VisualScript, vs.Graph, &m_preview,
-                                                T("Drop a .vgraph here"));
+                                                T("Drop a .sgraph here"));
     if (r.Changed) {
         host.PushUndoSnapshot();
         vs.Graph = r.Path;
     }
-    if (!vs.Graph.empty() && EditorIcons::Button("wire", T("Open in Visual Script")))
+    if (!vs.Graph.empty() && EditorIcons::Button("wire", T("Open in Script Graph")))
         host.OpenVisualScript(sage::PathToUtf8(host.CurrentProject().Dir() / sage::PathFromUtf8(vs.Graph)));
     ImGui::TextUnformatted(T("Variables of the object (Instance)"));
     varsui::DrawTable(host, obj, vs.Vars, &m_preview);

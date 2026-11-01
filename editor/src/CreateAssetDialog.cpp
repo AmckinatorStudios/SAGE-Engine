@@ -1,5 +1,7 @@
 #include "CreateAssetDialog.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstring>
 
@@ -12,8 +14,8 @@
 #include "LogicKinds.h"
 #include "sage/core/Paths.h"
 #include "Localization.h"
-#include "Project.h"
 #include "NewShader.h"
+#include "Project.h"
 #include "panels/AssetsPanel.h"
 #include "sage/assets/AssetDatabase.h"
 
@@ -28,12 +30,14 @@ struct State {
     bool Open = false;
     Request Req;
     char Name[128] = {0};
-    std::string Logic = "lua";   // id вида логики (LogicKinds.h)
+    bool NameEdited = false;     // человек правил имя — смена вида его не трогает
+    std::string Logic = "slua";  // id вида логики (LogicKinds.h)
     bool ScreenShader = false;   // вид нового шейдера: экран или материал (NewShader.h)
     int Color = -1;         // номер цвета палитры; -1 — без цвета
-    std::string Error;
+    std::string Error;      // ошибка создания (диск); ошибка имени считается на лету
     bool CloseRequested = false;   // закрыть снаружи (самопроверка)
     float Width = 0.0f;            // ширина окна в прошлом кадре
+    float Height = 0.0f;
 };
 
 State& S() {
@@ -74,41 +78,83 @@ const char* TitleOf(What kind) {
     }
 }
 
-const char* IconOf(What kind) {
-    switch (kind) {
-        case What::Folder: return "folder-plus";
-        case What::Scene: return "scene";
-        case What::Material: return "material";
-        case What::TextFile: return "file";
-        case What::Shader: return "code";
-        case What::Script:
-        default: return "script";
-    }
+// ИМЯ ФАЙЛА — проверяется до нажатия, а не ошибкой после: кнопка «Создать»
+// неактивна, пока имя не годится, и под полем сказано почему. Правила — те, что
+// не пропустит хоть одна из систем, где проект откроют (Windows строже всех).
+std::string NameProblem(const std::string& name) {
+    if (name.empty()) return T("Enter a name");
+    if (name.size() > 64) return T("The name is too long (64 characters at most)");
+    for (char c : name)
+        if (std::strchr("\\/:*?\"<>|", c) || (unsigned char)c < 32) return T("The name cannot contain \\ / : * ? \" < > |");
+    if (name.front() == ' ' || name.back() == ' ' || name.front() == '.' || name.back() == '.')
+        return T("The name cannot start or end with a space or a dot");
+    std::string upper;
+    for (char c : name.substr(0, name.find('.'))) upper += (char)std::toupper((unsigned char)c);
+    static const char* kReserved[] = {"CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5",
+                                      "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4",
+                                      "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"};
+    for (const char* r : kReserved)
+        if (upper == r) return T("This name is reserved by the system");
+    return {};
 }
 
-// Выбор вида — карточкой с объяснением: «Lua» и «SAGE Lua» по одному
-// названию не различить, а разница в том, ЧТО проверяется до запуска.
-//
+// Строка вида: значок, название и несколько слов о назначении — в ОДНУ строку.
 // NoAutoClosePopups ОБЯЗАТЕЛЕН: Selectable прямо в модальном окне по
-// умолчанию закрывает это окно. Щелчок по языку не выбирал его, а захлопывал
-// «Новый скрипт» — выбрать язык было нельзя вовсе.
-bool Choice(const char* id, const char* title, const char* note, bool selected) {
-    ImGui::PushID(id);
-    const float w = ImGui::GetContentRegionAvail().x;
-    const float h = ImGui::GetTextLineHeightWithSpacing() * 2.0f + ImGui::GetStyle().FramePadding.y * 2.0f;
+// умолчанию закрывает это окно — щелчок по типу захлопывал бы «Новый скрипт».
+bool KindRow(const logic::Kind& k, bool selected) {
+    ImGui::PushID(k.Id.c_str());
     const ImVec2 at = ImGui::GetCursorScreenPos();
-    const bool pressed =
-        ImGui::Selectable("##choice", selected, ImGuiSelectableFlags_NoAutoClosePopups, ImVec2(w, h));
+    const float h = ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.y;
+    const bool pressed = ImGui::Selectable("##kind", selected, ImGuiSelectableFlags_NoAutoClosePopups,
+                                           ImVec2(ImGui::GetContentRegionAvail().x, h));
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(k.Note.c_str()));
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float pad = ImGui::GetStyle().FramePadding.x;
-    dl->AddText(ImVec2(at.x + pad, at.y + ImGui::GetStyle().FramePadding.y), ImGui::GetColorU32(ImGuiCol_Text), title);
-    dl->AddText(ImVec2(at.x + pad, at.y + ImGui::GetStyle().FramePadding.y + ImGui::GetTextLineHeightWithSpacing()),
-                ImGui::GetColorU32(ImGuiCol_TextDisabled), note);
+    const ImGuiStyle& st = ImGui::GetStyle();
+    const float textY = at.y + (h - ImGui::GetTextLineHeight()) * 0.5f;
+    const float icon = ImGui::GetTextLineHeight();
+    const float labelW = EditorIcons::DrawLabeled(
+        dl, ImVec2(at.x + st.FramePadding.x, textY), icon, k.Icon.c_str(),
+        ImGui::GetColorU32(selected ? ImGuiCol_Text : ImGuiCol_TextDisabled), T(k.Title.c_str()),
+        ImGui::GetColorU32(ImGuiCol_Text));
+    // Пояснение — после названия, обрезано по краю строки: длинный текст не
+    // раздувает окно и не переносится на вторую строку.
+    const float noteX = at.x + st.FramePadding.x + labelW + st.ItemSpacing.x * 2.0f;
+    const float right = at.x + ImGui::GetContentRegionAvail().x;
+    if (noteX < right - icon) {
+        dl->PushClipRect(ImVec2(noteX, at.y), ImVec2(right - st.FramePadding.x, at.y + h), true);
+        dl->AddText(ImVec2(noteX, textY), ImGui::GetColorU32(ImGuiCol_TextDisabled), T(k.Note.c_str()));
+        dl->PopClipRect();
+    }
     ImGui::PopID();
     return pressed;
 }
 
 namespace ns = sage::editor::newshader;
+
+// Виды нового шейдера — строками того же вида, что виды логики.
+const logic::Kind& ShaderKindRow(bool screen) {
+    static const logic::Kind material = [] {
+        logic::Kind k;
+        k.Id = "shader.material";
+        k.Title = "Shader material";
+        k.Note = "For objects: its own .vert/.frag and settings";
+        k.Icon = "material";
+        return k;
+    }();
+    static const logic::Kind screenKind = [] {
+        logic::Kind k;
+        k.Id = "shader.screen";
+        k.Title = "Screen shader";
+        k.Note = "For the camera: processes the finished frame";
+        k.Icon = "camera";
+        return k;
+    }();
+    return screen ? screenKind : material;
+}
+
+const char* GroupTitle(const std::string& group) {
+    return group == "ai" ? T("Artificial intelligence") : T("Scripts");
+}
 
 } // namespace
 
@@ -116,12 +162,18 @@ void Open(const Request& request) {
     State& s = S();
     s.Req = request;
     s.Pending = true;
+    s.CloseRequested = false;   // просьба закрыть прошлое окно к новому не относится
     s.Error.clear();
     s.Color = -1;
+    s.NameEdited = false;
     std::snprintf(s.Name, sizeof(s.Name), "%s", request.Name.c_str());
-    // Язык скрипта — привычка человека, а не свойство проекта: запоминается.
-    s.Logic = sage::editor::prefs::GetString("create.script_language", "lua");
     s.ScreenShader = request.ScreenOnly;
+    // Вид — привычка человека, а не свойство проекта: запоминается.
+    s.Logic = sage::editor::prefs::GetString("create.script_language", "slua");
+    // Имя по умолчанию — по виду («NewAIGraph»), если слот не предложил своё.
+    if (request.Kind == What::Script)
+        if (const logic::Kind* k = LogicOf(s); k && (request.Name.empty() || request.Name == "NewScript"))
+            std::snprintf(s.Name, sizeof(s.Name), "%s", k->DefaultName.c_str());
 }
 
 bool IsOpen() { return S().Open || S().Pending; }
@@ -134,17 +186,23 @@ void Draw(EditorHost& host) {
         s.Open = true;
     }
     if (!s.Open) return;
-    const ImVec2 center = ImGui::GetMainViewport()->GetCenter();
-    ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    // РАЗМЕР — ПОСТОЯННЫЙ И В ПРЕДЕЛАХ ЭКРАНА. Ширина задана, а не «по
+    // содержимому» (поле имени «до края» и окно «по полю» сжимали друг друга
+    // до полоски); высота — не больше 85% окна редактора: лишнее прокручивается
+    // в списке, а имя и кнопки остаются на месте при любом разрешении.
+    const ImGuiViewport* vp = ImGui::GetMainViewport();
+    const float width = std::min(ImGui::GetFontSize() * 26.0f, vp->WorkSize.x * 0.92f);
+    const float maxHeight = vp->WorkSize.y * 0.85f;
+    ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+    ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0.0f), ImVec2(width, maxHeight));
     char title[128];
     std::snprintf(title, sizeof(title), "%s%s", TitleOf(s.Req.Kind), kPopup);
-    if (!ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+    if (!ImGui::BeginPopupModal(title, nullptr, ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings)) {
         s.Open = false;
         return;
     }
 
     const logic::Kind* lk = s.Req.Kind == What::Script ? LogicOf(s) : nullptr;
-    const bool shader = s.Req.Kind == What::Shader;
     fs::path dir = s.Req.Dir;
     if (host.CurrentProject().Loaded()) {
         const fs::path assets = host.CurrentProject().AssetsDir();
@@ -162,45 +220,78 @@ void Draw(EditorHost& host) {
         }
     }
 
-    EditorIcons::Inline(IconOf(s.Req.Kind));
-    ImGui::SameLine(0.0f, 0.0f);
-    ImGui::TextUnformatted(TitleOf(s.Req.Kind));
-    ImGui::Spacing();
-
-    // ИМЯ — первым и сразу с курсором: окно открыли, чтобы назвать вещь.
-    ImGui::TextDisabled("%s", T("Name"));
-    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
-    // ШИРИНА ПОЛЯ — ЧИСЛОМ, А НЕ -1. В окне AlwaysAutoResize поле «до края»
-    // мерит себя по окну, а окно — по полю: каждый кадр оба становились чуть
-    // уже, и окно «Новый материал» (где больше нечему держать ширину, в отличие
-    // от палитры папки) сжималось до узкой полоски. Заданный ранее размер окна
-    // AlwaysAutoResize всё равно отменял.
-    ImGui::SetNextItemWidth(-1.0f);
-    bool create = ImGui::InputText("##create_name", s.Name, sizeof(s.Name), ImGuiInputTextFlags_EnterReturnsTrue);
-
+    // --- ТИП — список с разделами, прокрутка внутри при нехватке места --------
     if (s.Req.Kind == What::Script) {
-        ImGui::Spacing();
-        ImGui::TextDisabled("%s", T("Language"));
-        for (const logic::Kind* k : logic::ForSlot(s.Req.Slot))
-            if (Choice(k->Id.c_str(), T(k->Title.c_str()), T(k->Note.c_str()), lk == k)) {
+        const std::vector<const logic::Kind*> kinds = logic::ForSlot(s.Req.Slot);
+        if (kinds.empty()) ImGui::TextDisabled("%s", T("No kinds of logic for this slot"));
+        const float row = ImGui::GetFrameHeight() + ImGui::GetStyle().FramePadding.y + ImGui::GetStyle().ItemSpacing.y;
+        int groups = 0;
+        std::string last;
+        for (const logic::Kind* k : kinds)
+            if (k->Group != last) {
+                ++groups;
+                last = k->Group;
+            }
+        const float want = row * (float)kinds.size() + ImGui::GetTextLineHeightWithSpacing() * 1.4f * (float)groups;
+        // Место под имя, подсказку и кнопки — всегда; список — сколько останется.
+        const float reserved = ImGui::GetFrameHeightWithSpacing() * 5.0f + ImGui::GetTextLineHeightWithSpacing() * 4.0f;
+        const float listH = std::max(row * 2.0f, std::min(want, maxHeight - reserved));
+        ImGui::BeginChild("##create_kinds", ImVec2(0.0f, listH), ImGuiChildFlags_None);
+        last.clear();
+        for (const logic::Kind* k : kinds) {
+            // Скрипты и ИИ — раздельно: инструменты разного назначения.
+            if (k->Group != last) {
+                if (!last.empty()) ImGui::Spacing();
+                ImGui::TextDisabled("%s", GroupTitle(k->Group));
+                ImGui::Separator();
+                last = k->Group;
+            }
+            if (KindRow(*k, lk == k)) {
+                // Имя по умолчанию следует за видом, пока человек его не трогал.
+                if (!s.NameEdited) std::snprintf(s.Name, sizeof(s.Name), "%s", k->DefaultName.c_str());
                 s.Logic = k->Id;
                 lk = k;
+                s.Error.clear();
             }
-        if (!lk) ImGui::TextDisabled("%s", T("No kinds of logic for this slot"));
+        }
+        ImGui::EndChild();
+        ImGui::Spacing();
     }
 
-    if (s.Req.Kind == What::Shader) {
-        ImGui::Spacing();
+    // --- ШЕЙДЕР: пустой, вид — материал или экран --------------------------------
+    const bool shader = s.Req.Kind == What::Shader;
+    if (shader && !s.Req.ScreenOnly) {
         // Пустой шейдер: контракт движка соблюдён, рисует он то, что напишут.
-        if (!s.Req.ScreenOnly) {
-            ImGui::TextDisabled("%s", T("Kind"));
-            if (Choice("material", T("Shader material"), T("For objects: its own .vert/.frag and settings"),
-                       !s.ScreenShader))
-                s.ScreenShader = false;
-            if (Choice("screen", T("Screen shader"), T("For the camera: processes the finished frame"), s.ScreenShader))
-                s.ScreenShader = true;
-        }
+        ImGui::TextDisabled("%s", T("Kind"));
+        ImGui::Separator();
+        if (KindRow(ShaderKindRow(false), !s.ScreenShader)) s.ScreenShader = false;
+        if (KindRow(ShaderKindRow(true), s.ScreenShader)) s.ScreenShader = true;
+        ImGui::Spacing();
     }
+    if (shader && host.CurrentProject().Loaded())
+        dir = host.CurrentProject().AssetsDir() / (s.ScreenShader ? "shaders" : "materials");
+
+    // --- ИМЯ -----------------------------------------------------------------
+    ImGui::TextDisabled("%s", T("Name"));
+    if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
+    ImGui::SetNextItemWidth(-1.0f);
+    const bool enter =
+        ImGui::InputText("##create_name", s.Name, sizeof(s.Name), ImGuiInputTextFlags_EnterReturnsTrue);
+    if (ImGui::IsItemEdited()) {
+        s.NameEdited = true;
+        s.Error.clear();
+    }
+
+    // Проверка имени — на лету: в том числе «такой файл уже есть».
+    // Шейдер материала кладёт три файла; показан главный — материал.
+    const std::string ext = shader ? (s.ScreenShader ? ".frag" : ".sagemat") : lk ? lk->Ext : std::string();
+    const std::string file = FileName(s.Req.Kind, ext, s.Name[0] ? s.Name : "…");
+    std::string problem = NameProblem(s.Name);
+    if (problem.empty()) {
+        std::error_code ec;
+        if (fs::exists(dir / sage::PathFromUtf8(file), ec)) problem = T("A file with this name already exists");
+    }
+    if (s.Req.Kind == What::Script && !lk) problem = T("Choose a language");
 
     if (s.Req.Kind == What::Folder) {
         ImGui::Spacing();
@@ -211,7 +302,7 @@ void Draw(EditorHost& host) {
         // обязанность.
         if (EditorIcons::IconOnlyButton("folder", T("No colour"), s.Color < 0)) s.Color = -1;
         for (int i = 0; i < (int)palette.size(); ++i) {
-            ImGui::SameLine(0.0f, 4.0f);
+            if (ImGui::GetContentRegionAvail().x > box + 4.0f) ImGui::SameLine(0.0f, 4.0f);
             ImGui::PushID(i);
             const glm::vec3 c = palette[(size_t)i].Color;
             const ImVec4 col(c.r, c.g, c.b, 1.0f);
@@ -229,28 +320,37 @@ void Draw(EditorHost& host) {
         }
     }
 
-    // Что получится и где — до нажатия: расширение и папку видно заранее.
-    ImGui::Spacing();
-    std::string ext = lk ? lk->Ext : std::string();
-    // Шаблон материала кладёт три файла: шейдеры — в shaders, материал (то,
-    // что назначают объекту) — в materials. Показываем главный.
-    if (shader) {
-        ext = s.ScreenShader ? ".frag" : ".sagemat";
-        if (host.CurrentProject().Loaded())
-            dir = host.CurrentProject().AssetsDir() / (s.ScreenShader ? "shaders" : "materials");
+    // Ошибка имени или создания — красным под полем; иначе — куда ляжет файл.
+    const std::string shown = !s.Error.empty() ? s.Error : problem;
+    if (!shown.empty()) {
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", shown.c_str());
+        ImGui::PopTextWrapPos();
+    } else {
+        std::string where = sage::PathToUtf8(dir.filename());
+        if (host.CurrentProject().Loaded()) {
+            std::error_code ec;
+            const fs::path rel = fs::relative(dir, host.CurrentProject().Dir(), ec);
+            if (!ec && !rel.empty()) where = rel.generic_string();
+        }
+        const std::string full = where + "/" + file;
+        ImGui::TextDisabled("%s", full.c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip(T("Will be created: %s"), full.c_str());
     }
-    const std::string file = FileName(s.Req.Kind, ext, s.Name[0] ? s.Name : "…");
-    std::string where = dir.filename().string();
-    if (host.CurrentProject().Loaded()) {
-        std::error_code ec;
-        const fs::path rel = fs::relative(dir, host.CurrentProject().Dir(), ec);
-        if (!ec && !rel.empty()) where = rel.generic_string();
-    }
-    ImGui::TextDisabled(T("Will be created: %s/%s"), where.c_str(), file.c_str());
-    if (!s.Error.empty()) ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", s.Error.c_str());
 
-    ImGui::Spacing();
-    create = EditorIcons::Button("plus", T("Create")) || create;
+    // --- КНОПКИ — внизу, справа, всегда видны --------------------------------
+    ImGui::Separator();
+    const bool valid = problem.empty();
+    const float cancelW = ImGui::CalcTextSize(T("Cancel")).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    const float createW = ImGui::CalcTextSize(T("Create")).x + ImGui::GetStyle().FramePadding.x * 2.0f +
+                          ImGui::GetTextLineHeight() + ImGui::GetStyle().ItemInnerSpacing.x;
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - cancelW - createW -
+                                                                      ImGui::GetStyle().ItemSpacing.x));
+    ImGui::BeginDisabled(!valid);
+    bool create = EditorIcons::Button("plus", T("Create"));
+    ImGui::EndDisabled();
+    if (!valid && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) ImGui::SetTooltip("%s", problem.c_str());
+    create = (create || enter) && valid;
     ImGui::SameLine();
     const bool cancel = ImGui::Button(T("Cancel")) || ImGui::IsKeyPressed(ImGuiKey_Escape);
 
@@ -259,16 +359,12 @@ void Draw(EditorHost& host) {
         fs::create_directories(dir, mk);
         fs::path created;
         bool made = false;
-        if (s.Req.Kind == What::Script) {
-            if (!lk || !lk->Create) s.Error = T("Choose a language");
-            else made = lk->Create(s.Name, dir, created, s.Error);
-        } else if (s.Req.Kind == What::Shader) {
+        if (s.Req.Kind == What::Script) made = lk && lk->Create && lk->Create(s.Name, dir, created, s.Error);
+        else if (shader) {
             if (!host.CurrentProject().Loaded()) s.Error = T("Open a project first");
             else made = ns::Create(s.ScreenShader ? ns::Kind::Screen : ns::Kind::Material, s.Name,
                                    host.CurrentProject().Dir(), host.CurrentProject().AssetsDir(), created, s.Error);
-        } else {
-            made = AssetsPanel::CreateAsset(KindFor(s.Req.Kind), s.Name, dir, created, s.Error);
-        }
+        } else made = AssetsPanel::CreateAsset(KindFor(s.Req.Kind), s.Name, dir, created, s.Error);
         if (made) {
             if (lk) sage::editor::prefs::SetString("create.script_language", lk->Id);
             if (s.Req.Kind == What::Folder && s.Color >= 0) {
@@ -281,8 +377,10 @@ void Draw(EditorHost& host) {
             if (host.CurrentProject().Loaded())
                 sage::AssetDatabase::Instance().ScanProject(host.CurrentProject().Dir().string());
             if (s.Req.Done) s.Req.Done(created);
+            // Граф — сразу в его редактор: Script Graph — в Script Graph, AI
+            // Graph — в AI Graph; выбор типа однозначно задаёт и редактор.
             if (lk && lk->Open && s.Req.OpenAfter) lk->Open(host, created);
-            host.SetStatusMessage(T("Created: ") + created.filename().string());
+            host.SetStatusMessage(T("Created: ") + sage::PathToUtf8(created.filename()));
             s.Open = false;
             ImGui::CloseCurrentPopup();
         }
@@ -292,10 +390,12 @@ void Draw(EditorHost& host) {
     }
     s.CloseRequested = false;
     s.Width = ImGui::GetWindowWidth();
+    s.Height = ImGui::GetWindowHeight();
     ImGui::EndPopup();
 }
 
 float WindowWidth() { return S().Open ? S().Width : 0.0f; }
+float WindowHeight() { return S().Open ? S().Height : 0.0f; }
 void RequestClose() { S().CloseRequested = true; }
 
 } // namespace sage::editor::createasset

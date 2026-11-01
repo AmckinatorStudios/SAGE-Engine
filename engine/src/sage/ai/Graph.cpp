@@ -1,5 +1,7 @@
 #include "sage/ai/Graph.h"
 
+#include <cctype>
+
 #include <algorithm>
 
 #include <nlohmann/json.hpp>
@@ -22,12 +24,14 @@ const char* GraphKindId(GraphKind kind) {
 
 bool NodeAllowed(unsigned nodeDomains, GraphKind kind) {
     switch (kind) {
-        // Функцию зовут оба редактора — в ней только то, что годится обоим.
-        case GraphKind::Function: return (nodeDomains & (kDomainAI | kDomainLogic)) == (kDomainAI | kDomainLogic);
-        // Скрипт объекта — узлы объекта (On Start, действия, общие); узел ИИ
-        // из Lua (ИИ + логика задач) сюда не попадает.
-        case GraphKind::Script: return (nodeDomains & kDomainObject) != 0;
+        // Функция Script Graph — логика без событий объекта: у функции нет
+        // своего объекта, её зовут.
+        case GraphKind::Function: return (nodeDomains & kDomainLogic) != 0;
+        // Script Graph объекта: логика и события объекта.
+        case GraphKind::Script: return (nodeDomains & kDomainScript) != 0;
+        // Устаревший граф задачи — как прежде: логика без событий объекта.
         case GraphKind::Task: return (nodeDomains & kDomainLogic) != 0;
+        // AI Graph: только узлы ИИ.
         case GraphKind::Behavior: return (nodeDomains & kDomainAI) != 0;
     }
     return false;
@@ -35,12 +39,48 @@ bool NodeAllowed(unsigned nodeDomains, GraphKind kind) {
 
 unsigned GraphDomain(GraphKind kind) {
     switch (kind) {
-        case GraphKind::Function: return kDomainAI | kDomainLogic;
+        case GraphKind::Function: return kDomainLogic;
         case GraphKind::Script: return kDomainScript;
         case GraphKind::Task: return kDomainLogic;
         case GraphKind::Behavior: return kDomainAI;
     }
     return kDomainAll;
+}
+
+namespace {
+std::string LowerExt(const std::string& path) {
+    const size_t slash = path.find_last_of("/\\");
+    const size_t dot = path.find_last_of('.');
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) return {};
+    std::string e = path.substr(dot);
+    for (char& c : e) c = (char)std::tolower((unsigned char)c);
+    return e;
+}
+} // namespace
+
+bool IsGraphFile(const std::string& path) {
+    const std::string e = LowerExt(path);
+    return e == ".aigraph" || e == ".sgraph" || e == ".vgraph";
+}
+
+const char* GraphFileExt(GraphKind kind) {
+    return kind == GraphKind::Behavior ? ".aigraph" : ".sgraph";
+}
+
+bool CheckGraphFile(const std::string& path, GraphKind kind, std::string& error) {
+    const std::string e = LowerExt(path);
+    bool ok = true;
+    if (e == ".aigraph") ok = kind == GraphKind::Behavior;
+    else if (e == ".sgraph") ok = kind == GraphKind::Script || kind == GraphKind::Function;
+    else if (e == ".vgraph") ok = kind != GraphKind::Behavior;
+    else {
+        error = "'" + path + "' — не файл графа (.aigraph, .sgraph)";
+        return false;
+    }
+    if (!ok)
+        error = "'" + path + "': в файле " + e + " записан граф вида '" + GraphKindId(kind) +
+                "' — расширение и вид не совпадают (файл правили руками или переименовали)";
+    return ok;
 }
 
 bool ParseGraphKind(const std::string& id, GraphKind& out) {

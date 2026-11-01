@@ -49,8 +49,9 @@ void Open(const Request& request);
 // Рисует окно, если оно открыто. Зовётся раз за кадр на уровне окна-хоста.
 void Draw(EditorHost& host);
 bool IsOpen();
-// Для самопроверки: ширина окна в прошлом кадре (0 — закрыто) и закрыть его.
+// Для самопроверки: размер окна в прошлом кадре (0 — закрыто) и закрыть его.
 float WindowWidth();
+float WindowHeight();
 void RequestClose();
 
 // Куда по умолчанию кладётся ассет этого вида: assets/scripts, assets/materials,

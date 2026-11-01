@@ -1,5 +1,7 @@
 #include "AiGraphPanel.h"
 
+#include <cfloat>
+
 #include <algorithm>
 #include <cmath>
 
@@ -358,6 +360,24 @@ void AiGraphPanel::DrawCanvas(EditorHost& host) {
             if (rd->Paused && rd->PausedNode == n.Id) { border = IM_COL32(255, 70, 70, 255); bw = 3.5f; }
         }
         dl->AddRect(L.Min, L.Max, border, 6.0f * m_zoom, 0, bw);
+        // ИТОГ ЗАДАЧИ (AI Graph): над узлом — выполняется / успех / неудача.
+        // По нему видно, какая задача идёт сейчас, какая кончилась и чем, —
+        // без поиска по истории отладчика.
+        if (rd) {
+            auto oc = rd->Outcomes.find(n.Id);
+            if (oc != rd->Outcomes.end()) {
+                const bool run = oc->second == "running", ok = oc->second == "succeeded";
+                const char* label = run ? T("running") : ok ? T("success") : T("failure");
+                const ImU32 col = run ? IM_COL32(70, 140, 230, 230) : ok ? IM_COL32(60, 160, 80, 230)
+                                                                          : IM_COL32(200, 70, 60, 230);
+                const float fs = fontSize * 0.85f;
+                const ImVec2 ts = font->CalcTextSizeA(fs, FLT_MAX, 0.0f, label);
+                const ImVec2 b0(L.Min.x, L.Min.y - ts.y - 6.0f * m_zoom);
+                const ImVec2 b1(b0.x + ts.x + 10.0f * m_zoom, L.Min.y - 2.0f * m_zoom);
+                dl->AddRectFilled(b0, b1, col, 4.0f * m_zoom);
+                dl->AddText(font, fs, ImVec2(b0.x + 5.0f * m_zoom, b0.y + 2.0f * m_zoom), IM_COL32_WHITE, label);
+            }
+        }
         // Проблема проверки графа — знак в углу заголовка, текст — при наведении.
         {
             std::string text;

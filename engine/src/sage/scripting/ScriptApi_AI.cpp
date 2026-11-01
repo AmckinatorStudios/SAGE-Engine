@@ -592,5 +592,6 @@ void ScriptEngine::RegisterAiApi() {
     }
     RegisterAiGraphApi();
     RegisterAiWorldNodes();
+    RegisterAiBehaviorNodes();
     RegisterVisualApi();
 }

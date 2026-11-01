@@ -45,6 +45,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ai/GraphNodes_Flow.cpp
     src/sage/ai/GraphNodes_Data.cpp
     src/sage/ai/GraphNodes_Decide.cpp
+    src/sage/ai/GraphNodes_Behavior.cpp
+    src/sage/ai/GraphNodes_AIContext.cpp
     src/sage/vars/Refs.cpp
     src/sage/events/Events.cpp
     src/sage/events/TypedBus.cpp
@@ -242,6 +244,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_AI.cpp
     src/sage/scripting/ScriptApi_AIGraph.cpp
     src/sage/scripting/ScriptApi_AIWorld.cpp
+    src/sage/scripting/ScriptApi_AIBehavior.cpp
     src/sage/scripting/ScriptApi_Visual.cpp
     src/sage/scripting/ScriptApi_Tween.cpp
     src/sage/scripting/ScriptTween.cpp

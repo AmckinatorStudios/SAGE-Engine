@@ -96,8 +96,21 @@ struct NodeType {
     std::vector<SettingSpec> Settings;
     bool Pure = false;
     bool Entry = false;       // точка входа (Start, On Event): у неё нет входа потока
-    // Для какого редактора узел (NodeDomain в Graph.h): общий — обоим.
-    unsigned Domains = kDomainAll;
+    // Для какого графа узел (NodeDomain в Graph.h). По умолчанию — Script
+    // Graph: узел ИИ объявляет себя ИИ явно (kDomainAI), а не наоборот.
+    unsigned Domains = kDomainScript;
+    // ВХОД ПО СОБЫТИЮ (On Event, On Collision, On Fixed Update): какое событие
+    // графа он слушает (по узлу — у On Event имя в настройке), в какой выход
+    // данных кладёт данные события и из какого выхода потока идёт ветка.
+    // NoOverlap — новое срабатывание не заводится, пока ветка прошлого не
+    // дошла до конца (как On Update: ждущий обработчик не плодит копии).
+    std::function<std::string(const GraphNode&)> ListensTo;
+    std::string EventData = "data";
+    std::string EventExec = "fired";
+    bool NoOverlap = false;
+    // Событие выполняет САМ узел (его Run), а не ветку за ним: Remember Event
+    // записывает данные события в память и только потом идёт дальше.
+    bool EventRunsSelf = false;
     uint32_t Color = 0;       // 0 — цвет раздела
     std::vector<std::string> Keywords;   // для поиска в палитре
 

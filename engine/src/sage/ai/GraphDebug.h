@@ -58,6 +58,9 @@ struct RunDebug {
     std::map<int, int> NodeHits;                            // сколько раз шагал
     std::map<std::pair<int, std::string>, std::string> Pins;   // (узел, пин) -> значение
     std::set<int> Current;                                  // узлы, на которых стоят ветки
+    // AI Graph: итог узлов-задач и узлов управления — «running», «succeeded»,
+    // «failed». По нему холст показывает, какая задача идёт, какая кончилась.
+    std::map<int, std::string> Outcomes;
     bool Paused = false;
     int PausedNode = 0;
     bool StepRequested = false;
@@ -87,6 +90,7 @@ public:
     void TaskFinished(int run, const std::string& status, const std::string& error, double time);
     void NodeStepped(int run, const std::string& graph, int node, uint64_t frame, double time);
     void PinValue(int run, int node, const std::string& pin, const std::string& value);
+    void NodeOutcome(int run, int node, const std::string& state);
     void SetCurrent(int run, std::set<int> nodes);
     // Сработала точка останова (или шаг): выполнение встаёт на паузу.
     void Paused(int run, const std::string& graph, int node, double time);

@@ -31,6 +31,14 @@
 // ГРАФ ЗАВЕРШАЕТСЯ узлом Return (успех или неудача — его вход ok) или когда
 // все ветки дошли до конца. Граф с обработчиками событий (On Event) сам не
 // кончается: он ждёт событий, пока его не отменят или не сработает Return.
+//
+// РЕЗУЛЬТАТ ВЕТКИ (AI Graph). Ветка кончается успехом или неудачей с
+// причиной: узлом Succeed / Fail или выходом неудачи задачи, который ни с чем
+// не соединён (Move To Target не дошёл — ветка неудачна, а не «просто
+// кончилась»). Узлы управления поведением (Sequence, Selector, Repeat, If
+// Condition) запускают дочерние ветки и решают по их результату. Граф ИИ —
+// это задача: он кончается результатом своей КОРНЕВОЙ ветки (от Task Start),
+// и этот результат видят решение, Lua и отладчик.
 // ---------------------------------------------------------------------------
 namespace sage::ai {
 
@@ -49,7 +57,8 @@ struct CompiledGraph {
     std::vector<CompiledNode> Nodes;
     std::map<int, size_t> Index;
     int StartNode = 0;
-    std::vector<size_t> EventNodes;   // On Event
+    std::vector<size_t> EventNodes;   // входы по событию (On Event, On Collision, …)
+    std::vector<std::string> EventNames;   // какое событие слушает каждый из них
     std::vector<size_t> UpdateNodes;  // On Update (Visual Scripting)
     bool ListensAll = false;          // есть Decide с перепроверкой по событиям
     std::string Problem;              // почему граф нельзя выполнить
@@ -81,6 +90,10 @@ struct Fiber {
     std::function<bool()> Condition;
     bool TimedOut = false;
     vars::Value Payload;
+    // Результат ветки: неудача и её причина (см. «Результат ветки»).
+    bool Failed = false;
+    std::string Reason;
+    bool Ran = false;   // ветка уже шагала (On Fixed Update: «прошлый шаг ещё не начат»)
 };
 
 class GraphBehavior;
@@ -134,6 +147,20 @@ public:
     // Снять ветку; задача, которую она ждала, отменяется с этой причиной.
     void Kill(int fiber, const std::string& reason = {});
     bool FiberDone(int fiber) const;
+    // Результат законченной ветки: true — ветка кончилась (ok — успехом,
+    // reason — причина неудачи). Читается один раз: результат забывается.
+    bool FiberResult(int fiber, bool& ok, std::string& reason);
+    // Закончить текущую ветку с результатом (Succeed / Fail).
+    NodeResult EndBranch(bool ok, const std::string& reason = {});
+    // Причина неудачи, если узел уйдёт по несоединённому выходу неудачи.
+    void FailReason(const std::string& reason);
+    // Итог последней задачи поведения этого выполнения (Last Result).
+    void SetLastResult(bool ok, const std::string& what, const std::string& reason);
+    void LastResult(bool& ok, std::string& what, std::string& reason) const;
+    // Прервать всё поведение: выполнение графа отменяется с причиной.
+    void Abort(const std::string& reason);
+    // Отладчик: итог узла-задачи (выполняется, успех, неудача).
+    void Report(const std::string& state);
 
     RunPtr StartTask(const std::string& name, const Blackboard& inputs, int priority = 0);
     RunPtr TaskById(int id) const;
@@ -191,6 +218,7 @@ private:
     void KillFiber(int id, const std::string& reason = {});
     void DeliverEvents(TaskContext& ctx);
     void Fail(const std::string& reason);
+    void Remember(const Fiber& f);
     int Target(const CompiledNode& n, const std::string& pin) const;
     const std::string& GraphName() const { return m_def.Name; }
 
@@ -198,6 +226,11 @@ private:
     std::shared_ptr<CompiledGraph> m_g;
     std::vector<std::unique_ptr<Fiber>> m_fibers;
     std::map<int, NodeState> m_state;
+    // Результаты законченных веток, пока их не прочёл узел, который их ждал.
+    std::map<int, std::pair<bool, std::string>> m_results;
+    int m_root = 0;              // корневая ветка AI Graph (от Task Start)
+    bool m_lastOk = true;
+    std::string m_lastWhat, m_lastReason;
     std::map<int, RunPtr> m_tasks;
     std::deque<std::pair<std::string, vars::Value>> m_events;
     std::deque<RunPtr> m_cancelQueue;

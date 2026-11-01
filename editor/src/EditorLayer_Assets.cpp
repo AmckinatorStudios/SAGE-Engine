@@ -14,6 +14,10 @@
 #include "ModelHierarchy.h"
 #include <limits>
 #include "EditorLayer.h"
+#include <sstream>
+#include "sage/scene/VisualScriptComponent.h"
+#include "sage/scene/AiAgentComponent.h"
+#include "sage/ai/Graph.h"
 #include "ModelImportDialog.h"
 #include "sage/assets/Pack.h"
 
@@ -236,6 +240,38 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
         PushUndoSnapshot();
         m_scene->Registry().emplace_or_replace<ScriptComponent>(obj.Entity(), ScriptComponent{ref});
         SetStatusMessage(T("Script assigned: ") + asset.filename().string());
+        return true;
+    }
+    // ГРАФЫ — каждый в свой компонент: Script Graph — логика объекта, AI Graph
+    // — поведение персонажа. Вид проверяется по файлу: устаревший граф задачи
+    // (.vgraph вида task) объекту не назначается — у него нет событий объекта.
+    if (ext == ".sgraph" || ext == ".vgraph" || ext == ".aigraph") {
+        sage::ai::GraphDoc doc;
+        std::string text, err;
+        {
+            std::ifstream f(asset, std::ios::binary);
+            std::stringstream ss;
+            ss << f.rdbuf();
+            text = ss.str();
+        }
+        if (!sage::ai::LoadGraph(text, doc, err) || !sage::ai::CheckGraphFile(sage::PathToUtf8(asset), doc.Kind, err)) {
+            SetStatusMessage(T("The graph cannot be assigned: ") + err);
+            return true;
+        }
+        PushUndoSnapshot();
+        if (doc.Kind == sage::ai::GraphKind::Behavior) {
+            auto& ai = m_scene->Registry().get_or_emplace<AiAgentComponent>(obj.Entity());
+            ai.Graph = ref;   // память персонажа, уже настроенная, остаётся
+            SetStatusMessage(T("AI Graph assigned: ") + asset.filename().string());
+            return true;
+        }
+        if (doc.Kind != sage::ai::GraphKind::Script) {
+            SetStatusMessage(T("Only a Script Graph of an object can be assigned (this one is a function or an old task)"));
+            return true;
+        }
+        auto& vs = m_scene->Registry().get_or_emplace<VisualScriptComponent>(obj.Entity());
+        vs.Graph = ref;
+        SetStatusMessage(T("Script Graph assigned: ") + asset.filename().string());
         return true;
     }
     if (ModelLoader::IsSupportedModel(ext)) {
@@ -461,7 +497,10 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
     // хотят покрасить. Разница только в том, что материала ещё нет — он
     // собирается из набора карт, лежащих рядом (см. MaterialFromTextureSet).
     const bool isTexture = assetslot::Accepts(assetslot::Kind::Texture, asset);
-    if (!isModel && !isPrefab && !isMaterial && !isTexture) return false;
+    // Логика (скрипт, Script Graph, AI Graph) — на объект под курсором, как
+    // материал: её роняют НА того, кто будет так себя вести.
+    const bool isLogic = ext == ".slua" || ext == ".lua" || ext == ".sgraph" || ext == ".vgraph" || ext == ".aigraph";
+    if (!isModel && !isPrefab && !isMaterial && !isTexture && !isLogic) return false;
 
     // Луч через точку, где отпустили кнопку. Та же математика, что у выбора
     // мышью (см. PickAtViewportWith), и это важно: место, куда встанет объект,
@@ -491,6 +530,15 @@ bool EditorLayer::DropAssetAtViewport(const glm::mat4& view, const glm::mat4& pr
         }
     }
 
+    if (isLogic) {
+        if (bestEntity == entt::null) {
+            SetStatusMessage(T("Drop the script or graph on an object"));
+            return true;
+        }
+        const int id = m_scene->Registry().get<IdComponent>(bestEntity).Id;
+        if (ApplyAssetToEntity(id, asset)) m_selection.SetPrimary(id);
+        return true;
+    }
     if (isMaterial || isTexture) {
         // Материал ложится на то, НА ЧТО его уронили. В пустоту ронять его
         // бессмысленно — там нечего красить, и создавать ради этого объект было

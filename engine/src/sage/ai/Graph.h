@@ -7,17 +7,20 @@
 #include "sage/vars/Value.h"
 
 // ---------------------------------------------------------------------------
-// ДОКУМЕНТ SAGE AI GRAPH — то, что лежит в файле .aigraph и что правит
-// редактор. Здесь только данные: что за узлы, где стоят, чем соединены.
+// ДОКУМЕНТ ВИЗУАЛЬНОГО ГРАФА — то, что лежит в файле .aigraph / .sgraph и что
+// правит редактор. Здесь только данные: что за узлы, где стоят, чем соединены.
 // Как граф ВЫПОЛНЯЕТСЯ — в GraphRuntime.h; какие бывают узлы — в Nodes.h.
 //
-// ТРИ ВИДА ГРАФА, одна система:
-//   behavior — главный граф поведения: принимает решения и запускает задачи;
-//   task     — граф задачи: последовательность действий одной задачи;
-//   function — переиспользуемый блок, который зовут из других графов.
-// Все три регистрируются задачами в библиотеке мира ИИ и зовутся по имени —
-// из графа, из Lua и из C++ одинаково. Вид — это намерение автора (и
-// раздел в палитре), а не разные правила выполнения.
+// ДВА ИНСТРУМЕНТА, у каждого свой файл, свой редактор, свой набор узлов и
+// свои правила выполнения:
+//   AI Graph (.aigraph)     — поведение ИИ: задачи, условия, контекст и
+//                             управление поведением (вид behavior);
+//   Script Graph (.sgraph)  — игровая логика объектов: события, поток,
+//                             переменные, игровые действия (вид script) и
+//                             переиспользуемые функции (вид function).
+// Вид записан в файле, но решает его РАСШИРЕНИЕ (CheckGraphFile): файл
+// .aigraph с видом script — ошибка загрузки, а не «граф, который сам
+// догадается, кто он».
 //
 // ПРОВОДА. У узла пины двух родов: поток выполнения (exec) и данные. Выход
 // потока ведёт в ОДИН вход (куда идти дальше — однозначно), вход потока
@@ -29,38 +32,51 @@
 // ---------------------------------------------------------------------------
 namespace sage::ai {
 
-// ВИДЫ ГРАФОВ И ИХ РЕДАКТОРЫ — главное разделение SAGE AI:
-//   Behavior — AI Graph: РЕШАЕТ, какую задачу выполнять и когда сменить
-//              поведение (условия, приоритеты, запуск и отмена задач).
-//   Task     — задача в Visual Scripting: КАК выполняется часть поведения
-//              (последовательность действий, проверки, ожидания).
-//   Script   — игровая логика объекта в Visual Scripting (On Start, On Update).
-//   Function — переиспользуемый блок обоих редакторов: только общие узлы.
-// Задачи на Lua (ai.task) и задачи графом Task равноправны: AI Graph зовёт
-// их одним узлом и по одним правилам.
+// ВИДЫ ГРАФОВ:
+//   Behavior — AI Graph: поведение ИИ (выбор задачи, её выполнение, результат).
+//   Script   — Script Graph: игровая логика объекта (On Start, On Update, …).
+//   Function — функция Script Graph: переиспользуемый блок игровой логики.
+//   Task     — УСТАРЕВШИЙ граф задачи (.vgraph прежних версий). Новые не
+//              создаются; старые файлы загружаются и работают, как работали,
+//              а задачи теперь собираются в AI Graph или пишутся на SAGE Lua.
 enum class GraphKind { Behavior, Task, Function, Script };
 const char* GraphKindId(GraphKind kind);
 bool ParseGraphKind(const std::string& id, GraphKind& out);
 
-// НАЗНАЧЕНИЕ УЗЛА. Основа графов одна (документ, выполнение, типы,
-// переменные), наборы узлов — по назначению:
-//   AI     — управление поведением: решение с приоритетами, запуск задачи без
-//            ожидания, её состояние, отмена — только в AI Graph;
-//   Logic  — логика Visual Scripting (задачи, скрипты объектов);
-//   Object — входы скрипта объекта (On Start, On Update) — только в Script.
-// Общие (Branch, Sequence, циклы, математика, переменные, мир, Run Task,
-// Parallel) несут все биты.
+// НАЗНАЧЕНИЕ УЗЛА — у каждого графа СВОЙ перечень узлов:
+//   AI     — только AI Graph: задачи поведения, условия ИИ, контекст ИИ,
+//            управление поведением (Task Start, Succeed, Sequence задач,
+//            Decide, Move To Target, …);
+//   Logic  — игровая логика Script Graph: поток (Branch, Sequence, циклы),
+//            переменные, математика, игровые действия, функции;
+//   Object — события объекта (On Start, On Update, столкновения) — только в
+//            Script Graph объекта, не в функции.
+// Общего «на всякий случай» набора нет: узел Script Graph не появляется в
+// AI Graph только потому, что он уже существует, и наоборот. Оба бита несёт
+// лишь Reroute — точка излома провода, не логика.
 enum NodeDomain : unsigned {
     kDomainAI = 1u,
     kDomainLogic = 2u,
     kDomainObject = 4u,
-    kDomainScript = kDomainLogic | kDomainObject,   // узел Visual Scripting (visual.node)
+    kDomainScript = kDomainLogic | kDomainObject,   // узел Script Graph (visual.node)
     kDomainAll = kDomainAI | kDomainLogic | kDomainObject,
 };
 // Можно ли узлу с таким назначением стоять в графе этого вида.
 bool NodeAllowed(unsigned nodeDomains, GraphKind kind);
-// Назначение графа этого вида (функция — обоим).
+// Назначение графа этого вида.
 unsigned GraphDomain(GraphKind kind);
+
+// ФАЙЛ И ЕГО ВИД. Расширение однозначно задаёт вид графа и редактор:
+//   .aigraph — только behavior (AI Graph);
+//   .sgraph  — script или function (Script Graph);
+//   .vgraph  — устаревший файл Visual Script: script, function или task.
+// Несовпадение (ручная правка файла, переименование) — ошибка с причиной,
+// а не попытка угадать назначение по содержимому.
+bool CheckGraphFile(const std::string& path, GraphKind kind, std::string& error);
+// Расширение нового файла этого вида (task — устаревший, новых не бывает).
+const char* GraphFileExt(GraphKind kind);
+// Файл графа по расширению (любой из трёх).
+bool IsGraphFile(const std::string& path);
 
 struct GraphPinRef {
     int Node = 0;
@@ -104,8 +120,8 @@ struct GraphDoc {
     std::string Name;
     std::string Description;
     std::string Category;   // раздел в палитре для function-графов
-    // Граф задачи: какие каналы персонажа занимает и можно ли его прервать
-    // (TaskSignature::Channels / Interruptible).
+    // AI Graph (и устаревший граф задачи): какие каналы персонажа занимает и
+    // можно ли его прервать (TaskSignature::Channels / Interruptible).
     std::vector<std::string> Channels;
     bool Interruptible = true;
     std::vector<GraphVar> Inputs, Outputs, Locals;

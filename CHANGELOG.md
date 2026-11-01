@@ -39,6 +39,50 @@
 - Правило в `CLAUDE.md`: никаких готовых эффектов и механик, даже шаблонами
   редактора.
 
+### 2026-11-01 (SAGE Lua, Script Graph и AI Graph — три инструмента логики)
+
+**Изменено**
+- Создаются только три вида логики: SAGE Lua (`.slua`), Script Graph
+  (`.sgraph`) и AI Graph (`.aigraph`). Обычный Lua (`.lua`), Visual Script и
+  задача ИИ (`.vgraph`) новыми файлами не создаются; старые файлы не
+  удаляются, открываются и работают.
+- Окно «Создать…» переделано: компактное, высота не выходит за экран (список
+  типов прокручивается внутри, кнопки внизу всегда видны), разделы «Скрипты»
+  и «Искусственный интеллект», короткие пояснения вместо длинных, проверка
+  имени на лету с причиной, имя по умолчанию по типу.
+- Script Graph и AI Graph — раздельные наборы узлов, без общих «на всякий
+  случай»: в AI Graph нет Branch, Sequence потока, циклов, переменных и
+  игровых действий, в Script Graph — задач и управления поведением ИИ.
+  Правило соблюдается в палитре, проверке, загрузке и выполнении.
+- Вид графа задаёт расширение файла: вид, поправленный в файле руками, не
+  загружается. `ai.node` без `domain` — узел AI Graph.
+- AI Graph начинается узлом Task Start и кончается результатом своей
+  корневой ветки (успех, неудача с причиной, прерывание); неудача задачи без
+  провода — неудача ветки.
+- Окно «Visual Script» и компонент называются «Script Graph» (данные сцен те
+  же).
+
+**Добавлено**
+- Узлы AI Graph: Task Start, Succeed, Fail, Abort Behavior; Task Sequence,
+  Selector, If Condition (прерывание по условию), Repeat; Check Condition,
+  Has Target, Can See Target, Target Within Distance, In State, Compare
+  Parameter, Can Run Task, All Of, Any Of, Not; Self, Current Target, Get /
+  Set Parameter, Set State, Last Result, Remember Event; Find / Select /
+  Forget Target, Move To Target, Follow Target, Face Target, Interact, Wait,
+  Wait Until, Wait For Event.
+- События Script Graph: On Fixed Update, On Collision Enter / Exit, On
+  Trigger Enter / Exit, On Signal.
+- Итоги задач на холсте AI Graph в отладке: выполняется / успех / неудача.
+- Перетаскивание `.sgraph` и `.aigraph` на объект (компоненты Script Graph и
+  AI) и в окно редактора графов.
+- Библиотека ИИ читает `.slua` и `.sgraph`.
+
+**Исправлено**
+- Поиск в окне «Настройки» давал ошибку ImGui «Code uses SetCursorPos() to
+  extend window boundaries».
+- Результат дочерней ветки доходит до узла-родителя в том же кадре (цепочка
+  мгновенных шагов не растягивалась на кадры).
+
 ### 2026-11-01 (гибкие настройки графики, ровное окно «Настройки», тема Premium Gold)
 
 **Добавлено**

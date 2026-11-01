@@ -612,6 +612,7 @@ void ScriptEngine::UpdateFixed(float deltaTime) {
     if (m_fixedAccum > cap) m_fixedAccum = cap;
     while (m_fixedAccum >= m_fixedStep) {
         CallHook(&ScriptInstance::FixedUpdateFn, m_fixedStep);
+        EmitVisualFixedStep(m_fixedStep);
         m_fixedAccum -= m_fixedStep;
     }
 }

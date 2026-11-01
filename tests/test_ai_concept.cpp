@@ -1,9 +1,9 @@
 // ПРИМЕР ИЗ КОНЦЕПЦИИ SAGE AI — целиком, как его собрал бы автор игры.
 //
-// NPC патрулирует (задача Patrol на Lua), слышит шум — AI Graph запускает
-// InvestigateNoise (задача Visual Scripting: Move To к шуму), затем
-// AnalyzeEvidence (Lua) и кладёт её результат в память; замечает игрока —
-// ChasePlayer (Lua) прерывает всё, что важнее не она. Задачи, двигающие
+// NPC патрулирует (задача Patrol на Lua), слышит шум (Remember Event) — AI
+// Graph запускает InvestigateNoise (тоже AI Graph: Move To Target к шуму),
+// затем AnalyzeEvidence (Lua) и кладёт её результат в память; замечает
+// игрока — ChasePlayer (Lua) прерывает всё, что важнее не она. Задачи, двигающие
 // персонажа, занимают канал «legs» — два перемещения одновременно не идут.
 // Движок здесь даёт только механизмы: решение с приоритетами, задачи,
 // каналы, события, память; поведение задаёт «игра» в этом тесте.
@@ -37,10 +37,10 @@ void Data(GraphDoc& d, int from, const std::string& pin, int to, const std::stri
 }
 Value Str(const char* s) { return Value(std::string(s)); }
 int Mem(GraphDoc& d, const char* name) {
-    return Add(d, "var.get", {{"scope", Str("instance")}, {"name", Str(name)}});
+    return Add(d, "ai.get_param", {{"scope", Str("instance")}, {"name", Str(name)}});
 }
 int SetMem(GraphDoc& d, const char* name) {
-    return Add(d, "var.set", {{"scope", Str("instance")}, {"name", Str(name)}});
+    return Add(d, "ai.set_param", {{"scope", Str("instance")}, {"name", Str(name)}});
 }
 
 template <class T>
@@ -82,33 +82,32 @@ ai.task("Dance", {channels = {"legs"}, interruptible = false,
     run = function(t) while true do t.wait() end end})
 )";
 
-// Задача Visual Scripting: дойти до шума (Move To), осмотреться.
+// Задача AI Graph: дойти до шума (Move To Target к точке), осмотреться.
 GraphDoc InvestigateNoise() {
     GraphDoc d;
-    d.Kind = GraphKind::Task;
+    d.Kind = GraphKind::Behavior;
     d.Name = "InvestigateNoise";
     d.Channels = {"legs"};
     d.Inputs = {{"where", "vec3", Value(glm::vec3(0.0f)), ""}};
-    const int start = Add(d, "flow.start");
-    const int self = Add(d, "world.self");
-    const int where = Add(d, "var.get", {{"scope", Str("input")}, {"name", Str("where")}});
-    const int move = Add(d, "object.move_to", {{"speed", Value(40.0f)}, {"arrive_distance", Value(0.2f)}});
-    const int look = Add(d, "flow.wait", {{"seconds", Value(0.1f)}});
-    const int ret = Add(d, "flow.return");
+    const int start = Add(d, "ai.task_start");
+    const int where = Add(d, "ai.get_param", {{"scope", Str("input")}, {"name", Str("where")}});
+    const int move = Add(d, "ai.move_to", {{"destination", Str("point")}, {"speed", Value(40.0f)},
+                                          {"arrive_distance", Value(0.2f)}});
+    const int look = Add(d, "ai.wait", {{"seconds", Value(0.1f)}});
+    const int ok = Add(d, "ai.succeed");
     Exec(d, start, "then", move);
-    Data(d, self, "object", move, "object");
-    Data(d, where, "value", move, "target");
-    Exec(d, move, "arrived", look);
-    Exec(d, look, "then", ret);
+    Data(d, where, "value", move, "point");
+    Exec(d, move, "success", look);
+    Exec(d, look, "success", ok);
     return d;
 }
 
-// AI Graph: решение с приоритетами + реакция на шум.
+// AI Graph: решение с приоритетами + память о шуме.
 GraphDoc GuardBrain() {
     GraphDoc d;
     d.Kind = GraphKind::Behavior;
     d.Name = "GuardBrain";
-    const int start = Add(d, "flow.start");
+    const int start = Add(d, "ai.task_start");
     const int decide = Add(d, "ai.decide", {{"options", Value(3)}, {"interval", Value(0.1f)},
                                             {"priority 0", Value(30)}, {"priority 1", Value(20)},
                                             {"priority 2", Value(10)}, {"condition 2", Value(true)}});
@@ -117,30 +116,27 @@ GraphDoc GuardBrain() {
     Data(d, Mem(d, "sees_player"), "value", decide, "condition 0");
     const int chase = Add(d, "task.run", {{"task", Str("ChasePlayer")}, {"priority", Value(30)}});
     Exec(d, decide, "option 0", chase);
-    // 1: слышал шум — исследовать, затем разобрать улики (Lua), запомнить итог.
+    // 1: слышал шум — по порядку: исследовать, разобрать улики (Lua) и
+    //    запомнить итог, успокоиться.
     Data(d, Mem(d, "heard"), "value", decide, "condition 1");
+    const int seq = Add(d, "ai.sequence", {{"steps", Value(3)}});
+    Exec(d, decide, "option 1", seq);
     const int inv = Add(d, "task.run", {{"task", Str("InvestigateNoise")}, {"priority", Value(20)}});
     Data(d, Mem(d, "noise_pos"), "value", inv, "where");
-    Exec(d, decide, "option 1", inv);
+    Exec(d, seq, "step 0", inv);
     const int analyze = Add(d, "task.run", {{"task", Str("AnalyzeEvidence")}});
-    Exec(d, inv, "succeeded", analyze);
+    Exec(d, seq, "step 1", analyze);
     const int remember = SetMem(d, "evidence");
     Exec(d, analyze, "succeeded", remember);
     Data(d, analyze, "found", remember, "value");
     const int calm = SetMem(d, "heard");
     d.FindNode(calm)->Values["value"] = Value(false);
-    Exec(d, remember, "then", calm);
+    Exec(d, seq, "step 2", calm);
     // 2: всегда — патруль.
     const int patrol = Add(d, "task.run", {{"task", Str("Patrol")}, {"priority", Value(10)}});
     Exec(d, decide, "option 2", patrol);
-    // Шум: запомнить, где, и что слышал (On Event работает параллельно решению).
-    const int on = Add(d, "event.on", {{"event", Str("noise")}});
-    const int pos = SetMem(d, "noise_pos");
-    const int heard = SetMem(d, "heard");
-    d.FindNode(heard)->Values["value"] = Value(true);
-    Exec(d, on, "fired", pos);
-    Data(d, on, "data", pos, "value");
-    Exec(d, pos, "then", heard);
+    // Шум: запомнить, где, и что слышал — что бы поведение ни делало.
+    Add(d, "ai.remember_event", {{"event", Str("noise")}, {"name", Str("noise_pos")}, {"flag", Str("heard")}});
     return d;
 }
 
@@ -151,20 +147,19 @@ TEST(AIConcept_guard_patrols_investigates_chases_with_priorities) {
     dbg.Reset();
     dbg.Enabled = true;
 
-    // Проект «игры»: assets/ai — Lua и AI Graph, assets/visual — задача VS.
+    // Проект «игры»: assets/ai — задачи на Lua и два AI Graph.
     const fs::path root = fs::temp_directory_path() / "sage_ai_concept";
     fs::remove_all(root);
     fs::create_directories(root / "assets" / "ai");
-    fs::create_directories(root / "assets" / "visual");
     std::ofstream(root / "assets" / "ai" / "tasks.lua") << kLua;
     std::ofstream(root / "assets" / "ai" / "GuardBrain.aigraph") << SaveGraph(GuardBrain());
-    std::ofstream(root / "assets" / "visual" / "InvestigateNoise.vgraph") << SaveGraph(InvestigateNoise());
+    std::ofstream(root / "assets" / "ai" / "InvestigateNoise.aigraph") << SaveGraph(InvestigateNoise());
 
     Scene scene{"concept"};
     ScriptEngine se;
     se.BindScene(scene);
     se.SetAiRoot(root.string());
-    CHECK_EQ(se.LoadAiLibrary("assets/ai") + se.LoadAiLibrary("assets/visual"), 3);
+    CHECK_EQ(se.LoadAiLibrary("assets/ai"), 3);
     GameObject guard = scene.CreateObject("Guard");
     AiAgentComponent c;
     c.Graph = "assets/ai/GuardBrain.aigraph";
@@ -188,7 +183,7 @@ TEST(AIConcept_guard_patrols_investigates_chases_with_priorities) {
     CHECK_TRUE(patrolRun > 0);
 
     // 2. Шум: важнее патруля — патруль прерван с причиной, NPC идёт к шуму
-    //    (задача VS), потом разбирает улики (Lua), итог — в памяти.
+    //    (AI Graph), потом разбирает улики (Lua), итог — в памяти.
     CHECK_TRUE(se.Lua().safe_script("sage.events.Emit('noise', Vec3(6, 0, 0))").valid());
     frames(3);
     CHECK_TRUE(dbg.FindRun(patrolRun) && dbg.FindRun(patrolRun)->Status == "cancelled");
@@ -250,7 +245,7 @@ TEST(AIConcept_noninterruptible_option_finishes_before_switch) {
     GraphDoc d;
     d.Kind = GraphKind::Behavior;
     d.Name = "Hungry";
-    const int start = Add(d, "flow.start");
+    const int start = Add(d, "ai.task_start");
     const int decide = Add(d, "ai.decide", {{"options", Value(2)}, {"interval", Value(0.0f)},
                                             {"priority 0", Value(50)}, {"priority 1", Value(10)},
                                             {"condition 1", Value(true)}, {"interruptible 1", Value(false)}});
@@ -274,31 +269,37 @@ TEST(AIConcept_noninterruptible_option_finishes_before_switch) {
     CHECK_TRUE(w.FindAgent(agent)->Memory->Get("fled").AsBool());   // доел — и бежать
 }
 
-// Узел-действие ИИ на Lua (ai.node без domain) нужен и задаче Visual
-// Scripting: задачи живут там, а не в AI Graph. Раньше такой узел годился
-// только графу решений, и граф задачи его отвергал.
-TEST(AIConcept_lua_ai_node_usable_in_task_graph) {
+// Узел ИИ на Lua (ai.node без domain) — узел AI Graph: в Script Graph его
+// нет, и наоборот — visual.node не попадает в AI Graph.
+TEST(AIConcept_lua_nodes_belong_to_their_graph) {
     ScriptEngine se;
     World& w = se.AI();
     CHECK_TRUE(se.Lua().safe_script(R"(
         ai.node("game.bark", {run = function(n) n.instance.barked = true end})
-        ai.node("game.think", {domain = "ai", run = function(n) end})
+        visual.node("game.door", {run = function(n) end})
+        ai.node("game.both", {domain = "both", pure = true, outputs = {{"v", "float"}}, run = function(n) end})
     )").valid());
     const NodeType* bark = w.Nodes().Find("game.bark");
-    const NodeType* think = w.Nodes().Find("game.think");
-    CHECK_TRUE(bark && think);
-    if (!bark || !think) return;
-    CHECK_TRUE(NodeAllowed(bark->Domains, GraphKind::Task));
+    const NodeType* door = w.Nodes().Find("game.door");
+    const NodeType* both = w.Nodes().Find("game.both");
+    CHECK_TRUE(bark && door && both);
+    if (!bark || !door || !both) return;
     CHECK_TRUE(NodeAllowed(bark->Domains, GraphKind::Behavior));
-    CHECK_FALSE(NodeAllowed(think->Domains, GraphKind::Task));
+    CHECK_FALSE(NodeAllowed(bark->Domains, GraphKind::Script));
+    CHECK_FALSE(NodeAllowed(door->Domains, GraphKind::Behavior));
+    CHECK_TRUE(NodeAllowed(door->Domains, GraphKind::Script));
+    CHECK_TRUE(NodeAllowed(both->Domains, GraphKind::Behavior) && NodeAllowed(both->Domains, GraphKind::Script));
     GraphDoc d;
-    d.Kind = GraphKind::Task;
+    d.Kind = GraphKind::Behavior;
     d.Name = "Bark";
-    Exec(d, Add(d, "flow.start"), "then", Add(d, "game.bark"));
+    const int bk = Add(d, "game.bark");
+    Exec(d, Add(d, "ai.task_start"), "then", bk);
+    Exec(d, bk, "then", Add(d, "ai.succeed"));
     std::string err;
     CHECK_TRUE(w.RegisterGraph(d, err));
     const int agent = w.CreateAgent();
-    w.Start(agent, "Bark");
+    RunPtr r = w.Start(agent, "Bark");
     w.Tick(0.1f);
     CHECK_TRUE(w.FindAgent(agent)->Memory->Get("barked").AsBool());
+    CHECK_TRUE(r->Status == TaskStatus::Succeeded);
 }

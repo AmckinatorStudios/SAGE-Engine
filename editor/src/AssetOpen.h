@@ -22,7 +22,7 @@ inline OpenAs Of(const std::filesystem::path& path, bool isDir) {
     if (ext == ".sageprefab") return OpenAs::Prefab;
     if (ext == ".sageclip" || ext == ".sageanim") return OpenAs::Clip;
     if (ext == ".aigraph") return OpenAs::AiGraph;
-    if (ext == ".vgraph") return OpenAs::VisualScript;
+    if (ext == ".sgraph" || ext == ".vgraph") return OpenAs::VisualScript;
     if (ext == ".lua" || ext == ".slua" || ext == ".vert" || ext == ".frag" || ext == ".glsl" || ext == ".txt" ||
         ext == ".md" || ext == ".json")
         return OpenAs::Text;

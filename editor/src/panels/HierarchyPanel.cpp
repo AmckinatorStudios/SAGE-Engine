@@ -330,6 +330,8 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
                 case assetslot::Kind::Material: what = T("Assign the material to this object"); break;
                 case assetslot::Kind::Model:    what = T("Replace this object's mesh"); break;
                 case assetslot::Kind::Script:   what = T("Attach the script to this object"); break;
+                case assetslot::Kind::VisualScript: what = T("Attach the Script Graph to this object"); break;
+                case assetslot::Kind::AiGraph:  what = T("Give this object the AI Graph behavior"); break;
                 case assetslot::Kind::Prefab:   what = T("Add the prefab as a child"); break;
                 default: break;
             }

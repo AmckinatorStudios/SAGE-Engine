@@ -224,12 +224,12 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
          "Sound of this object: ambience, hum, one-shot", HasComp<AudioSourceComponent>,
          AddComp<AudioSourceComponent>},
 
-        // ИИ — граф поведения SAGE AI и начальная память персонажа.
+        // ИИ — AI Graph поведения и начальная память персонажа.
         {"AI", "Logic", "wire",
-         "Behaviour graph of SAGE AI and the memory the character starts with",
+         "AI Graph of the character's behavior and the memory it starts with",
          HasComp<AiAgentComponent>, AddComp<AiAgentComponent>},
-        // Visual Script — игровая логика объекта графом (Visual Scripting).
-        {"Visual Script", "Logic", "wire",
+        // Script Graph — игровая логика объекта графом.
+        {"Script Graph", "Logic", "wire",
          "Game logic of this object made of nodes: On Start, On Update, events",
          HasComp<VisualScriptComponent>, AddComp<VisualScriptComponent>},
         {"Script", "Logic", "script",
