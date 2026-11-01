@@ -37,6 +37,7 @@
 #include "Thumbnails.h"
 
 #include "sage/assets/Quarantine.h"
+#include "sage/render/SkyDraw.h"
 #include "sage/render/DebugView.h"
 #include "sage/app/Application.h"
 #include "ScreenColor.h"
@@ -538,7 +539,12 @@ void EditorLayer::OnRender() {
     // поверх редактируемого мешает не меньше подложки. В пространстве сцены
     // область пустая, то есть «всё, как в игре» (см. EditorLayer::UiScope).
     m_renderer.SetUIScope(UiScope());
-    m_renderer.RenderGame(*m_scene, env, cfg);      // Primary-камера сцены (если есть)
+    // Окно Game — вид собранной игры, поэтому и флаги качества «Туман» и
+    // «Небо» из настроек — как в игре. Вьюпорт показывает среду как есть:
+    // её здесь правят, и выключенный настройкой туман там только мешал бы.
+    LightingEnvironment gameEnv = env;
+    sage::render::ApplyQualityToEnvironment(cfg, gameEnv);
+    m_renderer.RenderGame(*m_scene, gameEnv, cfg);  // Primary-камера сцены (если есть)
 
     // Превью ВЫБРАННОЙ камеры — последним и только по запросу вьюпорта: это
     // ещё один полный проход сцены, и платить за него, когда карточки на

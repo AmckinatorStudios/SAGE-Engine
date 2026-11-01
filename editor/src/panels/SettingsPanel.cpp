@@ -26,24 +26,27 @@ struct CategoryInfo {
     const char* About;
 };
 // Названия — через T() в месте использования (каталог перевода видит литералы).
+// Значки — одного рисунка и веса (контурные Tabler, без букв внутри): глиф
+// языка и буква в круге были мельче и жирнее соседей, и колонка разделов
+// выглядела неровной.
 CategoryInfo Info(SettingsPanel::Category c) {
     switch (c) {
         case SettingsPanel::Category::Screen:
             return {"window", T("Screen"), T("Window mode, monitor, resolution and frame rate of the game.")};
         case SettingsPanel::Category::Quality:
-            return {"chart", T("Graphics Quality"), T("Quality profile, render resolution and anti-aliasing.")};
+            return {"particles", T("Graphics Quality"), T("Quality profile, render resolution and anti-aliasing.")};
         case SettingsPanel::Category::Lighting:
             return {"sun", T("Lighting and shadows"),
                     T("Shadows of the sun and of lamps, bounced light and reflections.")};
         case SettingsPanel::Category::Controls:
             return {"keyboard", T("Game controls"), T("Game actions and the keys, buttons and sticks they are bound to.")};
         case SettingsPanel::Category::Advanced:
-            return {"gear", T("Advanced"), T("Graphics API of the game and information about this machine.")};
+            return {"chart", T("Advanced"), T("Graphics API of the game and information about this machine.")};
         case SettingsPanel::Category::General:
-            return {"language", T("General"),
+            return {"gear", T("General"),
                     T("Language of the editor and the program that opens code. Stored for you, not in the project.")};
         case SettingsPanel::Category::Appearance:
-            return {"theme", T("Appearance"),
+            return {"material", T("Appearance"),
                     T("Theme and scale of the editor. Stored for you, not in the project, and applied at once.")};
         default: return {"gear", "", ""};
     }
@@ -214,10 +217,13 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
     }
     if (ctx.Filter.empty()) {
         const CategoryInfo info = Info(m_cat);
+        // Значок — по центру строки заголовка (а не «сверху плюс два»): крупный
+        // заголовок выше обычной строки, и значок висел над ним.
         const float big = std::floor(ImGui::GetFontSize() * 1.6f);
+        const float titleH = std::floor(ImGui::GetFontSize() * 1.35f);
         const ImVec2 p = ImGui::GetCursorScreenPos();
-        EditorIcons::Overlay(ImGui::GetWindowDrawList(), p.x, p.y + 2.0f, big, info.Icon);
-        ImGui::Dummy(ImVec2(big + st.SpacingMD, big));
+        EditorIcons::Overlay(ImGui::GetWindowDrawList(), p.x, p.y + std::floor((titleH - big) * 0.5f), big, info.Icon);
+        ImGui::Dummy(ImVec2(big + st.SpacingMD, std::max(big, titleH)));
         ImGui::SameLine();
         ImGui::BeginGroup();
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.35f);

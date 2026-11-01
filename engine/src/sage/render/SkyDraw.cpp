@@ -1,5 +1,7 @@
 #include "sage/render/SkyDraw.h"
 
+#include "sage/core/Config.h"
+
 #include "sage/render/ResourceManager.h"
 #include "sage/render/SkyRenderer.h"
 #include "sage/render/Skybox.h"
@@ -50,6 +52,23 @@ void DrawSceneSky(SkyRenderer& fallback, const LightingEnvironment& env, const g
     SkyCelestials sky = CelestialsFromEnvironment(env);
     sky.Time = time;
     fallback.Draw(view, proj, env.SkyTop(), env.SkyHorizon(), sky);
+}
+
+// Настройка качества выключает ОТРИСОВКУ неба, а не солнце над миром:
+// «поставил пресет полегче — мир погас» было бы не оптимизацией, а поломкой.
+// Поэтому посчитанный от неба ambient замораживается своими значениями, и
+// сцена освещена ровно так же, как при включённом небе. (Автор, выключивший
+// небо В СЦЕНЕ, получает темноту намеренно — см. ResolveAmbient.)
+void ApplyQualityToEnvironment(const sage::EngineConfig& cfg, LightingEnvironment& env) {
+    if (!cfg.Skybox && env.Skybox.Enabled) {
+        glm::vec3 ambientSky, ambientGround;
+        env.ResolveAmbient(ambientSky, ambientGround);
+        env.SkyColor = ambientSky;
+        env.GroundColor = ambientGround;
+        env.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+        env.Skybox.Enabled = false;
+    }
+    if (!cfg.Fog) env.Fog.Enabled = false;
 }
 
 } // namespace sage::render

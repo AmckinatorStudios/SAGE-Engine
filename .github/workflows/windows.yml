@@ -86,8 +86,8 @@ jobs:
           # первого не работает Build Game, без вторых — шаблон «Витрина».
           test -f build-windows/runtime/SagePlayer.exe \
             || { echo "::error::SagePlayer.exe не собрался — Build Game работать не будет"; exit 1; }
-          test -f build-windows/editor/themes/example-amber.json \
-            || { echo "::error::темы оформления не скопировались в themes/"; exit 1; }
+          test -f build-windows/editor/themes/README.txt \
+            || { echo "::error::папка тем оформления не скопировалась в themes/"; exit 1; }
           file "$EXE"
           # Подсистема — ИЗ ЗАГОЛОВКА PE (objdump), а не из строки `file`: формат
           # строки у `file` меняется от версии к версии («PE32+ executable (GUI)»

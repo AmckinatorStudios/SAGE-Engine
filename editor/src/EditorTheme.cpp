@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 
@@ -84,7 +85,9 @@ Theme ModernDark() {
     c[(int)Role::Surface] = Hex("#15181D");
     c[(int)Role::SurfaceAlt] = Hex("#1B1F26");
     c[(int)Role::Elevated] = Hex("#232830");
-    c[(int)Role::Input] = Hex("#1E2229");
+    // Поле — на полступени светлее панели: при #1E2229 на #15181D пустой
+    // флажок и поле без текста почти сливались с фоном.
+    c[(int)Role::Input] = Hex("#22272F");
     c[(int)Role::Overlay] = Hex("#191D23FA");
 
     c[(int)Role::Line] = Hex("#272C35");
@@ -158,71 +161,64 @@ Theme ModernLight() {
     return t;
 }
 
-// Почти чёрная: для тёмной комнаты и OLED-экрана, где серый фон светится, а
-// чёрный — нет. Акцент тот же фирменный жёлтый: тема меняет ГЛУБИНУ, а не
-// принадлежность продукту.
-Theme Midnight() {
+// Premium Gold — тёмная тема с золотом: глубокий тёплый чёрный, слоновая
+// кость в тексте и металлическое золото в акценте.
+//
+// Чем она отличается от «тёмной с жёлтым»: фон ТЁПЛЫЙ (коричневатый, а не
+// синеватый) — на холодном сером золото выглядит латунью, на тёплом — золотом;
+// текст не белый, а цвета слоновой кости — белый рядом с золотом режет глаз;
+// рамки всплывающих окон тонкие золотистые, а не серые — именно они и делают
+// тему «дорогой», а не просто тёмной. Скругления чуть больше обычных и слои
+// разделены фоном: никаких сеток из линий.
+Theme PremiumGold() {
     Theme t = ModernDark();
-    t.Id = "midnight";
-    t.Name = "SAGE Midnight";
-    ImVec4* c = t.Colors;
-    c[(int)Role::Bg] = Hex("#000000");
-    c[(int)Role::Surface] = Hex("#08090B");
-    c[(int)Role::SurfaceAlt] = Hex("#101216");
-    c[(int)Role::Elevated] = Hex("#181B21");
-    c[(int)Role::Input] = Hex("#121418");
-    c[(int)Role::Overlay] = Hex("#08090BFA");
-    c[(int)Role::Line] = Hex("#1C1F25");
-    c[(int)Role::LineStrong] = Hex("#333945");
-    c[(int)Role::Text] = Hex("#F2F4F7");
-    c[(int)Role::TextDim] = Hex("#A6AEBC");
-    c[(int)Role::TextFaint] = Hex("#69707E");
-    return t;
-}
-
-// Прежнее оформление редактора — чтобы новая тема не отняла привычное.
-// Метрики тоже прежние: плотнее и с рамками, в этом и была его суть.
-Theme Classic() {
-    Theme t;
-    t.Id = "classic";
-    t.Name = "Classic (SAGE 1.x)";
+    t.Id = "premium-gold";
+    t.Name = "Premium Gold";
     t.Dark = true;
     ImVec4* c = t.Colors;
-    c[(int)Role::Bg] = Hex("#17181B");
-    c[(int)Role::Surface] = Hex("#1D1F23");
-    c[(int)Role::SurfaceAlt] = Hex("#25272C");
-    c[(int)Role::Elevated] = Hex("#2F3238");
-    c[(int)Role::Input] = Hex("#25272C");
-    c[(int)Role::Overlay] = Hex("#1A1B1FFA");
-    c[(int)Role::Line] = Hex("#3D4047");
-    c[(int)Role::LineStrong] = Hex("#4B4F57");
-    c[(int)Role::Text] = Hex("#E5E8ED");
-    c[(int)Role::TextDim] = Hex("#8C919E");
-    c[(int)Role::TextFaint] = Hex("#5F646F");
-    c[(int)Role::TextOnAccent] = Hex("#FFFFFF");
-    c[(int)Role::Accent] = Hex("#4271C7");
-    c[(int)Role::AccentHover] = Hex("#5284DE");
-    c[(int)Role::AccentActive] = Hex("#37539E");
-    c[(int)Role::AccentMuted] = Hex("#4271C744");
-    c[(int)Role::Hover] = Hex("#FFFFFF12");
-    c[(int)Role::Selection] = Hex("#4271C74D");
-    c[(int)Role::Ok] = Hex("#4FBF74");
-    c[(int)Role::Warn] = Hex("#D9A441");
-    c[(int)Role::Danger] = Hex("#D9534F");
-    c[(int)Role::Info] = Hex("#5BA9D8");
+    // Лесенка слоёв — тот же шаг яркости, что у тёмной, но с тёплым оттенком.
+    c[(int)Role::Bg] = Hex("#0A0907");
+    c[(int)Role::Surface] = Hex("#12100C");
+    c[(int)Role::SurfaceAlt] = Hex("#191611");
+    c[(int)Role::Elevated] = Hex("#221E17");
+    c[(int)Role::Input] = Hex("#1F1B14");
+    c[(int)Role::Overlay] = Hex("#15130FF7");
+
+    // Линии — с золотом: обычная едва тёплая, заметная — приглушённое золото.
+    // Линии с золотом: тонкие рамки полей (см. метрики ниже) — тёплые,
+    // заметные, но не спорят с акцентом.
+    c[(int)Role::Line] = Hex("#3A3121");
+    c[(int)Role::LineStrong] = Hex("#6B5A33");
+
+    // Слоновая кость, а не белый; второстепенное — тёплый серо-песочный.
+    c[(int)Role::Text] = Hex("#F4ECDC");
+    c[(int)Role::TextDim] = Hex("#B5A88F");
+    c[(int)Role::TextFaint] = Hex("#6F6553");
+    c[(int)Role::TextOnAccent] = Hex("#17130B");
+
+    // Металлическое золото: чуть приглушённое (#D4AF37 — классический «gold»),
+    // светлее при наведении, темнее при нажатии — как блик на металле.
+    c[(int)Role::Accent] = Hex("#D4AF37");
+    c[(int)Role::AccentHover] = Hex("#E8C65A");
+    c[(int)Role::AccentActive] = Hex("#B08F25");
+    c[(int)Role::AccentMuted] = Hex("#D4AF372E");
+
+    c[(int)Role::Hover] = Hex("#FFE7B00F");          // тёплое наведение
+    c[(int)Role::Selection] = Hex("#D4AF3233");
+
+    // Семантика — смягчённая, чтобы не спорить с золотом.
+    c[(int)Role::Ok] = Hex("#7BC48E");
+    c[(int)Role::Warn] = Hex("#E8B04B");
+    c[(int)Role::Danger] = Hex("#E07065");
+    c[(int)Role::Info] = Hex("#8DB4E2");
 
     Metrics& m = t.Metric;
-    m.Radius = 4.0f;
-    m.RadiusFrame = 3.0f;
-    m.RadiusSmall = 3.0f;
-    m.WindowPadding = ImVec2(8, 8);
-    m.FramePadding = ImVec2(8, 4);
-    m.ItemSpacing = ImVec2(8, 5);
-    m.ItemInnerSpacing = ImVec2(6, 4);
-    m.CellPadding = ImVec2(6, 3);
-    m.BorderWindow = 1.0f;
-    m.TabOverline = 0.0f;
-    m.IndentSpacing = 16.0f;
+    m.Radius = 10.0f;
+    m.RadiusFrame = 7.0f;
+    m.RadiusSmall = 5.0f;
+    m.BorderPopup = 1.0f;     // тонкая золотистая рамка меню и подсказок
+    m.BorderFrame = 1.0f;     // и у полей: тема держится на тонких тёплых рамках
+    m.TabOverline = 2.0f;     // полоска золота над активной вкладкой — тоньше
     return t;
 }
 
@@ -398,19 +394,37 @@ bool SetTheme(const std::string& id) {
     return true;
 }
 
-void Init() {
-    if (!Registry().empty()) return;
+namespace {
+void FillRegistry() {
+    Registry().clear();
+    // Три темы: тёмная, светлая и Premium Gold. Остальные (почти чёрная и
+    // прежняя «классика») убраны — сохранённый выбор одной из них молча
+    // становится тёмной (см. Init).
     Registry().push_back(ModernDark());
     Registry().push_back(ModernLight());
-    Registry().push_back(Midnight());
-    Registry().push_back(Classic());
+    Registry().push_back(PremiumGold());
     LoadExternalThemes();
+}
+} // namespace
+
+void RescanThemes() {
+    FillRegistry();
+    if (!Find(CurrentIdRef())) CurrentIdRef() = "modern-dark";
+    Apply();
+}
+
+void Init() {
+    if (!Registry().empty()) return;
+    FillRegistry();
 
     ScaleRef() = std::clamp(sage::editor::prefs::GetFloat("uiScale", 1.0f), 0.75f, 2.0f);
     const std::string saved = sage::editor::prefs::GetString("theme", "modern-dark");
     // Сохранённой темы может не быть: файл темы удалили, а выбор остался.
     // Тогда молча берём тему по умолчанию — редактор без оформления не бывает.
     CurrentIdRef() = Find(saved) ? saved : "modern-dark";
+    // Тема для скриншот-проверки (SAGE_EDITOR_THEME=premium-gold): ставится
+    // только на этот запуск и в профиль не пишется.
+    if (const char* forced = std::getenv("SAGE_EDITOR_THEME"); forced && Find(forced)) CurrentIdRef() = forced;
     Apply();
 }
 

@@ -465,20 +465,35 @@ bool EditorLayer::SelfTestToolsLayoutAndData() {
     {
         const std::string startId = EditorTheme::CurrentId();
 
-        if (EditorTheme::Themes().size() < 4) {
-            LOG_ERROR("Editor") << "SELFTEST: тем оформления меньше четырёх ("
-                                << EditorTheme::Themes().size() << ")";
-            ok = false;
+        // Встроенных тем ровно три: тёмная, светлая и Premium Gold.
+        for (const char* id : {"modern-dark", "modern-light", "premium-gold"}) {
+            const bool has = std::any_of(EditorTheme::Themes().begin(), EditorTheme::Themes().end(),
+                                         [id](const EditorTheme::Theme& t) { return t.Id == id; });
+            if (!has) {
+                LOG_ERROR("Editor") << "SELFTEST: нет встроенной темы " << id;
+                ok = false;
+            }
         }
-        // Тема из themes/*.json — рядом со встроенными, без пересборки.
-        // Именно это отличает «настраиваемый редактор» от «редактора, у
-        // которого автор предусмотрел четыре варианта».
-        const bool fromFile = std::any_of(
-            EditorTheme::Themes().begin(), EditorTheme::Themes().end(),
-            [](const EditorTheme::Theme& t) { return t.Id == "amber"; });
-        if (!fromFile) {
-            LOG_ERROR("Editor") << "SELFTEST: тема из файла themes/example-amber.json не подхвачена";
-            ok = false;
+        // Тема из themes/*.json — рядом со встроенными, без пересборки. Файла-
+        // примера в поставке больше нет, поэтому самопроверка кладёт свой и
+        // убирает за собой.
+        {
+            const std::string file = EditorTheme::ThemesDir() + "/selftest-amber.json";
+            std::error_code fec;
+            fs::create_directories(sage::PathFromUtf8(EditorTheme::ThemesDir()), fec);
+            {
+                std::ofstream out(sage::PathFromUtf8(file));
+                out << R"({"id": "selftest-amber", "name": "Amber", "base": "modern-dark", "colors": {"accent": "#E0862C"}})";
+            }
+            EditorTheme::RescanThemes();
+            const bool fromFile = std::any_of(EditorTheme::Themes().begin(), EditorTheme::Themes().end(),
+                                              [](const EditorTheme::Theme& t) { return t.Id == "selftest-amber"; });
+            if (!fromFile) {
+                LOG_ERROR("Editor") << "SELFTEST: тема из файла themes/*.json не подхвачена";
+                ok = false;
+            }
+            fs::remove(sage::PathFromUtf8(file), fec);
+            EditorTheme::RescanThemes();
         }
 
         // Переключение обязано МЕНЯТЬ КАРТИНКУ. Сравниваем сам стиль ImGui, а
