@@ -100,7 +100,7 @@ TEST(SpriteSheet_script_cuts_saves_and_reads_by_name) {
     const std::filesystem::path dir = std::filesystem::temp_directory_path() / "sage_sheet_test";
     std::filesystem::create_directories(dir);
     const std::string file = (dir / "sheet.png").string();
-    const auto px = Picture(16, 8, {{0, 0, 8, 8}, {8, 2, 4, 4}});
+    const auto px = Picture(16, 8, {{0, 0, 7, 8}, {10, 2, 4, 4}});   // два острова через прозрачный промежуток
     CHECK_TRUE(stbi_write_png(file.c_str(), 16, 8, 4, px.data(), 16 * 4) != 0);
     ScriptEngine se;
     Scene scene("P");

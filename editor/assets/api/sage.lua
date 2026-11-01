@@ -1992,6 +1992,9 @@ function sage.mesh.Box(size) end
 ---@param seg? number
 ---@param caps? boolean
 function sage.mesh.Cylinder(r, h, seg, caps) end
+---@param source? any
+---@param opts? table
+function sage.mesh.Extrude(source, opts) end
 ---@param sx number
 ---@param sz number
 ---@param rx number
@@ -2518,8 +2521,15 @@ function sage.ui.SetSliceTiled(entity, tiled) end
 ---@param h number
 function sage.ui.SetSprite(entity, x, y, w, h) end
 ---@param entity Entity
+---@param path string
+---@param name string
+---@param sharp? boolean
+function sage.ui.SetSpriteNamed(entity, path, name, sharp) end
+---@param entity Entity
 ---@param value number
 function sage.ui.SetValue(entity, value) end
+---@param path string
+function sage.ui.Sheet(path) end
 ---@param name string
 ---@return number
 function sage.ui.SpawnDemo(name) end
@@ -2960,6 +2970,8 @@ SetUISliceTiled = sage.ui.SetSliceTiled
 ---@type fun(...): any
 SetUISprite = sage.ui.SetSprite
 ---@type fun(...): any
+SetUISpriteNamed = sage.ui.SetSpriteNamed
+---@type fun(...): any
 SetUIValue = sage.ui.SetValue
 ---@type fun(...): any
 SetVelocity = sage.physics.SetVelocity
@@ -3224,6 +3236,15 @@ function formula(expr, args) end
 ---@param height? fun(x:number, z:number): number
 ---@return Mesh
 function grid(width, depth, cols, rows, height) end
+
+---Объёмный спрайт: кусок картинки, выдавленный в толщину по альфе (меч,
+---ключ, листок). source — холст texture(...)/texture.load или путь;
+---opts = {x, y, w, h, depth = 1, cutoff = 0.5}, кусок — от левого верхнего угла.
+---Меш: длинная сторона = 1, центр в нуле, лицом к +Z. Материал — с вырезом по альфе.
+---@param source Texture|string
+---@param opts? table
+---@return Mesh
+function extrude(source, opts) end
 
 ---Коробка: одно число — куб, три — размеры по осям.
 ---@param w number
