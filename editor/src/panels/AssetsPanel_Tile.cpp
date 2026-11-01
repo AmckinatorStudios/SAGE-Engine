@@ -84,8 +84,11 @@ std::string KindLabel(const fs::path& path, bool isDir) {
     if (ext == ".sage") return T("Scene");
     if (ext == ".sageprefab") return T("Prefab");
     if (ext == ".sagemat") return T("Material");
-    if (ext == ".lua") return T("Script");
+    if (ext == ".lua") return T("Lua script (old)");
     if (ext == ".slua") return T("SAGE Lua script");
+    if (ext == ".sgraph") return T("Script Graph");
+    if (ext == ".aigraph") return T("AI Graph");
+    if (ext == ".vgraph") return T("Visual Script (old)");
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".fbx" || ext == ".blend" ||
         ext == ".bbmodel" || ext == ".sagemesh")
         return T("Model");
@@ -111,6 +114,8 @@ AssetStyle StyleForPath(const fs::path& path, bool isDir) {
     if (ext == ".sageimport") return { ImVec4(0.62f, 0.58f, 0.48f, 1.0f), "import", "file" };
     if (ext == ".lua") return { ImVec4(0.45f, 0.82f, 0.50f, 1.0f), "lua", "script" };
     if (ext == ".slua") return { ImVec4(0.40f, 0.85f, 0.75f, 1.0f), "slua", "script" };
+    if (ext == ".sgraph" || ext == ".vgraph") return { ImVec4(0.45f, 0.70f, 0.98f, 1.0f), "graph", "wire" };
+    if (ext == ".aigraph") return { ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "ai", "wire" };
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".fbx" || ext == ".blend" ||
         ext == ".bbmodel" || ext == ".sagemesh")
         return { ImVec4(0.70f, 0.55f, 0.92f, 1.0f), ext.substr(1), "model" };
@@ -520,8 +525,8 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
                 case OpenAs::Scene: openLabel = T("Open scene"); openIcon = "scene"; break;
                 case OpenAs::Prefab: openLabel = T("Add to the scene"); openIcon = "prefab"; break;
                 case OpenAs::Clip: openLabel = T("Open in the animation tool"); openIcon = "anim"; break;
-                case OpenAs::AiGraph: openLabel = T("Open in the graph editor"); openIcon = "wire"; break;
-                case OpenAs::VisualScript: openLabel = T("Open in Visual Script"); openIcon = "wire"; break;
+                case OpenAs::AiGraph: openLabel = T("Open in AI Graph"); openIcon = "wire"; break;
+                case OpenAs::VisualScript: openLabel = T("Open in Script Graph"); openIcon = "wire"; break;
                 case OpenAs::Text: openLabel = T("Open in the code editor"); openIcon = "code"; break;
                 case OpenAs::None: break;
             }

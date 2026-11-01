@@ -110,11 +110,18 @@ bool EditorLayer::SelfTestScenesGone() {
 
     // --- Виды логики ---------------------------------------------------------
     namespace lg = sage::editor::logic;
-    for (const char* id : {"lua", "slua", "visual", "task", "ai"})
+    // Ровно три вида: SAGE Lua, Script Graph, AI Graph. Обычный Lua и старые
+    // .vgraph не создаются.
+    for (const char* id : {"slua", "sgraph", "aigraph"})
         if (!lg::Find(id)) fail(std::string("нет встроенного вида логики ") + id);
+    for (const char* id : {"lua", "visual", "task", "ai"})
+        if (lg::Find(id)) fail(std::string("устаревший вид логики ") + id + " всё ещё создаётся");
+    for (const lg::Kind& k : lg::All())
+        if (k.Ext == ".lua" || k.Ext == ".vgraph") fail("создаётся устаревший формат " + k.Ext);
     const auto forScript = lg::ForSlot("script");
-    if (forScript.size() != 2) fail("слот Script предлагает не только скрипты");
-    if (lg::ForSlot("").size() < 5) fail("окно «Создать…» видит не все виды логики");
+    if (forScript.size() != 1 || forScript.front()->Id != "slua") fail("слот Script предлагает не только SAGE Lua");
+    if (lg::ForSlot("").size() != 3) fail("окно «Создать…» видит не три вида логики");
+    if (lg::Find("aigraph") && lg::Find("aigraph")->Group != "ai") fail("AI Graph не в разделе ИИ");
     const fs::path tmp = m_project.Dir() / ".sage" / "selftest_logic";
     fs::remove_all(tmp, ec);
     for (const lg::Kind& k : lg::All()) {
@@ -125,17 +132,21 @@ bool EditorLayer::SelfTestScenesGone() {
             continue;
         }
         if (made.extension() != k.Ext) fail("вид " + k.Id + " создал файл не с тем расширением");
-        if (k.Ext == ".vgraph" || k.Ext == ".aigraph") {
+        if (k.Ext == ".sgraph" || k.Ext == ".aigraph") {
             std::ifstream in(made, std::ios::binary);
             std::stringstream ss;
             ss << in.rdbuf();
             sage::ai::GraphDoc d;
             std::string gerr;
             if (!sage::ai::LoadGraph(ss.str(), d, gerr)) fail("граф вида " + k.Id + " не читается: " + gerr);
-            const sage::ai::GraphKind want = k.Id == "visual" ? sage::ai::GraphKind::Script
-                                             : k.Id == "task" ? sage::ai::GraphKind::Task
-                                                              : sage::ai::GraphKind::Behavior;
+            const sage::ai::GraphKind want =
+                k.Id == "sgraph" ? sage::ai::GraphKind::Script : sage::ai::GraphKind::Behavior;
             if (d.Kind != want) fail("граф вида " + k.Id + " не того вида");
+            // Новый граф — сразу с точкой начала своего вида.
+            const char* startType = want == sage::ai::GraphKind::Behavior ? "ai.task_start" : "script.on_start";
+            bool hasStart = false;
+            for (const sage::ai::GraphNode& n : d.Nodes) hasStart |= n.Type == startType;
+            if (!hasStart) fail("новый граф вида " + k.Id + " без узла " + startType);
         }
     }
     // Свой вид (как из плагина): регистрация, замена тем же Id, снятие владельца.

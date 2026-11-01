@@ -176,7 +176,7 @@ void EditorLayer::RegisterPanels() {
     {
         PanelSpec s;
         s.Id = "VisualScript";
-        s.Title = "Visual Script";
+        s.Title = "Script Graph";
         s.Icon = "wire";
         s.Section = PanelSection::Tools;
         s.WrapWindow = false;

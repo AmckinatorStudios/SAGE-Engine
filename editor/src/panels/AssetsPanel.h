@@ -31,7 +31,9 @@ public:
     static std::filesystem::path AssetsRoot(EditorHost& host);
     static void ClampCwd(EditorHost& host);
 
-    enum class CreateKind { None, Folder, Script, SageScript, TextFile, Material, Scene };
+    // Скрипт — только SAGE Lua (.slua): обычный Lua новыми файлами не
+    // создаётся (старые .lua открываются и работают как прежде).
+    enum class CreateKind { None, Folder, SageScript, TextFile, Material, Scene };
 
     // ИМЯ ОКНА приходит снаружи: у каждого рабочего пространства оно своё
     // (см. PanelWindowId.h). Панель одна, а окон два — иначе раскладки сцены и

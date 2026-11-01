@@ -707,7 +707,6 @@ bool EditorLayer::SelfTestProjectAndAssets() {
     if (ok) {
         struct { AssetsPanel::CreateKind kind; const char* name; const char* expect; } cases[] = {
             {AssetsPanel::CreateKind::Folder, "selftest_dir", "selftest_dir"},
-            {AssetsPanel::CreateKind::Script, "selftest_script", "selftest_script.lua"},
             {AssetsPanel::CreateKind::SageScript, "selftest_sage", "selftest_sage.slua"},
             {AssetsPanel::CreateKind::Scene, "selftest_new_scene", "selftest_new_scene.sage"},
             {AssetsPanel::CreateKind::Material, "selftest_mat", "selftest_mat.sagemat"},

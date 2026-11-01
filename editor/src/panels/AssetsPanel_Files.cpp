@@ -485,7 +485,6 @@ bool AssetsPanel::CreateAsset(CreateKind kind, const std::string& rawName, const
 
     const char* wantExt = nullptr;
     switch (kind) {
-        case CreateKind::Script:   wantExt = ".lua"; break;
         case CreateKind::SageScript: wantExt = ".slua"; break;
         case CreateKind::Scene:    wantExt = ".sage"; break;
         case CreateKind::TextFile: wantExt = ".txt"; break;
@@ -508,27 +507,7 @@ bool AssetsPanel::CreateAsset(CreateKind kind, const std::string& rawName, const
         }
     } else {
         std::string content;
-        if (kind == CreateKind::Script) {
-            content =
-                "-- " + name + " — скрипт сущности SAGE.\n"
-                "-- OnStart(entity) вызывается один раз при привязке скрипта,\n"
-                "-- OnUpdate(entity, dt) — каждый кадр Play-режима/игры.\n"
-                "\n"
-                "-- ПУБЛИЧНЫЕ ПЕРЕМЕННЫЕ — настройка объекта, видна и правится в инспекторе,\n"
-                "-- своя у каждого объекта с этим скриптом (см. docs/scripting.md):\n"
-                "-- Vars = {\n"
-                "--     speed = 3.0,\n"
-                "--     target = { kind = \"entity\", label = \"Цель\" },\n"
-                "-- }\n"
-                "-- Читаются так: entity:Vars().speed (или self:Vars().speed).\n"
-                "\n"
-                "function OnStart(entity)\n"
-                "end\n"
-                "\n"
-                "function OnUpdate(entity, dt)\n"
-                "    -- entity.Transform.Rotation.y = entity.Transform.Rotation.y + dt * 45.0\n"
-                "end\n";
-        } else if (kind == CreateKind::Scene) {
+        if (kind == CreateKind::Scene) {
             // Новая сцена — сразу рабочая: солнце и камера. Без них открытая
             // сцена — чёрный кадр (свет мира сам собой не горит), а Play —
             // «нет камеры», и непонятно, что сделано не так.

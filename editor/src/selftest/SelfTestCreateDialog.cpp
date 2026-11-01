@@ -14,8 +14,14 @@
 // ---------------------------------------------------------------------------
 void EditorLayer::CheckCreateDialogFrame() {
     if (m_createDialogChecked || !std::getenv("SAGE_EDITOR_SELFTEST") || !m_tweenChecked) return;
+    // По очереди с окнами AI Graph: та проверка запускает Play и выводит окна
+    // вперёд, а модальное окно, открытое в тот же кадр, закрывается.
+    if (m_aiGraphFrameStep >= 0) return;
     namespace ca = sage::editor::createasset;
-    const int step = m_createDialogStep++;
+    // Отсчёт — с десятого кадра после окон AI Graph: они только что
+    // остановили Play и вернули фокус редактору.
+    const int step = m_createDialogStep++ - 10;
+    if (step < 0) return;
     if (step == 0) {
         ca::Request r;
         r.Kind = ca::What::Material;
@@ -41,10 +47,52 @@ void EditorLayer::CheckCreateDialogFrame() {
         if (ImGuiWindow* w = ImGui::FindWindowByID(ImHashStr("Inspector"))) ImGui::FocusWindow(w);
         return;
     }
+    // Окно «Новый скрипт»: три вида в двух разделах, высота — в пределах
+    // экрана при любом разрешении (лишнее прокручивается внутри).
+    if (step == 70) {
+        ca::Request r;
+        r.Kind = ca::What::Script;
+        ca::Open(r);
+        return;
+    }
+    if (step < 90) return;
+    if (step == 90) {
+        const float h = ca::WindowHeight();
+        const float limit = ImGui::GetMainViewport()->WorkSize.y * 0.85f + 1.0f;
+        m_createScriptFits = h > 0.0f && h <= limit && ca::WindowWidth() <= ImGui::GetMainViewport()->WorkSize.x;
+        m_createScriptHeight = h;
+        ca::RequestClose();
+        return;
+    }
+    // ОКНО «НАСТРОЙКИ» С ПОИСКОМ: строка поиска раскладывает находки по
+    // разделам, двигая курсор, — и в ImGui 1.92 это давало красное «Code uses
+    // SetCursorPos() to extend window boundaries» поверх окна. Ошибки ImGui
+    // кадра считаются здесь, пока окно рисуется с запросом «о».
+    if (step == 95) {
+        m_panels[EditorPanel::Settings] = true;
+        m_settingsPanel.SetSearch("\xD0\xBE");   // «о»
+        m_settingsErrors = 0;
+        return;
+    }
+    if (step < 115) {
+        if (step > 97) m_settingsErrors += ImGui::GetCurrentContext()->ErrorCountCurrentFrame;
+        return;
+    }
+    if (step == 115) {
+        m_settingsPanel.SetSearch("");
+        m_panels[EditorPanel::Settings] = false;
+        if (m_settingsErrors == 0) LOG_INFO("Editor") << "SETTINGS_SEARCH: OK — поиск в окне «Настройки» без ошибок ImGui";
+        else LOG_ERROR("Editor") << "SETTINGS_SEARCH: FAIL — ошибок ImGui в окне «Настройки» с поиском: " << m_settingsErrors;
+        return;
+    }
     const float want = ImGui::GetFontSize() * 20.0f;
     const bool fit = m_inspector.MaterialLabelsFit();
     m_createDialogChecked = true;
-    if (m_createDialogWidth >= want && fit)
+    if (!m_createScriptFits)
+        LOG_ERROR("Editor") << "CREATE_DIALOG: FAIL — окно «Новый скрипт» не помещается в экран (высота "
+                            << (int)m_createScriptHeight << " px, экран "
+                            << (int)ImGui::GetMainViewport()->WorkSize.y << " px)";
+    else if (m_createDialogWidth >= want && fit)
         LOG_INFO("Editor") << "CREATE_DIALOG: OK — окно «Новый материал» держит ширину (" << (int)m_createDialogWidth
                            << " px), подписи полей материала видны целиком";
     else
