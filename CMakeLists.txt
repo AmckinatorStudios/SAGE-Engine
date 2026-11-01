@@ -517,6 +517,9 @@ endif()
 # Упаковщик шаблонов проекта: нужен сборке релиза (кладёт .sagetemplate рядом с
 # архивом) и полезен сам по себе. Собирается всегда — он крошечный.
 add_subdirectory(tools/sage_template)
+# Каталог API скриптов в файл (подсказки, таблица проверки типов): им пользуется
+# scripts/gen_script_api.py, поэтому собирается вместе с движком.
+add_subdirectory(tools/sage_api)
 
 if (SAGE_BUILD_EDITOR AND EXISTS "${SAGE_ENGINE_ROOT}/editor/CMakeLists.txt")
     add_subdirectory(editor)

@@ -117,9 +117,16 @@ public:
 
     // Произвольный метод экземпляра — то, чем скрипты разговаривают друг с
     // другом (`enemy:Call("TakeDamage", 20)`). Значения — общий словарь движка,
-    // поэтому так сможет позвать и C++, и скрипт на другом языке.
-    virtual bool Invoke(InstanceId id, const std::string& method,
-                        const std::vector<sage::vars::Value>& args, ScriptError& err) = 0;
+    // поэтому так зовёт и C++, и скрипт на ДРУГОМ языке; что метод вернул —
+    // в results (несколько значений — по порядку).
+    virtual bool Invoke(InstanceId id, const std::string& method, const std::vector<sage::vars::Value>& args,
+                        std::vector<sage::vars::Value>& results, ScriptError& err) = 0;
+    // Вызов, которому ответ не нужен (связи, сообщения).
+    bool Invoke(InstanceId id, const std::string& method, const std::vector<sage::vars::Value>& args,
+                ScriptError& err) {
+        std::vector<sage::vars::Value> ignored;
+        return Invoke(id, method, args, ignored, err);
+    }
 
     // Есть ли у экземпляра такой метод. Связь из инспектора («On Click →
     // Menu.start_game()») обязана сказать «в скрипте нет метода start_game»,
@@ -154,6 +161,11 @@ public:
     // Предел длительности одного вызова скрипта, в секундах (сторож
     // зависаний). Язык без сторожа это молча пропускает.
     virtual void SetCallBudget(double seconds) { (void)seconds; }
+
+    // Предел памяти рантайма языка, в байтах; 0 — без предела. Превышение —
+    // ошибка скрипта, который просил память, а не нехватка памяти у игры.
+    // Язык, который не считает свою память (внешний процесс), это пропускает.
+    virtual void SetMemoryLimit(size_t bytes) { (void)bytes; }
 
     // Всё снести (смена сцены, Stop). После этого бэкенд обязан быть готов
     // принимать Create заново — без утечек и без памяти о прежних экземплярах.

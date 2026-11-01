@@ -128,8 +128,9 @@ public:
     bool Call(InstanceId id, Hook hook, float dt, ScriptError& err) override;
     bool CallWith(InstanceId id, Hook hook, GameObject other, ScriptError& err) override;
     bool CallNamed(InstanceId id, Hook hook, const std::string& name, ScriptError& err) override;
-    bool Invoke(InstanceId id, const std::string& method,
-                const std::vector<sage::vars::Value>& args, ScriptError& err) override;
+    using LanguageBackend::Invoke;
+    bool Invoke(InstanceId id, const std::string& method, const std::vector<sage::vars::Value>& args,
+                std::vector<sage::vars::Value>& results, ScriptError& err) override;
     bool HasMethod(InstanceId id, const std::string& method) const override;
     bool InvokeEvent(InstanceId id, const std::string& method, const sage::events::Event& event,
                      ScriptError& err) override;
@@ -147,6 +148,8 @@ public:
     // в Start законно бывает долгой, а зависание — это навсегда.
     static constexpr double kDefaultCallBudget = 8.0;
     void SetCallBudget(double seconds) override { m_budget = seconds > 0.0 ? seconds : kDefaultCallBudget; }
+    void SetMemoryLimit(size_t bytes) override { m_memLimit = bytes; }
+    size_t MemoryUsed() const { return m_memUsed; }
     static constexpr int kWatchEvery = 20000;
     static constexpr const char* kTimeoutText = "вызов скрипта длится дольше";
     const ScriptServices& Services() const { return m_services; }
@@ -322,6 +325,15 @@ private:
     // времени на десятки тысяч инструкций.
     void InstallWatchdog();
     static void WatchdogHook(lua_State* L, lua_Debug* ar);
+
+    // Счёт памяти Lua поверх распределителя, который был у состояния (оно
+    // может быть общим с прежним движком и пережить бэкенд — тогда прежний
+    // распределитель возвращается на место).
+    static void* CountingAlloc(void* ud, void* ptr, size_t osize, size_t nsize);
+    lua_Alloc m_baseAlloc = nullptr;
+    void* m_baseUd = nullptr;
+    size_t m_memUsed = 0;
+    size_t m_memLimit = 0;
     int m_depth = 0;
     std::chrono::steady_clock::time_point m_callStart{};
     double m_budget = kDefaultCallBudget;

@@ -181,8 +181,23 @@ void ScriptEngine::RegisterEngineApi() {
     // Не последний хозяин: модулю нового API (Requires = {"Scene"}) ещё
     // придёт бэкенд — он и скажет «нет модуля», если тот так и не появится.
     sage::scripting::InstallScriptModules(ctx, builtins, /*withRegistry=*/true, /*final=*/false);
+    // Функции, зарегистрированные для всех языков (игра, плагин, новые
+    // системы движка), — до коротких имён: их модули тоже получают короткое имя.
+    BindPortableApi();
     // Короткие имена — ПОСЛЕДНИМИ: они раздают псевдонимы уже собранным модулям.
     RegisterShortNames();
+}
+
+void ScriptEngine::BindPortableApi() {
+    for (const sage::scripting::PortableFunction& f : sage::scripting::PortableFunctions()) {
+        sol::table table = f.Meta.Module.empty() ? sol::table(m_lua.globals()) : Module(f.Meta.Module.c_str());
+        // Имя, уже занятое Lua-привязкой движка, не перебивается: каталог
+        // сообщил о конфликте при регистрации, а работающий скрипт не должен
+        // молча получить другую функцию.
+        if (table[f.Meta.Name].valid()) continue;
+        f.BindLua(table, f.Meta.Name);
+        if (f.Invoke) m_api.Set(f.Meta.Qualified, f.Invoke, f.Meta.Aliases);
+    }
 }
 
 // ============================================================================

@@ -4,6 +4,9 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include "sage/core/Log.h"
+#include "sage/lang/ApiRegistry.h"
+#include "sage/scripting/ProcessLanguage.h"
+#include "sage/scripting/ScriptEngine.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/SaveGame.h"
 #include "sage/core/Paths.h"
@@ -104,6 +107,9 @@ void Project::Adopt() {
     sage::save::SetGameName(m_name);
     sage::scene::ClearPrefabCache();   // префабы прошлого проекта тут ни при чём
 
+    // Языки проекта (scripting/languages.json) — сразу при открытии: инспектор
+    // показывает поля их скриптов, браузер файлов узнаёт их как скрипты.
+    sage::scripting::LoadProjectLanguages(m_dir);
     InstallScriptApiHints();
 }
 
@@ -147,6 +153,17 @@ void Project::InstallScriptApiHints() const {
         LOG_WARN("Editor") << "Подсказка по API не обновилась: " << ec.message();
         return;
     }
+
+    // Из каталога API (sage/lang/ApiRegistry.h): функции модулей игры и
+    // плагинов — их статичный sage.lua не знает — и весь каталог в JSON для
+    // инструментов других языков. Каталог наполняет состояние скриптов; если
+    // его ещё не заводили, хватит одного пробного.
+    if (sage::lang::ApiRegistry::Instance().All().empty()) ScriptEngine probe;
+    sage::lang::ApiRegistry own;
+    for (sage::lang::ApiEntry e : sage::lang::ApiRegistry::Instance().All())
+        if (e.Origin != "engine") own.Add(std::move(e));
+    std::ofstream(apiDir / "sage_catalog.lua", std::ios::binary) << own.ToLuaHints();
+    std::ofstream(apiDir / "sage_api.json", std::ios::binary) << sage::lang::ApiRegistry::Instance().ToJson();
 
     const fs::path luarc = m_dir / ".luarc.json";
     if (fs::exists(luarc, ec)) return;

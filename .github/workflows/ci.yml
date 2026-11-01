@@ -84,17 +84,18 @@ jobs:
       - name: Editor file size check
         run: python3 scripts/check_file_size.py
 
-      # Подсказка по скриптовому API для редакторов кода собирается из вызовов
-      # Bind(...) движка. Устареет — начнёт врать: предлагать то, чего нет, и
-      # молчать о том, что появилось. Врущая подсказка хуже отсутствующей.
-      - name: Script API hints are up to date
-        run: python3 scripts/gen_script_api.py --check
-
       - name: Configure
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build -j"$(nproc)"
+
+      # Подсказка по API для редакторов кода и таблица проверки типов: имена —
+      # из вызовов Bind(...), типы — из каталога API, который собирает сам
+      # движок (tools/sage_api), поэтому шаг идёт после сборки. Устаревшая
+      # подсказка врёт — предлагает то, чего нет, и молчит о новом.
+      - name: Script API hints are up to date
+        run: python3 scripts/gen_script_api.py --check
 
       # Модульные тесты (математика/сериализация/анимация/ретаргет) — быстрые,
       # без GL. Эталонные кадры исключены: им нужен графический контекст, и

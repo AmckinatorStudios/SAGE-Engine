@@ -162,9 +162,17 @@ mingw) — половина поломок Windows-сборки на Linux не 
   настройки одной таблицей (`noise{kind = "simplex"}`), необязательное — в
   конце с умолчанием, без цепочек вызовов. Старые имена не удаляются — снимок
   `tests/data/script_api_surface.txt` сторожит совместимость.
-- **Новая функция скриптам — вызов `Bind(...)`** в
-  `engine/src/sage/scripting/`, затем `python3 scripts/gen_script_api.py`
-  (собирает подсказку `editor/assets/api/sage.lua`). Сторожит `--check`.
+- **Новая функция скриптам — одна регистрация, без повторных описаний.**
+  Для всех языков — `RegisterApiFunction(модуль, имя, функция, описание)`
+  (`sage/scripting/ScriptApi.h`, типы обязаны быть переносимыми); только для
+  Lua — `Bind(...)` в `engine/src/sage/scripting/`. Типы в каталог API пишет
+  компилятор; затем `python3 scripts/gen_script_api.py` (нужен собранный
+  `build/tools/sage_api`) обновляет подсказку `editor/assets/api/sage.lua` и
+  таблицу проверки типов. Сторожит `--check`.
+- **Новый язык скриптов — запись реестра** (`RegisterLanguage`,
+  `sage/scripting/Languages.h`) или описание в `scripting/languages.json`
+  проекта (`sage/scripting/ProcessLanguage.h`), а не ветки `if (ext == ...)`
+  в инструментах и хостах.
 - **Новый файл в редакторе** — дописать в `editor/CMakeLists.txt`.
 - **Новая панель — запись в реестре панелей** (`PanelSpec`,
   `editor/src/PanelRegistry.h`; встроенные — `EditorLayer_Panels.cpp`), а не

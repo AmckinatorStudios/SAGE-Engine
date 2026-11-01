@@ -1,5 +1,7 @@
 #include "sage/scripting/lua/LuaInternal.h"
+#include "sage/scripting/ScriptingSystem.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cctype>
 
@@ -240,6 +242,9 @@ Backend::~Backend() {
         m_interop->SetQuitSink(nullptr);
     }
     Reset();
+    // Состояние Lua может пережить бэкенд (оно у прежнего движка): прежний
+    // распределитель — обратно, иначе он звал бы счётчик мёртвого бэкенда.
+    if (m_baseAlloc) lua_setallocf(m_lua->lua_state(), m_baseAlloc, m_baseUd);
 }
 
 void Backend::Bind(const ScriptServices& services) { m_services = services; }
@@ -256,8 +261,23 @@ int TracebackHandler(lua_State* L) {
 }
 } // namespace
 
+void* Backend::CountingAlloc(void* ud, void* ptr, size_t osize, size_t nsize) {
+    Backend* self = static_cast<Backend*>(ud);
+    // ptr == nullptr: osize — вид объекта, а не размер (так устроен lua_Alloc).
+    const size_t old = ptr ? osize : 0;
+    if (nsize > old && self->m_memLimit && self->m_memUsed + (nsize - old) > self->m_memLimit)
+        return nullptr;   // Lua поднимет «not enough memory» в вызове скрипта
+    void* out = self->m_baseAlloc(self->m_baseUd, ptr, osize, nsize);
+    if (nsize == 0 || out) self->m_memUsed = self->m_memUsed - std::min(old, self->m_memUsed) + nsize;
+    return out;
+}
+
 void Backend::InstallWatchdog() {
     lua_State* L = m_lua->lua_state();
+    // Счёт памяти — с того, что уже занято (API движка, прежние скрипты).
+    m_baseAlloc = lua_getallocf(L, &m_baseUd);
+    m_memUsed = (size_t)lua_gc(L, LUA_GCCOUNT, 0) * 1024 + (size_t)lua_gc(L, LUA_GCCOUNTB, 0);
+    lua_setallocf(L, &Backend::CountingAlloc, this);
     lua_pushlightuserdata(L, this);
     lua_rawsetp(L, LUA_REGISTRYINDEX, &g_watchKey);
     // Хук наследуют и корутины: они создаются из того же состояния.
@@ -570,8 +590,8 @@ bool Backend::CallNamed(InstanceId id, Hook hook, const std::string& name, Scrip
     return CallHook(id, hook, sol::make_object(*m_lua, name), err);
 }
 
-bool Backend::Invoke(InstanceId id, const std::string& method,
-                     const std::vector<sage::vars::Value>& args, ScriptError& err) {
+bool Backend::Invoke(InstanceId id, const std::string& method, const std::vector<sage::vars::Value>& args,
+                     std::vector<sage::vars::Value>& results, ScriptError& err) {
     Instance* inst = Get(id);
     if (!inst) return false;
     sol::protected_function call = MethodOf(*inst, method);
@@ -584,9 +604,12 @@ bool Backend::Invoke(InstanceId id, const std::string& method,
     CurrentScope scope(*this, id);
     sol::protected_function_result result =
         inst->Simple ? call(sol::as_args(converted)) : call(inst->Self, sol::as_args(converted));
-    if (result.valid()) return true;
-    Explain(result, std::string(), err);
-    return false;
+    if (!result.valid()) {
+        Explain(result, std::string(), err);
+        return false;
+    }
+    for (int i = 0; i < result.return_count(); ++i) results.push_back(FromLua(result.get<sol::object>(i)));
+    return true;
 }
 
 bool Backend::HasMethod(InstanceId id, const std::string& method) const {
@@ -674,7 +697,16 @@ sol::object Backend::InvokeOn(GameObject object, const std::string& method,
                               sol::variadic_args args) {
     if (!object.Valid()) return sol::lua_nil;
     auto it = m_byEntity.find((uint32_t)entt::to_integral(object.Entity()));
-    if (it == m_byEntity.end()) return sol::lua_nil;
+    if (it == m_byEntity.end()) {
+        // Скрипт объекта — на другом языке: вызов идёт через рантайм, значения
+        // — общим словарём движка (vars::Value) туда и обратно.
+        if (!m_services.System) return sol::lua_nil;
+        std::vector<sage::vars::Value> in, out;
+        for (const sol::stack_proxy& a : args) in.push_back(FromLua(sol::object(a)));
+        if (!m_services.System->Runtime().Invoke(object.Entity(), method, in, out) || out.empty())
+            return sol::lua_nil;
+        return ToLua(out.front());
+    }
     Instance* inst = Get(it->second);
     if (!inst) return sol::lua_nil;
     sol::protected_function call = MethodOf(*inst, method);

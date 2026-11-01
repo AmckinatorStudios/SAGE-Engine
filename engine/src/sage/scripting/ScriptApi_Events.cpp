@@ -247,4 +247,6 @@ void ScriptEngine::RegisterRenderTextureApi() {
 void ScriptEngine::BindScene(Scene& scene) {
     if (m_scene && m_scene != &scene) m_scene->Events.DisconnectGroup(m_events->Group());
     m_scene = &scene;
+    // Переносимые функции API работают с этой сценой, каким бы языком их ни звали.
+    sage::scripting::SetCurrentApiScene(&scene);
 }

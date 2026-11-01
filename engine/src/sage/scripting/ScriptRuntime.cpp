@@ -422,10 +422,16 @@ void ScriptRuntime::DispatchNamedAll(Hook hook, const std::string& name) {
 
 bool ScriptRuntime::Invoke(entt::entity entity, const std::string& method,
                            const std::vector<sage::vars::Value>& args) {
+    std::vector<sage::vars::Value> ignored;
+    return Invoke(entity, method, args, ignored);
+}
+
+bool ScriptRuntime::Invoke(entt::entity entity, const std::string& method,
+                           const std::vector<sage::vars::Value>& args, std::vector<sage::vars::Value>& results) {
     LiveScript* s = Find(entity);
     if (!s) return false;
     ScriptError err;
-    const bool ok = s->Backend->Invoke(s->Instance, method, args, err);
+    const bool ok = s->Backend->Invoke(s->Instance, method, args, results, err);
     if (!ok && !err.Empty()) {
         if (err.File.empty()) err.File = s->Path;
         Report(err);

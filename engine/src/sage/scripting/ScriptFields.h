@@ -33,4 +33,7 @@ std::vector<std::string> ParseMethods(const std::string& path, const std::string
 // SAGE Lua пишут вызов одинаково.
 std::vector<std::string> ParseEmittedSignals(const std::string& source);
 
+// Методы Lua-файла по тексту — инструмент языка Lua в реестре языков.
+std::vector<std::string> ParseLuaMethods(const std::string& source);
+
 } // namespace sage::scripting

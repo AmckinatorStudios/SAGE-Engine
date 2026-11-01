@@ -16,6 +16,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneFlow.h"
 #include "sage/scene/SceneSerializer.h"
+#include "sage/scripting/Languages.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
 
@@ -122,7 +123,9 @@ int EditorPlaySession::BuildRuntime(const PlayContext& ctx, Scene& scene) {
     // скрипты (глобальные OnStart/OnUpdate), и новые (`return Player`) живут
     // рядом и видят один и тот же API.
     m_scripting = std::make_unique<sage::scripting::ScriptingSystem>();
-    m_scripting->AddBackend(sage::scripting::MakeLuaBackend({m_scripts.get()}));
+    // Все зарегистрированные языки (sage/scripting/Languages.h): Lua работает
+    // на состоянии прежнего движка, остальные зовут API через его вызыватели.
+    sage::scripting::AttachLanguages(*m_scripting, {m_scripts.get(), ctx.ProjectDir});
     m_scripting->SetProjectDir(ctx.ProjectDir);
     sage::scripting::ScriptServices services;
     services.ScenePtr = &scene;
