@@ -1349,11 +1349,11 @@ sage.ai = {}
 ---@type sage.ai
 ai = nil
 
----@param owner? any
+---@param owner any
 ---@param opts? table
 ---@return table
 function sage.ai.agent(owner, opts) end
----@param entity? any
+---@param entity any
 ---@return any
 function sage.ai.agent_of(entity) end
 ---@param name string
@@ -1365,15 +1365,15 @@ function sage.ai.connect_rule(fn) end
 ---@param fn function
 function sage.ai.convert_rule(fn) end
 ---@param event string
----@param data? any
----@param target? any
----@return number
+---@param data any
+---@param target any
+---@return integer
 function sage.ai.emit(event, data, target) end
 ---@param path string
 ---@return string
 function sage.ai.graph(path) end
 ---@param dir string
----@return number
+---@return integer
 function sage.ai.load_library(dir) end
 ---@param vars any
 ---@return table
@@ -1392,6 +1392,7 @@ function sage.ai.operations() end
 ---@param fn function
 function sage.ai.path_finder(fn) end
 ---@param space? string
+---@return any
 function sage.ai.shared(space) end
 ---@param name string
 ---@param spec table
@@ -1425,15 +1426,15 @@ function sage.anim.BoneAxis(entity, bone, axis) end
 function sage.anim.BonePosition(entity, bone) end
 ---@param entity Entity
 ---@param path string
----@return number
+---@return integer
 function sage.anim.Borrow(entity, path) end
 ---@param entity Entity
 function sage.anim.ClearJointPoses(entity) end
 ---@param entity Entity
----@return number
+---@return integer
 function sage.anim.Count(entity) end
 ---@param entity Entity
----@param clip number
+---@param clip integer
 ---@return number
 function sage.anim.Duration(entity, clip) end
 ---@param entity Entity
@@ -1441,11 +1442,11 @@ function sage.anim.Duration(entity, clip) end
 function sage.anim.Fade(entity) end
 ---@param entity Entity
 ---@param name string
----@return number
+---@return integer
 function sage.anim.Index(entity, name) end
 ---@param entity Entity
 ---@param name string
----@return number
+---@return integer
 function sage.anim.JointIndex(entity, name) end
 ---@param entity Entity
 ---@return table
@@ -1454,7 +1455,7 @@ function sage.anim.JointNames(entity) end
 ---@return table
 function sage.anim.Names(entity) end
 ---@param entity Entity
----@param clip number
+---@param clip integer
 ---@param blend? number
 ---@return boolean
 function sage.anim.Play(entity, clip, blend) end
@@ -1467,7 +1468,7 @@ function sage.anim.PlayNamed(entity, name, blend) end
 ---@param time number
 function sage.anim.Seek(entity, time) end
 ---@param entity Entity
----@param joint number
+---@param joint integer
 ---@param rx number
 ---@param ry number
 ---@param rz number
@@ -1514,6 +1515,7 @@ sage.audio = {}
 audio = nil
 
 ---@param entity Entity
+---@return boolean
 function sage.audio.IsPlaying(entity) end
 ---@param entity Entity
 function sage.audio.Play(entity) end
@@ -1587,20 +1589,20 @@ sage.events = {}
 events = nil
 
 ---@param name string
----@return number
+---@return integer
 function sage.events.Count(name) end
 ---@param name string
----@param payload? any
+---@param payload any
 function sage.events.Emit(name, payload) end
----@param arg? any
+---@param arg any
 function sage.events.Off(arg) end
 ---@param name string
 ---@param fn function
----@return number
+---@return integer
 function sage.events.On(name, fn) end
 ---@param name string
 ---@param fn function
----@return number
+---@return integer
 function sage.events.Once(name, fn) end
 
 ---@class sage.fx
@@ -1615,7 +1617,7 @@ fx = nil
 ---@param pos Vec3
 ---@param size Vec2
 ---@param texturePath? string
----@return number
+---@return integer
 function sage.fx.AddBillboard(pos, size, texturePath) end
 ---@param id string
 ---@param fx any
@@ -1623,26 +1625,27 @@ function sage.fx.AddBillboard(pos, size, texturePath) end
 function sage.fx.CreateStream(id, fx, pos) end
 ---@param fx any
 ---@param pos Vec3
----@param count number
+---@param count integer
 function sage.fx.Emit(fx, pos, count) end
 ---@param entity Entity
----@param count number
+---@param count integer
 function sage.fx.EmitFrom(entity, count) end
 ---@param path string
+---@return any
 function sage.fx.LoadEffect(path) end
 ---@param entity Entity
 function sage.fx.Play(entity) end
----@param id number
+---@param id integer
 function sage.fx.RemoveBillboard(id) end
 ---@param id string
 function sage.fx.RemoveStream(id) end
----@param id number
+---@param id integer
 ---@param pos Vec3
 function sage.fx.SetBillboardPosition(id, pos) end
----@param id number
+---@param id integer
 ---@param tint Vec4
 function sage.fx.SetBillboardTint(id, tint) end
----@param id number
+---@param id integer
 ---@param visible boolean
 function sage.fx.SetBillboardVisible(id, visible) end
 ---@param id string
@@ -1664,7 +1667,9 @@ sage.game = {}
 ---@type sage.game
 game = nil
 
+---@return boolean
 function sage.game.HasPauseMenu() end
+---@return boolean
 function sage.game.IsPaused() end
 ---@param paused boolean
 function sage.game.Pause(paused) end
@@ -1684,41 +1689,41 @@ ik = nil
 
 ---@param entity Entity
 ---@param bone string
----@param chainLength? number
----@return number
+---@param chainLength? integer
+---@return integer
 function sage.ik.AddGoal(entity, bone, chainLength) end
 ---@param entity Entity
----@param goal number
+---@param goal integer
 ---@return boolean
 function sage.ik.Locked(entity, goal) end
 ---@param entity Entity
----@param goal number
+---@param goal integer
 ---@param axis Vec3
 ---@param maxAngle? number
 function sage.ik.SetAim(entity, goal, axis, maxAngle) end
 ---@param entity Entity
----@param goal number
+---@param goal integer
 ---@param normal Vec3
 function sage.ik.SetAlign(entity, goal, normal) end
 ---@param entity Entity
 ---@param on boolean
 function sage.ik.SetEnabled(entity, on) end
 ---@param entity Entity
----@param goal number
+---@param goal integer
 ---@param on boolean
 ---@param plantHeight? number
 ---@param releaseTime? number
 function sage.ik.SetFootLock(entity, goal, on, plantHeight, releaseTime) end
 ---@param entity Entity
----@param goal number
+---@param goal integer
 ---@param pole Vec3
 function sage.ik.SetPole(entity, goal, pole) end
 ---@param entity Entity
----@param goal number
+---@param goal integer
 ---@param target Vec3
 function sage.ik.SetTarget(entity, goal, target) end
 ---@param entity Entity
----@param goal number
+---@param goal integer
 ---@param weight number
 function sage.ik.SetWeight(entity, goal, weight) end
 
@@ -1741,18 +1746,18 @@ function sage.input.AnyPressedSource() end
 ---@return number
 function sage.input.Axis(name) end
 ---@param action string
----@param keys? any
----@return number
+---@param keys any
+---@return integer
 function sage.input.Bind(action, keys) end
 ---@param action string
 ---@param positive string
 ---@param negative string
----@return number
+---@return integer
 function sage.input.BindAxis(action, positive, negative) end
 ---@param context string
 ---@param action string
----@param keys? any
----@return number
+---@param keys any
+---@return integer
 function sage.input.BindIn(context, action, keys) end
 ---@param action string
 ---@param up string
@@ -1767,15 +1772,15 @@ function sage.input.Configure(action, settings) end
 ---@return table
 function sage.input.ContextNames() end
 ---@param name string
----@param priority number
+---@param priority integer
 function sage.input.CreateContext(name, priority) end
 ---@param source string
 ---@return any
 function sage.input.FindConflict(source) end
----@param index? number
+---@param index? integer
 ---@return boolean
 function sage.input.GamepadConnected(index) end
----@param index? number
+---@param index? integer
 ---@return string
 function sage.input.GamepadName(index) end
 ---@param name string
@@ -1868,6 +1873,7 @@ light = nil
 ---@return any
 function sage.light.Get() end
 ---@param name string
+---@return boolean
 function sage.light.SetSkyPreset(name) end
 ---@param t table
 function sage.light.SetSun(t) end
@@ -1883,12 +1889,14 @@ material = nil
 
 ---@param name string
 ---@param props? table
+---@return string
 function sage.material.Create(name, props) end
 ---@param name string
 ---@param path string
+---@return boolean
 function sage.material.Save(name, path) end
 ---@param name string
----@param propsOrKey? any
+---@param propsOrKey any
 ---@param value? any
 function sage.material.Set(name, propsOrKey, value) end
 
@@ -1904,18 +1912,23 @@ math = nil
 ---@param x number
 ---@param lo number
 ---@param hi number
+---@return number
 function sage.math.Clamp(x, lo, hi) end
 ---@param a Vec3
 ---@param b Vec3
+---@return Vec3
 function sage.math.Cross(a, b) end
 ---@param rad number
+---@return number
 function sage.math.Degrees(rad) end
 ---@param x number
+---@return number
 function sage.math.Fract(x) end
----@param x number
----@param y? number
----@param z? number
----@param seed? number
+---@param x integer
+---@param y? integer
+---@param z? integer
+---@param seed? integer
+---@return number
 function sage.math.Hash(x, y, z, seed) end
 ---@param origin Vec3
 ---@param dir Vec3
@@ -1932,11 +1945,14 @@ function sage.math.IntersectRaySphere(origin, dir, center, radius) end
 ---@param a number
 ---@param b number
 ---@param v number
+---@return number
 function sage.math.InverseLerp(a, b, v) end
 ---@param t number
 ---@param len number
+---@return number
 function sage.math.PingPong(t, len) end
 ---@param deg number
+---@return number
 function sage.math.Radians(deg) end
 ---@return Vec2
 function sage.math.RandomInsideUnitCircle() end
@@ -1946,14 +1962,17 @@ function sage.math.RandomInsideUnitSphere() end
 function sage.math.RandomOnUnitSphere() end
 ---@param lo number
 ---@param hi number
+---@return number
 function sage.math.RandomRange(lo, hi) end
 ---@param v number
 ---@param a0 number
 ---@param a1 number
 ---@param b0 number
 ---@param b1 number
+---@return number
 function sage.math.Remap(v, a0, a1, b0, b1) end
 ---@param seed? number
+---@return any
 function sage.math.Rng(seed) end
 ---@param a Vec3
 ---@param b Vec3
@@ -1963,17 +1982,21 @@ function sage.math.Slerp(a, b, t) end
 ---@param edge0 number
 ---@param edge1 number
 ---@param x number
+---@return number
 function sage.math.SmoothStep(edge0, edge1, x) end
 ---@param e0 number
 ---@param e1 number
 ---@param x number
+---@return number
 function sage.math.SmootherStep(e0, e1, x) end
 ---@param edge number
 ---@param x number
+---@return number
 function sage.math.Step(edge, x) end
 ---@param x number
 ---@param lo number
 ---@param hi number
+---@return number
 function sage.math.Wrap(x, lo, hi) end
 
 ---@class sage.mesh
@@ -1985,26 +2008,32 @@ sage.mesh = {}
 ---@type sage.mesh
 mesh = nil
 
----@param size? any
+---@param size any
+---@return any
 function sage.mesh.Box(size) end
 ---@param r number
 ---@param h number
----@param seg? number
+---@param seg? integer
 ---@param caps? boolean
+---@return any
 function sage.mesh.Cylinder(r, h, seg, caps) end
----@param source? any
+---@param source any
 ---@param opts? table
+---@return any
 function sage.mesh.Extrude(source, opts) end
 ---@param sx number
 ---@param sz number
----@param rx number
----@param rz number
+---@param rx integer
+---@param rz integer
 ---@param h? function
+---@return any
 function sage.mesh.Grid(sx, sz, rx, rz, h) end
+---@return any
 function sage.mesh.New() end
 ---@param r number
----@param seg? number
----@param rings? number
+---@param seg? integer
+---@param rings? integer
+---@return any
 function sage.mesh.Sphere(r, seg, rings) end
 
 ---@class sage.msg
@@ -2017,16 +2046,16 @@ sage.msg = {}
 msg = nil
 
 ---@param name string
----@param data? any
+---@param data any
 function sage.msg.Broadcast(name, data) end
----@param target? any
+---@param target any
 ---@param name string
 ---@param ...? ...
 ---@return any
 function sage.msg.Call(target, name, ...) end
----@param target? any
+---@param target any
 ---@param name string
----@param data? any
+---@param data any
 function sage.msg.Send(target, name, data) end
 
 ---@class sage.noise
@@ -2039,28 +2068,36 @@ sage.noise = {}
 noise = nil
 
 ---@param opts? table
+---@return any
 function sage.noise.New(opts) end
 ---@param x number
 ---@param y number
 ---@param z? number
+---@return number
 function sage.noise.Perlin(x, y, z) end
----@param seed number
+---@param seed integer
 function sage.noise.Seed(seed) end
 ---@param x number
 ---@param y number
 ---@param z? number
+---@return number
 function sage.noise.Simplex(x, y, z) end
 ---@param x number
 ---@param y number
 ---@param z? number
+---@return number
 function sage.noise.Value(x, y, z) end
 ---@param p Vec3
 ---@param strength number
 ---@param opts? table
+---@return Vec3
 function sage.noise.Warp(p, strength, opts) end
 ---@param x number
 ---@param y number
 ---@param z? number
+---@return number
+---@return number
+---@return number
 function sage.noise.Worley(x, y, z) end
 
 ---@class sage.physics
@@ -2130,13 +2167,13 @@ function sage.physics.MoveCharacter(entity, velocity, dt) end
 function sage.physics.ObjectsInTrigger(zone) end
 ---@param center Vec3
 ---@param radius number
----@param mask? number
+---@param mask? integer
 ---@return table
 function sage.physics.OverlapSphere(center, radius, mask) end
 ---@param origin Vec3
 ---@param dir Vec3
 ---@param maxDistance number
----@param mask? number
+---@param mask? integer
 ---@return any
 function sage.physics.Raycast(origin, dir, maxDistance, mask) end
 ---@param entity Entity
@@ -2149,18 +2186,18 @@ function sage.physics.SetCharacterPosition(entity, pos) end
 ---@param t table
 function sage.physics.SetCharacterShape(entity, t) end
 ---@param entity Entity
----@param fn? any
+---@param fn any
 function sage.physics.SetCharacterWorld(entity, fn) end
 ---@param g Vec3
 function sage.physics.SetGravity(g) end
 ---@param entity Entity
----@param layer number
+---@param layer integer
 function sage.physics.SetLayer(entity, layer) end
 ---@param entity Entity
 ---@param on boolean
 function sage.physics.SetSensor(entity, on) end
 ---@param entity Entity
----@param mask number
+---@param mask integer
 function sage.physics.SetTriggerMask(entity, mask) end
 ---@param entity Entity
 ---@param v Vec3
@@ -2204,6 +2241,7 @@ render = nil
 function sage.render.ClearMaterialShader(mat) end
 ---@param entity Entity
 function sage.render.ClearShaderParams(entity) end
+---@return table
 function sage.render.DebugViews() end
 ---@return string
 function sage.render.GetDebugView() end
@@ -2236,7 +2274,7 @@ function sage.render.SetDebugView(name) end
 function sage.render.SetMaterial(entity, path) end
 ---@param path string
 ---@param name string
----@param value? any
+---@param value any
 function sage.render.SetMaterialParam(path, name, value) end
 ---@param mat any
 ---@param vertexPath string
@@ -2261,14 +2299,14 @@ function sage.render.SetMeshPlane(entity) end
 function sage.render.SetMeshSphere(entity) end
 ---@param entity Entity
 ---@param name string
----@param value? any
+---@param value any
 function sage.render.SetShaderParam(entity, name, value) end
 ---@param entity Entity
----@param part number
+---@param part integer
 ---@param path string
 function sage.render.SetSubmeshMaterial(entity, part, path) end
 ---@param entity Entity
----@return number
+---@return integer
 function sage.render.SubmeshCount(entity) end
 
 ---@class sage.rt
@@ -2299,11 +2337,15 @@ sage.save = {}
 save = nil
 
 ---@param slot string
+---@return boolean
 function sage.save.Delete(slot) end
+---@return string
 function sage.save.Directory() end
 ---@param slot string
+---@return boolean
 function sage.save.Exists(slot) end
 ---@param slot string
+---@return boolean
 function sage.save.HasBackup(slot) end
 ---@param slot string
 ---@return any
@@ -2312,15 +2354,16 @@ function sage.save.Info(slot) end
 ---@return any
 function sage.save.Read(slot) end
 ---@param slot string
+---@return boolean
 function sage.save.RestoreBackup(slot) end
 ---@return table
 function sage.save.Slots() end
 ---@param slot string
----@return number
+---@return integer
 function sage.save.Version(slot) end
 ---@param slot string
 ---@param data table
----@param options? any
+---@param options any
 ---@return boolean
 function sage.save.Write(slot, data, options) end
 
@@ -2333,17 +2376,17 @@ sage.scene = {}
 ---@type sage.scene
 scene = nil
 
----@param target? any
+---@param target any
 function sage.scene.Destroy(target) end
 ---@param name string
 ---@return Entity
 function sage.scene.Find(name) end
----@param id number
+---@param id integer
 ---@return Entity
 function sage.scene.FindById(id) end
 ---@param name string
 function sage.scene.Load(name) end
----@param id number
+---@param id integer
 ---@param path string
 ---@return boolean
 function sage.scene.SavePrefab(id, path) end
@@ -2352,11 +2395,11 @@ function sage.scene.SavePrefab(id, path) end
 function sage.scene.Spawn(name) end
 ---@param path string
 ---@param at? Vec3
----@return number
+---@return integer
 function sage.scene.SpawnPrefab(path, at) end
 ---@param pos Vec3
 ---@param scale? number
----@return number
+---@return integer
 function sage.scene.SpawnRagdoll(pos, scale) end
 
 ---@class sage.texture
@@ -2374,10 +2417,12 @@ texture = nil
 function sage.texture.Generate(name, t) end
 ---@param path string
 ---@param name? string
+---@return any
 function sage.texture.Load(path, name) end
 ---@param name string
----@param w number
----@param h number
+---@param w integer
+---@param h integer
+---@return any
 function sage.texture.New(name, w, h) end
 
 ---@class sage.time
@@ -2389,16 +2434,17 @@ sage.time = {}
 ---@type sage.time
 time = nil
 
----@param id number
+---@param id integer
 function sage.time.Cancel(id) end
 ---@param intervalSeconds number
 ---@param fn function
----@return number
+---@return integer
 function sage.time.Repeat(intervalSeconds, fn) end
+---@return number
 function sage.time.Scale() end
 ---@param seconds number
 ---@param fn function
----@return number
+---@return integer
 function sage.time.Schedule(seconds, fn) end
 ---@param scale number
 function sage.time.SetScale(scale) end
@@ -2414,34 +2460,40 @@ sage.tween = {}
 ---@type sage.tween
 tween = nil
 
+---@return integer
 function sage.tween.Active() end
----@param id any
+---@param id integer
 function sage.tween.Cancel(id) end
 function sage.tween.CancelAll() end
 ---@param entity Entity
 ---@param to Vec3
 ---@param dur number
----@param ease? any
+---@param ease any
+---@return integer
 function sage.tween.Color(entity, to, dur, ease) end
 ---@param entity Entity
 ---@param to Vec3
 ---@param dur number
----@param ease? any
+---@param ease any
+---@return integer
 function sage.tween.Move(entity, to, dur, ease) end
 ---@param entity Entity
 ---@param toEulerDeg Vec3
 ---@param dur number
----@param ease? any
+---@param ease any
+---@return integer
 function sage.tween.Rotate(entity, toEulerDeg, dur, ease) end
 ---@param entity Entity
 ---@param to Vec3
 ---@param dur number
----@param ease? any
+---@param ease any
+---@return integer
 function sage.tween.Scale(entity, to, dur, ease) end
 ---@param entity Entity
 ---@param to number
 ---@param dur number
----@param ease? any
+---@param ease any
+---@return integer
 function sage.tween.UIValue(entity, to, dur, ease) end
 
 ---@class sage.ui
@@ -2463,22 +2515,26 @@ function sage.ui.ClickedAction() end
 function sage.ui.Cursor() end
 ---@param x number
 ---@param y number
----@param screenW number
----@param screenH number
+---@param screenW integer
+---@param screenH integer
 ---@return Entity
 function sage.ui.ElementAt(x, y, screenW, screenH) end
 ---@param entity Entity
 ---@return number
 function sage.ui.GetValue(entity) end
 ---@param name string
+---@return boolean
 function sage.ui.HasIcon(name) end
 ---@return string
 function sage.ui.HoveredAction() end
 ---@return table
 function sage.ui.IconNames() end
 ---@param path string
+---@return integer
+---@return integer
 function sage.ui.ImageSize(path) end
 ---@param entity Entity
+---@return boolean
 function sage.ui.LoadSlice(entity) end
 ---@return boolean
 function sage.ui.MouseDown() end
@@ -2524,16 +2580,18 @@ function sage.ui.SetSprite(entity, x, y, w, h) end
 ---@param path string
 ---@param name string
 ---@param sharp? boolean
+---@return boolean
 function sage.ui.SetSpriteNamed(entity, path, name, sharp) end
 ---@param entity Entity
 ---@param value number
 function sage.ui.SetValue(entity, value) end
 ---@param path string
+---@return any
 function sage.ui.Sheet(path) end
 ---@param name string
----@return number
+---@return integer
 function sage.ui.SpawnDemo(name) end
----@return number
+---@return integer
 function sage.ui.SpawnShowcase() end
 
 ---@class sage.visual
@@ -2557,7 +2615,7 @@ function sage.visual.graph(path) end
 ---@param id string
 ---@param spec table
 function sage.visual.node(id, spec) end
----@param entity? any
+---@param entity any
 ---@return any
 function sage.visual.of(entity) end
 ---@param id string
@@ -2581,473 +2639,239 @@ function sage.volumetric.Set(t) end
 -- --- Старые глобальные имена ----------------------------------------------
 -- Те же функции, что выше, под именами, с которых начинался движок.
 -- Работают и работать будут: на них написаны существующие игры.
----@type fun(...): any
 ActiveTweens = sage.tween.Active
----@type fun(...): any
 AddAngularImpulse = sage.physics.AddAngularImpulse
----@type fun(...): any
 AddAnimatedModel = sage.anim.Add
----@type fun(...): any
 AddBillboard = sage.fx.AddBillboard
----@type fun(...): any
 AddCharacterController = sage.physics.AddCharacter
----@type fun(...): any
 AddForce = sage.physics.AddForce
----@type fun(...): any
 AddIKGoal = sage.ik.AddGoal
----@type fun(...): any
 AddImpulse = sage.physics.AddImpulse
----@type fun(...): any
 AddImpulseAtPoint = sage.physics.AddImpulseAtPoint
----@type fun(...): any
 AddRenderTexture = sage.rt.Attach
----@type fun(...): any
 AddTorque = sage.physics.AddTorque
----@type fun(...): any
 AnimationCount = sage.anim.Count
----@type fun(...): any
 AnimationDuration = sage.anim.Duration
----@type fun(...): any
 AnimationFade = sage.anim.Fade
----@type fun(...): any
 AnimationIndex = sage.anim.Index
----@type fun(...): any
 AnimationNames = sage.anim.Names
----@type fun(...): any
 AnimationTime = sage.anim.Time
----@type fun(...): any
 ApplySkyPreset = sage.light.SetSkyPreset
----@type fun(...): any
 BindAction = sage.input.Bind
----@type fun(...): any
 BindActionIn = sage.input.BindIn
----@type fun(...): any
 BindAxis = sage.input.BindAxis
----@type fun(...): any
 BindVector = sage.input.BindVector
----@type fun(...): any
 BoneAxis = sage.anim.BoneAxis
----@type fun(...): any
 BonePosition = sage.anim.BonePosition
----@type fun(...): any
 BorrowAnimations = sage.anim.Borrow
----@type fun(...): any
 Broadcast = sage.msg.Broadcast
----@type fun(...): any
 CallScript = sage.msg.Call
----@type fun(...): any
 CancelTimer = sage.time.Cancel
----@type fun(...): any
 CharacterFits = sage.physics.CharacterFits
----@type fun(...): any
 CharacterState = sage.physics.CharacterState
----@type fun(...): any
 Clamp = sage.math.Clamp
----@type fun(...): any
 ClearJointPoses = sage.anim.ClearJointPoses
----@type fun(...): any
 ClearMaterialShader = sage.render.ClearMaterialShader
----@type fun(...): any
 ClearShaderParams = sage.render.ClearShaderParams
----@type fun(...): any
 ClearUIImage = sage.ui.ClearImage
----@type fun(...): any
 ClearUILayout = sage.ui.ClearLayout
----@type fun(...): any
 Collisions = sage.physics.Collisions
----@type fun(...): any
 CreateInputContext = sage.input.CreateContext
----@type fun(...): any
 CreateParticleStream = sage.fx.CreateStream
----@type fun(...): any
 Cross = sage.math.Cross
----@type fun(...): any
 DebugViews = sage.render.DebugViews
----@type fun(...): any
 Degrees = sage.math.Degrees
----@type fun(...): any
 DeleteSave = sage.save.Delete
----@type fun(...): any
 DestroyObject = sage.scene.Destroy
----@type fun(...): any
 DisablePlanarReflection = sage.reflect.DisablePlanar
----@type fun(...): any
 EmitEvent = sage.events.Emit
----@type fun(...): any
 EmitFromObject = sage.fx.EmitFrom
----@type fun(...): any
 EmitParticles = sage.fx.Emit
----@type fun(...): any
 EventCount = sage.events.Count
----@type fun(...): any
 FindObject = sage.scene.Find
----@type fun(...): any
 FindObjectById = sage.scene.FindById
----@type fun(...): any
 GenerateTexture = sage.texture.Generate
----@type fun(...): any
 GetAngularVelocity = sage.physics.GetAngularVelocity
----@type fun(...): any
 GetAxis = sage.input.Axis
----@type fun(...): any
 GetCamera = sage.camera.Get
----@type fun(...): any
 GetDebugView = sage.render.GetDebugView
----@type fun(...): any
 GetLighting = sage.light.Get
----@type fun(...): any
 GetMaterial = sage.render.GetMaterial
----@type fun(...): any
 GetMaterialParam = sage.render.GetMaterialParam
----@type fun(...): any
 GetMouseDelta = sage.input.MouseDelta
----@type fun(...): any
 GetMousePosition = sage.input.MousePosition
----@type fun(...): any
 GetScrollDelta = sage.input.ScrollDelta
----@type fun(...): any
 GetUIElementAt = sage.ui.ElementAt
----@type fun(...): any
 GetUIValue = sage.ui.GetValue
----@type fun(...): any
 GetVector = sage.input.Vector
----@type fun(...): any
 GetVelocity = sage.physics.GetVelocity
----@type fun(...): any
 GroundNormal = sage.physics.GroundNormal
----@type fun(...): any
 HasAction = sage.input.Has
----@type fun(...): any
 HasIcon = sage.ui.HasIcon
----@type fun(...): any
 HasSave = sage.save.Exists
----@type fun(...): any
 HasSaveBackup = sage.save.HasBackup
----@type fun(...): any
 IKLocked = sage.ik.Locked
----@type fun(...): any
 IconNames = sage.ui.IconNames
----@type fun(...): any
 ImageSize = sage.ui.ImageSize
----@type fun(...): any
 IntersectRayPlane = sage.math.IntersectRayPlane
----@type fun(...): any
 IntersectRaySphere = sage.math.IntersectRaySphere
----@type fun(...): any
 IsActionDown = sage.input.IsDown
----@type fun(...): any
 IsGrounded = sage.physics.IsGrounded
----@type fun(...): any
 IsInTrigger = sage.physics.IsInTrigger
----@type fun(...): any
 IsInputContextEnabled = sage.input.IsContextEnabled
----@type fun(...): any
 IsMouseCaptured = sage.input.IsMouseCaptured
----@type fun(...): any
 IsPlaying = sage.audio.IsPlaying
----@type fun(...): any
 IsSleeping = sage.physics.IsSleeping
----@type fun(...): any
 JointIndex = sage.anim.JointIndex
----@type fun(...): any
 JointNames = sage.anim.JointNames
----@type fun(...): any
 LaunchArg = sage.app.Arg
----@type fun(...): any
 LaunchFlag = sage.app.Flag
----@type fun(...): any
 LensFlareEnabled = sage.lensflare.Enabled
----@type fun(...): any
 LoadGame = sage.save.Read
----@type fun(...): any
 LoadInputMapping = sage.input.LoadMapping
----@type fun(...): any
 LoadParticleEffect = sage.fx.LoadEffect
----@type fun(...): any
 LoadScene = sage.scene.Load
----@type fun(...): any
 LoadUISlice = sage.ui.LoadSlice
----@type fun(...): any
 MaterialOf = sage.render.MaterialOf
----@type fun(...): any
 MoveCharacter = sage.physics.MoveCharacter
----@type fun(...): any
 NewMaterial = sage.render.NewMaterial
----@type fun(...): any
 ObjectsInTrigger = sage.physics.ObjectsInTrigger
----@type fun(...): any
 OffEvent = sage.events.Off
----@type fun(...): any
 OnEvent = sage.events.On
----@type fun(...): any
 OnceEvent = sage.events.Once
----@type fun(...): any
 OverlapSphere = sage.physics.OverlapSphere
----@type fun(...): any
 Play = sage.audio.Play
----@type fun(...): any
 PlayAnimation = sage.anim.Play
----@type fun(...): any
 PlayAnimationNamed = sage.anim.PlayNamed
----@type fun(...): any
 PlayMusic = sage.audio.PlayMusic
----@type fun(...): any
 PlayParticles = sage.fx.Play
----@type fun(...): any
 PlaySound = sage.audio.PlaySound
----@type fun(...): any
 PlaySound3D = sage.audio.PlaySound3D
----@type fun(...): any
 Radians = sage.math.Radians
----@type fun(...): any
 RandomInsideUnitCircle = sage.math.RandomInsideUnitCircle
----@type fun(...): any
 RandomInsideUnitSphere = sage.math.RandomInsideUnitSphere
----@type fun(...): any
 RandomOnUnitSphere = sage.math.RandomOnUnitSphere
----@type fun(...): any
 RandomRange = sage.math.RandomRange
----@type fun(...): any
 Raycast = sage.physics.Raycast
----@type fun(...): any
 RebindAction = sage.input.Rebind
----@type fun(...): any
 RefreshRenderTexture = sage.rt.Refresh
----@type fun(...): any
 ReloadMaterial = sage.render.ReloadMaterial
----@type fun(...): any
 RemoveBillboard = sage.fx.RemoveBillboard
----@type fun(...): any
 RemoveParticleStream = sage.fx.RemoveStream
----@type fun(...): any
 RenderTextureReady = sage.rt.Ready
----@type fun(...): any
 Repeat = sage.time.Repeat
----@type fun(...): any
 ResolveMaterialTextures = sage.render.ResolveMaterialTextures
----@type fun(...): any
 RestoreSaveBackup = sage.save.RestoreBackup
----@type fun(...): any
 SaveDirectory = sage.save.Directory
----@type fun(...): any
 SaveGame = sage.save.Write
----@type fun(...): any
 SaveInfo = sage.save.Info
----@type fun(...): any
 SaveInputMapping = sage.input.SaveMapping
----@type fun(...): any
 SaveMaterial = sage.render.SaveMaterial
----@type fun(...): any
 SavePrefab = sage.scene.SavePrefab
----@type fun(...): any
 SaveSlots = sage.save.Slots
----@type fun(...): any
 SaveVersion = sage.save.Version
----@type fun(...): any
 Schedule = sage.time.Schedule
----@type fun(...): any
 SeekAnimation = sage.anim.Seek
----@type fun(...): any
 SendMessage = sage.msg.Send
----@type fun(...): any
 SetActionTrigger = sage.input.SetTrigger
----@type fun(...): any
 SetAngularVelocity = sage.physics.SetAngularVelocity
----@type fun(...): any
 SetAnimationLoop = sage.anim.SetLoop
----@type fun(...): any
 SetAnimationPlaying = sage.anim.SetPlaying
----@type fun(...): any
 SetAnimationSpeed = sage.anim.SetSpeed
----@type fun(...): any
 SetBillboardPosition = sage.fx.SetBillboardPosition
----@type fun(...): any
 SetBillboardTint = sage.fx.SetBillboardTint
----@type fun(...): any
 SetBillboardVisible = sage.fx.SetBillboardVisible
----@type fun(...): any
 SetCharacterPosition = sage.physics.SetCharacterPosition
----@type fun(...): any
 SetCharacterShape = sage.physics.SetCharacterShape
----@type fun(...): any
 SetCharacterWorld = sage.physics.SetCharacterWorld
----@type fun(...): any
 SetClip = sage.audio.SetClip
----@type fun(...): any
 SetDebugView = sage.render.SetDebugView
----@type fun(...): any
 SetGravity = sage.physics.SetGravity
----@type fun(...): any
 SetIKAim = sage.ik.SetAim
----@type fun(...): any
 SetIKAlign = sage.ik.SetAlign
----@type fun(...): any
 SetIKEnabled = sage.ik.SetEnabled
----@type fun(...): any
 SetIKFootLock = sage.ik.SetFootLock
----@type fun(...): any
 SetIKPole = sage.ik.SetPole
----@type fun(...): any
 SetIKTarget = sage.ik.SetTarget
----@type fun(...): any
 SetIKWeight = sage.ik.SetWeight
----@type fun(...): any
 SetInputContextEnabled = sage.input.SetContextEnabled
----@type fun(...): any
 SetJointRotation = sage.anim.SetJointRotation
----@type fun(...): any
 SetLensFlare = sage.lensflare.Set
----@type fun(...): any
 SetMasterVolume = sage.audio.SetMasterVolume
----@type fun(...): any
 SetMaterial = sage.render.SetMaterial
----@type fun(...): any
 SetMaterialParam = sage.render.SetMaterialParam
----@type fun(...): any
 SetMaterialShader = sage.render.SetMaterialShader
----@type fun(...): any
 SetMeshCapsule = sage.render.SetMeshCapsule
----@type fun(...): any
 SetMeshCone = sage.render.SetMeshCone
----@type fun(...): any
 SetMeshCube = sage.render.SetMeshCube
----@type fun(...): any
 SetMeshCylinder = sage.render.SetMeshCylinder
----@type fun(...): any
 SetMeshModel = sage.render.SetMeshModel
----@type fun(...): any
 SetMeshNone = sage.render.SetMeshNone
----@type fun(...): any
 SetMeshPlane = sage.render.SetMeshPlane
----@type fun(...): any
 SetMeshSphere = sage.render.SetMeshSphere
----@type fun(...): any
 SetMouseCaptured = sage.input.SetMouseCaptured
----@type fun(...): any
 SetParticleStreamActive = sage.fx.SetStreamActive
----@type fun(...): any
 SetParticleStreamPosition = sage.fx.SetStreamPosition
----@type fun(...): any
 SetPauseMenu = sage.game.SetPauseMenu
----@type fun(...): any
 SetPhysicsLayer = sage.physics.SetLayer
----@type fun(...): any
 SetPitch = sage.audio.SetPitch
----@type fun(...): any
 SetPlanarReflection = sage.reflect.SetPlanar
----@type fun(...): any
 SetPlanarReflectionScale = sage.reflect.SetPlanarScale
----@type fun(...): any
 SetReflectionIntensity = sage.reflect.SetIntensity
----@type fun(...): any
 SetReflectionsEnabled = sage.reflect.SetEnabled
----@type fun(...): any
 SetRootMotion = sage.anim.SetRootMotion
----@type fun(...): any
 SetSensor = sage.physics.SetSensor
----@type fun(...): any
 SetShaderParam = sage.render.SetShaderParam
----@type fun(...): any
 SetSubmeshMaterial = sage.render.SetSubmeshMaterial
----@type fun(...): any
 SetSun = sage.light.SetSun
----@type fun(...): any
 SetTriggerMask = sage.physics.SetTriggerMask
----@type fun(...): any
 SetUICanvas = sage.ui.SetCanvas
----@type fun(...): any
 SetUIImage = sage.ui.SetImage
----@type fun(...): any
 SetUILayout = sage.ui.SetLayout
----@type fun(...): any
 SetUIPreset = sage.ui.Preset
----@type fun(...): any
 SetUISlice = sage.ui.SetSlice
----@type fun(...): any
 SetUISliceDrawsCenter = sage.ui.SetSliceDrawsCenter
----@type fun(...): any
 SetUISliceTiled = sage.ui.SetSliceTiled
----@type fun(...): any
 SetUISprite = sage.ui.SetSprite
----@type fun(...): any
 SetUISpriteNamed = sage.ui.SetSpriteNamed
----@type fun(...): any
 SetUIValue = sage.ui.SetValue
----@type fun(...): any
 SetVelocity = sage.physics.SetVelocity
----@type fun(...): any
 SetVolume = sage.audio.SetVolume
----@type fun(...): any
 SetVolumetrics = sage.volumetric.Set
----@type fun(...): any
 SetWaterReflection = sage.reflect.SetWater
----@type fun(...): any
 Slerp = sage.math.Slerp
----@type fun(...): any
 SmoothStep = sage.math.SmoothStep
----@type fun(...): any
 SpawnObject = sage.scene.Spawn
----@type fun(...): any
 SpawnPrefab = sage.scene.SpawnPrefab
----@type fun(...): any
 SpawnRagdoll = sage.scene.SpawnRagdoll
----@type fun(...): any
 SpawnUIDemo = sage.ui.SpawnDemo
----@type fun(...): any
 SpawnUIShowcase = sage.ui.SpawnShowcase
----@type fun(...): any
 StartCoroutine = sage.time.StartCoroutine
----@type fun(...): any
 Stop = sage.audio.Stop
----@type fun(...): any
 StopMusic = sage.audio.StopMusic
----@type fun(...): any
 StopParticles = sage.fx.Stop
----@type fun(...): any
 SubmeshCount = sage.render.SubmeshCount
----@type fun(...): any
 TriggersOf = sage.physics.TriggersOf
----@type fun(...): any
 TweenCancel = sage.tween.Cancel
----@type fun(...): any
 TweenCancelAll = sage.tween.CancelAll
----@type fun(...): any
 TweenColor = sage.tween.Color
----@type fun(...): any
 TweenMove = sage.tween.Move
----@type fun(...): any
 TweenRotate = sage.tween.Rotate
----@type fun(...): any
 TweenScale = sage.tween.Scale
----@type fun(...): any
 TweenUIValue = sage.tween.UIValue
----@type fun(...): any
 UIClickedAction = sage.ui.ClickedAction
----@type fun(...): any
 UICursor = sage.ui.Cursor
----@type fun(...): any
 UIHoveredAction = sage.ui.HoveredAction
----@type fun(...): any
 UIMouseDown = sage.ui.MouseDown
----@type fun(...): any
 UIPressedAction = sage.ui.PressedAction
----@type fun(...): any
 UIReleasedAction = sage.ui.ReleasedAction
----@type fun(...): any
 UIScreenSize = sage.ui.ScreenSize
----@type fun(...): any
 VolumetricsEnabled = sage.volumetric.Enabled
----@type fun(...): any
 WasActionPressed = sage.input.WasPressed
----@type fun(...): any
 WasActionReleased = sage.input.WasReleased
----@type fun(...): any
 WasActionTriggered = sage.input.Triggered
----@type fun(...): any
 log = sage.core.log
----@type fun(...): any
 logError = sage.core.logError
----@type fun(...): any
 logWarn = sage.core.logWarn
 -- --- Процедурная генерация в стиле SAGE (ScriptApi_ProcGen.cpp) ----------
 ---Цвет из трёх долей 0..1.

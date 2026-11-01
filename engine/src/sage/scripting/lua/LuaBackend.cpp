@@ -1,6 +1,7 @@
 #include "sage/scripting/lua/LuaInternal.h"
 #include "sage/scripting/ScriptingSystem.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cctype>
 
@@ -241,6 +242,9 @@ Backend::~Backend() {
         m_interop->SetQuitSink(nullptr);
     }
     Reset();
+    // Состояние Lua может пережить бэкенд (оно у прежнего движка): прежний
+    // распределитель — обратно, иначе он звал бы счётчик мёртвого бэкенда.
+    if (m_baseAlloc) lua_setallocf(m_lua->lua_state(), m_baseAlloc, m_baseUd);
 }
 
 void Backend::Bind(const ScriptServices& services) { m_services = services; }
@@ -257,8 +261,23 @@ int TracebackHandler(lua_State* L) {
 }
 } // namespace
 
+void* Backend::CountingAlloc(void* ud, void* ptr, size_t osize, size_t nsize) {
+    Backend* self = static_cast<Backend*>(ud);
+    // ptr == nullptr: osize — вид объекта, а не размер (так устроен lua_Alloc).
+    const size_t old = ptr ? osize : 0;
+    if (nsize > old && self->m_memLimit && self->m_memUsed + (nsize - old) > self->m_memLimit)
+        return nullptr;   // Lua поднимет «not enough memory» в вызове скрипта
+    void* out = self->m_baseAlloc(self->m_baseUd, ptr, osize, nsize);
+    if (nsize == 0 || out) self->m_memUsed = self->m_memUsed - std::min(old, self->m_memUsed) + nsize;
+    return out;
+}
+
 void Backend::InstallWatchdog() {
     lua_State* L = m_lua->lua_state();
+    // Счёт памяти — с того, что уже занято (API движка, прежние скрипты).
+    m_baseAlloc = lua_getallocf(L, &m_baseUd);
+    m_memUsed = (size_t)lua_gc(L, LUA_GCCOUNT, 0) * 1024 + (size_t)lua_gc(L, LUA_GCCOUNTB, 0);
+    lua_setallocf(L, &Backend::CountingAlloc, this);
     lua_pushlightuserdata(L, this);
     lua_rawsetp(L, LUA_REGISTRYINDEX, &g_watchKey);
     // Хук наследуют и корутины: они создаются из того же состояния.

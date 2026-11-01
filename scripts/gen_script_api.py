@@ -100,6 +100,52 @@ def arg_name(cpp, index):
     return 'entity' if name in ('obj', 'object') else name
 
 
+CATALOG_TOOL = [ROOT / "build/tools/sage_api/sage_api", ROOT / "build/tools/sage_api/sage_api.exe"]
+
+
+def load_catalog():
+    """Каталог API, собранный самим движком (tools/sage_api): {полное имя: запись}.
+
+    Типы аргументов и возврата берутся ОТСЮДА — их вывел компилятор из сигнатур
+    C++. Регулярка по тексту лямбды типов не знает (лямбда без «-> тип»
+    становилась функцией без возврата) — из текста берутся только имена
+    аргументов. Каталог обязателен: подсказка, собранная без него, расходилась бы
+    между машинами.
+    """
+    import json
+    import subprocess
+    import tempfile
+    path = None
+    if '--catalog' in sys.argv:
+        path = Path(sys.argv[sys.argv.index('--catalog') + 1])
+    else:
+        tool = next((t for t in CATALOG_TOOL if t.exists()), None)
+        if tool is None:
+            print("Нет tools/sage_api: сначала соберите движок (cmake --build build), "
+                  "либо укажите --catalog <файл>.")
+            sys.exit(2)
+        path = Path(tempfile.mkdtemp()) / "sage_api.json"
+        subprocess.run([str(tool), "--json", str(path)], check=True, stdout=subprocess.DEVNULL)
+    data = json.loads(path.read_text(encoding='utf-8'))
+    return {f['name']: f for f in data['functions']}
+
+
+def apply_catalog(modules, catalog):
+    """Типы из каталога поверх имён из текста."""
+    for module, fns in modules.items():
+        for i, (name, params, rtype) in enumerate(fns):
+            e = catalog.get(f'sage.{module}.{name}')
+            if not e or e['unknown']:
+                continue
+            typed = []
+            for k, p in enumerate(e['params']):
+                pname = params[k][0] if k < len(params) and params[k][0] != '...' else p['name']
+                typed.append((pname, p['type'], p['optional']))
+            if e['variadic']:
+                typed.append(('...', '...', True))
+            fns[i] = (name, typed, ', '.join(e['returns']) if e['returns'] else 'nil')
+
+
 def collect():
     """{модуль: [(имя, [(имя_арг, тип, необязателен)], тип_возврата, старое_имя)]}"""
     modules = {}
@@ -1541,6 +1587,7 @@ def render_table(modules, legacy):
     for module in sorted(modules):
         for name, params, rtype in modules[module]:
             sig = lua_sig_text(params)
+            rtype = rtype.split(', ')[0]   # проверке типов — первое значение
             rows.append((f'sage.{module}.{name}', sig, rtype))
             # Короткое имя модуля. Его нет, если имя занято стандартной
             # библиотекой Lua: math.X — это всегда math из Lua, не sage.math.
@@ -1590,7 +1637,8 @@ def render(modules, legacy):
             for pname, ptype, opt in params:
                 out.append(f'---@param {pname}{"?" if opt else ""} {ptype}\n')
             if rtype != 'nil':
-                out.append(f'---@return {rtype}\n')
+                for r in rtype.split(', '):
+                    out.append(f'---@return {r}\n')
             arglist = ', '.join(p[0] for p in params)
             out.append(f'function sage.{module}.{name}({arglist}) end\n')
         out.append('\n')
@@ -1598,8 +1646,10 @@ def render(modules, legacy):
     out.append('-- --- Старые глобальные имена ----------------------------------------------\n')
     out.append('-- Те же функции, что выше, под именами, с которых начинался движок.\n')
     out.append('-- Работают и работать будут: на них написаны существующие игры.\n')
+    # Псевдоним, а не «fun(...): any»: редактор берёт аргументы и возврат у
+    # самой функции (одна запись каталога — несколько имён).
     for old, module, name in legacy:
-        out.append(f'---@type fun(...): any\n{old} = sage.{module}.{name}\n')
+        out.append(f'{old} = sage.{module}.{name}\n')
     out.append(procgen_hints())
     out.append(HOOKS)
     return ''.join(out)
@@ -1607,6 +1657,7 @@ def render(modules, legacy):
 
 def main():
     modules, legacy = collect()
+    apply_catalog(modules, load_catalog())
     text = render(modules, legacy)
     table = render_table(modules, legacy)
     check = '--check' in sys.argv

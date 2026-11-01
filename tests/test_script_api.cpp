@@ -39,7 +39,9 @@ TEST(ScriptApi_bind_records_exact_signatures) {
     CHECK_TRUE(clamp.Portable);
     // Псевдонимы: короткое имя модуля и прежнее глобальное — та же запись.
     CHECK_TRUE(Entry("Clamp").Qualified == "sage.math.Clamp");
-    CHECK_TRUE(Entry("math.Clamp").Qualified == "sage.math.Clamp");
+    CHECK_TRUE(Entry("noise.Perlin").Qualified == "sage.noise.Perlin");
+    // math.X — всегда стандартная библиотека Lua: короткого имени у модуля math нет.
+    CHECK_FALSE(ApiRegistry::Instance().Has("math.Clamp"));
 
     const ApiEntry cross = Entry("sage.math.Cross");
     CHECK_TRUE(cross.Returns == std::vector<std::string>{"Vec3"});
@@ -410,4 +412,74 @@ TEST(ProcessLanguage_hung_or_broken_language_is_an_error_not_a_hang) {
     UnregisterLanguages("project");
     fs::remove_all(project);
     fs::remove_all(py);
+}
+
+// --- Проверка типов и ресурсы ------------------------------------------------------
+
+#include "sage/lang/SageApi.h"
+#include "sage/scripting/lua/LuaBackend.h"
+
+// Функция модуля игры видна проверке SAGE Lua: имя известно, тип возврата —
+// из сигнатуры C++. Прежде проверка знала только сгенерированную таблицу.
+TEST(ScriptApi_checker_sees_game_modules_from_the_live_catalog) {
+    CHECK_TRUE(sage::lang::FindApiFunction("sage.testcheck.boost") == nullptr);
+    sage::scripting::RegisterApiFunction("testcheck", "boost", [](float x) { return x * 2.0f; }, "", "test:check");
+    const sage::lang::ApiFunction* f = sage::lang::FindApiFunction("sage.testcheck.boost");
+    CHECK_TRUE(f != nullptr);
+    if (f) {
+        CHECK_TRUE(std::string(f->Ret) == "number");
+        CHECK_TRUE(std::string(f->Params) == "arg1:number");
+    }
+    CHECK_TRUE(sage::lang::FindApiFunction("testcheck.boost") != nullptr);   // короткое имя модуля
+    CHECK_TRUE(sage::lang::IsKnownGlobal("testcheck"));
+    CHECK_TRUE(sage::lang::IsApiModule("sage.testcheck"));
+    // Таблица по-прежнему первая ступень: функции движка находятся как раньше.
+    CHECK_TRUE(sage::lang::FindApiFunction("sage.math.Clamp") != nullptr);
+    sage::scripting::RemovePortableFunctions("test:check");
+    CHECK_TRUE(sage::lang::FindApiFunction("sage.testcheck.boost") == nullptr);
+}
+
+// Предел памяти Lua: скрипт, раздувающий таблицу, получает ошибку «не хватает
+// памяти», игра и соседние скрипты живы.
+TEST(ScriptApi_lua_memory_limit_is_a_script_error) {
+    using namespace sage::scripting;
+    const fs::path dir = fs::temp_directory_path() / "sage_memlimit";
+    fs::remove_all(dir);
+    WriteText(dir / "hog.lua", R"LUA(
+local Hog = {}
+function Hog:Start()
+    local t = {}
+    for i = 1, 50000000 do t[i] = string.rep("x", 64) .. i end
+end
+return Hog
+)LUA");
+    WriteText(dir / "calm.lua", R"LUA(
+local Calm = {}
+function Calm:Start() self.ok = true; Events.emit("calm_ok", 1) end
+return Calm
+)LUA");
+    Scene scene("S");
+    GameObject hog = scene.CreateObject("Hog");
+    scene.Registry().emplace<ScriptComponent>(hog.Entity(), ScriptComponent{"hog.lua", {}});
+    GameObject calm = scene.CreateObject("Calm");
+    scene.Registry().emplace<ScriptComponent>(calm.Entity(), ScriptComponent{"calm.lua", {}});
+    ScriptingSystem sys;
+    sys.SetProjectDir(dir);
+    sys.AddBackend(MakeLuaBackend({}));
+    sys.Runtime().SetMemoryLimit(64u * 1024 * 1024);
+    ScriptServices services;
+    services.ScenePtr = &scene;
+    sys.Bind(services);
+    bool calmOk = false;
+    scene.Events.Connect(0, "calm_ok", [&](const sage::events::Event&) { calmOk = true; });
+    std::vector<ScriptError> errors;
+    sys.Runtime().SetErrorSink([&](const ScriptError& e) { errors.push_back(e); });
+    sys.AttachScene(scene);
+    bool sawMemory = false;
+    for (const ScriptError& e : errors)
+        if (e.Message.find("memory") != std::string::npos || e.Message.find("памят") != std::string::npos)
+            sawMemory = true;
+    CHECK_TRUE(sawMemory);
+    CHECK_TRUE(calmOk);
+    fs::remove_all(dir);
 }

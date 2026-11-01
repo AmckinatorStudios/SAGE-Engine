@@ -372,6 +372,17 @@ ApiInvoker MakeInvoker(F fn, const std::string& name) {
 
 } // namespace api_detail
 
+// Короткое имя модуля («noise.Perlin» вместо «sage.noise.Perlin») — псевдоним
+// в каталоге, если имя не занято стандартной библиотекой Lua: `math.X` для
+// скрипта и проверки — всегда math из Lua (см. RegisterShortNames).
+inline bool HasShortModuleName(const std::string& module) {
+    static const char* kStd[] = {"math", "string", "table", "os", "io", "coroutine", "utf8", "debug", "package"};
+    if (module.empty()) return false;
+    for (const char* n : kStd)
+        if (module == n) return false;
+    return true;
+}
+
 // --- Регистрация без sol: функция для всех языков -----------------------------
 
 struct PortableFunction {
@@ -408,7 +419,7 @@ void RegisterApiFunction(const std::string& module, const std::string& name, F f
                   "недоступна другим языкам; функцию только для Lua регистрируйте через модуль Lua");
     pf.Meta.Doc = std::move(doc);
     pf.Meta.Origin = std::move(origin);
-    if (!module.empty()) pf.Meta.Aliases = {module + "." + name};
+    if (HasShortModuleName(module)) pf.Meta.Aliases = {module + "." + name};
     pf.Invoke = api_detail::MakeInvoker(fn, module.empty() ? name : "sage." + module + "." + name);
     pf.BindLua = [fn](sol::table& table, const std::string& key) { table.set_function(key, fn); };
     AddPortableFunction(std::move(pf));
@@ -419,7 +430,7 @@ template <typename F>
 void RecordBoundFunction(ApiBindings& bindings, const char* module, const char* name, const char* legacy,
                          const F& fn) {
     sage::lang::ApiEntry e = api_detail::Describe<F>(module ? module : "", name);
-    if (module && *module) e.Aliases.push_back(std::string(module) + "." + name);
+    if (module && HasShortModuleName(module)) e.Aliases.push_back(std::string(module) + "." + name);
     if (legacy) e.Aliases.push_back(legacy);
     const std::string qualified = module && *module ? std::string("sage.") + module + "." + name : name;
     if (ApiInvoker inv = api_detail::MakeInvoker(fn, qualified)) bindings.Set(qualified, std::move(inv), e.Aliases);

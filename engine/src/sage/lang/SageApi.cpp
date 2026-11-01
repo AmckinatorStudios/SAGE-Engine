@@ -1,8 +1,13 @@
 #include "sage/lang/SageApi.h"
 
 #include <algorithm>
+#include <deque>
+#include <memory>
+#include <mutex>
 #include <set>
 #include <unordered_map>
+
+#include "sage/lang/ApiRegistry.h"
 
 namespace sage::lang {
 namespace {
@@ -35,19 +40,101 @@ const Index& TheIndex() {
     return idx;
 }
 
+// ЖИВОЙ КАТАЛОГ (ApiRegistry) — вторая ступень после таблицы: в нём функции,
+// которых таблица знать не может, — модули игры и плагинов
+// (RegisterApiFunction), зарегистрированные уже после сборки движка. Без него
+// проверка называла бы их «неизвестным именем».
+struct Owned {
+    std::string Name, Params, Ret;
+    ApiFunction View{};
+};
+struct Live {
+    std::mutex M;
+    uint64_t Version = ~0ull;
+    std::unordered_map<std::string, const ApiFunction*> Functions;
+    std::set<std::string, std::less<>> Modules, Globals;
+    std::vector<std::string> GlobalList;
+    std::deque<Owned> Storage;   // указатели отданы наружу — записи не двигаются
+};
+
+Live& TheLive() {
+    static Live live;
+    return live;
+}
+
+void AddLive(Live& l, const std::string& name, const ApiEntry& e) {
+    std::string params;
+    for (size_t i = 0; i < e.Params.size(); ++i) {
+        if (i) params += ",";
+        const std::string pname = e.Params[i].Name.empty() ? "arg" + std::to_string(i + 1) : e.Params[i].Name;
+        params += pname + (e.Params[i].Optional ? "?:" : ":") + e.Params[i].Type;
+    }
+    if (e.Variadic || e.Unknown) params += params.empty() ? "..." : ",...";
+    Owned& o = l.Storage.emplace_back();
+    o.Name = name;
+    o.Params = params;
+    o.Ret = e.Returns.empty() ? "nil" : e.Returns.front();
+    o.View = {o.Name.c_str(), o.Params.c_str(), o.Ret.c_str()};
+    l.Functions[name] = &o.View;
+    for (size_t dot = name.find('.'); dot != std::string::npos; dot = name.find('.', dot + 1))
+        l.Modules.insert(name.substr(0, dot));
+    const size_t dot = name.find('.');
+    l.Globals.insert(dot == std::string::npos ? name : name.substr(0, dot));
+}
+
+// Пересобрать живую выборку, если каталог дописан. Под замком: проверку
+// зовут и из фоновой сборки скриптов.
+Live& Refreshed() {
+    Live& l = TheLive();
+    const uint64_t version = ApiRegistry::Instance().Version();
+    if (l.Version == version) return l;
+    l.Functions.clear();
+    l.Modules.clear();
+    l.Globals.clear();
+    for (const ApiEntry& e : ApiRegistry::Instance().All()) {
+        AddLive(l, e.Qualified, e);
+        for (const std::string& a : e.Aliases) AddLive(l, a, e);
+    }
+    std::set<std::string, std::less<>> all = TheIndex().Globals;
+    all.insert(l.Globals.begin(), l.Globals.end());
+    l.GlobalList.assign(all.begin(), all.end());
+    l.Version = version;
+    return l;
+}
+
 } // namespace
 
 const ApiFunction* FindApiFunction(std::string_view dotted) {
     const auto& f = TheIndex().Functions;
     auto it = f.find(dotted);
-    return it == f.end() ? nullptr : it->second;
+    if (it != f.end()) return it->second;
+    Live& l = TheLive();
+    std::lock_guard<std::mutex> lock(l.M);
+    Refreshed();
+    auto lit = l.Functions.find(std::string(dotted));
+    return lit == l.Functions.end() ? nullptr : lit->second;
 }
 
-bool IsApiModule(std::string_view dotted) { return TheIndex().Modules.count(dotted) > 0; }
+bool IsApiModule(std::string_view dotted) {
+    if (TheIndex().Modules.count(dotted) > 0) return true;
+    Live& l = TheLive();
+    std::lock_guard<std::mutex> lock(l.M);
+    return Refreshed().Modules.count(dotted) > 0;
+}
 
-bool IsKnownGlobal(std::string_view name) { return TheIndex().Globals.count(name) > 0; }
+bool IsKnownGlobal(std::string_view name) {
+    if (TheIndex().Globals.count(name) > 0) return true;
+    Live& l = TheLive();
+    std::lock_guard<std::mutex> lock(l.M);
+    return Refreshed().Globals.count(name) > 0;
+}
 
-const std::vector<std::string>& KnownGlobals() { return TheIndex().GlobalList; }
+const std::vector<std::string>& KnownGlobals() {
+    Live& l = TheLive();
+    std::lock_guard<std::mutex> lock(l.M);
+    const std::vector<std::string>& list = Refreshed().GlobalList;
+    return list.empty() ? TheIndex().GlobalList : list;
+}
 
 std::vector<const ApiFunction*> AllApiFunctions() {
     std::vector<const ApiFunction*> out;

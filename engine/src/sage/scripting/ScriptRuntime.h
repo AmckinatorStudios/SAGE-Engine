@@ -156,6 +156,10 @@ public:
     void SetCallBudget(double seconds) {
         for (auto& b : m_backends) b->SetCallBudget(seconds);
     }
+    // Предел памяти каждого языка, байты (0 — без предела).
+    void SetMemoryLimit(size_t bytes) {
+        for (auto& b : m_backends) b->SetMemoryLimit(bytes);
+    }
 
 private:
     void StartScript(LiveScript& live);
