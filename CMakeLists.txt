@@ -207,6 +207,20 @@ FetchContent_Declare(
   SOURCE_SUBDIR do-not-add-to-build
 )
 FetchContent_MakeAvailable(sol2_src)
+# В sol2 3.3 optional<T&>::emplace зовёт несуществующий construct. GCC до 15 и
+# старый clang такое тело шаблона пропускали, GCC 15 — только с флагом ниже, а
+# clang 17 из Xcode 16 (раннер macos-15) останавливает на нём сборку КАЖДОГО
+# файла со sol2, и флага-обхода у него нет. Ссылку optional хранит указателем,
+# поэтому emplace — просто взять адрес; правка повторный запуск переживает.
+set(_sol_optional "${sol2_src_SOURCE_DIR}/include/sol/optional_implementation.hpp")
+file(READ "${_sol_optional}" _sol_text)
+string(REPLACE
+    "T& emplace(Args&&... args) noexcept {\n\t\t\tstatic_assert(std::is_constructible<T, Args&&...>::value, \"T must be constructible with Args\");\n\n\t\t\t*this = nullopt;\n\t\t\tthis->construct(std::forward<Args>(args)...);\n"
+    "T& emplace(Args&&... args) noexcept {\n\t\t\tstatic_assert(std::is_constructible<T, Args&&...>::value, \"T must be constructible with Args\");\n\n\t\t\t*this = nullopt;\n\t\t\tm_value = std::addressof(std::forward<Args>(args)...);\n\t\t\treturn *m_value;\n"
+    _sol_fixed "${_sol_text}")
+if (NOT _sol_fixed STREQUAL _sol_text)
+    file(WRITE "${_sol_optional}" "${_sol_fixed}")
+endif()
 add_library(sol2 INTERFACE)
 target_include_directories(sol2 INTERFACE ${sol2_src_SOURCE_DIR}/include)
 target_link_libraries(sol2 INTERFACE lua54)

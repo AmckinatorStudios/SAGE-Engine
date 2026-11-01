@@ -61,7 +61,7 @@ cmake --build build-windows -j"$(nproc)"                          # кросс-�
 
 Обе платформы обязательны всегда (Linux `build/`, Windows `build-windows/`
 mingw) — половина поломок Windows-сборки на Linux не видна. macOS собирается
-только в CI (`.github/workflows/macos.yml`, раннер macos-14): локально его не
+только в CI (`.github/workflows/macos.yml`, раннер macos-15): локально его не
 проверить, поэтому после пуша в `main` ждать и его — релиз `macos-latest`
 обязан обновиться так же, как `windows-latest`.
 
