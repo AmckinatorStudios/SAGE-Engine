@@ -9,6 +9,7 @@
 #include "sage/physics/PhysicsScene.h"
 #include "sage/ai/World.h"
 #include "sage/scripting/LuaHandlerStore.h"
+#include "sage/scripting/ScriptApi.h"
 
 namespace sage::net { class NetworkSystem; }
 #include <sol/sol.hpp>
@@ -252,6 +253,12 @@ public:
     // свою собственную API-функцию/тип в дополнение к базовой
     sol::state& Lua() { return m_lua; }
 
+    // Универсальные вызовы API этого состояния (sage/scripting/ScriptApi.h):
+    // через них функцию движка зовёт язык, у которого нет своей привязки,
+    // — внешний процесс, свой язык игры. Имена — как в каталоге API.
+    sage::scripting::ApiBindings& Api() { return m_api; }
+    const sage::scripting::ApiBindings& Api() const { return m_api; }
+
     // Короткие имена модулей в глобальных: game.Quit() == sage.game.Quit().
     // Псевдоним, а не копия; занятое имя не трогается. Подробности — в .cpp.
     // Открыт, потому что модули, доустановленные позже (их зависимость дал
@@ -394,8 +401,12 @@ public:
     float FrameTimeScale() const { return m_paused ? 0.0f : m_timeScale; }
 
 private:
+    // Одна регистрация — три потребителя: Lua (напрямую, без лишних слоёв в
+    // кадре), каталог API (типы выводит компилятор из сигнатуры) и
+    // универсальный вызов для других языков (если все типы переносимы).
     template <typename Fn>
     void Bind(const char* module, const char* name, const char* legacy, Fn&& fn) {
+        sage::scripting::RecordBoundFunction(m_api, module, name, legacy, fn);
         sol::table table = Module(module);
         table.set_function(name, std::forward<Fn>(fn));
         if (legacy) m_lua[legacy] = table[name];
@@ -490,6 +501,9 @@ private:
     const Texture* GetOrLoadBillboardTexture(const std::string& path);
 
     sol::state m_lua;
+    sage::scripting::ApiBindings m_api;
+    // Переносимые функции (RegisterApiFunction) — в Lua и вызыватели.
+    void BindPortableApi();
     std::vector<ScriptInstance> m_instances;
     std::vector<ScheduledCall> m_scheduled;
     // ЧЕРЕЗ УКАЗАТЕЛЬ, а не по значению: см. UpdateCoroutines в .cpp.
