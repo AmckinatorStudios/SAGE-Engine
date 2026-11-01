@@ -10,6 +10,7 @@
 #include "../AssetSlot.h"
 #include "../EditorHost.h"
 #include "../Localization.h"
+#include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Pack.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Texture.h"
@@ -38,12 +39,13 @@ void SpriteSheetPanel::Load(const std::string& path) {
     // Пиксели — для нарезки по островам и пропуска пустых клеток.
     int ch = 0;
     stbi_set_flip_vertically_on_load_thread(false);
-    if (unsigned char* data = sage::assets::vfs::LoadImage(path, &m_w, &m_h, &ch, 4)) {
+    m_disk = sage::AssetDatabase::Instance().LocatePath(path);
+    if (unsigned char* data = sage::assets::vfs::LoadImage(m_disk, &m_w, &m_h, &ch, 4)) {
         m_pixels.assign(data, data + (size_t)m_w * m_h * 4);
         stbi_image_free(data);
     }
     std::string err;
-    if (SpriteSheet::LoadFile(SpriteSheet::SidecarPath(path), m_sheet, err))
+    if (SpriteSheet::LoadFile(SpriteSheet::SidecarPath(m_disk), m_sheet, err))
         m_status = T("Loaded the sheet next to the picture");
     else
         m_status.clear();
@@ -102,7 +104,7 @@ void SpriteSheetPanel::Draw(EditorHost& host, bool* open) {
     ImGui::SameLine();
     if (ImGui::Button(m_dirty ? T("Save *") : T("Save"))) {
         std::string err;
-        if (m_sheet.SaveFile(SpriteSheet::SidecarPath(m_path), err)) {
+        if (m_sheet.SaveFile(SpriteSheet::SidecarPath(m_disk), err)) {
             m_status = T("Saved next to the picture");
             m_dirty = false;
         } else {

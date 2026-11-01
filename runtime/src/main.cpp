@@ -62,6 +62,11 @@ sage::Application* sage::CreateApplication(int argc, char** argv) {
     // рядом с исполняемым файлом.
     else if (fs::exists(sage::ExecutableDir() / "project" / "project.sageproj", ec))
         projectDir = sage::ExecutableDir() / "project";
+    // Проект рядом с плеером или в единственной подпапке — в текущей папке, затем
+    // у самого исполняемого файла. Архив «плеер + папка игры», запущенный
+    // двойным щелчком по плееру, иначе встречал «Здесь нет игры».
+    else if (const fs::path near = sage::FindProjectNear(fs::current_path(ec)); !near.empty()) projectDir = near;
+    else if (const fs::path near = sage::FindProjectNear(sage::ExecutableDir()); !near.empty()) projectDir = near;
     else projectDir = ".";
     projectDir = fs::absolute(projectDir, ec);
     // Указали САМ файл проекта, а не папку — берём папку, в которой он лежит.

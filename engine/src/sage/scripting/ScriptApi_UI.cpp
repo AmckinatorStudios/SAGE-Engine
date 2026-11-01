@@ -11,6 +11,7 @@
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/SpriteSheet.h"
+#include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Pack.h"
 #include <stb_image.h>
 #include "sage/scene/SceneLegacyUI.h"
@@ -202,11 +203,17 @@ struct SheetRef {
     std::string Path;
     sage::ui::SpriteSheet Sheet;
 };
+// Описание листа — рядом с НАСТОЯЩИМ файлом картинки (путь проекта ->
+// путь на диске): и прочитать, и записать его надо там, где лежит картинка.
+std::string SheetSidecar(const std::string& path) {
+    return sage::ui::SpriteSheet::SidecarPath(sage::AssetDatabase::Instance().LocatePath(path));
+}
 // Пиксели картинки листа (строки сверху вниз) — для нарезки.
 std::vector<unsigned char> SheetPixels(const std::string& path, int& w, int& h) {
     int ch = 0;
     stbi_set_flip_vertically_on_load_thread(false);
-    unsigned char* data = sage::assets::vfs::LoadImage(path, &w, &h, &ch, 4);
+    unsigned char* data =
+        sage::assets::vfs::LoadImage(sage::AssetDatabase::Instance().LocatePath(path), &w, &h, &ch, 4);
     if (!data) throw std::runtime_error("sprite_sheet: не удалось прочитать картинку '" + path + "'");
     std::vector<unsigned char> px(data, data + (size_t)w * h * 4);
     stbi_image_free(data);
@@ -665,7 +672,7 @@ void ScriptEngine::RegisterUIApi() {
         },
         "Save", [](const SheetRef& r) {
             std::string e;
-            if (!r.Sheet.SaveFile(sage::ui::SpriteSheet::SidecarPath(r.Path), e))
+            if (!r.Sheet.SaveFile(SheetSidecar(r.Path), e))
                 throw std::runtime_error("sprite_sheet.save: " + e);
             return true;
         });
@@ -673,7 +680,7 @@ void ScriptEngine::RegisterUIApi() {
         SheetRef r;
         r.Path = path;
         std::string err;
-        sage::ui::SpriteSheet::LoadFile(sage::ui::SpriteSheet::SidecarPath(path), r.Sheet, err);
+        sage::ui::SpriteSheet::LoadFile(SheetSidecar(path), r.Sheet, err);
         return r;
     });
     // Стиль SAGE — методы через точку: тонкая обёртка над объектом C++.
@@ -701,7 +708,7 @@ end
         if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return false;
         sage::ui::SpriteSheet sheet;
         std::string err;
-        if (!sage::ui::SpriteSheet::LoadFile(sage::ui::SpriteSheet::SidecarPath(path), sheet, err)) return false;
+        if (!sage::ui::SpriteSheet::LoadFile(SheetSidecar(path), sheet, err)) return false;
         const sage::ui::SpriteRegion* r = sheet.Find(name);
         if (!r) return false;
         sage::ui::Image& im = obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity());

@@ -8,6 +8,7 @@
 
 #include <stb_image.h>
 
+#include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Pack.h"
 #include "sage/assets/format/MeshFormat.h"
 #include "sage/core/Noise.h"
@@ -520,7 +521,8 @@ void ScriptEngine::RegisterProceduralApi() {
             const std::string path = source.as<std::string>();
             int ch = 0;
             stbi_set_flip_vertically_on_load_thread(true);
-            unsigned char* data = sage::assets::vfs::LoadImage(path, &W, &H, &ch, 4);
+            unsigned char* data =
+                sage::assets::vfs::LoadImage(sage::AssetDatabase::Instance().LocatePath(path), &W, &H, &ch, 4);
             if (!data) throw std::runtime_error("mesh.Extrude: не удалось прочитать '" + path + "'");
             loaded.assign(data, data + (size_t)W * H * 4);
             stbi_image_free(data);
@@ -634,7 +636,10 @@ void ScriptEngine::RegisterProceduralApi() {
     Bind("texture", "Load", nullptr, [](const std::string& path, sol::optional<std::string> name) {
         int w = 0, h = 0, ch = 0;
         stbi_set_flip_vertically_on_load_thread(true);
-        unsigned char* data = sage::assets::vfs::LoadImage(path, &w, &h, &ch, 4);
+        // Путь проекта ("assets/...") — как у любой текстуры движка: в
+        // редакторе текущий каталог процесса — не папка проекта.
+        unsigned char* data = sage::assets::vfs::LoadImage(sage::AssetDatabase::Instance().LocatePath(path), &w, &h,
+                                                           &ch, 4);
         if (!data) {
             // Причины может не быть вовсе (файла нет — до stb дело не дошло):
             // nullptr в строку — это падение процесса, а не ошибка скрипта.

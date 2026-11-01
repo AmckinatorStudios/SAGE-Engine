@@ -437,3 +437,34 @@ TEST(mesh_extrude_image_builds_faces_and_only_outer_sides) {
     // Один пиксель: лицо, оборот и 4 бока.
     CHECK_EQ(se.Lua()["tris"].get<int>(), 12);
 }
+
+// Путь проекта ("assets/...") читается из папки ПРОЕКТА, а не из текущего
+// каталога процесса. В редакторе это разные папки — и texture.load,
+// extrude и лист спрайтов не находили ни одной картинки игры.
+#include "sage/assets/AssetDatabase.h"
+TEST(script_images_resolve_project_paths) {
+    namespace fs = std::filesystem;
+    const fs::path project = fs::temp_directory_path() / "sage_project_paths";
+    fs::create_directories(project / "assets");
+    const unsigned char px[4] = {10, 20, 30, 255};
+    CHECK_TRUE(stbi_write_png((project / "assets" / "pic.png").string().c_str(), 1, 1, 4, px, 4) != 0);
+    sage::AssetDatabase::Instance().ScanProject(project.string());
+    ScriptEngine se;
+    Scene scene("P");
+    se.BindScene(scene);
+    se.Lua().script(R"LUA(
+        ok_tex = pcall(function() return texture.load("assets/pic.png") end)
+        ok_ext = pcall(function() return extrude("assets/pic.png") end)
+        s = sprite_sheet("assets/pic.png")
+        ok_auto = pcall(function() return s.auto() end)
+        s.save()
+    )LUA");
+    sol::state& L = se.Lua();
+    CHECK_TRUE(L["ok_tex"].get<bool>());
+    CHECK_TRUE(L["ok_ext"].get<bool>());
+    CHECK_TRUE(L["ok_auto"].get<bool>());
+    // Описание листа легло рядом с картинкой, а не в текущий каталог.
+    CHECK_TRUE(fs::exists(project / "assets" / "pic.png.sagesheet"));
+    sage::AssetDatabase::Instance().ScanProject("");
+    fs::remove_all(project);
+}

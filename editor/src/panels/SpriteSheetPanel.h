@@ -28,6 +28,7 @@ private:
     void DrawRegion();
 
     std::string m_path;
+    std::string m_disk;                    // настоящий путь картинки на диске
     std::shared_ptr<Texture> m_tex;
     std::vector<unsigned char> m_pixels;   // RGBA, строки сверху вниз
     int m_w = 0, m_h = 0;
