@@ -2,7 +2,9 @@
 #include <memory>
 #include <string>
 #include <glm/glm.hpp>
+#include <unordered_map>
 #include "sage/rhi/Resources.h"
+#include "sage/render/Material.h"
 
 // Пути к шейдеру векторного debug-текста (stb_easy_font) — используется и
 // UIRenderer, и DebugOverlay, поэтому вынесено в одно место вместо двух
@@ -44,6 +46,17 @@ public:
     void SetInt(const std::string& name, int value) const { m_program->SetInt(name, value); }
     void SetIntArray(const std::string& name, const int* v, int count) const { m_program->SetIntArray(name, v, count); }
     void SetFloatArray(const std::string& name, const float* v, int count) const { m_program->SetFloatArray(name, v, count); }
+
+    // Текст файла шейдера тем же путём, каким его читает сам Shader: пакет
+    // игры, затем диск, затем папка программы. Бросает, если файла нет.
+    static std::string LoadText(const std::string& path) { return ReadFile(path); }
+
+    // Умолчания параметров из подсказок в тексте шейдера
+    // («uniform float uWaveHeight; // 0.35 [0, 2]», см. ShaderParams.h).
+    // Заливаются ДО параметров материала: шейдер, которому в .sagemat ещё не
+    // дали значений, получает задуманное автором, а не нули (нулевая длина
+    // волны — деление на ноль, нулевой цвет — чёрный объект).
+    std::unordered_map<std::string, ShaderParam> Defaults;
 
 private:
     static std::string ReadFile(const std::string& path);

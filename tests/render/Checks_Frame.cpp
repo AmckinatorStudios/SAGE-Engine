@@ -1536,6 +1536,16 @@ void TestEveryEffectToggles(FrameRenderer& r, Scene& scene) {
                 if (e.Kind == id)
                     if (sage::render::PostValue* v = e.Find("shadows")) { v->V[0] = 2.0f; v->V[2] = 0.3f; }
         }
+        // Свой шейдер экрана — настоящим файлом: без него звену рисовать нечего.
+        if (id == "shader") {
+            const std::filesystem::path frag = std::filesystem::temp_directory_path() / "sage_render_invert.frag";
+            std::ofstream(frag) << "#version 330 core\nin vec2 vUV;\nout vec4 FragColor;\n"
+                                   "uniform sampler2D uScene;\nuniform float uStrength;\n"
+                                   "void main() { vec3 c = texture(uScene, vUV).rgb;\n"
+                                   "  FragColor = vec4(mix(c, 1.0 - c, uStrength), 1.0); }\n";
+            for (sage::render::PostEffect& e : on.Effects)
+                if (e.Kind == id) e.Source = frag.string();
+        }
         if (id == "dof") {
             SetParam(on, id.c_str(), "focus", 1.0f);
             SetParam(on, id.c_str(), "focalLength", 200.0f);

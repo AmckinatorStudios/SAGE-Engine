@@ -112,6 +112,15 @@ void DrawParam(EditorHost* host, sage::render::PostEffect& effect,
 
 } // namespace
 
+namespace {
+PostSourceSlotFn& SourceSlot() {
+    static PostSourceSlotFn fn;
+    return fn;
+}
+} // namespace
+
+void SetPostSourceSlot(PostSourceSlotFn fn) { SourceSlot() = std::move(fn); }
+
 bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const char* idScope) {
     using namespace sage::render;
     bool changed = false;
@@ -192,6 +201,14 @@ bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const
             if (on && index >= 0) {
                 ImGui::Indent();
                 PostEffect& effect = chain.Effects[(size_t)index];
+                // Звено со своим шейдером: сначала — какой файл.
+                if (kind->Id == "shader") {
+                    if (SourceSlot()) {
+                        if (SourceSlot()(host, effect)) changed = true;
+                    } else {
+                        ImGui::TextDisabled("%s", effect.Source.empty() ? T("No shader") : effect.Source.c_str());
+                    }
+                }
                 for (const PostParamDesc& param : kind->Params)
                     DrawParam(host, effect, param, changed);
                 ImGui::Unindent();

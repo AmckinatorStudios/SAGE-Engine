@@ -7,6 +7,7 @@
 #include "sage/assets/Quarantine.h"
 #include "sage/assets/import/ModelProbe.h"
 #include "sage/render/AlphaBleed.h"
+#include "sage/render/EffectChain.h"
 #include "sage/render/SkinnedModel.h"
 
 #include <stb_image.h> // реализация STB_IMAGE_IMPLEMENTATION живёт в Texture.cpp
@@ -552,9 +553,50 @@ std::shared_ptr<Shader> ResourceManager::GetShader(const std::string& vertexPath
     return m_shaders[key].Program;
 }
 
+namespace {
+// Шейдер экрана: встроенный полноэкранный вершинный + фрагментный файл.
+Shader BuildScreenShader(const std::string& fragPath) {
+    return Shader::FromSource(sage::render::FullscreenVertexSource(), Shader::LoadText(fragPath), fragPath);
+}
+} // namespace
+
+std::shared_ptr<Shader> ResourceManager::GetScreenShader(const std::string& fragmentPath) {
+    if (fragmentPath.empty()) return nullptr;
+    const std::string key = "screen|" + CacheKey(fragmentPath);
+    auto it = m_shaders.find(key);
+    if (it != m_shaders.end()) return it->second.Program;
+    ShaderEntry entry;
+    entry.Screen = true;
+    entry.FragPath = Locate(fragmentPath);
+    entry.FragStamp = FileStamp(entry.FragPath);
+    try {
+        entry.Program = std::make_shared<Shader>(BuildScreenShader(entry.FragPath));
+        LOG_INFO("Resources") << "Шейдер экрана собран: " << fragmentPath;
+    } catch (const std::exception& e) {
+        LOG_ERROR("Resources") << "Шейдер экрана не собрался (" << fragmentPath << "): " << e.what();
+    }
+    m_shaders[key] = entry;
+    return m_shaders[key].Program;
+}
+
 int ResourceManager::ReloadChangedShaders() {
     int reloaded = 0;
     for (auto& [key, entry] : m_shaders) {
+        if (entry.Screen) {
+            const long long f = FileStamp(entry.FragPath);
+            if (f == entry.FragStamp) continue;
+            entry.FragStamp = f;
+            try {
+                Shader fresh = BuildScreenShader(entry.FragPath);
+                if (entry.Program) *entry.Program = std::move(fresh);
+                else entry.Program = std::make_shared<Shader>(std::move(fresh));
+                ++reloaded;
+                LOG_INFO("Resources") << "Шейдер экрана перечитан: " << key;
+            } catch (const std::exception& e) {
+                LOG_WARN("Resources") << "Правка шейдера экрана не собралась, оставляю прежний: " << e.what();
+            }
+            continue;
+        }
         long long v = FileStamp(entry.VertPath);
         long long f = FileStamp(entry.FragPath);
         if (v == entry.VertStamp && f == entry.FragStamp) continue;

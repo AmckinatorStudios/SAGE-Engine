@@ -1,7 +1,11 @@
 #include "sage/core/Problems.h"
 #include "sage/app/CoreSystems.h"
 #include "EditorLayer.h"
+#include "CreateAssetDialog.h"
 #include "LuaPlugins.h"
+#include "ShaderTemplates.h"
+#include "sage/render/PostProcessComponent.h"
+#include "sage/render/ResourceManager.h"
 #include "PluginsWindow.h"
 #include "sage/scene/Signals.h"
 #include "sage/audio/AudioEngine.h"
@@ -123,7 +127,7 @@ void EditorLayer::ApplyStartupHooks() {
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TWEEN",
             "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
             "SAGE_EDITOR_SHOW_CONSOLE",  "SAGE_EDITOR_SHOW_PROBLEMS",
-            "SAGE_EDITOR_SHOW_PLUGINS",
+            "SAGE_EDITOR_SHOW_PLUGINS",   "SAGE_EDITOR_SHADER_DEMO",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -307,6 +311,42 @@ void EditorLayer::ApplyStartupHooks() {
     // которого раньше не было выхода. Проверять его иначе нечем: кликать по
     // крестикам в CI некому, а именно на этом кадре должна быть видна подсказка
     // «Все панели закрыты» с кнопкой возврата.
+    // Шейдеры из шаблонов вживую — для скриншот-проверки (окно «Создать →
+    // Шейдер» и правку параметров иначе не снять: мыши у прогона нет).
+    // water — плоскость воды выделена; material — её материал в инспекторе
+    // (параметры шейдера ползунками); screen — та
+    // же сцена со звеном «Свой шейдер» на камере; dialog — окно создания.
+    if (const std::string demo = sage::EnvString("SAGE_EDITOR_SHADER_DEMO"); !demo.empty() && m_project.Loaded()) {
+        namespace st = sage::editor::shadertemplates;
+        fs::path made;
+        std::string err;
+        st::Create(*st::Find("water"), "Water", m_project.Dir(), m_project.AssetsDir(), made, err);
+        st::Create(*st::Find("screen"), "PixelCRT", m_project.Dir(), m_project.AssetsDir(), made, err);
+        sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
+        GameObject water = CreatePrimitiveEntity("Water", MeshRef::Type::Plane);
+        water.GetTransform().Position = glm::vec3(0.0f, 0.05f, 0.0f);
+        water.GetTransform().Scale = glm::vec3(60.0f, 1.0f, 60.0f);
+        const std::string mat = "assets/materials/Water.sagemat";
+        AssignMaterial(m_scene->Registry().get<MeshRendererComponent>(water.Entity()), mat,
+                       ResourceManager::Instance().GetMaterial(mat));
+        GameObject selected = water;
+        if (demo == "screen") {
+            auto cams = m_scene->Registry().view<CameraComponent>();
+            entt::entity cam = cams.empty() ? m_scene->CreateEmptyObject("Camera").Entity() : cams.front();
+            if (!m_scene->Registry().all_of<CameraComponent>(cam)) m_scene->Registry().emplace<CameraComponent>(cam);
+            auto& ppc = m_scene->Registry().get_or_emplace<sage::render::PostProcessComponent>(cam);
+            if (ppc.Chain.Effects.empty()) ppc.Chain = sage::render::PostChain::Default();
+            sage::render::AddPostEffect(ppc.Chain, "shader").Source = "assets/shaders/PixelCRT.frag";
+            selected = GameObject(&m_scene->Registry(), cam);
+        }
+        // Окно — через очередь диалогов: открытое сразу закрыл бы перевод
+        // фокуса на инспектор в первых кадрах.
+        if (demo == "dialog") m_pendingDialog = "create-shader";
+        m_selection.SetPrimary(selected.Id());
+        // material — в инспекторе сам материал воды: параметры шейдера.
+        if (demo == "material") m_assets.Select((m_project.Dir() / mat).string());
+        m_focusInspectorFrames = 3;
+    }
     if (std::getenv("SAGE_EDITOR_CLOSE_PANELS")) {
         m_headlessProject = true;
         m_panels[EditorPanel::Hierarchy] = m_panels[EditorPanel::Inspector] = m_panels[EditorPanel::Environment] = false;

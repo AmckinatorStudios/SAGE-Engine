@@ -111,6 +111,10 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         if (!g.Transparent) setCull(g.Mat ? (int)g.Mat->Render.Cull : (int)CullFaces::Back);
         sh.SetFloat("uTime", m_time);
         bindLightmap(sh, g.LmPage);
+        // Умолчания из подсказок шейдера — первыми: параметр, которого нет в
+        // материале, получает задуманное значение, а не оставшееся от прошлой
+        // пачки или ноль.
+        UploadParams(sh, sh.Defaults);
         if (g.Mat) {
             // Линейный, как у штатного пути (ShadingAlbedo): свой шейдер
             // получает тот же контракт, что и встроенный.

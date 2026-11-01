@@ -93,6 +93,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/RenderPipeline.cpp
     src/sage/render/ShaderLibrary.cpp
     src/sage/render/ShaderMaterial.cpp
+    src/sage/render/ShaderParams.cpp
     src/sage/render/StandardPipeline.cpp
     src/sage/render/LodGroup.cpp
     src/sage/render/MeshSimplify.cpp

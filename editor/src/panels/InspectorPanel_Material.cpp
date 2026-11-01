@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "ShaderParamsUi.h"
 
 #include "EditorHost.h"
 #include "sage/core/Log.h"
@@ -220,6 +221,26 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
         ImGui::Spacing();
     }
 
+    // Свой шейдер материала: пара .vert/.frag (см. docs/custom_shaders.md).
+    // Правка файлов подхватывается на лету — ReloadChangedShaders в EditorLayer.
+    auto drawCustomShader = [&] {
+        ImGui::SeparatorText(T("Custom Shader"));
+        // Шейдер — такой же ассет проекта, как текстура, и выбирается так же:
+        // слотом с перетаскиванием (см. AssetSlot.h). Поле ввода здесь требовало
+        // помнить путь и нажать Enter, иначе набранное молча пропадало.
+        DrawShaderSlot(host, T("Vertex"), material->VertexShaderPath, material);
+        DrawShaderSlot(host, T("Fragment"), material->FragmentShaderPath, material);
+        // Параметры — из подсказок в тексте шейдера (ShaderParamsUi.h): ползунки
+        // и пипетки, а не «правьте в файле .sagemat».
+        sage::editor::shaderparamsui::Draw(host, material);
+    };
+    // У материала со своим шейдером главное — ЕГО параметры: раздел сразу под
+    // превью, а не под шестью слотами текстур, которые шейдер может и не читать.
+    // Решается по началу кадра: слот, очищенный в этом кадре, не переносит
+    // раздел посреди отрисовки.
+    const bool shaderFirst = material->HasCustomShader();
+    if (shaderFirst) drawCustomShader();
+
     // Базовый цвет — ВМЕСТЕ с непрозрачностью: у материала это два поля файла
     // (Albedo и Opacity), но смотрят на них как на один цвет «какой он и
     // насколько просвечивает». Ползунок «Непрозрачность» ниже правит то же число.
@@ -357,17 +378,7 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     ImGui::SliderFloat(T("Opacity"), &material->Opacity, 0.0f, 1.0f);
     sage::editor::ResetField(&host, *material, material->Opacity);
 
-    // Свой шейдер материала: пара .vert/.frag (см. docs/custom_shaders.md).
-    // Правка файлов подхватывается на лету — ReloadChangedShaders в EditorLayer.
-    ImGui::SeparatorText(T("Custom Shader"));
-    // Шейдер — такой же ассет проекта, как текстура, и выбирается так же:
-    // слотом с перетаскиванием (см. AssetSlot.h). Поле ввода здесь требовало
-    // помнить путь и нажать Enter, иначе набранное молча пропадало.
-    DrawShaderSlot(host, T("Vertex"), material->VertexShaderPath, material);
-    DrawShaderSlot(host, T("Fragment"), material->FragmentShaderPath, material);
-    if (material->HasCustomShader() && !material->Params.empty()) {
-        ImGui::TextDisabled(T("Params: %d (edit in the .sagemat file)"), (int)material->Params.size());
-    }
+    if (!shaderFirst) drawCustomShader();
 
     // Свойства рендера рисуются ПО ТАБЛИЦЕ (MaterialRenderFields). Новая
     // возможность рендера появляется в инспекторе сама — от неё требуется поле

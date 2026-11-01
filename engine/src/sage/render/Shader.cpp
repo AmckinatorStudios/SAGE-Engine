@@ -5,6 +5,7 @@
 #include "sage/core/Paths.h"
 #include "sage/assets/Pack.h"
 #include "sage/rhi/GraphicsDevice.h"
+#include "sage/render/ShaderParams.h"
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
@@ -68,6 +69,15 @@ std::string ExpandEngineIncludes(std::string src) {
 }
 } // namespace
 
+namespace {
+// Умолчания из подсказок обоих исходников; первое объявление главное.
+void CollectDefaults(Shader& sh, const std::string& v, const std::string& f) {
+    for (const std::string* src : {&v, &f})
+        for (const sage::render::ShaderUniformInfo& u : sage::render::ParseShaderUniforms(*src))
+            sh.Defaults.emplace(u.Name, ShaderParam{u.Type, u.Default});
+}
+} // namespace
+
 Shader::Shader(const std::string& vertexPath, const std::string& fragmentPath) {
     std::string vSrc = ExpandEngineIncludes(ReadFile(vertexPath));
     std::string fSrc = ExpandEngineIncludes(ReadFile(fragmentPath));
@@ -75,6 +85,7 @@ Shader::Shader(const std::string& vertexPath, const std::string& fragmentPath) {
     // Компиляция/линковка — забота бэкенда; при ошибке он бросает исключение
     // с логом компилятора (текст видно и в консоли, и в панели Console редактора).
     m_program = sage::rhi::GraphicsDevice::Get().CreateShaderProgram(vSrc, fSrc);
+    CollectDefaults(*this, vSrc, fSrc);
 
     LOG_DEBUG("Shader") << "Скомпилирован: " << vertexPath << " + " << fragmentPath;
 }
@@ -82,6 +93,7 @@ Shader::Shader(const std::string& vertexPath, const std::string& fragmentPath) {
 Shader::Shader(FromSourceTag, const std::string& vertexSrc, const std::string& fragmentSrc,
                const std::string& tag) {
     m_program = sage::rhi::GraphicsDevice::Get().CreateShaderProgram(vertexSrc, fragmentSrc);
+    CollectDefaults(*this, vertexSrc, fragmentSrc);
     LOG_DEBUG("Shader") << "Скомпилирован из исходников: " << tag;
 }
 
