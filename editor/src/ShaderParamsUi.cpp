@@ -45,7 +45,8 @@ const std::vector<ShaderUniformInfo>& UniformsOf(const std::string& path) {
         p.Stamp = stamp;
         p.Ok = true;
         try {
-            p.Uniforms = sage::render::ParseShaderUniforms(Shader::LoadText(located));
+            // Со своими включениями: параметры из общего файла проекта тоже видны.
+            p.Uniforms = sage::render::ParseShaderUniforms(Shader::LoadExpanded(located));
         } catch (const std::exception&) {
             p.Uniforms.clear();   // файла нет — об этом говорит сам слот шейдера
         }
@@ -64,17 +65,15 @@ int Components(ShaderParam::Type t) {
 
 } // namespace
 
-int Draw(EditorHost& host, const std::shared_ptr<Material>& material) {
+int Draw(EditorHost& host, const std::shared_ptr<Material>& material,
+         const std::function<void(std::string& target)>& browseTexture) {
     if (!material || !material->HasCustomShader()) return 0;
     // Оба файла: волна объявлена в вершинном, цвет — в пиксельном. Одно имя в
     // обоих — один параметр (юниформ общий для программы).
+    const std::vector<ShaderUniformInfo> merged = sage::render::MergeShaderUniforms(
+        {UniformsOf(material->VertexShaderPath), UniformsOf(material->FragmentShaderPath)});
     std::vector<const ShaderUniformInfo*> list;
-    for (const std::string* path : {&material->VertexShaderPath, &material->FragmentShaderPath})
-        for (const ShaderUniformInfo& u : UniformsOf(*path)) {
-            bool dup = false;
-            for (const ShaderUniformInfo* seen : list) dup = dup || seen->Name == u.Name;
-            if (!dup) list.push_back(&u);
-        }
+    for (const ShaderUniformInfo& u : merged) list.push_back(&u);
     if (list.empty()) {
         ImGui::TextDisabled("%s", T("The shader declares no parameters"));
         if (ImGui::IsItemHovered())
@@ -84,14 +83,35 @@ int Draw(EditorHost& host, const std::shared_ptr<Material>& material) {
         return 0;
     }
 
+    std::string header;
     for (const ShaderUniformInfo* u : list) {
+        // Группы — как их разложил автор шейдера («// @header …»).
+        if (u->Header != header) {
+            header = u->Header;
+            if (!header.empty()) ImGui::SeparatorText(header.c_str());
+        }
         ImGui::PushID(u->Name.c_str());
+        const std::string label = u->Label.empty() ? sage::render::UniformLabel(u->Name) : u->Label;
+        if (u->Texture) {
+            // Текстура — слотом, как любая картинка проекта (AssetSlot.h).
+            std::string& path = material->TextureParams[u->Name].Path;
+            ImGui::TextUnformatted(label.c_str());
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(T("Shader texture %s"), u->Name.c_str());
+            const assetslot::Result r = assetslot::Draw(host, "##tex", assetslot::Kind::Texture, path, nullptr);
+            if (r.Changed) {
+                host.PushUndoSnapshot();
+                path = r.Path;
+            }
+            if (r.BrowseRequested && browseTexture) browseTexture(path);
+            ImGui::PopID();
+            continue;
+        }
         auto it = material->Params.find(u->Name);
         // Не задан в материале — показываем умолчание шейдера (его же движок и
         // заливает); первая правка записывает значение в материал.
         ShaderParam value = it != material->Params.end() && it->second.Kind == u->Type
                                 ? it->second : ShaderParam{u->Type, u->Default};
-        const std::string label = u->Label.empty() ? sage::render::UniformLabel(u->Name) : u->Label;
         float* v = &value.Value.x;
         bool changed = false;
         const int n = Components(u->Type);
@@ -141,7 +161,6 @@ void InstallPostSourceSlot() {
             sage::editor::createasset::Request req;
             req.Kind = sage::editor::createasset::What::Shader;
             req.Name = "MyScreenEffect";
-            req.Template = "screen";
             req.ScreenOnly = true;
             sage::render::PostEffect* target = &effect;
             req.Done = [host, target](const fs::path& made) {

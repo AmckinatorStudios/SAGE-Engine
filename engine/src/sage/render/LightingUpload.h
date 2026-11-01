@@ -1,4 +1,5 @@
 #pragma once
+#include "sage/render/LightCookies.h"
 #include "sage/scene/Light.h"
 #include "sage/render/ShadowMap.h"
 #include "Shader.h"
@@ -24,6 +25,7 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
     // ставится всегда: иначе он остался бы на нулевом, вместе с albedo.
     shader.SetInt("uClustered", 0);
     shader.SetInt("uLightGrid", 7);   // sage::render::kLightClusterUnit
+    sage::render::LightCookies::Current().Upload(shader);
 
     shader.SetVec3("uSunDir", env.Sun.Direction);
     shader.SetVec3("uSunColor", env.Sun.Color);
@@ -43,6 +45,9 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
         // Место в атласе теней. Раздаётся покадрово (см. LocalShadowAtlas::
         // Prepare); -1 означает «тени у этого источника в этом кадре нет».
         shader.SetInt(prefix + "shadowSlot", light.ShadowSlot);
+        shader.SetInt(prefix + "cookie", sage::render::LightCookies::Current().SlotOf(light.Cookie));
+        shader.SetVec3(prefix + "forward", light.Forward);
+        shader.SetVec3(prefix + "right", light.Right);
     }
 
     // Прожекторы (spot): то же затухание, плюс направление конуса и косинусы
@@ -62,6 +67,8 @@ inline void UploadLighting(Shader& shader, const LightingEnvironment& env) {
         shader.SetFloat(prefix + "cosInner", light.CosInner());
         shader.SetFloat(prefix + "cosOuter", light.CosOuter());
         shader.SetInt(prefix + "shadowSlot", light.ShadowSlot);
+        shader.SetInt(prefix + "cookie", sage::render::LightCookies::Current().SlotOf(light.Cookie));
+        shader.SetVec3(prefix + "right", light.Right);
     }
 
     // Туман (атмосфера сцены) — применяется только в режиме полного освещения.

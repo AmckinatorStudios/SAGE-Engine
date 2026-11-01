@@ -80,7 +80,7 @@ add_executable(SageEditor WIN32
     src/EditorIcons.cpp
     src/AssetSlot.cpp
     src/CreateAssetDialog.cpp
-    src/ShaderTemplates.cpp
+    src/NewShader.cpp
     src/ShaderParamsUi.cpp
     src/LogicKinds.cpp
     src/LogicKindsBuiltin.cpp

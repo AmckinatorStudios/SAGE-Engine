@@ -84,7 +84,7 @@ std::vector<ShaderUniformInfo> ParseShaderUniforms(const std::string& source) {
     std::vector<ShaderUniformInfo> out;
     std::set<std::string> seen;
     std::istringstream in(source);
-    std::string line;
+    std::string line, header;
     while (std::getline(in, line)) {
         std::string code = line, comment;
         const size_t cpos = line.find("//");
@@ -93,6 +93,10 @@ std::vector<ShaderUniformInfo> ParseShaderUniforms(const std::string& source) {
             comment = Trim(line.substr(cpos + 2));
         }
         code = Trim(code);
+        if (code.empty() && comment.rfind("@header", 0) == 0) {
+            header = Trim(comment.substr(7));
+            continue;
+        }
         if (code.rfind("uniform ", 0) != 0) continue;
         std::istringstream ws(code);
         std::string kw, type, name;
@@ -109,9 +113,22 @@ std::vector<ShaderUniformInfo> ParseShaderUniforms(const std::string& source) {
         else if (type == "vec2") info.Type = ShaderParam::Type::Vec2;
         else if (type == "vec3") info.Type = ShaderParam::Type::Vec3;
         else if (type == "vec4") info.Type = ShaderParam::Type::Vec4;
-        else continue; // сэмплеры, матрицы, int — не параметры материала
+        else if (type == "sampler2D") info.Texture = true;
+        else continue; // матрицы, int, кубические карты — не параметры материала
         if (IsEngineUniform(name) || !seen.insert(name).second) continue;
         info.Name = name;
+        info.Header = header;
+        if (info.Texture) {
+            std::istringstream cs(comment);
+            std::string tok, label;
+            while (cs >> tok) {
+                if (tok == "linear" && label.empty()) info.Linear = true;
+                else label += (label.empty() ? "" : " ") + tok;
+            }
+            info.Label = label.empty() ? UniformLabel(name) : label;
+            out.push_back(std::move(info));
+            continue;
+        }
 
         // Подсказка: [color] числа [min, max] подпись.
         std::istringstream cs(comment);
@@ -167,6 +184,29 @@ std::vector<ShaderUniformInfo> ParseShaderUniforms(const std::string& source) {
         out.push_back(std::move(info));
     }
     return out;
+}
+
+std::vector<ShaderUniformInfo> MergeShaderUniforms(const std::vector<std::vector<ShaderUniformInfo>>& sources) {
+    std::vector<ShaderUniformInfo> merged;
+    for (const std::vector<ShaderUniformInfo>& list : sources)
+        for (const ShaderUniformInfo& u : list) {
+            auto it = std::find_if(merged.begin(), merged.end(),
+                                   [&](const ShaderUniformInfo& m) { return m.Name == u.Name; });
+            if (it == merged.end()) {
+                merged.push_back(u);
+                continue;
+            }
+            if (it->Header.empty()) it->Header = u.Header;
+            // Подпись «из имени» уступает написанной автором.
+            if (it->Label == UniformLabel(it->Name) && u.Label != UniformLabel(u.Name)) it->Label = u.Label;
+        }
+    std::vector<std::string> order{""};
+    for (const ShaderUniformInfo& u : merged)
+        if (std::find(order.begin(), order.end(), u.Header) == order.end()) order.push_back(u.Header);
+    std::stable_sort(merged.begin(), merged.end(), [&](const ShaderUniformInfo& a, const ShaderUniformInfo& b) {
+        return std::find(order.begin(), order.end(), a.Header) < std::find(order.begin(), order.end(), b.Header);
+    });
+    return merged;
 }
 
 } // namespace sage::render

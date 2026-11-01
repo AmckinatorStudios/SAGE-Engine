@@ -1,5 +1,7 @@
 #pragma once
+#include <functional>
 #include <memory>
+#include <string>
 
 class EditorHost;
 struct Material;
@@ -20,8 +22,10 @@ struct Material;
 namespace sage::editor::shaderparamsui {
 
 // Рисует параметры. Возвращает число показанных (0 — шейдера нет или он без
-// параметров).
-int Draw(EditorHost& host, const std::shared_ptr<Material>& material);
+// параметров). browseTexture — «Обзор…» у слота текстуры: открыть диалог и
+// записать выбор в переданный путь (диалог один на панель, он у инспектора).
+int Draw(EditorHost& host, const std::shared_ptr<Material>& material,
+         const std::function<void(std::string& target)>& browseTexture = {});
 
 } // namespace sage::editor::shaderparamsui
 

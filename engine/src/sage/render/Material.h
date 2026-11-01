@@ -286,6 +286,20 @@ struct Material {
     // общий материал (см. ShaderParamsComponent).
     std::unordered_map<std::string, ShaderParam> Params;
 
+    // Текстуры своего шейдера: имя sampler2D -> картинка проекта. Шейдер
+    // объявляет, какие ему нужны (ShaderParams.h), — у материала-шейдера нет
+    // «карты альбедо» и «карты нормалей», есть то, что назвал автор шейдера.
+    // Tex/From — рантайм: загруженная текстура и путь, из которого она взята
+    // (разошлись — перечитать).
+    struct ShaderTexture {
+        std::string Path;
+        // Кэш загрузки: заполняет отрисовка, которой материал дан как const.
+        mutable std::shared_ptr<Texture> Tex;
+        mutable std::string From;
+        mutable bool FromLinear = false;
+    };
+    std::unordered_map<std::string, ShaderTexture> TextureParams;
+
     // runtime: скомпилированная программа (ResourceManager::GetShader).
     std::shared_ptr<Shader> ShaderPtr;
 

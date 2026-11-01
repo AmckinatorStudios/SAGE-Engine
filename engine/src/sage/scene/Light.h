@@ -42,6 +42,12 @@ struct PointLight {
     // ровно для того источника, чей вклад он считает, — а связывает их индекс
     // в этом же массиве.
     int ShadowSlot = -1;
+    // Текстура света (маска): путь к картинке-панораме (равнопромежуточная
+    // проекция вокруг источника), пусто — светит ровно во все стороны.
+    // Forward/Right — оси источника: панорама поворачивается вместе с ним.
+    std::string Cookie;
+    glm::vec3 Forward{0.0f, 0.0f, -1.0f};
+    glm::vec3 Right{1.0f, 0.0f, 0.0f};
 
     float Constant() const { return 1.0f; }
     float Linear() const { return 4.5f / Range; }
@@ -63,6 +69,11 @@ struct SpotLight {
     float OuterAngleDeg = 30.0f; // край конуса (яркость -> 0)
     bool CastShadows = true;     // см. PointLight::CastShadows
     int ShadowSlot = -1;         // место в атласе теней кадра, -1 — нет
+    // Текстура света: картинка, проецируемая конусом (узор фонаря, витраж,
+    // листва), пусто — ровный круг. Right — ось X картинки: поворот
+    // прожектора вокруг своей оси поворачивает и узор.
+    std::string Cookie;
+    glm::vec3 Right{1.0f, 0.0f, 0.0f};
 
     float Constant() const { return 1.0f; }
     float Linear() const { return 4.5f / Range; }

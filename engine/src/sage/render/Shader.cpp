@@ -73,19 +73,79 @@ namespace {
 // Умолчания из подсказок обоих исходников; первое объявление главное.
 void CollectDefaults(Shader& sh, const std::string& v, const std::string& f) {
     for (const std::string* src : {&v, &f})
-        for (const sage::render::ShaderUniformInfo& u : sage::render::ParseShaderUniforms(*src))
-            sh.Defaults.emplace(u.Name, ShaderParam{u.Type, u.Default});
+        for (const sage::render::ShaderUniformInfo& u : sage::render::ParseShaderUniforms(*src)) {
+            if (u.Texture) {
+                bool dup = false;
+                for (const Shader::TextureSlot& t : sh.Textures) dup = dup || t.Name == u.Name;
+                if (!dup) sh.Textures.push_back({u.Name, u.Linear});
+            } else {
+                sh.Defaults.emplace(u.Name, ShaderParam{u.Type, u.Default});
+            }
+        }
+}
+
+std::string ParentDir(const std::string& path) {
+    const size_t slash = path.find_last_of("/\\");
+    return slash == std::string::npos ? std::string() : path.substr(0, slash + 1);
+}
+
+std::string Expand(const std::string& path, std::vector<std::string>& seen, int depth) {
+    std::string src = Shader::LoadText(path);
+    if (depth > 32) return src;   // цикл включений — дальше не идём, компилятор скажет сам
+    std::string out;
+    out.reserve(src.size());
+    size_t start = 0;
+    int lineNo = 0;
+    while (start <= src.size()) {
+        size_t end = src.find('\n', start);
+        if (end == std::string::npos) end = src.size();
+        const std::string line = src.substr(start, end - start);
+        ++lineNo;
+        size_t p = line.find_first_not_of(" \t");
+        const bool isInclude = p != std::string::npos && line.compare(p, 8, "#include") == 0 &&
+                               line.find('"', p) != std::string::npos;
+        if (isInclude) {
+            const size_t q1 = line.find('"', p);
+            const size_t q2 = line.find('"', q1 + 1);
+            const std::string name = q2 == std::string::npos ? std::string() : line.substr(q1 + 1, q2 - q1 - 1);
+            const std::string full = ParentDir(path) + name;
+            bool already = false;
+            for (const std::string& s : seen) already = already || s == full;
+            if (!name.empty() && !already) {
+                seen.push_back(full);
+                out += Expand(full, seen, depth + 1);
+            }
+            // Номера строк ошибок — снова по этому файлу.
+            out += "\n#line " + std::to_string(lineNo + 1) + "\n";
+        } else {
+            out += line;
+            if (end < src.size()) out += '\n';
+        }
+        if (end >= src.size()) break;
+        start = end + 1;
+    }
+    return out;
 }
 } // namespace
 
+std::string Shader::LoadExpanded(const std::string& path, std::vector<std::string>* included) {
+    std::vector<std::string> seen;
+    std::string text = Expand(path, seen, 0);
+    if (included) *included = std::move(seen);
+    return text;
+}
+
 Shader::Shader(const std::string& vertexPath, const std::string& fragmentPath) {
-    std::string vSrc = ExpandEngineIncludes(ReadFile(vertexPath));
-    std::string fSrc = ExpandEngineIncludes(ReadFile(fragmentPath));
+    std::vector<std::string> vInc, fInc;
+    std::string vSrc = ExpandEngineIncludes(LoadExpanded(vertexPath, &vInc));
+    std::string fSrc = ExpandEngineIncludes(LoadExpanded(fragmentPath, &fInc));
 
     // Компиляция/линковка — забота бэкенда; при ошибке он бросает исключение
     // с логом компилятора (текст видно и в консоли, и в панели Console редактора).
     m_program = sage::rhi::GraphicsDevice::Get().CreateShaderProgram(vSrc, fSrc);
     CollectDefaults(*this, vSrc, fSrc);
+    Included = std::move(vInc);
+    Included.insert(Included.end(), fInc.begin(), fInc.end());
 
     LOG_DEBUG("Shader") << "Скомпилирован: " << vertexPath << " + " << fragmentPath;
 }

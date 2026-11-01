@@ -23,8 +23,8 @@ class EditorHost;
 // ---------------------------------------------------------------------------
 namespace sage::editor::createasset {
 
-// Shader — шаблон шейдера (ShaderTemplates.h): материал из .vert/.frag/.sagemat
-// или шейдер экрана .frag; выбирается карточкой в окне.
+// Shader — пустой шейдер (NewShader.h): материал-шейдер (.vert/.frag/.sagemat)
+// или шейдер экрана (.frag); вид выбирается карточкой в окне.
 enum class What { Folder, Script, Scene, Material, TextFile, Shader };
 
 struct Request {
@@ -37,10 +37,8 @@ struct Request {
     // Открыть созданный граф в его редакторе (меню панели Assets — да; слот,
     // который просто назначает созданное, — нет).
     bool OpenAfter = false;
-    // Для What::Shader — какой шаблон выбрать сразу (id из ShaderTemplates.h);
-    // пусто — запомненный. ScreenOnly — предлагать только шейдеры экрана
-    // (слот звена пост-обработки).
-    std::string Template;
+    // Для What::Shader: ScreenOnly — сразу шейдер экрана, без выбора (слот
+    // звена пост-обработки).
     bool ScreenOnly = false;
     // Что сделать с созданным (назначить в слот, выделить в панели). Зовётся
     // один раз, после успешного создания.

@@ -221,25 +221,69 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
         ImGui::Spacing();
     }
 
-    // Свой шейдер материала: пара .vert/.frag (см. docs/custom_shaders.md).
-    // Правка файлов подхватывается на лету — ReloadChangedShaders в EditorLayer.
-    auto drawCustomShader = [&] {
-        ImGui::SeparatorText(T("Custom Shader"));
-        // Шейдер — такой же ассет проекта, как текстура, и выбирается так же:
-        // слотом с перетаскиванием (см. AssetSlot.h). Поле ввода здесь требовало
-        // помнить путь и нажать Enter, иначе набранное молча пропадало.
+    // Правка видна сразу, а на диск попадает по «Сохранить» (см. drawSave).
+    auto drawSave = [&] {
+        // Правка видна сразу, а на диск попадает по «Сохранить»: о том, что в
+        // файле ещё старое, говорит метка, иначе это узнают, только перезапустив
+        // редактор и потеряв полчаса настройки.
+        const bool unsaved = material->HasUnsavedChanges();
+        if (ImGui::Button(unsaved ? T("Save Material *###SaveMaterial") : T("Save Material###SaveMaterial"))) {
+            try {
+                // Путь объекта — относительно проекта («assets/x.sagemat»), а
+                // редактор живёт в своём каталоге: пишем туда, откуда материал
+                // читался (LocatePath), а не в каталог процесса.
+                material->SaveToFile(sage::AssetDatabase::Instance().LocatePath(pathStr));
+                LOG_INFO("Editor") << "Material saved: " << pathStr;
+            } catch (const std::exception& e) {
+                LOG_ERROR("Editor") << "Material save failed: " << e.what();
+            }
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(T("Revert"))) ResourceManager::Instance().ReloadMaterial(pathStr);
+        if (unsaved) {
+            ImGui::SameLine();
+            ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", T("unsaved changes"));
+        }
+    };
+
+    // МАТЕРИАЛ-ШЕЙДЕР — СВОЙ ИНСПЕКТОР. Его поверхность целиком описывает шейдер:
+    // альбедо, металличность, карты и повтор текстуры обычного материала он
+    // не читает, и показывать их — значит предлагать ручки, которые ни к чему
+    // не подключены. Здесь только шейдер, то, что ОН объявил настраиваемым
+    // (числа, цвета, текстуры, группы — ShaderParamsUi.h), и состояние
+    // отрисовки, которое из шейдера не задать.
+    if (material->HasCustomShader()) {
+        ImGui::SeparatorText(T("Shader"));
+        // Шейдер выбирается слотом, как любой ассет (AssetSlot.h).
         DrawShaderSlot(host, T("Vertex"), material->VertexShaderPath, material);
         DrawShaderSlot(host, T("Fragment"), material->FragmentShaderPath, material);
-        // Параметры — из подсказок в тексте шейдера (ShaderParamsUi.h): ползунки
-        // и пипетки, а не «правьте в файле .sagemat».
-        sage::editor::shaderparamsui::Draw(host, material);
-    };
-    // У материала со своим шейдером главное — ЕГО параметры: раздел сразу под
-    // превью, а не под шестью слотами текстур, которые шейдер может и не читать.
-    // Решается по началу кадра: слот, очищенный в этом кадре, не переносит
-    // раздел посреди отрисовки.
-    const bool shaderFirst = material->HasCustomShader();
-    if (shaderFirst) drawCustomShader();
+        sage::editor::shaderparamsui::Draw(host, material, [this, &host](std::string& target) {
+            FileBrowser::Config c;
+            c.Title = T("Shader texture");
+            c.Filters = assetslot::Extensions(assetslot::Kind::Texture);
+            c.FilterLabel = T("Images");
+            c.StartDir = c.Root = assetslot::ProjectRoot(host);
+            m_browser.Open(c);
+            m_browseTarget = &target;
+            m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
+        });
+
+        ImGui::SeparatorText(T("Drawing"));
+        for (const MaterialRenderField& f : MaterialRenderFields()) {
+            if (std::string(f.Key) != "cull" || !f.GetEnum || !f.SetEnum) continue;
+            int value = f.GetEnum(material->Render);
+            if (ImGui::Combo(f.Label, &value, f.EnumLabels, std::min(f.EnumCount, 8)))
+                f.SetEnum(material->Render, value);
+            if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
+        }
+        ImGui::SliderFloat(T("uOpacity"), &material->Opacity, 0.0f, 1.0f);
+        host.TrackLastImGuiItem();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Passed to the shader as uOpacity.\n"
+                                      "Below 1 the material is drawn in the transparent pass (blending, back to front)."));
+        drawSave();
+        return;
+    }
 
     // Базовый цвет — ВМЕСТЕ с непрозрачностью: у материала это два поля файла
     // (Albedo и Opacity), но смотрят на них как на один цвет «какой он и
@@ -378,7 +422,8 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     ImGui::SliderFloat(T("Opacity"), &material->Opacity, 0.0f, 1.0f);
     sage::editor::ResetField(&host, *material, material->Opacity);
 
-    if (!shaderFirst) drawCustomShader();
+    // Своего шейдера у обычного материала нет: материал-шейдер — отдельный
+    // вид, создаётся «Создать → Шейдер» и показывается своим инспектором выше.
 
     // Свойства рендера рисуются ПО ТАБЛИЦЕ (MaterialRenderFields). Новая
     // возможность рендера появляется в инспекторе сама — от неё требуется поле
@@ -407,27 +452,7 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     }
 
 
-    // Правка видна сразу, а на диск попадает по «Сохранить»: о том, что в
-    // файле ещё старое, говорит метка, иначе это узнают, только перезапустив
-    // редактор и потеряв полчаса настройки.
-    const bool unsaved = material->HasUnsavedChanges();
-    if (ImGui::Button(unsaved ? T("Save Material *###SaveMaterial") : T("Save Material###SaveMaterial"))) {
-        try {
-            // Путь объекта — относительно проекта («assets/x.sagemat»), а
-            // редактор живёт в своём каталоге: пишем туда, откуда материал
-            // читался (LocatePath), а не в каталог процесса.
-            material->SaveToFile(sage::AssetDatabase::Instance().LocatePath(pathStr));
-            LOG_INFO("Editor") << "Material saved: " << pathStr;
-        } catch (const std::exception& e) {
-            LOG_ERROR("Editor") << "Material save failed: " << e.what();
-        }
-    }
-    ImGui::SameLine();
-    if (ImGui::Button(T("Revert"))) ResourceManager::Instance().ReloadMaterial(pathStr);
-    if (unsaved) {
-        ImGui::SameLine();
-        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", T("unsaved changes"));
-    }
+    drawSave();
 }
 
 // Настройки импорта выбранной модели — ТЕ ЖЕ, что в окне импорта

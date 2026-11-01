@@ -13,7 +13,7 @@
 #include "sage/core/Paths.h"
 #include "Localization.h"
 #include "Project.h"
-#include "ShaderTemplates.h"
+#include "NewShader.h"
 #include "panels/AssetsPanel.h"
 #include "sage/assets/AssetDatabase.h"
 
@@ -29,7 +29,7 @@ struct State {
     Request Req;
     char Name[128] = {0};
     std::string Logic = "lua";   // id вида логики (LogicKinds.h)
-    std::string Template = "water";   // id шаблона шейдера (ShaderTemplates.h)
+    bool ScreenShader = false;   // вид нового шейдера: экран или материал (NewShader.h)
     int Color = -1;         // номер цвета палитры; -1 — без цвета
     std::string Error;
     bool CloseRequested = false;   // закрыть снаружи (самопроверка)
@@ -108,22 +108,7 @@ bool Choice(const char* id, const char* title, const char* note, bool selected) 
     return pressed;
 }
 
-namespace st = sage::editor::shadertemplates;
-
-// Шаблоны, предлагаемые этому запросу: слоту звена пост-обработки — только экран.
-std::vector<const st::Template*> TemplatesFor(const Request& r) {
-    std::vector<const st::Template*> out;
-    for (const st::Template& t : st::All())
-        if (!r.ScreenOnly || t.Kind == st::Target::Screen) out.push_back(&t);
-    return out;
-}
-
-const st::Template* TemplateOf(const State& s) {
-    const std::vector<const st::Template*> offered = TemplatesFor(s.Req);
-    for (const st::Template* t : offered)
-        if (s.Template == t->Id) return t;
-    return offered.empty() ? nullptr : offered.front();
-}
+namespace ns = sage::editor::newshader;
 
 } // namespace
 
@@ -136,8 +121,7 @@ void Open(const Request& request) {
     std::snprintf(s.Name, sizeof(s.Name), "%s", request.Name.c_str());
     // Язык скрипта — привычка человека, а не свойство проекта: запоминается.
     s.Logic = sage::editor::prefs::GetString("create.script_language", "lua");
-    s.Template = request.Template.empty() ? sage::editor::prefs::GetString("create.shader_template", "water")
-                                          : request.Template;
+    s.ScreenShader = request.ScreenOnly;
 }
 
 bool IsOpen() { return S().Open || S().Pending; }
@@ -160,7 +144,7 @@ void Draw(EditorHost& host) {
     }
 
     const logic::Kind* lk = s.Req.Kind == What::Script ? LogicOf(s) : nullptr;
-    const st::Template* tpl = s.Req.Kind == What::Shader ? TemplateOf(s) : nullptr;
+    const bool shader = s.Req.Kind == What::Shader;
     fs::path dir = s.Req.Dir;
     if (host.CurrentProject().Loaded()) {
         const fs::path assets = host.CurrentProject().AssetsDir();
@@ -207,12 +191,15 @@ void Draw(EditorHost& host) {
 
     if (s.Req.Kind == What::Shader) {
         ImGui::Spacing();
-        ImGui::TextDisabled("%s", T("Template"));
-        for (const st::Template* t : TemplatesFor(s.Req))
-            if (Choice(t->Id, T(t->Title), T(t->Note), tpl == t)) {
-                s.Template = t->Id;
-                tpl = t;
-            }
+        // Пустой шейдер: контракт движка соблюдён, рисует он то, что напишут.
+        if (!s.Req.ScreenOnly) {
+            ImGui::TextDisabled("%s", T("Kind"));
+            if (Choice("material", T("Shader material"), T("For objects: its own .vert/.frag and settings"),
+                       !s.ScreenShader))
+                s.ScreenShader = false;
+            if (Choice("screen", T("Screen shader"), T("For the camera: processes the finished frame"), s.ScreenShader))
+                s.ScreenShader = true;
+        }
     }
 
     if (s.Req.Kind == What::Folder) {
@@ -247,10 +234,10 @@ void Draw(EditorHost& host) {
     std::string ext = lk ? lk->Ext : std::string();
     // Шаблон материала кладёт три файла: шейдеры — в shaders, материал (то,
     // что назначают объекту) — в materials. Показываем главный.
-    if (tpl) {
-        ext = tpl->Kind == st::Target::Screen ? ".frag" : ".sagemat";
+    if (shader) {
+        ext = s.ScreenShader ? ".frag" : ".sagemat";
         if (host.CurrentProject().Loaded())
-            dir = host.CurrentProject().AssetsDir() / (tpl->Kind == st::Target::Screen ? "shaders" : "materials");
+            dir = host.CurrentProject().AssetsDir() / (s.ScreenShader ? "shaders" : "materials");
     }
     const std::string file = FileName(s.Req.Kind, ext, s.Name[0] ? s.Name : "…");
     std::string where = dir.filename().string();
@@ -276,15 +263,14 @@ void Draw(EditorHost& host) {
             if (!lk || !lk->Create) s.Error = T("Choose a language");
             else made = lk->Create(s.Name, dir, created, s.Error);
         } else if (s.Req.Kind == What::Shader) {
-            if (!tpl || !host.CurrentProject().Loaded()) s.Error = T("Open a project first");
-            else made = st::Create(*tpl, s.Name, host.CurrentProject().Dir(), host.CurrentProject().AssetsDir(),
-                                   created, s.Error);
+            if (!host.CurrentProject().Loaded()) s.Error = T("Open a project first");
+            else made = ns::Create(s.ScreenShader ? ns::Kind::Screen : ns::Kind::Material, s.Name,
+                                   host.CurrentProject().Dir(), host.CurrentProject().AssetsDir(), created, s.Error);
         } else {
             made = AssetsPanel::CreateAsset(KindFor(s.Req.Kind), s.Name, dir, created, s.Error);
         }
         if (made) {
             if (lk) sage::editor::prefs::SetString("create.script_language", lk->Id);
-            if (tpl) sage::editor::prefs::SetString("create.shader_template", tpl->Id);
             if (s.Req.Kind == What::Folder && s.Color >= 0) {
                 const auto palette = sage::editor::foldercolors::Palette();
                 if (s.Color < (int)palette.size())

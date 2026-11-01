@@ -471,6 +471,33 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 // «выворачивается»): подтягиваем внешний до внутреннего.
                 if (light->OuterConeDeg < light->InnerConeDeg) light->OuterConeDeg = light->InnerConeDeg;
             }
+            // Текстура света: прожектор проецирует картинку конусом, точечный —
+            // панорамой вокруг себя (render/LightCookies.h).
+            if (light->Kind == LightComponent::Type::Spot || light->Kind == LightComponent::Type::Point) {
+                ImGui::TextUnformatted(T("Light texture"));
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", light->Kind == LightComponent::Type::Spot
+                                                ? T("Picture projected by the cone: lantern pattern, grille, stained glass.\n"
+                                                    "Brightness scales the light, colour tints it.")
+                                                : T("Panorama around the lamp (equirectangular): the centre looks along -Z.\n"
+                                                    "Brightness scales the light, colour tints it."));
+                const assetslot::Result r = assetslot::Draw(host, "##light_cookie", assetslot::Kind::Texture,
+                                                            light->Cookie, &m_preview, T("No texture: even light"));
+                if (r.Changed) {
+                    host.PushUndoSnapshot();
+                    light->Cookie = r.Path;
+                }
+                if (r.BrowseRequested) {
+                    FileBrowser::Config c;
+                    c.Title = T("Light texture");
+                    c.Filters = assetslot::Extensions(assetslot::Kind::Texture);
+                    c.FilterLabel = T("Images");
+                    c.StartDir = c.Root = assetslot::ProjectRoot(host);
+                    m_browser.Open(c);
+                    m_browseTarget = &light->Cookie;
+                    m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
+                }
+            }
             const bool area = light->Kind == LightComponent::Type::Area;
             if (area) {
                 ImGui::DragFloat(T("Width"), &light->AreaWidth, 0.02f, 0.05f, 50.0f); host.TrackLastImGuiItem();

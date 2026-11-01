@@ -552,8 +552,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     if (openDialog && std::strcmp(openDialog, "create-shader") == 0) {
         sage::editor::createasset::Request req;
         req.Kind = sage::editor::createasset::What::Shader;
-        req.Name = "Lava";
-        req.Template = "water";
+        req.Name = "MyShader";
         sage::editor::createasset::Open(req);
         openDialog = nullptr;
     }

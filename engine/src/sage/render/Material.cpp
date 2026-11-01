@@ -229,6 +229,9 @@ Material Material::LoadFromFile(const std::string& path) {
             }
         }
     }
+    if (root.contains("textures") && root["textures"].is_object())
+        for (auto it = root["textures"].begin(); it != root["textures"].end(); ++it)
+            if (it.value().is_string()) m.TextureParams[it.key()].Path = it.value().get<std::string>();
     m.TexturePath = root.value("texture", m.TexturePath);
     m.NormalMapPath = root.value("normalMap", m.NormalMapPath);
     m.MetallicMapPath = root.value("metallicMap", m.MetallicMapPath);
@@ -292,6 +295,15 @@ uint64_t Material::Fingerprint() const {
             h.F(kv->second.Value.z); h.F(kv->second.Value.w);
         }
     }
+    if (!TextureParams.empty()) {
+        std::vector<std::pair<std::string, std::string>> tex;
+        for (const auto& [name, t] : TextureParams) tex.emplace_back(name, t.Path);
+        std::sort(tex.begin(), tex.end());
+        for (const auto& [name, path] : tex) {
+            h.S(name);
+            h.S(path);
+        }
+    }
     h.S(TexturePath);
     h.S(NormalMapPath);
     h.S(MetallicMapPath);
@@ -330,6 +342,8 @@ void Material::SaveToFile(const std::string& path) const {
                 root["params"][name] = {prm.Value.x, prm.Value.y, prm.Value.z, prm.Value.w}; break;
         }
     }
+    for (const auto& [name, t] : TextureParams)
+        if (!t.Path.empty()) root["textures"][name] = t.Path;
     root["texture"] = TexturePath;
     root["normalMap"] = NormalMapPath;
     root["metallicMap"] = MetallicMapPath;

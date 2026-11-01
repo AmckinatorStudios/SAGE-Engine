@@ -1,3 +1,4 @@
+#include "sage/render/LightCookies.h"
 #include "sage/render/LightClusters.h"
 
 #include <algorithm>
@@ -128,9 +129,9 @@ LightClusterData BuildLightClusters(const LightingEnvironment& env, const glm::m
         lights.push_back(glm::vec4(p.Position, (float)LightClusterData::Point));
         lights.push_back(glm::vec4(p.Color, p.Intensity));
         lights.push_back(glm::vec4(p.Constant(), p.Linear(), p.Quadratic(), (float)p.ShadowSlot));
-        lights.push_back(glm::vec4(0.0f));
-        lights.push_back(glm::vec4(0.0f));
-        lights.push_back(glm::vec4(0.0f, 0.0f, p.Range, 0.0f));
+        lights.push_back(glm::vec4(p.Forward, 0.0f));
+        lights.push_back(glm::vec4(p.Right, 0.0f));
+        lights.push_back(glm::vec4(0.0f, 0.0f, p.Range, (float)LightCookies::Current().SlotOf(p.Cookie)));
         spheres.push_back({p.Position, p.Range});
     }
     for (const SpotLight& s : env.SpotLights) {
@@ -140,8 +141,8 @@ LightClusterData BuildLightClusters(const LightingEnvironment& env, const glm::m
         lights.push_back(glm::vec4(s.Color, s.Intensity));
         lights.push_back(glm::vec4(s.Constant(), s.Linear(), s.Quadratic(), (float)s.ShadowSlot));
         lights.push_back(glm::vec4(s.Direction, s.CosInner()));
-        lights.push_back(glm::vec4(0.0f, 0.0f, 0.0f, s.CosOuter()));
-        lights.push_back(glm::vec4(0.0f, 0.0f, s.Range, 0.0f));
+        lights.push_back(glm::vec4(s.Right, s.CosOuter()));
+        lights.push_back(glm::vec4(0.0f, 0.0f, s.Range, (float)LightCookies::Current().SlotOf(s.Cookie)));
         spheres.push_back({s.Position, s.Range});
     }
     for (const AreaLight& a : env.AreaLights) {
@@ -277,6 +278,7 @@ void LightClusters::Build(const LightingEnvironment& env, const glm::mat4& view,
 }
 
 void DisableLightClusters(Shader& shader) {
+    LightCookies::Current().Upload(shader);
     shader.SetInt("uLightGrid", kLightClusterUnit);
     shader.SetInt("uClustered", 0);
 }
@@ -284,10 +286,12 @@ void DisableLightClusters(Shader& shader) {
 void LightClusters::Upload(Shader& shader) const {
     shader.SetInt("uLightGrid", kLightClusterUnit);
     if (!Ready()) {
+        LightCookies::Current().Upload(shader);
         shader.SetInt("uClustered", 0);
         return;
     }
     m_texture->Bind(kLightClusterUnit);
+    LightCookies::Current().Upload(shader);
     shader.SetInt("uClustered", 1);
     shader.SetInt("uClusterGridBase", m_data.GridBase);
     shader.SetInt("uClusterIndexBase", m_data.IndexBase);

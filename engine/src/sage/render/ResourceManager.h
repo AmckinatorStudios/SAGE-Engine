@@ -429,6 +429,7 @@ private:
         std::shared_ptr<Shader> Program; // nullptr — не собрался
         std::string VertPath, FragPath;
         long long VertStamp = 0, FragStamp = 0;
+        long long IncludeStamp = 0;   // сумма штампов «#include "…"» файлов программы
         bool Screen = false; // вершинный — встроенный полноэкранный (VertPath пуст)
     };
     std::unordered_map<std::string, ShaderEntry> m_shaders;
