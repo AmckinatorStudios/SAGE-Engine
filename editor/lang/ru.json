@@ -3465,7 +3465,6 @@
     "Attach the Script Graph to this object": "Назначить объекту Script Graph",
     "Drop a .sgraph here": "Перетащите сюда .sgraph",
     "Drop the script or graph on an object": "Перетащите скрипт или граф на объект",
-    "Enter a name": "Введите имя",
     "Give this object the AI Graph behavior": "Назначить объекту поведение AI Graph",
     "Graph name (the file goes to assets/visual)": "Имя графа (файл ляжет в assets/visual)",
     "Instance (the memory of the character) and Shared parameters are read and written by name with Get/Set Parameter.": "Параметры Instance (память персонажа) и Shared читаются и пишутся по имени узлами Get/Set Parameter.",
@@ -3590,6 +3589,22 @@
     "True when every condition is true.": "Истинно, когда истинны все условия.",
     "True when at least one condition is true.": "Истинно, когда истинно хотя бы одно условие.",
     "Set State": "Задать состояние",
-    "Switches the behavior state of the character (its memory \"state\").": "Переключает состояние поведения персонажа (его память \"state\")."
+    "Switches the behavior state of the character (its memory \"state\").": "Переключает состояние поведения персонажа (его память \"state\").",
+    "Sprite sheet": "Нарезка спрайтов",
+    "Loaded the sheet next to the picture": "Загружен лист рядом с картинкой",
+    "Pick a picture: it will be cut into named pieces.": "Выберите картинку: она будет нарезана на именованные куски.",
+    "Cell": "Клетка",
+    "Gap": "Промежуток",
+    "Margin": "Поле",
+    "Name prefix": "Начало имени",
+    "Cut by grid": "Нарезать сеткой",
+    "Pieces added: ": "Добавлено кусков: ",
+    "Find pieces": "Найти куски",
+    "Every island of opaque pixels becomes a piece.": "Каждый остров непрозрачных пикселей становится куском.",
+    "Save *": "Сохранить *",
+    "Click a piece to edit it.": "Щёлкните по куску, чтобы править его.",
+    "This name is taken": "Это имя уже занято",
+    "Rect": "Прямоугольник",
+    "Remove piece": "Удалить кусок"
   }
 }

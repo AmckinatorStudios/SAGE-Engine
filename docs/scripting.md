@@ -994,6 +994,10 @@ m.arrays{
 m.vertex(0, 1, 0, Vec3(0, 1, 0), Vec2(0, 1), Vec2(0.5, 0.5))   -- uv2 шестым
 m.set_uv2(1, 0.5, 0.25)
 
+-- Объёмный спрайт: кусок картинки, выдавленный в толщину по альфе (меч, ключ)
+sword = extrude("assets/items/sword.png", {depth = 1})    -- или холст texture(...)
+part = extrude(sheet_tex, {x = 32, y = 0, w = 16, h = 16}) -- кусок от левого верхнего угла
+
 -- Шум сеткой: nx*ny*nz значений (x быстрее всего, затем y, затем z)
 heights = n.grid(x0, 0, z0, 16, 1, 16)           -- 16x16 точек, шаг 1
 caves = n.grid(x0, 0, z0, 16, 64, 16, 1, "raw")  -- режимы: fbm, ridged, raw

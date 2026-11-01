@@ -75,6 +75,21 @@ public:
     static MeshBuilder Sphere(float radius, int segments, int rings);
     static MeshBuilder Cylinder(float radius, float height, int segments, bool caps = true);
 
+    // Объёмный спрайт: кусок картинки, «выдавленный» в толщину по альфе.
+    // Лицо и оборот — по прямоугольнику куска (прозрачное отбрасывает материал
+    // с вырезом по альфе), бока — только по краю непрозрачных пикселей, каждый
+    // своим цветом. Плоская картинка предмета становится вещью, у которой есть
+    // торец, — меч, ключ, листок, монета.
+    //
+    // rgba — W×H пикселей; rowsBottomUp — строки снизу вверх (так их хранит
+    // движок). Кусок (rx, ry, rw, rh) — в пикселях от ЛЕВОГО ВЕРХНЕГО угла
+    // картинки (как спрайт интерфейса). Меш — в единицах «длинная сторона
+    // куска = 1», с центром в нуле, лицом к +Z; depthPixels — толщина в
+    // пикселях картинки. Пустой кусок — пустой меш.
+    static MeshBuilder ExtrudeImage(const unsigned char* rgba, int W, int H, bool rowsBottomUp, int rx,
+                                    int ry, int rw, int rh, float depthPixels = 1.0f,
+                                    float alphaCutoff = 0.5f);
+
 private:
     std::vector<Vertex> m_vertices;
     // Треугольники по слотам материала: m_slots[i] — индексы слота i.

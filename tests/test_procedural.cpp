@@ -403,3 +403,37 @@ TEST(script_noise_grid_matches_point_samples) {
     CHECK_TRUE(L["ridged_same"].get<bool>());
     CHECK_FALSE(L["bad_mode"].get<bool>());
 }
+
+// Объёмный спрайт: лицо и оборот по куску, бока — только по краю
+// непрозрачных пикселей. Буква «Г» из трёх пикселей на поле 3×3.
+TEST(mesh_extrude_image_builds_faces_and_only_outer_sides) {
+    // Строки сверху вниз: верхняя строка — два пикселя, под левым — третий.
+    unsigned char px[3 * 3 * 4] = {};
+    auto set = [&](int x, int y) { px[(y * 3 + x) * 4 + 3] = 255; };
+    set(0, 0);
+    set(1, 0);
+    set(0, 1);
+    const sage::render::MeshBuilder b = sage::render::MeshBuilder::ExtrudeImage(px, 3, 3, false, 0, 0, 3, 3, 1.0f);
+    // Периметр «Г» из трёх клеток — 8 рёбер: 2 квада лица/оборота + 8 боков.
+    CHECK_EQ((int)b.TriangleCount(), (2 + 8) * 2);
+    glm::vec3 lo, hi;
+    b.Bounds(lo, hi);
+    CHECK_NEAR(hi.x - lo.x, 1.0f, 1e-5f);           // длинная сторона куска = 1
+    CHECK_NEAR(hi.z - lo.z, 1.0f / 3.0f, 1e-5f);    // толщина — пиксель
+    // Пустой кусок — пустой меш, а не падение.
+    const sage::render::MeshBuilder none = sage::render::MeshBuilder::ExtrudeImage(px, 3, 3, false, 5, 5, 2, 2);
+    CHECK_EQ((int)none.TriangleCount(), 0);
+
+    ScriptEngine se;
+    Scene scene("P");
+    se.BindScene(scene);
+    se.Lua().script(R"LUA(
+        t = texture("ext", 4, 4)
+        t.fill(function() return Vec4(1, 1, 1, 0) end)
+        t.set(1, 3, Vec4(1, 0, 0, 1))      -- холст снизу вверх: верхняя строка
+        m = extrude(t, {depth = 2})
+        tris = m.triangles
+    )LUA");
+    // Один пиксель: лицо, оборот и 4 бока.
+    CHECK_EQ(se.Lua()["tris"].get<int>(), 12);
+}

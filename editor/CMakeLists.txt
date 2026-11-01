@@ -184,6 +184,7 @@ add_executable(SageEditor WIN32
     src/panels/TweenPanel_Cards.cpp
     src/panels/TweenPanel_Menus.cpp
     src/panels/NineSlicePanel.cpp
+    src/panels/SpriteSheetPanel.cpp
     src/AssetPreview.cpp
 )
 
