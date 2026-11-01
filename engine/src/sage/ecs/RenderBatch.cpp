@@ -12,6 +12,8 @@
 #include "sage/render/LightingUpload.h"
 #include "sage/render/Material.h"
 #include "sage/render/PbrShader.h"
+#include "sage/render/ResourceManager.h"
+#include "sage/core/Log.h"
 #include "sage/render/Shader.h"
 #include "sage/render/Texture.h"
 #include "sage/gi/GI.h"
@@ -232,6 +234,68 @@ void UploadParams(Shader& sh, const std::unordered_map<std::string, ShaderParam>
             case ShaderParam::Type::Vec3:  sh.SetVec3(name, glm::vec3(p.Value)); break;
             case ShaderParam::Type::Vec4:  sh.SetVec4(name, p.Value); break;
         }
+    }
+}
+
+// Белая 1×1 — для пустого слота текстуры своего шейдера.
+Texture& WhiteTexture() {
+    static Texture* t = [] {
+        const unsigned char px[4] = {255, 255, 255, 255};
+        return new Texture(px, 1, 1);
+    }();
+    return *t;
+}
+
+// Юниты под текстуры своего шейдера: всё, что не занял движок (тени, GI,
+// кластеры, текстуры света, лайтмапа, отражения). Сколько их — решает
+// видеокарта, а не константа здесь.
+const std::vector<int>& ShaderTextureUnits() {
+    static const std::vector<int> units = [] {
+        static const int kEngine[] = {1, 6, 7, 8, 9, 10, 11, 13, 14, 15};
+        const int caps = sage::rhi::GraphicsDevice::Get().Capabilities().MaxTextureUnits;
+        const int total = caps > 0 ? std::min(caps, 32) : 16;
+        std::vector<int> out;
+        for (int u = 0; u < total; ++u)
+            if (std::find(std::begin(kEngine), std::end(kEngine), u) == std::end(kEngine)) out.push_back(u);
+        return out;
+    }();
+    return units;
+}
+
+void BindShaderTextures(Shader& sh, const Material* mat) {
+    const std::vector<int>& units = ShaderTextureUnits();
+    for (size_t i = 0; i < sh.Textures.size(); ++i) {
+        const Shader::TextureSlot& slot = sh.Textures[i];
+        if (i >= units.size()) {
+            static bool warned = false;
+            if (!warned) {
+                LOG_WARN("Render") << "Своему шейдеру не хватило юнитов текстур: видеокарта даёт "
+                                   << units.size() << " свободных, шейдер просит " << sh.Textures.size();
+                warned = true;
+            }
+            break;
+        }
+        const int unit = units[i];
+        sh.SetInt(slot.Name, unit);
+        Texture* tex = nullptr;
+        if (mat) {
+            auto it = mat->TextureParams.find(slot.Name);
+            if (it != mat->TextureParams.end() && !it->second.Path.empty()) {
+                const Material::ShaderTexture& t = it->second;
+                // Перечитываем, только если сменился путь или вид данных:
+                // поиск в кэше по пути — не бесплатный (канонический путь).
+                if (!t.Tex || t.From != t.Path || t.FromLinear != slot.Linear) {
+                    t.Tex = ResourceManager::Instance().GetTexture(t.Path, TextureFilter::Anisotropic, true, false,
+                                                                   !slot.Linear);
+                    t.From = t.Path;
+                    t.FromLinear = slot.Linear;
+                }
+                tex = t.Tex.get();
+            }
+        }
+        // Пустой слот — белая текстура: шейдер, умножающий на неё, не чернеет.
+        if (tex) tex->Bind((unsigned)unit);
+        else WhiteTexture().Bind((unsigned)unit);
     }
 }
 

@@ -48,8 +48,9 @@ nlohmann::json PostChainToJson(const PostChain& chain) {
                 }
             }
         }
-        effects.push_back(
-            {{"kind", effect.Kind}, {"enabled", effect.Enabled}, {"params", std::move(params)}});
+        nlohmann::json entry = {{"kind", effect.Kind}, {"enabled", effect.Enabled}, {"params", std::move(params)}};
+        if (!effect.Source.empty()) entry["source"] = effect.Source;
+        effects.push_back(std::move(entry));
     }
     out["effects"] = std::move(effects);
     return out;
@@ -65,6 +66,7 @@ PostChain PostChainFromJson(const nlohmann::json& json) {
         if (!entry.is_object()) continue;
         PostEffect effect = MakePostEffect(entry.value("kind", std::string()));
         effect.Enabled = entry.value("enabled", true);
+        effect.Source = entry.value("source", std::string());
 
         const nlohmann::json params = entry.value("params", nlohmann::json::object());
         if (params.is_object()) {

@@ -94,6 +94,7 @@ void RunGrading(PostContext& ctx, const PostEffect& e);
 void RunTonemap(PostContext& ctx, const PostEffect& e);
 void RunVignette(PostContext& ctx, const PostEffect& e);
 void RunChromatic(PostContext& ctx, const PostEffect& e);
+void RunCustomShader(PostContext& ctx, const PostEffect& e);
 void RunGrain(PostContext& ctx, const PostEffect& e);
 void RunFxaa(PostContext& ctx, const PostEffect& e);
 PostParamDesc Param(const char* name, const char* label, float def, float min, float max, const char* hint);

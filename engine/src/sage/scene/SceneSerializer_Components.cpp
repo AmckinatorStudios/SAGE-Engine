@@ -114,6 +114,7 @@ void SaveLight(json& j, const LightComponent& light) {
     j["light"]["range"] = light.Range;
     j["light"]["innerCone"] = light.InnerConeDeg;
     j["light"]["outerCone"] = light.OuterConeDeg;
+    if (!light.Cookie.empty()) j["light"]["cookie"] = light.Cookie;
     j["light"]["castShadows"] = light.CastShadows;
     if (light.Kind == LightComponent::Type::Area) {
         j["light"]["width"] = light.AreaWidth;
@@ -129,6 +130,7 @@ LightComponent ParseLight(const json& lj) {
     light.Range = lj.value("range", light.Range);
     light.InnerConeDeg = lj.value("innerCone", light.InnerConeDeg);
     light.OuterConeDeg = lj.value("outerCone", light.OuterConeDeg);
+    light.Cookie = lj.value("cookie", light.Cookie);
     light.CastShadows = lj.value("castShadows", light.CastShadows);
     light.AreaWidth = lj.value("width", light.AreaWidth);
     light.AreaHeight = lj.value("height", light.AreaHeight);

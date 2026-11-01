@@ -181,6 +181,8 @@ inline LightingEnvironment CollectLighting(Scene& scene) {
             s.InnerAngleDeg = lc.InnerConeDeg;
             s.OuterAngleDeg = lc.OuterConeDeg;
             s.CastShadows = lc.CastShadows;
+            s.Cookie = lc.Cookie;
+            s.Right = glm::normalize(glm::vec3(world * glm::vec4(1.0f, 0.0f, 0.0f, 0.0f)));
             env.SpotLights.push_back(s);
         } else {
             PointLight p;
@@ -188,6 +190,9 @@ inline LightingEnvironment CollectLighting(Scene& scene) {
             p.Color = lc.Color;
             p.Intensity = lc.Intensity;
             p.Range = lc.Range;
+            p.Cookie = lc.Cookie;
+            p.Forward = wdir;
+            p.Right = glm::normalize(glm::vec3(world * glm::vec4(1.0f, 0.0f, 0.0f, 0.0f)));
             p.CastShadows = lc.CastShadows;
             env.PointLights.push_back(p);
         }

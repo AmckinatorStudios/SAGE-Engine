@@ -269,6 +269,24 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
         catalog.Register(std::move(k));
     }
     {
+        // Свой шейдер экрана проекта (.frag): стилизация, пиксель-арт, ЭЛТ,
+        // контур, подводный эффект — всё, чего нет в списке. Повторяемый:
+        // несколько своих шейдеров идут подряд в порядке тракта.
+        PostEffectKind k;
+        k.Id = "shader";
+        k.Label = "Custom Shader";
+        k.Hint = "Your own screen shader (.frag): gets the finished frame, depth, time and four values";
+        k.Needs = PostNeeds::LdrColor | PostNeeds::Depth;
+        k.Stage = PostStage::Lens;
+        k.Repeatable = true;
+        k.Params = {Param("strength", "Strength", 1.0f, 0.0f, 1.0f, "uStrength in the shader"),
+                    Param("a", "Value A", 0.5f, 0.0f, 1.0f, "uParamA in the shader"),
+                    Param("b", "Value B", 0.5f, 0.0f, 1.0f, "uParamB in the shader"),
+                    ColorParam("tint", "Tint", "uTint in the shader")};
+        k.Run = RunCustomShader;
+        catalog.Register(std::move(k));
+    }
+    {
         PostEffectKind k;
         k.Id = "grain";
         k.Label = "Film Grain";

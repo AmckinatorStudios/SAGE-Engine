@@ -40,6 +40,7 @@
 #include "sage/render/SkyDraw.h"
 #include "sage/render/DebugView.h"
 #include "sage/app/Application.h"
+#include "ShaderParamsUi.h"
 #include "ScreenColor.h"
 #include "ui/ColorPicker.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -180,6 +181,7 @@ void EditorLayer::OnAttach() {
     InitEditorServices();
     // Виды логики окна «Создать…» — до плагинов: плагин добавляет свои к ним.
     sage::editor::logic::RegisterBuiltins();
+    sage::editor::shaderparamsui::InstallPostSourceSlot();
     InitPlugins();
     ApplyStartupHooks();
     UpdateWindowTitle();

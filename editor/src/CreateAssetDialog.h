@@ -23,7 +23,9 @@ class EditorHost;
 // ---------------------------------------------------------------------------
 namespace sage::editor::createasset {
 
-enum class What { Folder, Script, Scene, Material, TextFile };
+// Shader — пустой шейдер (NewShader.h): материал-шейдер (.vert/.frag/.sagemat)
+// или шейдер экрана (.frag); вид выбирается карточкой в окне.
+enum class What { Folder, Script, Scene, Material, TextFile, Shader };
 
 struct Request {
     What Kind = What::Script;
@@ -35,6 +37,9 @@ struct Request {
     // Открыть созданный граф в его редакторе (меню панели Assets — да; слот,
     // который просто назначает созданное, — нет).
     bool OpenAfter = false;
+    // Для What::Shader: ScreenOnly — сразу шейдер экрана, без выбора (слот
+    // звена пост-обработки).
+    bool ScreenOnly = false;
     // Что сделать с созданным (назначить в слот, выделить в панели). Зовётся
     // один раз, после успешного создания.
     std::function<void(const std::filesystem::path& created)> Done;
@@ -68,6 +73,7 @@ inline std::string FileName(What kind, const std::string& logicExt, const std::s
         case What::Scene: return name + ".sage";
         case What::Material: return name + ".sagemat";
         case What::TextFile: return name + ".txt";
+        case What::Shader: return name + logicExt;   // расширение — от шаблона
         case What::Script:
         default: return name + logicExt;
     }

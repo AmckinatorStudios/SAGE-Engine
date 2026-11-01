@@ -544,6 +544,46 @@ void TestFoliageShadows(FrameRenderer& r) {
     Check(flippedTextured > 400, "двусторонняя карточка листа изнанкой к свету отбрасывает тень");
 }
 
+// --- Текстуры света (render/LightCookies.h) --------------------------------
+// Маска «левая половина чёрная, правая белая»: у прожектора и у точечного
+// половина пятна на полу обязана погаснуть, а другая — остаться как была.
+// Сторону не угадываем (зависит от камеры теста): считаем, что погасло много
+// пикселей И много осталось прежними.
+void TestLightCookies(FrameRenderer& r) {
+    Image mask;
+    mask.Width = mask.Height = 64;
+    mask.Pixels.assign(64 * 64 * 3, 0);
+    for (int y = 0; y < 64; ++y)
+        for (int x = 32; x < 64; ++x)
+            for (int c = 0; c < 3; ++c) mask.Pixels[((size_t)y * 64 + x) * 3 + c] = 255;
+    const std::string maskPath = (std::filesystem::temp_directory_path() / "sage_cookie_half.png").string();
+    Check(SavePng(maskPath, mask), "маска света записана");
+    for (LightComponent::Type kind : {LightComponent::Type::Spot, LightComponent::Type::Point}) {
+        const char* label = kind == LightComponent::Type::Spot ? "прожектор" : "точечный";
+        std::unique_ptr<Scene> scene = MakeLampScene(kind, false);
+        const Image plain = RenderWithLampShadows(r, *scene, nullptr);
+        auto lamps = scene->Registry().view<LightComponent>();
+        for (auto e : lamps) lamps.get<LightComponent>(e).Cookie = maskPath;
+        const Image masked = RenderWithLampShadows(r, *scene, nullptr);
+        long long darkened = 0, same = 0;
+        for (size_t i = 0; i + 2 < plain.Pixels.size(); i += 3) {
+            const int a = plain.Pixels[i] + plain.Pixels[i + 1] + plain.Pixels[i + 2];
+            const int b = masked.Pixels[i] + masked.Pixels[i + 1] + masked.Pixels[i + 2];
+            if (a < 90) continue;   // пол вне пятна света — не в счёт
+            if (b * 2 < a) ++darkened;
+            else if (std::abs(a - b) * 20 < a) ++same;
+        }
+        std::printf("    маска света, %s: погасло %lld, осталось %lld\n", label, darkened, same);
+        Check(darkened > 400, (std::string(label) + ": чёрная половина маски гасит свет").c_str());
+        Check(same > 400, (std::string(label) + ": белая половина маски свет не трогает").c_str());
+    }
+    // Без маски свет прежний: убрали — кадр как без неё.
+    std::unique_ptr<Scene> scene = MakeLampScene(LightComponent::Type::Spot, false);
+    const Image a = RenderWithLampShadows(r, *scene, nullptr);
+    const Image b = RenderWithLampShadows(r, *scene, nullptr);
+    Check(a.Pixels == b.Pixels, "источник без маски светит как прежде");
+}
+
 } // namespace
 
 void RunShadowChecks(FrameRenderer& r, Scene& scene) {
@@ -553,6 +593,7 @@ void RunShadowChecks(FrameRenderer& r, Scene& scene) {
     TestLocalShadows(r);
     TestManyAndWeakLamps(r);
     TestFoliageShadows(r);
+    TestLightCookies(r);
 }
 
 } // namespace sage::rendertest

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include "sage/render/PostEffect.h"
 
 class EditorHost;
@@ -34,6 +36,12 @@ namespace sage::editor {
 // рисоваться в двух местах одного кадра, и ImGui опознаёт виджеты по подписи.
 //
 // Возвращает true, если тракт изменился.
+// Слот файла шейдера у звена «Свой шейдер» (PostEffect::Source). Рисует его
+// редактор (слот ассета, AssetSlot.h), а сюда подставляется крючком: этот файл
+// собирается и в модульные тесты, где слотов нет. true — путь изменился.
+using PostSourceSlotFn = std::function<bool(EditorHost* host, sage::render::PostEffect& effect)>;
+void SetPostSourceSlot(PostSourceSlotFn fn);
+
 bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const char* idScope);
 
 } // namespace sage::editor

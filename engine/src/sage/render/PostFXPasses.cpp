@@ -11,6 +11,7 @@
 
 #include "sage/core/Log.h"
 #include "sage/core/Profiler.h"
+#include "sage/render/ResourceManager.h"
 #include "sage/render/LensFlare.h"
 
 using namespace sage::rhi;
@@ -624,6 +625,47 @@ void RunChromatic(PostContext& ctx, const PostEffect& e) {
         sh.SetFloat("uStart", glm::clamp(e.Float("start", 0.2f), 0.0f, 0.99f));
         sh.SetFloat("uAspect", (float)ctx.Width / (float)std::max(ctx.Height, 1));
         sh.SetInt("uSamples", glm::clamp(e.Int("samples", 12), 3, 32));
+    });
+}
+
+// --- Звено «Свой шейдер» -----------------------------------------------------
+//
+// Шейдер экрана проекта: один .frag, вершинный — полноэкранный треугольник
+// движка. Получает готовый кадр (uScene, после тон-маппинга), глубину сцены
+// (uDepth), время, размер кадра и четыре своих числа звена — силу, A, B и
+// оттенок (контракт — docs/custom_shaders.md, «Шейдер экрана»). Файла нет или
+// он не собрался — звено пропускается с причиной в логе, кадр не чернеет.
+void RunCustomShader(PostContext& ctx, const PostEffect& e) {
+    SAGE_PROFILE("Свой шейдер");
+    if (e.Source.empty()) return;
+    std::shared_ptr<Shader> shader = ResourceManager::Instance().GetScreenShader(e.Source);
+    if (!shader) {
+        OnceLog("звено «Свой шейдер» пропущено: шейдер " + e.Source + " не собрался (причина — выше в логе)");
+        return;
+    }
+    GraphicsDevice& device = Dev(ctx);
+    RunSimplePass(ctx, *shader, /*ldrOut=*/true, [&](Shader& sh) {
+        // Свои параметры шейдера экрана — умолчаниями из его подсказок.
+        for (const auto& [name, p] : sh.Defaults) {
+            switch (p.Kind) {
+                case ShaderParam::Type::Float: sh.SetFloat(name, p.Value.x); break;
+                case ShaderParam::Type::Vec2: sh.SetVec2(name, glm::vec2(p.Value)); break;
+                case ShaderParam::Type::Vec3: sh.SetVec3(name, glm::vec3(p.Value)); break;
+                case ShaderParam::Type::Vec4: sh.SetVec4(name, p.Value); break;
+            }
+        }
+        sh.SetInt("uDepth", 1);
+        device.BindTexture2D(1, ctx.SceneDepth);
+        sh.SetFloat("uTime", ctx.Time);
+        sh.SetVec2("uResolution", glm::vec2((float)ctx.Width, (float)ctx.Height));
+        sh.SetVec2("uTexel", glm::vec2(1.0f / (float)std::max(ctx.Width, 1), 1.0f / (float)std::max(ctx.Height, 1)));
+        sh.SetFloat("uStrength", e.Float("strength", 1.0f));
+        sh.SetFloat("uParamA", e.Float("a", 0.5f));
+        sh.SetFloat("uParamB", e.Float("b", 0.5f));
+        const PostValue* tint = e.Find("tint");
+        sh.SetVec4("uTint", tint ? tint->V4() : glm::vec4(1.0f));
+        sh.SetMat4("uProj", ctx.Proj);
+        sh.SetMat4("uInvProj", glm::inverse(ctx.Proj));
     });
 }
 

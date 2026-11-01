@@ -203,6 +203,40 @@ float RangeFade(float dist, float range) {
 }
 
 // Вклад точечного источника — одна функция на массивы и на кластеры.
+// --- Текстуры света (render/LightCookies.h) --------------------------------
+// Все маски кадра — плитки одного атласа cols×cols. Выборка поджата внутрь
+// плитки на полтекселя: иначе билинейный фильтр подмешивал бы соседнюю маску.
+uniform sampler2D uCookieAtlas;
+uniform int uCookieCols;
+uniform float uCookieTile;
+vec3 CookieSample(int slot, vec2 uv) {
+    if (slot < 0 || uCookieCols <= 0) return vec3(1.0);
+    float size = 1.0 / float(uCookieCols);
+    vec2 tile = vec2(float(slot % uCookieCols), float(slot / uCookieCols)) * size;
+    float inset = 0.5 / (uCookieTile * float(uCookieCols));
+    vec2 p = clamp(tile + clamp(uv, 0.0, 1.0) * size, tile + inset, tile + size - inset);
+    return texture(uCookieAtlas, p).rgb;
+}
+// Прожектор: картинка проецируется конусом — круг конуса вписан в квадрат
+// картинки. d — направление ОТ источника к точке.
+vec3 SpotCookie(int slot, vec3 d, vec3 fwd, vec3 right, float cosOuter) {
+    if (slot < 0) return vec3(1.0);
+    vec3 up = cross(right, fwd);
+    float z = max(dot(d, fwd), 1e-4);
+    float tanOuter = sqrt(max(1.0 - cosOuter * cosOuter, 1e-6)) / max(cosOuter, 1e-4);
+    vec2 uv = vec2(dot(d, right), dot(d, up)) / (z * tanOuter) * 0.5 + 0.5;
+    return CookieSample(slot, uv);
+}
+// Точечный: панорама вокруг источника (равнопромежуточная проекция), центр
+// картинки — вперёд источника, верх — его верх.
+vec3 PointCookie(int slot, vec3 d, vec3 fwd, vec3 right) {
+    if (slot < 0) return vec3(1.0);
+    vec3 up = cross(right, fwd);
+    float yaw = atan(dot(d, right), dot(d, fwd));
+    float pitch = asin(clamp(dot(d, up), -1.0, 1.0));
+    return CookieSample(slot, vec2(yaw / (2.0 * PI) + 0.5, pitch / PI + 0.5));
+}
+
 vec3 PointLightContrib(PointLight pl, float range, vec3 N, vec3 V, vec3 fragPos, vec3 shN, float localRot,
                        vec3 albedo, float metallic, float rough) {
     vec3 tl = pl.position - fragPos;
@@ -217,7 +251,8 @@ vec3 PointLightContrib(PointLight pl, float range, vec3 N, vec3 V, vec3 fragPos,
     float sh = 0.0;
     if (uLocalShadowsEnabled && pl.shadowSlot >= 0 && ndl > 0.0)
         sh = PointShadow(pl.shadowSlot, fragPos, shN, pl.position, pl.linear, ndl, localRot);
-    return PbrContrib(N, V, L, pl.color * pl.intensity * att * (1.0 - sh), albedo, metallic, rough);
+    vec3 cookie = PointCookie(pl.cookie, -L, normalize(pl.forward), normalize(pl.right));
+    return PbrContrib(N, V, L, pl.color * cookie * pl.intensity * att * (1.0 - sh), albedo, metallic, rough);
 }
 
 // Вклад прожектора (конус).
@@ -237,7 +272,8 @@ vec3 SpotLightContrib(SpotLight sl, float range, vec3 N, vec3 V, vec3 fragPos, v
     if (uLocalShadowsEnabled && sl.shadowSlot >= 0 && ndl > 0.0)
         sh = SpotShadow(sl.shadowSlot, sl.position, sl.direction, sl.cosOuter, sl.linear, fragPos, shN,
                        ndl, dist, localRot);
-    return PbrContrib(N, V, L, sl.color * sl.intensity * att * cone * (1.0 - sh), albedo, metallic, rough);
+    vec3 cookie = SpotCookie(sl.cookie, -L, normalize(sl.direction), normalize(sl.right), sl.cosOuter);
+    return PbrContrib(N, V, L, sl.color * cookie * sl.intensity * att * cone * (1.0 - sh), albedo, metallic, rough);
 }
 
 // --- Площадной (прямоугольный) источник ------------------------------------
@@ -351,12 +387,14 @@ vec3 ClusteredLights(vec3 N, vec3 V, vec3 fragPos, vec3 shN, float localRot,
             PointLight pl;
             pl.position = t0.xyz; pl.color = t1.rgb; pl.intensity = t1.a;
             pl.constant = t2.x; pl.linear = t2.y; pl.quadratic = t2.z; pl.shadowSlot = int(t2.w);
+            pl.cookie = int(t5.w); pl.forward = t3.xyz; pl.right = t4.xyz;
             Lo += PointLightContrib(pl, t5.z, N, V, fragPos, shN, localRot, albedo, metallic, rough);
         } else if (type == 1) {
             SpotLight sl;
             sl.position = t0.xyz; sl.direction = t3.xyz; sl.color = t1.rgb; sl.intensity = t1.a;
             sl.constant = t2.x; sl.linear = t2.y; sl.quadratic = t2.z;
             sl.cosInner = t3.w; sl.cosOuter = t4.w; sl.shadowSlot = int(t2.w);
+            sl.cookie = int(t5.w); sl.right = t4.xyz;
             Lo += SpotLightContrib(sl, t5.z, N, V, fragPos, shN, localRot, albedo, metallic, rough);
         } else {
             Lo += AreaLightContrib(t0.xyz, t3.xyz, t4.xyz, t5.xy, t5.z, t1.rgb * t1.a,

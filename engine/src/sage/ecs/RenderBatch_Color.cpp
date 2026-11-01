@@ -10,6 +10,7 @@
 #include "sage/ecs/RenderSystem.h"
 #include "sage/render/Frustum.h"
 #include "sage/render/LightingUpload.h"
+#include "sage/render/LightCookies.h"
 #include "sage/render/Material.h"
 #include "sage/render/PbrShader.h"
 #include "sage/render/Shader.h"
@@ -50,6 +51,8 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     // Источники кадра — по ячейкам ЭТОГО вида (render/LightClusters.h).
     // Строится на каждый цветной проход: у куба отражений, зеркала и панели
     // Game своя пирамида взгляда.
+    // Маски источников — до кластеров: номер плитки пишется в данные лампы.
+    sage::render::LightCookies::Current().Prepare(env);
     m_clusters.Build(env, view, proj);
 
     auto setupCommon = [&](Shader& sh) {
@@ -111,6 +114,10 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         if (!g.Transparent) setCull(g.Mat ? (int)g.Mat->Render.Cull : (int)CullFaces::Back);
         sh.SetFloat("uTime", m_time);
         bindLightmap(sh, g.LmPage);
+        // Умолчания из подсказок шейдера — первыми: параметр, которого нет в
+        // материале, получает задуманное значение, а не оставшееся от прошлой
+        // пачки или ноль.
+        UploadParams(sh, sh.Defaults);
         if (g.Mat) {
             // Линейный, как у штатного пути (ShadingAlbedo): свой шейдер
             // получает тот же контракт, что и встроенный.
@@ -126,6 +133,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             sh.SetFloat("uTranslucency", g.Mat->Render.Translucency);
             UploadParams(sh, g.Mat->Params);
         }
+        BindShaderTextures(sh, g.Mat);
         if (!g.AnyOverrides) {
             if (g.Transparent) {
                 // Порядок смешивания решается ВНУТРИ пачки: сортируем инстансы

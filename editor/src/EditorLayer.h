@@ -462,6 +462,7 @@ private:
     bool SelfTestPanelRegistry();
     bool SelfTestVisualScript();     // Visual Scripting: свой редактор, узлы, компонент в Play
     bool SelfTestAiGraph();          // SAGE AI Graph: библиотека, редактор графов, компонент AI в Play
+    bool SelfTestShaders();          // шаблоны шейдеров собираются, умолчания доходят
     bool SelfTestScenesGone();       // удалили все сцены — редактор живёт; виды логики «Создать…»
     bool SelfTestGIBake();           // запекание освещения: разметка, фон, свет по месту, «устарело»    // реестр панелей: встроенные, на ходу, окна плагинов          // плагины на Lua: шаблон, меню, отмена, ошибки, Play
     // Многооконность — проверка В ЖИВОМ КАДРЕ: окно системы заводит платформа,

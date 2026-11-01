@@ -32,6 +32,8 @@ std::string LitFragSource();
 std::string TexFragSource();
 void UploadTiling(Shader& sh, const MaterialRender& render);
 void UploadParams(Shader& sh, const std::unordered_map<std::string, ShaderParam>& params);
+// Текстуры своего шейдера (Shader::Textures) из материала — по свободным юнитам.
+void BindShaderTextures(Shader& sh, const Material* mat);
 Shader& LitShader();
 Shader& TexShader();
 Shader& DepthInstShader();

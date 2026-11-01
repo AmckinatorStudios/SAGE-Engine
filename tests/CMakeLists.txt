@@ -94,6 +94,7 @@ add_executable(sage_tests
     test_sky.cpp
     test_bench.cpp
     test_posteffect.cpp
+    test_shader_params.cpp
     test_editorstate.cpp
     test_pathscope.cpp
     test_hotkeyscope.cpp

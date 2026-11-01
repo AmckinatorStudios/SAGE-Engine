@@ -689,6 +689,9 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
         // Script, задача, AI Graph и языки плагинов выбираются в окне.
         if (EditorIcons::MenuItem("script", T("Script or graph..."))) startCreate(ca::What::Script, "NewScript");
         if (EditorIcons::MenuItem("material", T("Material..."))) startCreate(ca::What::Material, "NewMaterial");
+        // Шейдер — из шаблона (вода, освещённый, без света, экран): готовый
+        // контракт движка и параметры, которые инспектор покажет ползунками.
+        if (EditorIcons::MenuItem("shader", T("Shader..."))) startCreate(ca::What::Shader, "NewShader");
         if (EditorIcons::MenuItem("file", T("Text file..."))) startCreate(ca::What::TextFile, "notes");
         ImGui::Separator();
         if (EditorIcons::MenuItem("refresh", T("Convert the whole folder to engine formats"))) ConvertFolderHere(host);

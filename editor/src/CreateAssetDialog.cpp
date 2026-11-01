@@ -14,6 +14,7 @@
 #include "LogicKinds.h"
 #include "sage/core/Paths.h"
 #include "Localization.h"
+#include "NewShader.h"
 #include "Project.h"
 #include "panels/AssetsPanel.h"
 #include "sage/assets/AssetDatabase.h"
@@ -31,6 +32,7 @@ struct State {
     char Name[128] = {0};
     bool NameEdited = false;     // человек правил имя — смена вида его не трогает
     std::string Logic = "slua";  // id вида логики (LogicKinds.h)
+    bool ScreenShader = false;   // вид нового шейдера: экран или материал (NewShader.h)
     int Color = -1;         // номер цвета палитры; -1 — без цвета
     std::string Error;      // ошибка создания (диск); ошибка имени считается на лету
     bool CloseRequested = false;   // закрыть снаружи (самопроверка)
@@ -70,6 +72,7 @@ const char* TitleOf(What kind) {
         case What::Scene: return T("New scene");
         case What::Material: return T("New material");
         case What::TextFile: return T("New text file");
+        case What::Shader: return T("New shader");
         case What::Script:
         default: return T("New script");
     }
@@ -126,6 +129,29 @@ bool KindRow(const logic::Kind& k, bool selected) {
     return pressed;
 }
 
+namespace ns = sage::editor::newshader;
+
+// Виды нового шейдера — строками того же вида, что виды логики.
+const logic::Kind& ShaderKindRow(bool screen) {
+    static const logic::Kind material = [] {
+        logic::Kind k;
+        k.Id = "shader.material";
+        k.Title = "Shader material";
+        k.Note = "For objects: its own .vert/.frag and settings";
+        k.Icon = "material";
+        return k;
+    }();
+    static const logic::Kind screenKind = [] {
+        logic::Kind k;
+        k.Id = "shader.screen";
+        k.Title = "Screen shader";
+        k.Note = "For the camera: processes the finished frame";
+        k.Icon = "camera";
+        return k;
+    }();
+    return screen ? screenKind : material;
+}
+
 const char* GroupTitle(const std::string& group) {
     return group == "ai" ? T("Artificial intelligence") : T("Scripts");
 }
@@ -141,6 +167,7 @@ void Open(const Request& request) {
     s.Color = -1;
     s.NameEdited = false;
     std::snprintf(s.Name, sizeof(s.Name), "%s", request.Name.c_str());
+    s.ScreenShader = request.ScreenOnly;
     // Вид — привычка человека, а не свойство проекта: запоминается.
     s.Logic = sage::editor::prefs::GetString("create.script_language", "slua");
     // Имя по умолчанию — по виду («NewAIGraph»), если слот не предложил своё.
@@ -231,6 +258,19 @@ void Draw(EditorHost& host) {
         ImGui::Spacing();
     }
 
+    // --- ШЕЙДЕР: пустой, вид — материал или экран --------------------------------
+    const bool shader = s.Req.Kind == What::Shader;
+    if (shader && !s.Req.ScreenOnly) {
+        // Пустой шейдер: контракт движка соблюдён, рисует он то, что напишут.
+        ImGui::TextDisabled("%s", T("Kind"));
+        ImGui::Separator();
+        if (KindRow(ShaderKindRow(false), !s.ScreenShader)) s.ScreenShader = false;
+        if (KindRow(ShaderKindRow(true), s.ScreenShader)) s.ScreenShader = true;
+        ImGui::Spacing();
+    }
+    if (shader && host.CurrentProject().Loaded())
+        dir = host.CurrentProject().AssetsDir() / (s.ScreenShader ? "shaders" : "materials");
+
     // --- ИМЯ -----------------------------------------------------------------
     ImGui::TextDisabled("%s", T("Name"));
     if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
@@ -243,7 +283,9 @@ void Draw(EditorHost& host) {
     }
 
     // Проверка имени — на лету: в том числе «такой файл уже есть».
-    const std::string file = FileName(s.Req.Kind, lk ? lk->Ext : std::string(), s.Name[0] ? s.Name : "…");
+    // Шейдер материала кладёт три файла; показан главный — материал.
+    const std::string ext = shader ? (s.ScreenShader ? ".frag" : ".sagemat") : lk ? lk->Ext : std::string();
+    const std::string file = FileName(s.Req.Kind, ext, s.Name[0] ? s.Name : "…");
     std::string problem = NameProblem(s.Name);
     if (problem.empty()) {
         std::error_code ec;
@@ -318,7 +360,11 @@ void Draw(EditorHost& host) {
         fs::path created;
         bool made = false;
         if (s.Req.Kind == What::Script) made = lk && lk->Create && lk->Create(s.Name, dir, created, s.Error);
-        else made = AssetsPanel::CreateAsset(KindFor(s.Req.Kind), s.Name, dir, created, s.Error);
+        else if (shader) {
+            if (!host.CurrentProject().Loaded()) s.Error = T("Open a project first");
+            else made = ns::Create(s.ScreenShader ? ns::Kind::Screen : ns::Kind::Material, s.Name,
+                                   host.CurrentProject().Dir(), host.CurrentProject().AssetsDir(), created, s.Error);
+        } else made = AssetsPanel::CreateAsset(KindFor(s.Req.Kind), s.Name, dir, created, s.Error);
         if (made) {
             if (lk) sage::editor::prefs::SetString("create.script_language", lk->Id);
             if (s.Req.Kind == What::Folder && s.Color >= 0) {

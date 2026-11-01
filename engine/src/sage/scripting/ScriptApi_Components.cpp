@@ -60,7 +60,8 @@ void ScriptEngine::RegisterComponentTypes() {
         "InnerConeDeg", &LightComponent::InnerConeDeg,
         "OuterConeDeg", &LightComponent::OuterConeDeg,
         "AreaWidth", &LightComponent::AreaWidth,
-        "AreaHeight", &LightComponent::AreaHeight
+        "AreaHeight", &LightComponent::AreaHeight,
+        "Cookie", &LightComponent::Cookie
     );
     m_lua.new_usertype<CameraComponent>("CameraComponent",
         "Fov", &CameraComponent::Fov,

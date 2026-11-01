@@ -7,6 +7,7 @@
 #include "sage/assets/Quarantine.h"
 #include "sage/assets/import/ModelProbe.h"
 #include "sage/render/AlphaBleed.h"
+#include "sage/render/EffectChain.h"
 #include "sage/render/SkinnedModel.h"
 
 #include <stb_image.h> // реализация STB_IMAGE_IMPLEMENTATION живёт в Texture.cpp
@@ -523,6 +524,26 @@ void ResourceManager::RegisterTexture(const std::string& name, std::shared_ptr<T
 }
 
 
+namespace {
+// Шейдер экрана: встроенный полноэкранный вершинный + фрагментный файл.
+Shader BuildScreenShader(const std::string& fragPath) {
+    std::vector<std::string> inc;
+    const std::string text = Shader::LoadExpanded(fragPath, &inc);
+    Shader sh = Shader::FromSource(sage::render::FullscreenVertexSource(), text, fragPath);
+    sh.Included = std::move(inc);
+    return sh;
+}
+
+// Правка включённого файла («#include "noise.glsl"») — тоже повод пересобрать:
+// иначе общий код шейдеров правился бы, а сцена рисовалась старым.
+long long IncludesStamp(const std::shared_ptr<Shader>& sh) {
+    long long sum = 0;
+    if (sh)
+        for (const std::string& p : sh->Included) sum += FileStamp(p);
+    return sum;
+}
+} // namespace
+
 std::shared_ptr<Shader> ResourceManager::GetShader(const std::string& vertexPath,
                                                    const std::string& fragmentPath) {
     if (vertexPath.empty() || fragmentPath.empty()) return nullptr;
@@ -543,6 +564,7 @@ std::shared_ptr<Shader> ResourceManager::GetShader(const std::string& vertexPath
     entry.FragStamp = FileStamp(entry.FragPath);
     try {
         entry.Program = std::make_shared<Shader>(entry.VertPath, entry.FragPath);
+        entry.IncludeStamp = IncludesStamp(entry.Program);
         LOG_INFO("Resources") << "Шейдер собран: " << vertexPath << " + " << fragmentPath;
     } catch (const std::exception& e) {
         // nullptr тоже кэшируем — см. комментарий в заголовке.
@@ -552,12 +574,52 @@ std::shared_ptr<Shader> ResourceManager::GetShader(const std::string& vertexPath
     return m_shaders[key].Program;
 }
 
+
+std::shared_ptr<Shader> ResourceManager::GetScreenShader(const std::string& fragmentPath) {
+    if (fragmentPath.empty()) return nullptr;
+    const std::string key = "screen|" + CacheKey(fragmentPath);
+    auto it = m_shaders.find(key);
+    if (it != m_shaders.end()) return it->second.Program;
+    ShaderEntry entry;
+    entry.Screen = true;
+    entry.FragPath = Locate(fragmentPath);
+    entry.FragStamp = FileStamp(entry.FragPath);
+    try {
+        entry.Program = std::make_shared<Shader>(BuildScreenShader(entry.FragPath));
+        entry.IncludeStamp = IncludesStamp(entry.Program);
+        LOG_INFO("Resources") << "Шейдер экрана собран: " << fragmentPath;
+    } catch (const std::exception& e) {
+        LOG_ERROR("Resources") << "Шейдер экрана не собрался (" << fragmentPath << "): " << e.what();
+    }
+    m_shaders[key] = entry;
+    return m_shaders[key].Program;
+}
+
 int ResourceManager::ReloadChangedShaders() {
     int reloaded = 0;
     for (auto& [key, entry] : m_shaders) {
+        if (entry.Screen) {
+            const long long f = FileStamp(entry.FragPath);
+            const long long inc = IncludesStamp(entry.Program);
+            if (f == entry.FragStamp && inc == entry.IncludeStamp) continue;
+            entry.FragStamp = f;
+            try {
+                Shader fresh = BuildScreenShader(entry.FragPath);
+                if (entry.Program) *entry.Program = std::move(fresh);
+                else entry.Program = std::make_shared<Shader>(std::move(fresh));
+                entry.IncludeStamp = IncludesStamp(entry.Program);
+                ++reloaded;
+                LOG_INFO("Resources") << "Шейдер экрана перечитан: " << key;
+            } catch (const std::exception& e) {
+                LOG_WARN("Resources") << "Правка шейдера экрана не собралась, оставляю прежний: " << e.what();
+            }
+            continue;
+        }
         long long v = FileStamp(entry.VertPath);
         long long f = FileStamp(entry.FragPath);
-        if (v == entry.VertStamp && f == entry.FragStamp) continue;
+        const long long inc = IncludesStamp(entry.Program);
+        if (v == entry.VertStamp && f == entry.FragStamp && inc == entry.IncludeStamp) continue;
+        entry.IncludeStamp = inc;
         entry.VertStamp = v;
         entry.FragStamp = f;
         try {
@@ -567,6 +629,7 @@ int ResourceManager::ReloadChangedShaders() {
             Shader fresh(entry.VertPath, entry.FragPath);
             if (entry.Program) *entry.Program = std::move(fresh);
             else entry.Program = std::make_shared<Shader>(std::move(fresh));
+            entry.IncludeStamp = IncludesStamp(entry.Program);
             ++reloaded;
             LOG_INFO("Resources") << "Шейдер перечитан: " << key;
         } catch (const std::exception& e) {

@@ -214,6 +214,10 @@ public:
     // собраться каждый кадр, заваливая лог и съедая время.
     std::shared_ptr<Shader> GetShader(const std::string& vertexPath,
                                       const std::string& fragmentPath);
+    // Шейдер ЭКРАНА: только фрагментный файл, вершинный — полноэкранный
+    // треугольник движка (звено пост-обработки «Свой шейдер»). Кэш и правка
+    // на лету — те же, что у шейдеров материалов.
+    std::shared_ptr<Shader> GetScreenShader(const std::string& fragmentPath);
 
     // Перечитать шейдеры, файлы которых изменились с момента загрузки.
     // Дёшево (stat на файл) и зовётся редактором раз в кадр: правка .frag
@@ -425,6 +429,8 @@ private:
         std::shared_ptr<Shader> Program; // nullptr — не собрался
         std::string VertPath, FragPath;
         long long VertStamp = 0, FragStamp = 0;
+        long long IncludeStamp = 0;   // сумма штампов «#include "…"» файлов программы
+        bool Screen = false; // вершинный — встроенный полноэкранный (VertPath пуст)
     };
     std::unordered_map<std::string, ShaderEntry> m_shaders;
     std::unordered_map<std::string, std::shared_ptr<Skybox>> m_skyboxes;

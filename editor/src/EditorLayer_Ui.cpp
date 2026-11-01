@@ -548,6 +548,14 @@ void EditorLayer::DrawDockspaceAndMenu() {
         m_dialogs.Browse(c, path, sizeof(path));
         openDialog = nullptr;
     }
+    // Окно «Создать → Шейдер» — для снимка (SAGE_EDITOR_SHADER_DEMO=dialog).
+    if (openDialog && std::strcmp(openDialog, "create-shader") == 0) {
+        sage::editor::createasset::Request req;
+        req.Kind = sage::editor::createasset::What::Shader;
+        req.Name = "MyShader";
+        sage::editor::createasset::Open(req);
+        openDialog = nullptr;
+    }
     if (openDialog) m_dialogs.Open(openDialog);
     m_dialogs.Draw(*this);
     // Отчёт о падении — ПЕРЕД предложением восстановить сцену: сначала «что

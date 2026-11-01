@@ -1,7 +1,11 @@
 #include "sage/core/Problems.h"
 #include "sage/app/CoreSystems.h"
 #include "EditorLayer.h"
+#include "CreateAssetDialog.h"
 #include "LuaPlugins.h"
+#include "NewShader.h"
+#include "sage/render/PostProcessComponent.h"
+#include "sage/render/ResourceManager.h"
 #include "PluginsWindow.h"
 #include "sage/scene/Signals.h"
 #include "sage/audio/AudioEngine.h"
@@ -123,7 +127,7 @@ void EditorLayer::ApplyStartupHooks() {
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TWEEN",
             "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
             "SAGE_EDITOR_SHOW_CONSOLE",  "SAGE_EDITOR_SHOW_PROBLEMS",
-            "SAGE_EDITOR_SHOW_PLUGINS",
+            "SAGE_EDITOR_SHOW_PLUGINS",   "SAGE_EDITOR_SHADER_DEMO",  "SAGE_EDITOR_LIGHT_COOKIE",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -307,6 +311,87 @@ void EditorLayer::ApplyStartupHooks() {
     // которого раньше не было выхода. Проверять его иначе нечем: кликать по
     // крестикам в CI некому, а именно на этом кадре должна быть видна подсказка
     // «Все панели закрыты» с кнопкой возврата.
+    // Материал-шейдер и шейдер экрана вживую — для скриншот-проверки (окно
+    // «Создать → Шейдер» и правку параметров иначе не снять: мыши у прогона нет).
+    // Создаётся ПУСТОЙ шейдер «Demo»; SAGE_EDITOR_SHADER_DEMO_FROM=<папка> —
+    // подменить его файлы своими (Demo.vert/.frag/.glsl, картинки — в
+    // assets/textures): так снимается шейдер, которого в движке нет.
+    // material — плоскость с материалом выделена, инспектор показывает материал;
+    // screen — ещё и звено «Свой шейдер» (Screen.frag) на камере; dialog — окно.
+    if (const std::string demo = sage::EnvString("SAGE_EDITOR_SHADER_DEMO"); !demo.empty() && m_project.Loaded()) {
+        namespace ns = sage::editor::newshader;
+        fs::path made;
+        std::string err;
+        ns::Create(ns::Kind::Material, "Demo", m_project.Dir(), m_project.AssetsDir(), made, err);
+        ns::Create(ns::Kind::Screen, "Screen", m_project.Dir(), m_project.AssetsDir(), made, err);
+        if (const fs::path from = sage::EnvPath("SAGE_EDITOR_SHADER_DEMO_FROM"); !from.empty()) {
+            std::error_code ec;
+            for (const auto& f : fs::directory_iterator(from, ec)) {
+                const std::string ext = f.path().extension().string();
+                const bool code = ext == ".vert" || ext == ".frag" || ext == ".glsl";
+                const fs::path dir = m_project.AssetsDir() / (code ? "shaders" : "textures");
+                fs::create_directories(dir, ec);
+                fs::copy_file(f.path(), dir / f.path().filename(), fs::copy_options::overwrite_existing, ec);
+            }
+            const fs::path matJson = from / "Demo.sagemat";
+            if (fs::exists(matJson, ec))
+                fs::copy_file(matJson, m_project.AssetsDir() / "materials" / "Demo.sagemat",
+                              fs::copy_options::overwrite_existing, ec);
+        }
+        sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
+        GameObject plane = CreatePrimitiveEntity("Demo", MeshRef::Type::Plane);
+        plane.GetTransform().Position = glm::vec3(0.0f, 0.05f, 0.0f);
+        plane.GetTransform().Scale = glm::vec3(60.0f, 1.0f, 60.0f);
+        const std::string mat = "assets/materials/Demo.sagemat";
+        AssignMaterial(m_scene->Registry().get<MeshRendererComponent>(plane.Entity()), mat,
+                       ResourceManager::Instance().GetMaterial(mat));
+        GameObject selected = plane;
+        if (demo == "screen") {
+            auto cams = m_scene->Registry().view<CameraComponent>();
+            entt::entity cam = cams.empty() ? m_scene->CreateEmptyObject("Camera").Entity() : cams.front();
+            if (!m_scene->Registry().all_of<CameraComponent>(cam)) m_scene->Registry().emplace<CameraComponent>(cam);
+            auto& ppc = m_scene->Registry().get_or_emplace<sage::render::PostProcessComponent>(cam);
+            if (ppc.Chain.Effects.empty()) ppc.Chain = sage::render::PostChain::Default();
+            sage::render::AddPostEffect(ppc.Chain, "shader").Source = "assets/shaders/Screen.frag";
+            selected = GameObject(&m_scene->Registry(), cam);
+        }
+        // Окно — через очередь диалогов: открытое сразу закрыл бы перевод
+        // фокуса на инспектор в первых кадрах.
+        if (demo == "dialog") m_pendingDialog = "create-shader";
+        m_selection.SetPrimary(selected.Id());
+        if (demo == "material") m_assets.Select((m_project.Dir() / mat).string());
+        m_focusInspectorFrames = 3;
+    }
+    // Текстура света вживую — для скриншот-проверки: картинка копируется в
+    // assets/textures и ставится прожектору сцены, солнце приглушается (иначе
+    // узор на полу не видно днём), прожектор выделяется.
+    if (const fs::path cookie = sage::EnvPath("SAGE_EDITOR_LIGHT_COOKIE"); !cookie.empty() && m_project.Loaded()) {
+        std::error_code ec;
+        const fs::path dir = m_project.AssetsDir() / "textures";
+        fs::create_directories(dir, ec);
+        fs::copy_file(cookie, dir / cookie.filename(), fs::copy_options::overwrite_existing, ec);
+        sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
+        const std::string ref = "assets/textures/" + sage::PathToUtf8(cookie.filename());
+        // Светлый пол: на тёмном полу демо-сцены узор маски не разглядеть.
+        GameObject floor = CreatePrimitiveEntity("CookieFloor", MeshRef::Type::Plane);
+        floor.GetTransform().Position = glm::vec3(0.0f, 0.02f, 0.0f);
+        floor.GetTransform().Scale = glm::vec3(16.0f, 1.0f, 16.0f);
+        m_scene->Registry().get<MeshRendererComponent>(floor.Entity()).Color = glm::vec3(0.85f);
+        entt::registry& reg = m_scene->Registry();
+        for (auto e : reg.view<LightComponent>()) {
+            LightComponent& lc = reg.get<LightComponent>(e);
+            if (lc.Kind == LightComponent::Type::Directional) lc.Intensity *= 0.03f;
+            if (lc.Kind == LightComponent::Type::Point) lc.Intensity = 0.0f;
+            if (lc.Kind == LightComponent::Type::Spot) {
+                lc.Cookie = ref;
+                lc.Color = glm::vec3(1.0f, 0.95f, 0.85f);
+                lc.Intensity = std::max(lc.Intensity, 80.0f);
+                lc.OuterConeDeg = std::max(lc.OuterConeDeg, 40.0f);
+                m_selection.SetPrimary(GameObject(&reg, e).Id());
+                m_focusInspectorFrames = 3;
+            }
+        }
+    }
     if (std::getenv("SAGE_EDITOR_CLOSE_PANELS")) {
         m_headlessProject = true;
         m_panels[EditorPanel::Hierarchy] = m_panels[EditorPanel::Inspector] = m_panels[EditorPanel::Environment] = false;

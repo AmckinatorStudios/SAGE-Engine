@@ -48,6 +48,7 @@ add_executable(SageEditor WIN32
     src/selftest/SelfTestAiGraph.cpp
     src/selftest/SelfTestVisualScript.cpp
     src/selftest/SelfTestScenesGone.cpp
+    src/selftest/SelfTestShaders.cpp
     src/selftest/SelfTestAiGraphFrame.cpp
     src/selftest/SelfTestCursorLock.cpp
     src/selftest/SelfTestColliderHandles.cpp
@@ -79,6 +80,8 @@ add_executable(SageEditor WIN32
     src/EditorIcons.cpp
     src/AssetSlot.cpp
     src/CreateAssetDialog.cpp
+    src/NewShader.cpp
+    src/ShaderParamsUi.cpp
     src/LogicKinds.cpp
     src/LogicKindsBuiltin.cpp
     src/LuaPlugins.cpp

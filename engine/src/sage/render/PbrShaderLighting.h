@@ -19,8 +19,12 @@ const float PI = 3.14159265359;
 // Он ЧАСТЬ ИСТОЧНИКА, а не отдельный массив: иначе связь «эта лампа — эта
 // плитка» держалась бы на совпадении двух порядков, а они расходятся при
 // первом же источнике, которому места не досталось.
-struct PointLight { vec3 position; vec3 color; float intensity; float constant; float linear; float quadratic; int shadowSlot; };
-struct SpotLight  { vec3 position; vec3 direction; vec3 color; float intensity; float constant; float linear; float quadratic; float cosInner; float cosOuter; int shadowSlot; };
+// cookie — плитка текстуры света в атласе (render/LightCookies.h), -1 — нет;
+// forward/right — оси источника, по ним маска поворачивается вместе с ним.
+struct PointLight { vec3 position; vec3 color; float intensity; float constant; float linear; float quadratic; int shadowSlot;
+                    int cookie; vec3 forward; vec3 right; };
+struct SpotLight  { vec3 position; vec3 direction; vec3 color; float intensity; float constant; float linear; float quadratic; float cosInner; float cosOuter; int shadowSlot;
+                    int cookie; vec3 right; };
 
 uniform vec3 uAmbientSky;
 uniform vec3 uAmbientGround;
