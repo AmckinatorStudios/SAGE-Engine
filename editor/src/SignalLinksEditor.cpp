@@ -1,4 +1,5 @@
 #include "SignalLinksEditor.h"
+#include "sage/scripting/Languages.h"
 
 #include <algorithm>
 #include <cfloat>
@@ -64,8 +65,7 @@ const std::vector<std::string>& ProjectEmittedSignals(EditorHost& host) {
     for (auto it = std::filesystem::recursive_directory_iterator(host.CurrentProject().AssetsDir(), ec);
          !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
         if (!it->is_regular_file(ec)) continue;
-        const std::string ext = it->path().extension().string();
-        if (ext != ".lua" && ext != ".slua") continue;
+        if (!sage::scripting::IsScriptPath(it->path().string())) continue;
         if (it->file_size(ec) > 512 * 1024) continue; // не скрипт, а данные
         std::ifstream in(it->path(), std::ios::binary);
         const std::string src((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());

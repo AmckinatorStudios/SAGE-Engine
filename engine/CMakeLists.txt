@@ -205,6 +205,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptEngine.cpp
     src/sage/scripting/ScriptModules.cpp
     src/sage/scripting/ScriptApi.cpp
+    src/sage/scripting/Languages.cpp
     src/sage/scripting/ScriptLint.cpp
     src/sage/lang/SageLexer.cpp
     src/sage/lang/SageParser.cpp

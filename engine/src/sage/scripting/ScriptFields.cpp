@@ -3,28 +3,16 @@
 #include <algorithm>
 #include <cctype>
 
-#include "sage/lang/SageCompiler.h"
-#include "sage/scripting/lua/LuaInternal.h"
+#include "sage/scripting/Languages.h"
 
 namespace sage::scripting {
 
+// Поля и методы спрашиваются у языка файла (sage/scripting/Languages.h):
+// выбор по расширению живёт в реестре языков, а не здесь.
 sage::vars::Table ParseFields(const std::string& path, const std::string& source) {
-    std::string ext;
-    const size_t dot = path.find_last_of('.');
-    if (dot != std::string::npos) ext = path.substr(dot);
-    std::transform(ext.begin(), ext.end(), ext.begin(),
-                   [](unsigned char c) { return (char)std::tolower(c); });
-
-    if (ext == ".lua") return lua::ParsePublicFields(source);
-    // Поля .slua — из объявления класса (@field(editable = true)), а не из
-    // текста по шаблону: тип, подпись и диапазон уже проверил компилятор.
-    // Файл с ошибкой полей не даёт — инспектор не показывает поля, которых,
-    // возможно, нет.
-    if (ext == ".slua") {
-        auto r = sage::lang::CompileForEngine(path, source);
-        return r->Ok ? sage::lang::FieldsOf(*r) : sage::vars::Table{};
-    }
-    return {};
+    Language lang;
+    if (!LanguageForPath(path, lang) || !lang.Fields) return {};
+    return lang.Fields(path, source);
 }
 
 namespace {
@@ -41,6 +29,8 @@ bool IsHook(const std::string& name) {
 }
 
 bool IdentChar(char c) { return std::isalnum((unsigned char)c) || c == '_'; }
+
+} // namespace
 
 // `function Menu:start_game(` / `function Menu.start_game(` / `function start_game(`
 // (старый стиль — глобальная функция файла). Комментарии и строки не
@@ -75,20 +65,10 @@ std::vector<std::string> ParseLuaMethods(const std::string& src) {
     return out;
 }
 
-} // namespace
-
 std::vector<std::string> ParseMethods(const std::string& path, const std::string& source) {
-    std::string ext;
-    const size_t dot = path.find_last_of('.');
-    if (dot != std::string::npos) ext = path.substr(dot);
-    std::transform(ext.begin(), ext.end(), ext.begin(),
-                   [](unsigned char c) { return (char)std::tolower(c); });
-    if (ext == ".lua") return ParseLuaMethods(source);
-    if (ext == ".slua") {
-        auto r = sage::lang::CompileForEngine(path, source);
-        return r->Ok ? sage::lang::MethodsOf(*r) : std::vector<std::string>{};
-    }
-    return {};
+    Language lang;
+    if (!LanguageForPath(path, lang) || !lang.Methods) return {};
+    return lang.Methods(path, source);
 }
 
 std::vector<std::string> ParseEmittedSignals(const std::string& source) {

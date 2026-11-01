@@ -152,3 +152,94 @@ TEST(ScriptApi_engine_api_has_no_name_conflicts) {
     for (const std::string& c : conflicts) std::printf("    %s\n", c.c_str());
     CHECK_TRUE(conflicts.empty());
 }
+
+// --- Реестр языков -------------------------------------------------------------
+
+#include "sage/scripting/Languages.h"
+#include "sage/scripting/ScriptFields.h"
+#include "sage/scripting/ScriptingSystem.h"
+
+namespace {
+// Язык-заглушка: исполнение есть, но ничего не делает. Для проверки того, что
+// хост подключает любой зарегистрированный язык, не зная его заранее.
+class NullBackend : public sage::scripting::LanguageBackend {
+public:
+    const char* Name() const override { return "Null"; }
+    bool Handles(const std::string& ext) const override { return ext == ".nul"; }
+    void Bind(const sage::scripting::ScriptServices&) override {}
+    sage::vars::Table ParseFields(const std::string&, const std::string&) const override { return {}; }
+    sage::scripting::InstanceId Create(const sage::scripting::ScriptSource&, GameObject,
+                                       sage::scripting::ScriptError&) override { return 1; }
+    void Destroy(sage::scripting::InstanceId) override {}
+    bool Has(sage::scripting::InstanceId, sage::scripting::Hook) const override { return false; }
+    bool Call(sage::scripting::InstanceId, sage::scripting::Hook, float, sage::scripting::ScriptError&) override {
+        return true;
+    }
+    bool CallWith(sage::scripting::InstanceId, sage::scripting::Hook, GameObject,
+                  sage::scripting::ScriptError&) override { return true; }
+    bool CallNamed(sage::scripting::InstanceId, sage::scripting::Hook, const std::string&,
+                   sage::scripting::ScriptError&) override { return true; }
+    bool Invoke(sage::scripting::InstanceId, const std::string&, const std::vector<Value>&,
+                sage::scripting::ScriptError&) override { return true; }
+    bool HasMethod(sage::scripting::InstanceId, const std::string&) const override { return false; }
+    bool InvokeEvent(sage::scripting::InstanceId, const std::string&, const sage::events::Event&,
+                     sage::scripting::ScriptError&) override { return true; }
+    void ApplyFields(sage::scripting::InstanceId, const sage::vars::Table&) override {}
+    void Reset() override {}
+};
+} // namespace
+
+// Lua и SAGE Lua — обычные записи реестра; инструменты разбора (поля,
+// методы) идут через реестр, а не через выбор по расширению.
+TEST(Languages_builtins_are_registry_entries) {
+    using namespace sage::scripting;
+    Language lua, slua;
+    CHECK_TRUE(LanguageForPath("assets/scripts/player.LUA", lua));
+    CHECK_TRUE(lua.Id == "lua" && lua.CreateBackend);
+    CHECK_TRUE(LanguageForPath("a/b.slua", slua) && slua.RunsOn == "lua" && !slua.CreateBackend);
+    CHECK_TRUE(IsScriptPath("x.lua") && !IsScriptPath("x.png") && !IsScriptPath("lua"));
+    const sage::vars::Table fields = ParseFields("p.lua", "speed = 5\nfunction Update(dt) end\n");
+    CHECK_TRUE(fields.Find("speed") != nullptr);
+    const std::vector<std::string> methods = ParseMethods("p.lua", "function Menu:start_game() end\n");
+    CHECK_TRUE(methods.size() == 1 && methods[0] == "start_game");
+}
+
+// Свой язык — одна регистрация: его файлы узнают инструменты, его поля видит
+// инспектор, хост подключает его исполнение. Расширение чужого языка не отдаётся.
+TEST(Languages_custom_language_plugs_in_everywhere) {
+    using namespace sage::scripting;
+    Language nul;
+    nul.Id = "null-test";
+    nul.Name = "Null";
+    nul.Extensions = {".NUL"};
+    nul.Origin = "test:null";
+    nul.CreateBackend = [](const LanguageHost&) { return std::make_unique<NullBackend>(); };
+    nul.Fields = [](const std::string&, const std::string& src) {
+        sage::vars::Table t;
+        t.Set("from_null", Value((int)src.size()));
+        return t;
+    };
+    std::string err;
+    CHECK_TRUE(RegisterLanguage(nul, &err));
+    CHECK_TRUE(IsScriptPath("enemy.nul"));
+    const std::vector<std::string> exts = ScriptExtensions();
+    CHECK_TRUE(std::find(exts.begin(), exts.end(), ".nul") != exts.end());
+    CHECK_TRUE(ParseFields("enemy.nul", "abc").Find("from_null") != nullptr);
+
+    Language thief;
+    thief.Id = "thief";
+    thief.Name = "Thief";
+    thief.Extensions = {".lua"};
+    CHECK_FALSE(RegisterLanguage(thief, &err));
+    CHECK_TRUE(err.find("Lua") != std::string::npos);
+
+    ScriptEngine engine;
+    ScriptingSystem sys;
+    CHECK_EQ(AttachLanguages(sys, {&engine, {}}), 2);   // Lua и Null; SAGE Lua идёт в Lua
+    CHECK_TRUE(sys.Runtime().BackendFor("enemy.nul") != nullptr);
+    CHECK_TRUE(std::string(sys.Runtime().BackendFor("enemy.nul")->Name()) == "Null");
+    CHECK_TRUE(std::string(sys.Runtime().BackendFor("p.slua")->Name()) == "Lua");
+
+    CHECK_EQ(UnregisterLanguages("test:null"), 1);
+    CHECK_FALSE(IsScriptPath("enemy.nul"));
+}

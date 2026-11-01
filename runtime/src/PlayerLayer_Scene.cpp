@@ -39,6 +39,7 @@
 #include "sage/scene/SceneFlow.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scripting/ScriptEngine.h"
+#include "sage/scripting/Languages.h"
 #include "sage/scripting/ScriptingSystem.h"
 #include "sage/scripting/lua/LuaBackend.h"
 #include "sage/ecs/CameraView.h"
@@ -194,7 +195,9 @@ void PlayerLayer::BuildSceneRuntime() {
     // ПОСЛЕ физики: Start скрипта вправе спросить у себя CharacterController и
     // получить работающий, а не «физика не привязана» ровно на первом кадре.
     m_scripting = std::make_unique<sage::scripting::ScriptingSystem>();
-    m_scripting->AddBackend(sage::scripting::MakeLuaBackend({m_scripts.get()}));
+    // Все зарегистрированные языки (sage/scripting/Languages.h): Lua работает
+    // на состоянии прежнего движка, остальные зовут API через его вызыватели.
+    sage::scripting::AttachLanguages(*m_scripting, {m_scripts.get(), m_projectDir});
     sage::scripting::ScriptServices services;
     services.ScenePtr = &*m_scene;
     services.Input = &m_input;

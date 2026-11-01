@@ -2,6 +2,8 @@
 #include <filesystem>
 #include <string>
 
+#include "sage/scripting/Languages.h"
+
 // ---------------------------------------------------------------------------
 // ЧТО ЗНАЧИТ «ОТКРЫТЬ» ФАЙЛ ПРОЕКТА — одно правило для двойного щелчка и для
 // пункта «Открыть» в меню панели Assets.
@@ -23,8 +25,9 @@ inline OpenAs Of(const std::filesystem::path& path, bool isDir) {
     if (ext == ".sageclip" || ext == ".sageanim") return OpenAs::Clip;
     if (ext == ".aigraph") return OpenAs::AiGraph;
     if (ext == ".sgraph" || ext == ".vgraph") return OpenAs::VisualScript;
-    if (ext == ".lua" || ext == ".slua" || ext == ".vert" || ext == ".frag" || ext == ".glsl" || ext == ".txt" ||
-        ext == ".md" || ext == ".json")
+    // Скрипт любого зарегистрированного языка (sage/scripting/Languages.h) — текст.
+    if (sage::scripting::IsScriptPath(path.string()) || ext == ".vert" || ext == ".frag" || ext == ".glsl" ||
+        ext == ".txt" || ext == ".md" || ext == ".json")
         return OpenAs::Text;
     return OpenAs::None;
 }

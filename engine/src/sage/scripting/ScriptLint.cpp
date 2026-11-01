@@ -1,4 +1,5 @@
 #include "sage/scripting/ScriptLint.h"
+#include "sage/scripting/Languages.h"
 
 #include <fstream>
 #include <sstream>
@@ -52,14 +53,15 @@ ScriptLintResult LintScripts(const fs::path& root) {
             if (name.empty() || name[0] == '.' || name == "Builds") it.disable_recursion_pending();
             continue;
         }
-        const std::string ext = p.extension().string();
+        // Файлы любого языка с проверкой (sage/scripting/Languages.h);
         // sage.lua — подсказка для редактора кода, а не скрипт игры.
-        if ((ext != ".lua" && ext != ".slua") || name == "sage.lua") continue;
+        Language lang;
+        if (name == "sage.lua" || !LanguageForPath(p.string(), lang) || !lang.Check) continue;
         std::ifstream in(p, std::ios::binary);
         if (!in) continue;
         std::stringstream ss;
         ss << in.rdbuf();
-        const ScriptLintResult one = LintScriptSource(p.lexically_relative(root).generic_string(), ss.str());
+        const ScriptLintResult one = lang.Check(p.lexically_relative(root).generic_string(), ss.str());
         total.Files += one.Files;
         total.Errors += one.Errors;
         total.Warnings += one.Warnings;
