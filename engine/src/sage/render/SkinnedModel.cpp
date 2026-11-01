@@ -411,6 +411,10 @@ void SkinnedModel::Draw(const glm::mat4& entityModel, const glm::mat4& view, con
         // Материал сущности, если он назначен, заменяет материал из файла
         // целиком: скин персонажа меняется так же, как материал куба.
         const SkinnedMaterial& m = overrideMaterial ? *overrideMaterial : sub.Material;
+        // Картинки модели декодированы без переворота (под UV glTF), а
+        // текстуры движка — строками снизу вверх: у материала сущности v
+        // переворачивается, иначе скин ложится на модель вверх ногами.
+        shader.SetInt("uFlipV", overrideMaterial && m.Albedo && m.Albedo->FlippedRows() ? 1 : 0);
         UploadMorphs(shader, sub, morphWeights);
 
         // Двусторонний материал рисуется без отсечения задних граней. У
@@ -765,9 +769,11 @@ std::unique_ptr<SkinnedModel> SkinnedModel::BuildFromData(ModelData& data) {
         // не остаётся ничего. Мелкие текстуры (палитры, рисунки по пикселям) берём
         // ближайшим соседом и без мипов; крупные — как раньше.
         const bool palette = img.Width <= 128 && img.Height <= 128;
-        return std::make_shared<Texture>(img.Pixels.data(), img.Width, img.Height,
-                                         palette ? TextureFilter::Nearest : TextureFilter::Trilinear,
-                                         !palette, srgb);
+        auto tex = std::make_shared<Texture>(img.Pixels.data(), img.Width, img.Height,
+                                             palette ? TextureFilter::Nearest : TextureFilter::Trilinear,
+                                             !palette, srgb);
+        tex->SetFlippedRows(false);   // под UV glTF, без переворота
+        return tex;
     };
     std::vector<std::shared_ptr<Texture>> textures(data.Images.size());       // данные
     std::vector<std::shared_ptr<Texture>> colourTextures(data.Images.size()); // цвет (sRGB)
