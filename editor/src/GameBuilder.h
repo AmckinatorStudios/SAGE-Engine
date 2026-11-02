@@ -5,6 +5,8 @@
 #include <string>
 #include <thread>
 
+#include "sage/assets/GameBuild.h"
+
 // ---------------------------------------------------------------------------
 // СБОРКА ИГРЫ В ФОНЕ.
 //
@@ -14,27 +16,13 @@
 // (именно так о нём и сообщили). Здесь она идёт в своём потоке, а окно сборки
 // каждый кадр спрашивает Progress()/Stage() и рисует полосу.
 //
-// Что попадает в игру (одним пакетом game.sagepak рядом с exe):
-//   • ВЕСЬ проект — сцены, скрипты, модели, текстуры, звук, материалы,
-//     сайдкары импорта (.sageimport — без них модель в игре собиралась бы с
-//     другим масштабом, чем в редакторе); не едут только .meta и служебные
-//     папки на точку;
-//   • оглавление базы ассетов (GUID -> путь), иначе ссылки сцены по GUID
-//     в игре не находились бы;
-//   • ресурсы движка (шейдеры, шрифт) — россыпи assets/ рядом с exe больше нет.
-// Рядом с пакетом — только исполняемый файл, его библиотеки (.dll) и sage.cfg
-// (его игрок вправе править сам).
+// Сама упаковка — sage::assets::BuildGame (движок): ту же функцию зовёт
+// консольный tools/sage_build, и игра из CI собирается ровно так же, как
+// кнопкой. Здесь — только поток, полоса и перевод этапов на язык интерфейса.
 // ---------------------------------------------------------------------------
 class GameBuilder {
 public:
-    struct Request {
-        std::filesystem::path ProjectDir;
-        std::string ProjectName;
-        std::filesystem::path OutputDir;      // игра ляжет в OutputDir/ProjectName
-        std::filesystem::path Player;         // найденный SagePlayer
-        std::string AssetIndex;               // AssetDatabase::ExportIndex()
-        bool CopyProjectFile = false;         // см. EngineConfig::BuildProjectFile
-    };
+    using Request = sage::assets::GameBuildRequest;
 
     ~GameBuilder();
 

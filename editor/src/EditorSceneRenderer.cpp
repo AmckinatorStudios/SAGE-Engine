@@ -152,7 +152,7 @@ ShadowBinding EditorSceneRenderer::FrameShadows() const {
 // игра считает тени под свою камеру.
 void EditorSceneRenderer::FitSunShadows(Scene& scene, const LightingEnvironment& env,
                                         const ShadowMap::CameraView& view) {
-    if (!m_shadows) return;
+    if (!m_shadows || !env.SunShadowsVisible()) return;
     Window& window = sage::Application::Get().GetWindow();
     if (m_shadows->CascadeCount() > 1) m_shadows->SetCascades(env.Sun.Direction, view);
     else m_shadows->FitSingle(env.Sun.Direction, view);

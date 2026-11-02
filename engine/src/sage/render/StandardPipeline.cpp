@@ -44,7 +44,7 @@ void StandardPipeline::AddShadowPasses(RenderGraph& graph, const RenderView& vie
     pass.Name = kShadowPass;
     pass.Type = RGPassType::Custom; // карта теней привязывает свои цели сама
     pass.Writes = {m_shadowRes};
-    pass.Enabled = Shadows && view.World != nullptr;
+    pass.Enabled = Shadows && view.World != nullptr && view.World->Lighting.SunShadowsVisible();
     pass.Execute = [this, view](RenderGraphContext& ctx) {
         Scene& scene = *view.World;
         ShadowMap::CameraView v;

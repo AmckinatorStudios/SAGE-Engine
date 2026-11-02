@@ -84,6 +84,8 @@ jobs:
           test -f "$EXE" || { echo "::error::SageEditor.exe не собрался"; exit 1; }
           # Плеер и шаблоны — часть поставки, а не приятное дополнение: без
           # первого не работает Build Game, без вторых — шаблон «Витрина».
+          test -f build-windows/tools/sage_build/sage_build.exe \
+            || { echo "::error::sage_build.exe не собрался — игры в CI не собрать"; exit 1; }
           test -f build-windows/runtime/SagePlayer.exe \
             || { echo "::error::SagePlayer.exe не собрался — Build Game работать не будет"; exit 1; }
           test -f build-windows/editor/themes/README.txt \
@@ -203,6 +205,9 @@ jobs:
           mkdir -p "$PKG/runtime"
           cp build-windows/runtime/SagePlayer.exe "$PKG/runtime/"
           cp -r build-windows/runtime/assets "$PKG/runtime/assets"
+          # Сборка игры без редактора (CI игр, выпуск): та же упаковка, что у
+          # «File > Build Game». Рядом с редактором — та же libstdc++.
+          cp build-windows/tools/sage_build/sage_build.exe "$PKG"/
 
           # ГОТОВЫХ ПРОЕКТОВ В АРХИВЕ БОЛЬШЕ НЕТ.
           #

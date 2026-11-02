@@ -896,3 +896,24 @@ TEST(Material_fingerprint_follows_live_edits_and_the_file) {
     CHECK_TRUE(m.HasUnsavedChanges());     // правка после записи — видна
     std::remove(path.c_str());
 }
+
+// Процедурная текстура (собранная скриптом или движком) по имени — одна и та
+// же при любом способе заказа: обычном и фоновом, с любой выборкой. Раньше
+// фоновый заказ с другой выборкой ставил серую заглушку и искал файл, которого
+// нет: скин персонажа и иконки предметов оставались серыми.
+TEST(Generated_texture_is_found_by_async_request_with_any_sampling) {
+    auto device = sage::rhi::GraphicsDevice::Create(sage::rhi::Backend::Null);
+    device->Init(nullptr);
+    sage::rhi::GraphicsDevice::SetCurrent(device.get());
+    {
+        ResourceManager rm;
+        const unsigned char px[4] = {255, 0, 0, 255};
+        auto tex = std::make_shared<Texture>(px, 1, 1, TextureFilter::Nearest, false, true);
+        rm.RegisterTexture("game_icons", tex);
+        CHECK_TRUE(rm.GetTexture("game_icons") == tex);
+        CHECK_TRUE(rm.GetTextureAsync("game_icons", TextureFilter::Trilinear, true, true, true) == tex);
+        CHECK_TRUE(rm.GetTextureAsync("game_icons", TextureFilter::Nearest, false, false, false) == tex);
+        CHECK_EQ(rm.PumpAsyncUploads(), 0);
+    }
+    sage::rhi::GraphicsDevice::SetCurrent(nullptr);
+}
