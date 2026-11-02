@@ -54,13 +54,19 @@ const std::set<std::string>& PbrBlockUniforms() {
 } // namespace
 
 bool IsEngineUniform(const std::string& name) {
+    // Только то, что движок заливает МАТЕРИАЛУ. Имена контракта шейдера экрана
+    // (uScene, uDepth, uTexel, uResolution, uStrength, uParamA, uParamB, uTint,
+    // uProj, uInvProj) сюда не входят: материалу их никто не задаёт, и
+    // считать их служебными значило отнять у материала-шейдера его же
+    // параметр. Так uTint материала оставался без умолчания из подсказки —
+    // нулём, — и всё, что им умножалось, рисовалось чёрным, пока соседний
+    // материал с тем же шейдером случайно не оставлял в программе своё
+    // значение. Шейдеру экрана эти юниформы движок задаёт сам при каждом
+    // проходе (PostFXPasses, «Свой шейдер»), поверх любых умолчаний.
     static const std::set<std::string> contract = {
         "uView", "uProjection", "uModel", "uViewPos", "uTime", "uShadingMode", "uAlbedoFactor", "uMetallic",
         "uRoughness", "uOpacity", "uAlphaCutoff", "uTranslucency", "uLightmapEnabled", "uLightmap", "uUnlit",
-        "uEmissive", "uUVOffset",
-        // Шейдер экрана (звено «Свой шейдер» пост-обработки).
-        "uScene", "uDepth", "uTexel", "uResolution", "uStrength", "uParamA", "uParamB", "uTint",
-        "uProj", "uInvProj"};
+        "uEmissive", "uUVOffset"};
     return contract.count(name) > 0 || PbrBlockUniforms().count(name) > 0;
 }
 
