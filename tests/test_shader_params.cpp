@@ -106,6 +106,24 @@ TEST(ShaderParams_material_textures_and_light_cookie_survive_save) {
     CHECK_TRUE(found);
 }
 
+// Имя из контракта шейдера экрана (uTint, uStrength…) у материала-шейдера —
+// его собственный параметр: с умолчанием из подсказки и полем в инспекторе.
+// Раньше uTint считался служебным, оставался нулём, и материал, который им
+// умножает цвет, рисовался чёрным.
+TEST(ShaderParams_screen_contract_names_are_material_params) {
+    const auto list = ParseShaderUniforms(
+        "uniform vec3 uTint; // color 1 0.5 0.25 Оттенок\n"
+        "uniform float uStrength; // 0.7\n"
+        "uniform mat4 uView;\n");
+    CHECK_EQ(list.size(), (size_t)2);
+    CHECK_EQ(list[0].Name, std::string("uTint"));
+    CHECK_TRUE(list[0].Color);
+    CHECK_NEAR(list[0].Default.y, 0.5f, 1e-5f);
+    CHECK_EQ(list[1].Name, std::string("uStrength"));
+    CHECK_FALSE(sage::render::IsEngineUniform("uTint"));
+    CHECK_TRUE(sage::render::IsEngineUniform("uViewPos"));
+}
+
 // Параметр из .vert без группы и из .frag под заголовком — в группе; группы вместе.
 TEST(ShaderParams_merge_keeps_groups_together) {
     const auto vert = ParseShaderUniforms("uniform float uWaveHeight; // 0.25\nuniform float uWaveSpeed; // 1\n");

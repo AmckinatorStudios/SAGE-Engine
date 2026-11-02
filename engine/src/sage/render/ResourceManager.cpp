@@ -380,6 +380,15 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
         it->second.Tick = NextTick();
         return it->second.Tex; // готовая или ещё грузящийся плейсхолдер
     }
+    // Процедурная картинка (RegisterTexture) — та же, что у GetTexture: файла
+    // за ней нет. Без этой ветки модель или материал, заказавшие её с другой
+    // выборкой, получали серую заглушку навсегда, а фоновый поток — ошибку
+    // «не декодировалась» (так пропадали скин персонажа и иконки предметов).
+    auto generated = m_textures.find(CacheKey(path));
+    if (generated != m_textures.end() && generated->second.Generated) {
+        generated->second.Tick = NextTick();
+        return generated->second.Tex;
+    }
 
     // Плейсхолдер 1x1 (нейтральный серый) — виден мгновенно, реальные пиксели
     // заменят его на PumpAsyncUploads(). Без мипмапов -> размер ничтожен.

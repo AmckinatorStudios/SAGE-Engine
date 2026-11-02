@@ -443,3 +443,17 @@ TEST(AreaLight_form_factor_follows_the_area_law) {
     small.Width = 2.0f;
     CHECK_NEAR(sage::render::AreaFormFactor({0, 0, 0}, {0, 1, 0}, small) / f, 2.0f, 0.05f);
 }
+
+// Карта теней солнца нужна, только когда солнце светит и отбрасывает тень.
+// Сцена, которая освещает себя своими шейдерами (солнце погашено), раньше всё
+// равно рисовала всю геометрию второй раз — в карту теней, которую никто не
+// читает: вдвое больше вызовов отрисовки на ровном месте.
+TEST(Lighting_dark_sun_needs_no_shadow_map) {
+    LightingEnvironment env;
+    env.Sun = DirectionalLight::Off();
+    CHECK_FALSE(env.SunShadowsVisible());
+    env.Sun.Intensity = 1.0f;
+    CHECK_TRUE(env.SunShadowsVisible());
+    env.Sun.CastShadows = false;
+    CHECK_FALSE(env.SunShadowsVisible());
+}

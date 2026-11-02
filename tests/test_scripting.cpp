@@ -1940,3 +1940,29 @@ TEST(Camera_orbit_keeps_distance_and_looks_at_the_pivot) {
     // И действительно повернулась: не стоит на прежнем месте.
     CHECK_TRUE(glm::length(cam.Position - glm::vec3(0.0f, 2.0f, 10.0f)) > 1.0f);
 }
+
+// Выравнивание надписи из скрипта — все три положения по обеим осям. Раньше
+// скрипт знал только «по центру / с начала» (TextCentered), и число в правом
+// нижнем углу ячейки нельзя было поставить: его подгоняли шириной рамки, и
+// оно уезжало на соседнюю ячейку.
+TEST(Scripting_ui_text_align_reaches_end_on_both_axes) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject slot = scene.CreateObject("Slot");
+    se.Lua()["slot"] = slot;
+    se.Lua().script(R"(
+        local e = slot:AddUI()
+        e.Type = UIKind.Label
+        e.Text = "64"
+        e.TextAlign = "end"
+        e.TextVAlign = "end"
+        ok_read = e.TextAlign == "end" and e.TextVAlign == "end"
+        bad = not pcall(function() e.TextAlign = "right" end)
+    )");
+    const auto& label = scene.Registry().get<sage::ui::Label>(slot.Entity());
+    CHECK_TRUE(label.Horizontal == sage::ui::Label::Align::End);
+    CHECK_TRUE(label.Vertical == sage::ui::Label::Align::End);
+    CHECK_TRUE(se.Lua()["ok_read"].get<bool>());
+    CHECK_TRUE(se.Lua()["bad"].get<bool>());   // опечатка — ошибка, а не «по центру»
+}

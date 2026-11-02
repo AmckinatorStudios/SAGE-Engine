@@ -89,6 +89,25 @@ struct UIRef {
 // Читается как ответ на вопрос «чем этот элемент является в первую очередь»,
 // пишется как «сделай из этого вот такой элемент»: ставится определяющая часть
 // и снимаются чужие определяющие.
+// Выравнивание надписи по имени: "start" | "center" | "end". Неизвестное имя —
+// ошибка скрипта, а не молчаливое «по центру»: опечатка видна сразу.
+std::string LabelAlignName(UIRef& r, bool vertical) {
+    const sage::ui::Label* l = r.Peek<sage::ui::Label>();
+    const sage::ui::Label::Align a = l ? (vertical ? l->Vertical : l->Horizontal) : sage::ui::Label::Align::Center;
+    return a == sage::ui::Label::Align::Start ? "start" : a == sage::ui::Label::Align::End ? "end" : "center";
+}
+
+void SetLabelAlign(UIRef& r, const std::string& name, bool vertical) {
+    if (!r.Alive()) return;
+    sage::ui::Label::Align a;
+    if (name == "start") a = sage::ui::Label::Align::Start;
+    else if (name == "center") a = sage::ui::Label::Align::Center;
+    else if (name == "end") a = sage::ui::Label::Align::End;
+    else throw std::runtime_error("выравнивание надписи: \"" + name + "\" — нужно start, center или end");
+    sage::ui::Label& l = r.Part<sage::ui::Label>();
+    (vertical ? l.Vertical : l.Horizontal) = a;
+}
+
 UIKind KindOf(const UIRef& r) {
     using namespace sage::ui;
     if (r.Peek<sage::ui::Image>()) return UIKind::Image;
@@ -339,6 +358,14 @@ void ScriptEngine::RegisterUIApi() {
                                               centered ? sage::ui::Label::Align::Center
                                                        : sage::ui::Label::Align::Start;
                                       }),
+        // Выравнивание надписи строкой: "start" | "center" | "end" (и для
+        // вертикали — TextVAlign). Флаг TextCentered знал только два из трёх:
+        // число в правом нижнем углу ячейки (стопка, счёт) скрипт поставить не
+        // мог — подгонял шириной рамки и промахивался на любом другом шрифте.
+        "TextAlign", sol::property([](UIRef& r) { return LabelAlignName(r, false); },
+                                   [](UIRef& r, const std::string& a) { SetLabelAlign(r, a, false); }),
+        "TextVAlign", sol::property([](UIRef& r) { return LabelAlignName(r, true); },
+                                    [](UIRef& r, const std::string& a) { SetLabelAlign(r, a, true); }),
         // Шрифт и начертание надписи — из скрипта тоже: диалоги, титры и
         // всплывающие подсказки собирает код, и «этот заголовок жирным» там
         // такая же обычная просьба, как в редакторе.

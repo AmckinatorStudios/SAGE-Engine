@@ -208,9 +208,10 @@ void PlayerLayer::OnRender() {
         // интерьер) — самое место для теней от прожекторов, и выключать их
         // заодно с солнцем значило бы отнимать тени ровно там, где кроме них
         // ничего нет.
-        pass.Enabled = cfg.Shadows || m_localShadows.has_value();
-        pass.Execute = [&, this] {
-        if (cfg.Shadows) {
+        const bool sunShadows = cfg.Shadows && env.SunShadowsVisible();
+        pass.Enabled = sunShadows || m_localShadows.has_value();
+        pass.Execute = [&, this, sunShadows] {
+        if (sunShadows) {
             ShadowMap::CameraView v;
             v.Position = viewPos;
             // Направление и «верх» достаём из матрицы вида: камера здесь может быть
