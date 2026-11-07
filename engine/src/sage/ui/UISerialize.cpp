@@ -155,6 +155,7 @@ void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
     tj["margin"] = Vec4ToJson(t->Margin);
     tj["pivot"] = Vec2ToJson(t->Pivot);
     tj["rotation"] = t->Rotation;
+    if (t->Blend != UIBlend::Normal) tj["blend"] = UIBlendName(t->Blend);
     if (t->Scale != 1.0f) tj["scale"] = t->Scale;
     if (t->Opacity != 1.0f) tj["opacity"] = t->Opacity;
     tj["order"] = t->Order;
@@ -229,6 +230,7 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
         if (tj.contains("margin")) t.Margin = Vec4FromJson(tj["margin"], t.Margin);
         t.Pivot = Vec2FromJson(tj.value("pivot", json::object()), t.Pivot);
         t.Rotation = tj.value("rotation", t.Rotation);
+        UIBlendFromName(tj.value("blend", std::string("normal")), t.Blend);
         t.Scale = tj.value("scale", t.Scale);
         t.Opacity = tj.value("opacity", t.Opacity);
         t.Order = tj.value("order", tj.value("layer", t.Order));

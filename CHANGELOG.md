@@ -12,6 +12,24 @@
 
 ## 0.5.0 → 1.0 (в работе)
 
+### 2026-11-07 (визуальные эффекты кадра и объектов, смешивание интерфейса, высота звука)
+
+**Добавлено**
+- Эффекты изображения — звенья пост-обработки: Invert, Negative, Grayscale,
+  Sepia, Posterize, Pixelate, Blur, Glow, Distortion, Dissolve. У каждого
+  `intensity` 0..1 и свои параметры; складываются в любом порядке и
+  количестве (`docs/rendering.md`, «Визуальные эффекты»).
+- Эффекты отдельных объектов: компонент **«Эффекты объекта»**
+  (`ObjectEffectsComponent`) — тот же набор звеньев на объекте и его потомках,
+  только там, где объект виден. Работает с любым материалом, в том числе со
+  своим шейдером.
+- Скрипты: модуль `post` — `post.add/set/enable/remove/get/kinds` для кадра и
+  `post.object_add/object_set/object_enable/object_remove/object_get/object_clear`
+  для объектов; параметры одной таблицей (`{intensity = 0.5, radius = 4}`).
+- Смешивание элемента интерфейса `Blend`: normal, add, multiply, screen,
+  invert — инверсия фона, прицел виден на любой поверхности.
+- `PlaySound`/`PlaySound3D` принимают высоту (pitch); `AudioEngine::OneShotPitches`.
+
 ### 2026-11-07 (настройки игры, иконка и свойства exe, OGG, музыка плейлистом)
 
 **Добавлено**

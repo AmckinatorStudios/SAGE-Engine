@@ -133,7 +133,11 @@ public:
     // добавляющий свет, и закрывающая его геометрия: объёмные лучи плюс
     // облака поверх неба композитятся одной формулой, без второго прохода.
     // Additive — только сложение (искры, лучи без перекрытия).
-    enum class BlendMode { Alpha, Premultiplied, Additive };
+    // Multiply, Screen, Invert — для цвета, УЖЕ умноженного на альфу (прозрачное
+    // не меняет фон): умножение, «экран» и инверсия фона под рисунком
+    // (src·(1−dst) + dst·(1−src): белое инвертирует, чёрное не трогает) — так
+    // рисуют прицел, который виден на любом фоне.
+    enum class BlendMode { Alpha, Premultiplied, Additive, Multiply, Screen, Invert };
     virtual void SetBlendMode(BlendMode mode) { (void)mode; }
     virtual void SetDepthTest(bool enabled) = 0;
     virtual void SetDepthWrite(bool enabled) = 0;

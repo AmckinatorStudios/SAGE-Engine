@@ -397,6 +397,16 @@ void PlayerLayer::OnRender() {
             m_sceneFbo->Bind();
             device.SetViewport(0, 0, m_sceneFbo->Width(), m_sceneFbo->Height());
         }
+        // Маска эффектов объектов — тоже сразу после геометрии (список видимого).
+        bool objectFx = false;
+        if (usePost) {
+            objectFx = m_objectFx.Render(*m_scene, m_batch, view, proj, m_sceneFbo->Width(),
+                                         m_sceneFbo->Height());
+            if (objectFx) {
+                m_sceneFbo->Bind();
+                device.SetViewport(0, 0, m_sceneFbo->Width(), m_sceneFbo->Height());
+            }
+        }
 
         // Частицы (billboard) — camRight/Up берём из матрицы вида.
         if (m_particles) m_particles->DrawFromView(view, proj);
@@ -440,6 +450,8 @@ void PlayerLayer::OnRender() {
             // Солнце — звену «Lens Flare» (блик — часть тракта камеры).
             m_postfx->SetLighting(&env);
             m_postfx->SetGBuffer(m_sceneFbo->AlbedoTexture(), m_sceneFbo->NormalTexture());
+            m_postfx->SetObjectLayers(objectFx ? m_objectFx.Mask() : sage::rhi::TextureHandle{},
+                                      &m_objectFx.Layers());
             m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
                              m_sceneFbo->Width(), m_sceneFbo->Height(), proj, view,
                              cameraChain,

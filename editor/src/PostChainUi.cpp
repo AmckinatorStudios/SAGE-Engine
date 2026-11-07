@@ -121,7 +121,7 @@ PostSourceSlotFn& SourceSlot() {
 
 void SetPostSourceSlot(PostSourceSlotFn fn) { SourceSlot() = std::move(fn); }
 
-bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const char* idScope) {
+bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const char* idScope, bool imageOnly) {
     using namespace sage::render;
     bool changed = false;
 
@@ -131,7 +131,8 @@ bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const
     // может (его задают этапы), но звено неизвестного вида — из сцены другой
     // версии или другой игры — остаётся возможным, и узнать об этом надо здесь,
     // а не по странной картинке.
-    const PostChainReport report = chain.Compile();
+    // Цепочка объекта идёт ПОСЛЕ тон-маппинга камеры — проверяется дополненной.
+    const PostChainReport report = (imageOnly ? chain.Completed() : chain).Compile();
     if (!report.Ok) {
         ImGui::TextDisabled("%s", T("The chain will not run:"));
         ImGui::TextWrapped("%s", report.Error.c_str());
@@ -152,7 +153,9 @@ bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const
         // здесь: эффект, принесённый игрой, обязан появиться сам.
         std::vector<const PostEffectKind*> kinds;
         for (const PostEffectKind* kind : catalog.All())
-            if (kind->Stage == stage) kinds.push_back(kind);
+            if (kind->Stage == stage &&
+                (!imageOnly || (Has(kind->Needs, PostNeeds::LdrColor) && !Has(kind->Needs, PostNeeds::Depth))))
+                kinds.push_back(kind);
         if (kinds.empty()) continue;
 
         ImGui::SeparatorText(T(PostStageLabel(stage)));

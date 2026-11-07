@@ -20,6 +20,9 @@ namespace sage::render {
 
 using namespace postfx;
 
+// Эффекты изображения (Invert, Blur, Pixelate…) — PostFXImage.cpp.
+void RegisterImageEffects(PostEffectCatalog& catalog);
+
 void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
     // ПОРЯДОК РЕГИСТРАЦИИ — ПОРЯДОК ОБРАБОТКИ. Список «что можно добавить» в
     // инспекторе идёт отсюда, и он обязан читаться как путь кадра: экспозиция,
@@ -311,6 +314,9 @@ void RegisterBuiltinPostEffects(PostEffectCatalog& catalog) {
         k.Run = RunFxaa;
         catalog.Register(std::move(k));
     }
+    // Эффекты изображения (этап «Линза»): Invert, Negative, Grayscale, Sepia,
+    // Posterize, Pixelate, Blur, Glow, Distortion, Dissolve.
+    RegisterImageEffects(catalog);
 }
 
 // Тракт НОВОГО компонента «Пост-обработка».

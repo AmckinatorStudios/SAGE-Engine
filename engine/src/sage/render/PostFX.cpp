@@ -194,6 +194,9 @@ void PostFX::Render(sage::rhi::TextureHandle sceneColor, sage::rhi::TextureHandl
         kind->Run(ctx, effect);
     }
 
+    // Эффекты отдельных объектов — поверх готового кадра камеры.
+    if (m_objectMask.Valid() && m_objectLayers && !m_objectLayers->empty()) ApplyObjectLayers(ctx);
+
     // ФИНАЛЬНАЯ КОПИЯ. Звено пишет в СВОЮ цель, а не в выход: оно не обязано
     // знать, куда смотрит камера. Копия стоит один проход и одно чтение
     // текстуры, зато одно и то же звено годится и для превью в редакторе, и для
@@ -247,8 +250,14 @@ const PostFX::SelfCheck& PostFX::CheckPipeline() {
     // эффекты, читающие глубину, в этой пробе и не нужны (глубины тут нет).
     // Дополнение до рабочего делает сам исполнитель (PostChain::Completed).
     const PostChain chain;
+    // Слои объектов прошлого кадра к пробе отношения не имеют.
+    const sage::rhi::TextureHandle mask = m_objectMask;
+    const std::vector<PostChain>* layers = m_objectLayers;
+    m_objectLayers = nullptr;
     Render(input->Handle(), sage::rhi::TextureHandle{}, kSize, kSize, glm::mat4(1.0f),
            glm::mat4(1.0f), chain, &target, 0, 0, kSize, kSize);
+    m_objectMask = mask;
+    m_objectLayers = layers;
 
     target.Resolve();
     target.Bind();

@@ -82,6 +82,7 @@ int main(int argc, char** argv) {
         RunParticleChecks();
         RunPipelineChecks(*scene);
         RunLensChecks();
+        RunImageEffectChecks();
         RunStabilityChecks(renderer, *scene);
         RunDisplayChecks(window);
     }

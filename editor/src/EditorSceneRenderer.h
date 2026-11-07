@@ -6,6 +6,7 @@
 
 #include <glm/glm.hpp>
 
+#include "sage/render/ObjectEffects.h"
 #include "sage/render/Shader.h"
 #include "sage/render/Camera.h"
 #include "sage/render/Framebuffer.h"
@@ -320,6 +321,9 @@ private:
     // Буферы скоростей для смаза движения — по одному на вид.
     sage::render::VelocityBuffer m_viewportVelocity;
     sage::render::VelocityBuffer m_gameVelocity;
+    // Эффекты отдельных объектов: маска вьюпорта и окна Game.
+    sage::render::ObjectEffectsMask m_viewportObjectFx;
+    sage::render::ObjectEffectsMask m_gameObjectFx;
     std::optional<sage::render::Volumetrics> m_volumetrics;
     bool m_gamePostApplied = false;
     std::optional<DebugDraw> m_debugDraw;

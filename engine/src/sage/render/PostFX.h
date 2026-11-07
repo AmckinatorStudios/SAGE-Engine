@@ -147,6 +147,14 @@ public:
         m_gAlbedo = albedo;
         m_gNormal = normal;
     }
+    // Эффекты ОТДЕЛЬНЫХ объектов (ObjectEffectsComponent, см. ObjectEffects.h):
+    // маска кадра (в красном канале номер слоя k/255, 0 — объекта нет) и цепочка
+    // каждого слоя. Накладываются ПОСЛЕ тракта камеры, только там, где объект
+    // виден. Держится до следующего вызова; пустая маска — слоёв нет.
+    void SetObjectLayers(sage::rhi::TextureHandle mask, const std::vector<PostChain>* layers) {
+        m_objectMask = mask;
+        m_objectLayers = layers;
+    }
 
     // Копирует готовую картинку в цель вывода (FBO вьюпорта либо экран), в
     // прямоугольник (outX,outY,outW,outH). Тем же проходом, которым
@@ -195,8 +203,16 @@ private:
     sage::rhi::RenderTarget* EnsureAux(std::unique_ptr<sage::rhi::RenderTarget>& slot, int w = 0,
                                        int h = 0);
 
+    // Слои объектов поверх готового кадра (PostFXObjects.cpp).
+    void ApplyObjectLayers(PostContext& ctx);
+
     PostScratch m_scratch;
     const LightingEnvironment* m_lighting = nullptr;
+    sage::rhi::TextureHandle m_objectMask;
+    const std::vector<PostChain>* m_objectLayers = nullptr;
+    // Кадр до слоя: звенья слоя берут цели из пула, и исходник обязан лежать
+    // в своей цели, а не в общей (её бы перезаписали).
+    std::unique_ptr<sage::rhi::RenderTarget> m_objectBase;
     sage::rhi::TextureHandle m_gAlbedo, m_gNormal;
 };
 

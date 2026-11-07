@@ -28,7 +28,10 @@ CI, нет звуковой карты), конструктор не падае�
 режим, и все `Play*` становятся no-op (проверка — `IsAvailable()`). Тот же
 бинарник работает и со звуком, и без него. Из Lua доступны `PlaySound`/
 `PlaySound3D`/`PlayMusic`/`StopMusic`/`SetMasterVolume` после
-`ScriptEngine::BindAudio()`.
+`ScriptEngine::BindAudio()`. `PlaySound(path, volume, pitch)` и
+`PlaySound3D(path, pos, volume, pitch)`: высота (1 — как записано, 2 — на
+октаву выше, и быстрее) — чтобы один и тот же шаг или удар не звучал
+одинаково каждый раз.
 
 **Форматы:** WAV, MP3, FLAC и **OGG Vorbis**. Vorbis декодирует `stb_vorbis`
 (подключён к miniaudio в `audio/miniaudio_impl.cpp`); файлы читаются и из

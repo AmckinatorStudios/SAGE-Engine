@@ -3618,6 +3618,13 @@
     "Copyright": "Авторские права",
     "PNG, square, 256×256 or larger": "PNG, квадрат, 256×256 и больше",
     "No icon": "Без иконки",
-    "Game icon": "Иконка игры"
+    "Game icon": "Иконка игры",
+    "Add (glow)": "Сложение (свечение)",
+    "Invert background": "Инверсия фона",
+    "Blend": "Смешивание",
+    "How the element lays over what is behind it.\nInvert background — like a crosshair that stays visible on any surface.": "Как элемент ложится на то, что под ним.\nИнверсия фона — как прицел, который виден на любой поверхности.",
+    "Object Effects": "Эффекты объекта",
+    "Invert, glow, blur, dissolve… on this object only": "Инверсия, свечение, размытие, растворение… только на этом объекте",
+    "Applied to this object and its children, where they are visible": "Действуют на этот объект и его потомков — там, где они видны"
   }
 }

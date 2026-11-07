@@ -36,6 +36,7 @@ struct EntityRemovals {
     bool Camera = false;
     bool Light = false;
     bool PostProcess = false;
+    bool ObjectEffects = false;
     bool Interface = false;
     bool Decal = false;
     bool GiStatic = false;

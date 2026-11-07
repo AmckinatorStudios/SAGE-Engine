@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 3618.
+// Язык: Русский. Строк: 3625.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -388,6 +388,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Активен"},
     {"Add",
      "Добавить"},
+    {"Add (glow)",
+     "Сложение (свечение)"},
     {"Add Component",
      "Добавить компонент"},
     {"Add Event",
@@ -628,6 +630,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Применяется сразу и хранится в вашем профиле редактора"},
     {"Applied to the selected element",
      "Применено к выбранному элементу"},
+    {"Applied to this object and its children, where they are visible",
+     "Действуют на этот объект и его потомков — там, где они видны"},
     {"Applies to every camera of the scene that has no post processing of its own.",
      "Действует на все камеры сцены, у которых нет своей постобработки."},
     {"Applies to every camera of the scene without its own",
@@ -826,6 +830,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Квадрат к камере"},
     {"Black Level",
      "Уровень чёрного"},
+    {"Blend",
+     "Смешивание"},
     {"Blend Rotations",
      "Смешать повороты"},
     {"Blend Time",
@@ -2898,6 +2904,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Как собранная игра представляется: заголовок окна, имя файла, иконка и свойства файла."},
     {"How the editor looks and where new projects go",
      "Как выглядит редактор и куда попадают новые проекты"},
+    {"How the element lays over what is behind it.\nInvert background — like a crosshair that stays visible on any surface.",
+     "Как элемент ложится на то, что под ним.\nИнверсия фона — как прицел, который виден на любой поверхности."},
     {"How the properties follow each other on the timeline",
      "Как свойства идут друг за другом на шкале"},
     {"How the speed changes along the way",
@@ -3056,6 +3064,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Между ключами"},
     {"Invalid project file: ",
      "Файл проекта испорчен: "},
+    {"Invert background",
+     "Инверсия фона"},
+    {"Invert, glow, blur, dissolve… on this object only",
+     "Инверсия, свечение, размытие, растворение… только на этом объекте"},
     {"Invisible volume: reports entering and leaving, does not block",
      "Невидимый объём: сообщает о входе и выходе, но не преграждает путь"},
     {"Is Trigger",
@@ -3938,6 +3950,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Число элементов."},
     {"Object",
      "Объект"},
+    {"Object Effects",
+     "Эффекты объекта"},
     {"Object Info",
      "Сведения об объекте"},
     {"Object Reference",

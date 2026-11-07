@@ -451,6 +451,7 @@ private:
     void RegisterGameFlowApi();   // sage.scene.Load, sage.game.*, sage.time.SetScale
     void RegisterMathHelpers();   // Cross/Lerp/Clamp/Radians/Degrees
     void RegisterLightingApi();   // GetLighting + usertype'ы освещения
+    void RegisterPostApi();       // эффекты экрана: AddPostEffect/SetPostEffect/…
     void RegisterPhysicsApi();    // SetVelocity/GetVelocity/SetGravity
     void RegisterEventsApi();     // sage.events.On/Once/Off/Emit (см. DispatchEvent)
     void RegisterVarsApi();       // obj:Vars() — публичные переменные и ссылки
