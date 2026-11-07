@@ -2524,6 +2524,11 @@ function sage.time.Schedule(seconds, fn) end
 function sage.time.SetScale(scale) end
 ---@param fn function
 function sage.time.StartCoroutine(fn) end
+---@param unixSeconds? number
+---@return table
+function sage.time.local_date(unixSeconds) end
+---@return number
+function sage.time.unix_now() end
 
 ---@class sage.tween
 sage.tween = {}

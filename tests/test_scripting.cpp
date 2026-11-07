@@ -2108,3 +2108,53 @@ TEST(Scripting_screenshot_request_is_taken_once) {
     CHECK_TRUE(se.TakeScreenshotRequest(taken));
     CHECK_TRUE(taken.size() > 14 && taken.substr(taken.size() - 14) == "shots/boss.png");
 }
+
+// Местная дата для скриптов: время 0 в поясе UTC — 1 января 1970, полночь;
+// без аргумента — сейчас (год не раньше 2024).
+TEST(Scripting_local_date_from_unix_time) {
+#ifndef _WIN32
+    const char* oldTz = std::getenv("TZ");
+    std::string saved = oldTz ? oldTz : "";
+    setenv("TZ", "UTC", 1);
+    tzset();
+#endif
+    ScriptEngine se;
+    se.Lua().script(R"(
+        local d = time.local_date(86400 * 31 + 3600 * 5 + 61)
+        y, mo, da, h, mi, s = d.year, d.month, d.day, d.hour, d.minute, d.second
+        now_year = time.local_date().year
+        now_unix = time.unix_now()
+    )");
+#ifndef _WIN32
+    CHECK_EQ(se.Lua()["y"].get<int>(), 1970);
+    CHECK_EQ(se.Lua()["mo"].get<int>(), 2);
+    CHECK_EQ(se.Lua()["da"].get<int>(), 1);
+    CHECK_EQ(se.Lua()["h"].get<int>(), 5);
+    CHECK_EQ(se.Lua()["mi"].get<int>(), 1);
+    CHECK_EQ(se.Lua()["s"].get<int>(), 1);
+    if (oldTz) setenv("TZ", saved.c_str(), 1); else unsetenv("TZ");
+    tzset();
+#endif
+    CHECK_TRUE(se.Lua()["now_year"].get<int>() >= 2024);
+    CHECK_TRUE(se.Lua()["now_unix"].get<double>() > 1.7e9);
+}
+
+// Режим картинки из скрипта: ui.Fit = "tile" — фон из плитки; неизвестное
+// имя — ошибка с подсказкой, а не тихий «растянуть».
+TEST(Scripting_ui_image_fit_mode) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject bg = scene.CreateObject("Background");
+    se.Lua()["bg"] = bg;
+    se.Lua().script(R"(
+        local e = bg:AddUI()
+        e.Type = UIKind.Image
+        e.Fit = "tile"
+        read_back = e.Fit
+        bad = not pcall(function() e.Fit = "repeat" end)
+    )");
+    CHECK_TRUE(scene.Registry().get<sage::ui::Image>(bg.Entity()).Fit == sage::ui::Image::Mode::Tile);
+    CHECK_EQ(se.Lua()["read_back"].get<std::string>(), std::string("tile"));
+    CHECK_TRUE(se.Lua()["bad"].get<bool>());
+}
