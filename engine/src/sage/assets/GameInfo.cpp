@@ -11,6 +11,7 @@
 #include <stb_image_write.h>  // реализация — в render/Screenshot.cpp
 
 #include "sage/assets/AssetDatabase.h"
+#include "sage/core/EngineContext.h"
 #include "sage/assets/Pack.h"
 #include "sage/core/Paths.h"
 
@@ -124,7 +125,11 @@ bool SaveGameInfo(const fs::path& projectDir, const GameInfo& info, std::string*
 
 bool LoadIconImage(const std::string& path, IconImage& out) {
     std::vector<uint8_t> bytes;
-    const std::string located = sage::AssetDatabase::Instance().LocatePath(path);
+    // Базу ассетов спрашиваем, только если движок запущен: сборщик игры из
+    // командной строки (sage_build) работает без контекста, и обращение к ней
+    // роняло сборку на Windows — единственной системе, где иконка вшивается.
+    const std::string located =
+        EngineContext::CurrentOrNull() ? sage::AssetDatabase::Instance().LocatePath(path) : path;
     if (!vfs::ReadFile(located, bytes) && !vfs::ReadFile(path, bytes)) return false;
     int w = 0, h = 0, n = 0;
     stbi_uc* px = stbi_load_from_memory(bytes.data(), (int)bytes.size(), &w, &h, &n, 4);

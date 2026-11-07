@@ -11,6 +11,9 @@
 #include <nlohmann/json.hpp>
 
 #include "sage/assets/GameInfo.h"
+#include "sage/core/EngineContext.h"
+
+#include <stb_image_write.h>
 
 using namespace sage::assets;
 namespace fs = std::filesystem;
@@ -139,4 +142,28 @@ TEST(GameInfo_version_resource_layout) {
     CHECK_TRUE(Contains(v, Wide("Amckinator")));
     CHECK_TRUE(Contains(v, Wide("Voxel sandbox")));
     CHECK_TRUE(Contains(v, Wide("Translation")));
+}
+
+// Иконка читается и без запущенного движка: так работает сборщик игры из
+// командной строки (sage_build). Раньше чтение спрашивало базу ассетов и
+// бросало «подсистема вне контекста движка» — сборка игры на Windows падала.
+TEST(GameInfo_icon_loads_without_engine_context) {
+    const fs::path dir = fs::temp_directory_path() / "sage_icon_noctx";
+    fs::create_directories(dir);
+    const fs::path png = dir / "icon.png";
+    const unsigned char px[2 * 2 * 4] = {255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255};
+    CHECK_TRUE(stbi_write_png(png.string().c_str(), 2, 2, 4, px, 2 * 4) != 0);
+
+    sage::EngineContext* was = sage::EngineContext::SetCurrent(nullptr);
+    IconImage icon;
+    bool ok = false;
+    try {
+        ok = LoadIconImage(png.string(), icon);
+    } catch (...) {
+        ok = false;
+    }
+    sage::EngineContext::SetCurrent(was);
+    CHECK_TRUE(ok);
+    CHECK_EQ(icon.Width, 2);
+    fs::remove_all(dir);
 }
