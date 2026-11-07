@@ -12,7 +12,9 @@
 
 #include "sage/assets/GameInfo.h"
 #include "sage/core/EngineContext.h"
+#include "sage/render/Screenshot.h"
 
+#include <stb_image.h>
 #include <stb_image_write.h>
 
 using namespace sage::assets;
@@ -154,6 +156,8 @@ TEST(GameInfo_icon_loads_without_engine_context) {
     const unsigned char px[2 * 2 * 4] = {255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255};
     CHECK_TRUE(stbi_write_png(png.string().c_str(), 2, 2, 4, px, 2 * 4) != 0);
 
+    // Как после загрузки текстур на этом потоке: иконка всё равно сверху вниз.
+    stbi_set_flip_vertically_on_load_thread(true);
     sage::EngineContext* was = sage::EngineContext::SetCurrent(nullptr);
     IconImage icon;
     bool ok = false;
@@ -165,5 +169,29 @@ TEST(GameInfo_icon_loads_without_engine_context) {
     sage::EngineContext::SetCurrent(was);
     CHECK_TRUE(ok);
     CHECK_EQ(icon.Width, 2);
+    if (icon.Rgba.size() == 16) CHECK_EQ((int)icon.Rgba[0], 255);   // левый верхний — красный
+    stbi_set_flip_vertically_on_load_thread(false);
+    fs::remove_all(dir);
+}
+
+// Имя снимка экрана: ГГГГ-ММ-ДД_ЧЧ.ММ.СС.png, а второй за ту же секунду — _2,
+// а не перезапись первого.
+TEST(Screenshot_file_name_by_time_without_overwrite) {
+    const fs::path dir = fs::temp_directory_path() / "sage_shots_name";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    std::tm t{};
+    t.tm_year = 2026 - 1900;
+    t.tm_mon = 10;
+    t.tm_mday = 7;
+    t.tm_hour = 4;
+    t.tm_min = 5;
+    t.tm_sec = 9;
+    const std::string first = sage::render::ScreenshotFileName(dir.string(), t);
+    CHECK_TRUE(first == (dir / "2026-11-07_04.05.09.png").string() ||
+               first == dir.string() + "/2026-11-07_04.05.09.png");
+    std::ofstream(fs::path(first)) << "x";
+    const std::string second = sage::render::ScreenshotFileName(dir.string(), t);
+    CHECK_TRUE(second.find("2026-11-07_04.05.09_2.png") != std::string::npos);
     fs::remove_all(dir);
 }

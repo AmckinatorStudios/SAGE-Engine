@@ -83,6 +83,7 @@ int main(int argc, char** argv) {
         RunPipelineChecks(*scene);
         RunLensChecks();
         RunImageEffectChecks();
+        RunScreenshotChecks();
         RunStabilityChecks(renderer, *scene);
         RunDisplayChecks(window);
     }

@@ -2087,3 +2087,24 @@ TEST(Scripting_object_effects_controlled_at_runtime_and_saved) {
     se.Lua().script(R"(post.object_clear(FindObject("Box")))");
     CHECK_FALSE(scene.Registry().all_of<sage::render::ObjectEffectsComponent>(box.Entity()));
 }
+
+// Снимок экрана из скрипта: game.screenshot() сразу отдаёт путь (папка
+// screenshots/ каталога игры, имя по времени), а хозяин кадра забирает заказ
+// ровно один раз. Свой относительный путь — от каталога игры.
+TEST(Scripting_screenshot_request_is_taken_once) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    se.Lua().script(R"(shot = game.screenshot())");
+    const std::string shot = se.Lua()["shot"].get<std::string>();
+    CHECK_TRUE(shot.find("/screenshots/") != std::string::npos);
+    CHECK_TRUE(shot.size() > 4 && shot.substr(shot.size() - 4) == ".png");
+    std::string taken;
+    CHECK_TRUE(se.TakeScreenshotRequest(taken));
+    CHECK_TRUE(taken == shot);
+    CHECK_FALSE(se.TakeScreenshotRequest(taken));
+
+    se.Lua().script(R"(custom = game.screenshot("shots/boss.png"))");
+    CHECK_TRUE(se.TakeScreenshotRequest(taken));
+    CHECK_TRUE(taken.size() > 14 && taken.substr(taken.size() - 14) == "shots/boss.png");
+}

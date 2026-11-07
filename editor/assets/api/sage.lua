@@ -1688,6 +1688,9 @@ function sage.game.Quit() end
 function sage.game.Restart() end
 ---@param arg1 boolean
 function sage.game.SetPauseMenu(arg1) end
+---@param path? string
+---@return string
+function sage.game.screenshot(path) end
 
 ---@class sage.ik
 sage.ik = {}
