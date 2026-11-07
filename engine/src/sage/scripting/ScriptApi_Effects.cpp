@@ -279,9 +279,23 @@ void ScriptEngine::RegisterAudioApi() {
         if (!m_audio) throw std::runtime_error("PlaySound3D: аудио не привязано (ScriptEngine::BindAudio не вызван)");
         m_audio->PlaySound3D(path, pos, volume.value_or(1.0f));
     });
-    Bind("audio", "PlayMusic", "PlayMusic", [this](const std::string& path, sol::optional<float> volume) {
+    // PlayMusic(путь, громкость = 1, loop = true, fade = 0): loop = false — трек
+    // один раз (плейлист с паузами — скриптом через IsMusicPlaying), fade —
+    // секунды нарастания из тишины.
+    Bind("audio", "PlayMusic", "PlayMusic", [this](const std::string& path, sol::optional<float> volume,
+                                                   sol::optional<bool> loop, sol::optional<float> fade) {
         if (!m_audio) throw std::runtime_error("PlayMusic: аудио не привязано (ScriptEngine::BindAudio не вызван)");
-        m_audio->PlayMusic(path, volume.value_or(1.0f), true);
+        m_audio->PlayMusic(path, volume.value_or(1.0f), loop.value_or(true), fade.value_or(0.0f));
+    });
+    Bind("audio", "IsMusicPlaying", "IsMusicPlaying", [this]() -> bool {
+        return m_audio && m_audio->IsMusicPlaying();
+    });
+    Bind("audio", "SetMusicVolume", "SetMusicVolume", [this](float volume) {
+        if (m_audio) m_audio->SetMusicVolume(volume);
+    });
+    // Плавно увести музыку за seconds и остановить.
+    Bind("audio", "FadeOutMusic", "FadeOutMusic", [this](float seconds) {
+        if (m_audio) m_audio->FadeOutMusic(seconds);
     });
     Bind("audio", "StopMusic", "StopMusic", [this]() {
         if (!m_audio) throw std::runtime_error("StopMusic: аудио не привязано (ScriptEngine::BindAudio не вызван)");

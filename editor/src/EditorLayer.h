@@ -73,6 +73,7 @@ namespace sage { class Application; }
 #include "panels/TweenPanel.h"
 #include "panels/NineSlicePanel.h"
 #include "panels/SpriteSheetPanel.h"
+#include "panels/GameSettingsPanel.h"
 #include "ui/CommandPalette.h"
 #include "ui/Commands.h"
 #include "panels/DialogsPanel.h"
@@ -755,6 +756,8 @@ private:
     NineSlicePanel m_nineSlice;
     // Нарезка листа спрайтов (panels/SpriteSheetPanel.h) — окно из реестра.
     SpriteSheetPanel m_spriteSheet;
+    // Настройки игры (название, автор, версия, иконка) — окно из реестра.
+    GameSettingsPanel m_gameSettings;
 
     // Инструмент анимации (см. panels/AnimationPanel.h). Панель раскладки, а не
     // инструмент под задачу: анимацию правят рядом со сценой и рядом с

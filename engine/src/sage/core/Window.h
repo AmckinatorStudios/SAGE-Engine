@@ -48,6 +48,16 @@ public:
     // Редактор снимает его, показывает вопрос о несохранённой сцене и закрывает
     // окно уже своим решением.
     void CancelClose();
+
+    // Иконка окна (заголовок и панель задач): несколько размеров одной
+    // картинки, RGBA8 — система берёт ближайший. macOS иконку окна не
+    // показывает (у него иконка — у пакета .app), там вызов ничего не делает.
+    struct IconPixels {
+        int Width = 0, Height = 0;
+        const unsigned char* Rgba = nullptr;
+    };
+    void SetIcon(const std::vector<IconPixels>& images);
+    void SetTitle(const std::string& title);
     void SwapBuffers();
     void PollEvents();
     // То же, что PollEvents, но засыпает до первого события или до timeout

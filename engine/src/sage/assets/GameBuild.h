@@ -25,8 +25,8 @@ namespace sage::assets {
 
 struct GameBuildRequest {
     std::filesystem::path ProjectDir;
-    std::string ProjectName;
-    std::filesystem::path OutputDir;      // игра ляжет в OutputDir/ProjectName
+    std::string ProjectName;              // запасное имя, если в проекте нет названия игры
+    std::filesystem::path OutputDir;      // игра ляжет в OutputDir/<название игры>
     std::filesystem::path Player;         // собранный SagePlayer (его assets/ — рядом)
     std::string AssetIndex;               // AssetDatabase::ExportIndex()
     bool CopyProjectFile = false;         // см. EngineConfig::BuildProjectFile
@@ -43,6 +43,7 @@ struct GameBuildResult {
     std::string ErrorKey;      // английский ключ («Player copy failed: »)
     std::string ErrorDetail;   // подробность как есть (путь, текст системы)
     std::filesystem::path GameDir;
+    std::filesystem::path Exe; // исполняемый файл игры
     size_t Files = 0;          // файлов в пакете
 };
 

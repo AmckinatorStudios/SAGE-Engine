@@ -30,10 +30,36 @@ CI, нет звуковой карты), конструктор не падае�
 `PlaySound3D`/`PlayMusic`/`StopMusic`/`SetMasterVolume` после
 `ScriptEngine::BindAudio()`.
 
+**Форматы:** WAV, MP3, FLAC и **OGG Vorbis**. Vorbis декодирует `stb_vorbis`
+(подключён к miniaudio в `audio/miniaudio_impl.cpp`); файлы читаются и из
+пакета игры. `ReadAudioInfo(path, info)` — длительность, каналы и частота без
+проигрывания.
+
+**Музыка плейлистом.** `PlayMusic(path, volume = 1, loop = true, fade = 0)`:
+`loop = false` — трек один раз, `fade` — секунды нарастания из тишины.
+`IsMusicPlaying()` говорит, что трек кончился (пора следующий),
+`SetMusicVolume(v)` — громкость на ходу, `FadeOutMusic(seconds)` — плавно
+увести и остановить. Порядок треков, паузы и когда играть — решает игра:
+движок даёт инструменты, а не готовый плеер.
+
+```lua
+local tracks = {"assets/music/a.ogg", "assets/music/b.ogg"}
+local wait = 0
+function OnUpdate(entity, dt)
+    if not IsMusicPlaying() then
+        wait = wait - dt
+        if wait <= 0 then
+            PlayMusic(tracks[math.random(#tracks)], 0.6, false, 2)
+            wait = 10 + math.random() * 20      -- пауза после следующего трека
+        end
+    end
+end
+```
+
 **Декодирование без воспроизведения.** `AudioEngine::DecodeToMono` (статический,
 работает и в «немом» режиме, и без единого созданного движка) читает файл или
 кусок памяти и отдаёт сэмплы моно вместе с частотой дискретизации. Форматы —
-все, что понимает miniaudio: **WAV, MP3, FLAC**. Нужно это тем, кому звук надо
+все, что понимает движок: **WAV, MP3, FLAC, OGG Vorbis**. Нужно это тем, кому звук надо
 не услышать, а ПОСМОТРЕТЬ: осциллограмма на монтажной дорожке, поиск пиков для
 синхронизации анимации по удару, детект тишины. Director 3D рисует этим
 звуковую дорожку таймлайна — до этого он разбирал заголовок WAV вручную и

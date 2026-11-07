@@ -271,15 +271,39 @@ AudioEngine::SoundHandle AudioEngine::PlayLoop(const std::string& path, float vo
     return h;
 }
 
-void AudioEngine::PlayMusic(const std::string& path, float volume, bool loop) {
+void AudioEngine::PlayMusic(const std::string& path, float volume, bool loop, float fadeSeconds) {
     if (!m_impl->Available) return;
     StopMusic();
     ma_sound* s = m_impl->StartSound(path, Category::Music, volume, /*spatial=*/false,
                                      glm::vec3(0.0f), loop, /*streaming=*/true);
     if (!s) return;
+    if (fadeSeconds > 0.0f)
+        ma_sound_set_fade_in_milliseconds(s, 0.0f, kClamp01(volume), (ma_uint64)(fadeSeconds * 1000.0f));
     SoundHandle h = m_impl->NextHandle++;
     m_impl->Managed[h] = s;
     m_impl->MusicHandle = h;
+}
+
+bool AudioEngine::IsMusicPlaying() const {
+    return m_impl->MusicHandle != InvalidHandle && IsSoundPlaying(m_impl->MusicHandle);
+}
+
+void AudioEngine::SetMusicVolume(float volume) {
+    if (m_impl->MusicHandle != InvalidHandle) SetSoundVolume(m_impl->MusicHandle, volume);
+}
+
+void AudioEngine::FadeOutMusic(float seconds) {
+    auto it = m_impl->Managed.find(m_impl->MusicHandle);
+    if (it == m_impl->Managed.end()) return;
+    if (seconds <= 0.0f) {
+        StopMusic();
+        return;
+    }
+    // Затухание до нуля и остановка в тот же момент: поток не крутится
+    // беззвучно, и IsMusicPlaying честно отвечает «нет», когда стих.
+    const ma_uint64 ms = (ma_uint64)(seconds * 1000.0f);
+    ma_sound_set_fade_in_milliseconds(it->second, -1.0f, 0.0f, ms);
+    ma_sound_set_stop_time_in_milliseconds(it->second, ma_engine_get_time_in_milliseconds(&m_impl->Engine) + ms);
 }
 
 void AudioEngine::StopMusic() {
@@ -512,4 +536,19 @@ bool AudioEngine::DecodeToMono(const void* data, size_t bytes, std::vector<float
     const bool ok = DecodeAllToMono(decoder, outSamples, outSampleRate);
     ma_decoder_uninit(&decoder);
     return ok;
+}
+
+bool ReadAudioInfo(const std::string& path, AudioFileInfo& out) {
+    std::vector<uint8_t> bytes;
+    const std::string resolved = sage::AssetDatabase::Instance().LocatePath(path);
+    if (!sage::assets::vfs::ReadFile(resolved, bytes) || bytes.empty()) return false;
+    ma_decoder dec;
+    if (ma_decoder_init_memory(bytes.data(), bytes.size(), nullptr, &dec) != MA_SUCCESS) return false;
+    ma_uint64 frames = 0;
+    const bool ok = ma_decoder_get_length_in_pcm_frames(&dec, &frames) == MA_SUCCESS;
+    out.Channels = dec.outputChannels;
+    out.SampleRate = dec.outputSampleRate;
+    out.Frames = frames;
+    ma_decoder_uninit(&dec);
+    return ok && out.SampleRate > 0;
 }

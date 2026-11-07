@@ -3605,6 +3605,19 @@
     "Click a piece to edit it.": "Щёлкните по куску, чтобы править его.",
     "This name is taken": "Это имя уже занято",
     "Rect": "Прямоугольник",
-    "Remove piece": "Удалить кусок"
+    "Remove piece": "Удалить кусок",
+    "Saved to project.sageproj": "Сохранено в project.sageproj",
+    "Not saved: ": "Не сохранено: ",
+    "Open a project first.": "Сначала откройте проект.",
+    "How the built game presents itself: window title, file name, icon and file properties.": "Как собранная игра представляется: заголовок окна, имя файла, иконка и свойства файла.",
+    "Game name": "Название игры",
+    "Shown in the window title; the .exe gets this name": "Показывается в заголовке окна; так же называется .exe",
+    "Version": "Версия",
+    "Company": "Издатель",
+    "Publisher; empty — the author": "Компания; пусто — автор",
+    "Copyright": "Авторские права",
+    "PNG, square, 256×256 or larger": "PNG, квадрат, 256×256 и больше",
+    "No icon": "Без иконки",
+    "Game icon": "Иконка игры"
   }
 }

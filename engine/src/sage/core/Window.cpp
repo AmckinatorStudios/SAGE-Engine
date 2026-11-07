@@ -464,3 +464,21 @@ bool Window::ApplyDisplay(const Display& d, std::string* err) {
                        << " на «" << mon->Name << "», кадр " << fw << "x" << fh;
     return true;
 }
+
+void Window::SetIcon(const std::vector<IconPixels>& images) {
+    if (!m_handle) return;
+#ifdef __APPLE__
+    (void)images;   // у macOS иконка окна — иконка пакета, GLFW здесь отказал бы с ошибкой
+#else
+    std::vector<GLFWimage> list;
+    for (const IconPixels& p : images) {
+        if (p.Width > 0 && p.Height > 0 && p.Rgba)
+            list.push_back(GLFWimage{p.Width, p.Height, const_cast<unsigned char*>(p.Rgba)});
+    }
+    glfwSetWindowIcon(m_handle, (int)list.size(), list.empty() ? nullptr : list.data());
+#endif
+}
+
+void Window::SetTitle(const std::string& title) {
+    if (m_handle) glfwSetWindowTitle(m_handle, title.c_str());
+}

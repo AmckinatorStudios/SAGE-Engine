@@ -185,6 +185,7 @@ add_executable(SageEditor WIN32
     src/panels/TweenPanel_Menus.cpp
     src/panels/NineSlicePanel.cpp
     src/panels/SpriteSheetPanel.cpp
+    src/panels/GameSettingsPanel.cpp
     src/AssetPreview.cpp
 )
 
