@@ -1,4 +1,5 @@
 #pragma once
+#include "sage/ecs/RenderLayers.h"
 #include <glm/glm.hpp>
 
 #include "sage/render/ShadowMap.h"
@@ -41,7 +42,8 @@ void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& pr
                         const ShadowBinding& shadows,
                         const sage::render::ReflectionBinding* reflections = nullptr,
                         int shadingMode = 0,
-                        const sage::render::LightClusters* clusters = nullptr);
+                        const sage::render::LightClusters* clusters = nullptr,
+                        const sage::ecs::LayerFilter* layers = nullptr);
 
 // Рисует анимированные модели ТОЛЬКО в глубину (со скиннингом) — вызывается
 // внутри depth-прохода карты теней солнца, чтобы они отбрасывали тень.

@@ -3625,6 +3625,18 @@
     "How the element lays over what is behind it.\nInvert background — like a crosshair that stays visible on any surface.": "Как элемент ложится на то, что под ним.\nИнверсия фона — как прицел, который виден на любой поверхности.",
     "Object Effects": "Эффекты объекта",
     "Invert, glow, blur, dissolve… on this object only": "Инверсия, свечение, размытие, растворение… только на этом объекте",
-    "Applied to this object and its children, where they are visible": "Действуют на этот объект и его потомков — там, где они видны"
+    "Applied to this object and its children, where they are visible": "Действуют на этот объект и его потомков — там, где они видны",
+    "Render layer: which camera pass draws this object (empty — the main pass)": "Слой отрисовки: какой проход камеры рисует объект (пусто — основной)",
+    "Render passes": "Проходы отрисовки",
+    "Passes run in order. 'default' is the main pass; layers named in other passes are drawn only there. A pass that clears depth is drawn over everything before it.": "Проходы идут по порядку. «default» — основной проход; слои, названные в других проходах, рисуются только там. Проход с очисткой глубины рисуется поверх всего, что было до него.",
+    "Pass": "Проход",
+    "Layers": "Слои",
+    "Clear depth": "Очистить глубину",
+    "Pass FOV": "Поле зрения прохода",
+    "Pass near": "Ближняя плоскость прохода",
+    "Pass far": "Дальняя плоскость прохода",
+    "0 — as the camera": "0 — как у камеры",
+    "Remove pass": "Убрать проход",
+    "Add pass": "Добавить проход"
   }
 }

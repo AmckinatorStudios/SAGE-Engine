@@ -270,7 +270,7 @@ private:
     // Game обязаны вести его раздельно (см. RenderBatch::SetOcclusionCulling).
     void DrawLit(Scene& scene, const LightingEnvironment& env, const glm::mat4& view,
                  const glm::mat4& proj, glm::vec3 viewPos, int shadingMode, bool wireframe,
-                 int viewId);
+                 int viewId, const sage::render::CameraPassFrame* passes = nullptr);
     // Номер вида для панели Game: сразу за слотами вьюпорта, чтобы ни с одним
     // из них не совпасть.
     static constexpr int kGameViewId = kMaxViews;
@@ -321,6 +321,7 @@ private:
     // Буферы скоростей для смаза движения — по одному на вид.
     sage::render::VelocityBuffer m_viewportVelocity;
     sage::render::VelocityBuffer m_gameVelocity;
+    sage::render::SceneColorInput m_lastPassInput;   // вход основного прохода (для проходов после него)
     // Эффекты отдельных объектов: маска вьюпорта и окна Game.
     sage::render::ObjectEffectsMask m_viewportObjectFx;
     sage::render::ObjectEffectsMask m_gameObjectFx;

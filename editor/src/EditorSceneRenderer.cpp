@@ -241,7 +241,7 @@ void EditorSceneRenderer::RenderShadow(Scene& scene, LightingEnvironment& env,
 
 void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, const glm::mat4& view,
                                   const glm::mat4& proj, glm::vec3 viewPos, int shadingMode,
-                                  bool wireframe, int viewId) {
+                                  bool wireframe, int viewId, const sage::render::CameraPassFrame* passes) {
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
     if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Line);
     // Статика — RenderBatch (отсечение по фрустуму + инстансный батчинг).
@@ -265,6 +265,11 @@ void EditorSceneRenderer::DrawLit(Scene& scene, const LightingEnvironment& env, 
         m_probeSet = sage::render::CollectReflectionProbes(scene);
         color.Reflection.Probes = &m_probeSet;
     }
+    if (passes) {
+        passes->BeforeMain(scene, m_batch, color);
+        passes->ApplyMain(color);
+    }
+    m_lastPassInput = color;
     m_lastStats = sage::render::RenderSceneColor(scene, m_batch, color);
     if (wireframe) device.SetPolygonMode(sage::rhi::PolygonMode::Fill);
 }

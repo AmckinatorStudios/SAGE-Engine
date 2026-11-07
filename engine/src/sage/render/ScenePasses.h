@@ -4,7 +4,9 @@
 
 #include <glm/glm.hpp>
 
+#include "sage/ecs/CameraLightComponents.h"
 #include "sage/ecs/RenderBatch.h"
+#include "sage/ecs/RenderLayers.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/ShadowAtlas.h"
 #include "sage/render/Reflection.h"
@@ -84,6 +86,50 @@ struct SceneColorInput {
     // uTime. Проход обязан его знать: иначе каждая игра заводила бы свой
     // способ доставить время до шейдера, и ни один чужой материал не завёлся бы.
     float Time = 0.0f;
+    // Какие слои отрисовки рисует этот проход (nullptr — все).
+    const sage::ecs::LayerFilter* Layers = nullptr;
+};
+
+// --- Проходы камеры (CameraComponent::Passes) --------------------------------
+//
+// План кадра по списку проходов: что рисовать ДО основного прохода, какие
+// слои основной НЕ рисует (их забрали другие проходы) и что рисовать ПОСЛЕ.
+// Основной — проход со слоем "" (его место в списке задаёт порядок); нет его
+// в списке — основной идёт первым. Чистая функция: проверяется без окна.
+struct CameraPassPlan {
+    std::vector<CameraPass> Before;
+    std::vector<CameraPass> After;
+    sage::ecs::LayerFilter Main;   // основной проход: всё, кроме слоёв других
+    bool MainClearDepth = false;
+    float MainFov = 0.0f, MainNear = 0.0f, MainFar = 0.0f;
+};
+CameraPassPlan PlanCameraPasses(const CameraComponent* camera);
+
+// Проекция прохода: поле зрения и плоскости — свои или камеры.
+glm::mat4 PassProjection(const CameraComponent& camera, float fov, float nearClip, float farClip, float aspect);
+
+// Нарисовать проходы в текущую привязанную цель: глубина очищается, где
+// проход просит, вид — тот же, проекция — своя, слои — его.
+void RenderCameraPasses(Scene& scene, sage::ecs::RenderBatch& batch, const SceneColorInput& base,
+                        const std::vector<CameraPass>& passes, const CameraComponent& camera, float aspect);
+
+// Хозяину кадра (плеер, окно Game) — три шага вокруг основного прохода:
+//   frame.Prepare(scene, aspect);          // камера Primary и её план
+//   frame.BeforeMain(scene, batch, color); // проходы до основного
+//   frame.ApplyMain(color);                // основной: свои слои и проекция
+//   RenderSceneColor(scene, batch, color);
+//   ... частицы, отладка ...
+//   frame.AfterMain(scene, batch, color);  // проходы после (рука, оружие)
+struct CameraPassFrame {
+    CameraComponent Camera;
+    bool Active = false;
+    float Aspect = 1.0f;
+    CameraPassPlan Plan;
+
+    void Prepare(Scene& scene, float aspect);
+    void BeforeMain(Scene& scene, sage::ecs::RenderBatch& batch, const SceneColorInput& base) const;
+    void ApplyMain(SceneColorInput& input) const;
+    void AfterMain(Scene& scene, sage::ecs::RenderBatch& batch, const SceneColorInput& base) const;
 };
 
 // Цветной проход сцены: ECS-статика, проверка перекрытия, скелетные модели.

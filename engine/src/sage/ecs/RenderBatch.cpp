@@ -354,6 +354,8 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
         if (const AnimationComponent* anim = scene.Registry().try_get<AnimationComponent>(e)) {
             if (anim->Model) return;   // рисует sage::anim::DrawAnimatedModels
         }
+        // Чужой слой — его рисует другой проход камеры (тени — все слои).
+        if (m_layerFilter && !m_collectingShadows && !m_layerFilter->Accepts(mr.Layer)) return;
         const glm::mat4* cached = m_worldCache.Find(e);
         glm::mat4 model = cached ? *cached : scene.WorldMatrix(e);
         Mesh* mesh = mr.MeshPtr.get();

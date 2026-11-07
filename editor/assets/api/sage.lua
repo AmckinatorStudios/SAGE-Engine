@@ -1579,6 +1579,12 @@ function sage.camera.ScreenToRay(screenX, screenY) end
 ---@param worldPos Vec3
 ---@return any
 function sage.camera.WorldToScreen(worldPos) end
+---@param entity Entity
+---@return table
+function sage.camera.passes(entity) end
+---@param entity Entity
+---@param passes table
+function sage.camera.set_passes(entity, passes) end
 
 ---@class sage.core
 sage.core = {}
@@ -2774,6 +2780,7 @@ GenerateTexture = sage.texture.Generate
 GetAngularVelocity = sage.physics.GetAngularVelocity
 GetAxis = sage.input.Axis
 GetCamera = sage.camera.Get
+GetCameraPasses = sage.camera.passes
 GetDebugView = sage.render.GetDebugView
 GetLighting = sage.light.Get
 GetMaterial = sage.render.GetMaterial
@@ -2862,6 +2869,7 @@ SetAnimationSpeed = sage.anim.SetSpeed
 SetBillboardPosition = sage.fx.SetBillboardPosition
 SetBillboardTint = sage.fx.SetBillboardTint
 SetBillboardVisible = sage.fx.SetBillboardVisible
+SetCameraPasses = sage.camera.set_passes
 SetCharacterPosition = sage.physics.SetCharacterPosition
 SetCharacterShape = sage.physics.SetCharacterShape
 SetCharacterWorld = sage.physics.SetCharacterWorld

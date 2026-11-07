@@ -136,6 +136,11 @@ struct MeshRendererComponent {
     // и у травы (её тень — шум), а из отражений убирают, например, частицы.
     bool CastShadows = true;
     bool InReflections = true;
+
+    // Слой отрисовки (sage/ecs/RenderLayers.h): "" — основной. Объект
+    // рисует тот проход камеры, в чьём списке есть его слой
+    // (CameraComponent::Passes); имена — игры, движок их не толкует.
+    std::string Layer;
 };
 
 // НАЗНАЧЕНИЕ МАТЕРИАЛА объекту — одной функцией, а не двумя строчками на месте.

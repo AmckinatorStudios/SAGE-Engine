@@ -15,6 +15,7 @@
 #include "sage/scene/CharacterFit.h"
 #include "sage/scene/ScaleLock.h"
 #include "EditorTheme.h"
+#include "InspectorPassesUI.h"
 #include "ui/UI.h"
 #include "InspectorPanel.h"
 #include "sage/scene/AiAgentComponent.h"
@@ -398,6 +399,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         MeshRendererComponent& mr = obj.Renderer();
         DrawMeshSlot(host, obj.Entity(), mr, reg.all_of<AnimationComponent>(obj.Entity()));
         DrawMaterialSlot(host, mr);
+        sage::editor::DrawRenderLayerField(host, mr);
     }
 
     // --- Камера (игровая): панель Game рендерит от первой Primary-камеры ---
@@ -422,6 +424,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             sage::editor::ResetField(&host, *cam, cam->FarClip);
             if (ImGui::Checkbox(T("Primary"), &cam->Primary)) host.PushUndoSnapshot();
             EditorTheme::Hint(T("Game panel renders from the first Primary camera"));
+            sage::editor::DrawCameraPasses(host, *cam);
         }
     }
 

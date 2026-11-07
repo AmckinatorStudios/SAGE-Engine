@@ -438,6 +438,52 @@ void ScriptEngine::RegisterCameraApi() {
             [](Camera& c, float pitch) { c.Pitch = pitch; c.ProcessMouse(0.0f, 0.0f); })
     );
 
+    // Проходы камеры (CameraComponent::Passes, sage/ecs/RenderLayers.h):
+    //   camera.set_passes(cam, {
+    //       {layers = {"default"}},
+    //       {layers = {"viewmodel"}, clear_depth = true, fov = 70, near = 0.05},
+    //   })
+    // Пустая таблица — один проход, все слои. Объекту слой — mr.Layer.
+    Bind("camera", "set_passes", "SetCameraPasses", [](GameObject& obj, const sol::table& passes) {
+        if (!obj.Valid()) return;
+        CameraComponent* cam = obj.Registry()->try_get<CameraComponent>(obj.Entity());
+        if (!cam) throw std::runtime_error("camera.set_passes: у объекта нет камеры");
+        std::vector<CameraPass> out;
+        for (const auto& [_, v] : passes) {
+            if (!v.is<sol::table>()) throw std::runtime_error("camera.set_passes: проход — таблица {layers = {...}}");
+            sol::table t = v.as<sol::table>();
+            CameraPass p;
+            sol::optional<sol::table> layers = t["layers"];
+            if (!layers) throw std::runtime_error("camera.set_passes: у прохода нет layers");
+            for (const auto& [__, l] : *layers) p.Layers.push_back(l.as<std::string>());
+            p.ClearDepth = t.get_or("clear_depth", false);
+            p.Fov = t.get_or("fov", 0.0f);
+            p.Near = t.get_or("near", 0.0f);
+            p.Far = t.get_or("far", 0.0f);
+            out.push_back(std::move(p));
+        }
+        cam->Passes = std::move(out);
+    });
+    Bind("camera", "passes", "GetCameraPasses", [this](GameObject& obj) -> sol::table {
+        sol::table out = m_lua.create_table();
+        const CameraComponent* cam = obj.Valid() ? obj.Registry()->try_get<CameraComponent>(obj.Entity()) : nullptr;
+        if (!cam) return out;
+        int i = 1;
+        for (const CameraPass& p : cam->Passes) {
+            sol::table t = m_lua.create_table();
+            sol::table layers = m_lua.create_table();
+            int k = 1;
+            for (const std::string& l : p.Layers) layers[k++] = l;
+            t["layers"] = layers;
+            t["clear_depth"] = p.ClearDepth;
+            t["fov"] = p.Fov;
+            t["near"] = p.Near;
+            t["far"] = p.Far;
+            out[i++] = t;
+        }
+        return out;
+    });
+
     Bind("camera", "Get", "GetCamera", [this]() -> Camera& {
         if (!m_camera) throw std::runtime_error("GetCamera: камера не привязана (ScriptEngine::BindCamera не вызван)");
         return *m_camera;

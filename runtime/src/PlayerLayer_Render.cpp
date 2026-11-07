@@ -388,6 +388,12 @@ void PlayerLayer::OnRender() {
             color.Reflection.Probes = &m_probeSet;
         }
         color.ShadingMode = (int)debugView;
+        // Проходы камеры (CameraComponent::Passes): до основного, основной со
+        // своими слоями, после — в конце геометрии кадра.
+        sage::render::CameraPassFrame passes;
+        passes.Prepare(*m_scene, aspect);
+        passes.BeforeMain(*m_scene, m_batch, color);
+        passes.ApplyMain(color);
         sage::render::RenderSceneColor(*m_scene, m_batch, color);
         // Скорости — сразу после геометрии (см. VelocityBuffer).
         sage::rhi::TextureHandle velocity;
@@ -425,6 +431,9 @@ void PlayerLayer::OnRender() {
                 m_debugDraw->Line(l.A, l.B, l.Color);
             m_debugDraw->Flush(view, proj);
         }
+        // Проходы после основного (рука, оружие, 3D-интерфейс) — поверх всей
+        // геометрии кадра и до объёма и пост-обработки.
+        passes.AfterMain(*m_scene, m_batch, color);
 
         // Объём — после геометрии и ДО пост-обработки: лучи обязаны попасть в
         // bloom, иначе солнце светится, а его лучи нет. Работает только с

@@ -146,8 +146,10 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
 
     DrawSky(env, view, proj);
     // Игровое окно — всегда Shaded, без гизмо (как увидит игрок).
+    sage::render::CameraPassFrame passes;
+    passes.Prepare(scene, aspect);
     DrawLit(scene, env, view, proj, camPos, /*shadingMode=*/0, /*wireframe=*/false,
-            /*viewId=*/kGameViewId);
+            /*viewId=*/kGameViewId, &passes);
     sage::rhi::TextureHandle gameVelocity;
     // Тракт есть всегда: без своей обработки у камеры — базовый вывод (FramePostChain).
     const sage::render::PostChain gameChain =
@@ -172,6 +174,8 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
         m_debugDraw->SetHiddenLineAlpha(0.0f);   // в кадре игры — как в собранной игре
         m_debugDraw->Flush(view, proj, m_gameH);
     }
+    // Проходы камеры после основного — как у собранной игры.
+    passes.AfterMain(scene, m_batch, m_lastPassInput);
 
     // Объём и блик — ТЕ ЖЕ ДВА ПРОХОДА, что у собранной игры (см. PlayerLayer),
     // и в том же порядке: объём после геометрии, блик после объёма, оба до

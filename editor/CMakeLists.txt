@@ -110,6 +110,7 @@ add_executable(SageEditor WIN32
     src/panels/InspectorPanel.cpp
     src/panels/InspectorPanel_Material.cpp
     src/panels/InspectorPanel_Entity.cpp
+    src/panels/InspectorPanel_Passes.cpp
     src/panels/InspectorPanel_Physics.cpp
     src/panels/InspectorPanel_Animation.cpp
     src/panels/InspectorPanel_Effects.cpp
