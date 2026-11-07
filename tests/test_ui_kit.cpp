@@ -145,3 +145,81 @@ TEST(UIKit_slider_reports_value_in_game_units) {
     CHECK_NEAR(range.Step, 5.0f, 1e-4f);
     CHECK_NEAR(range.Knob.Color.r, 1.0f, 1e-4f);
 }
+
+// Поля детей и равномерное распределение в раскладке. Прежде поля ребёнка
+// раскладка не видела вовсе, а свободное место умела делить только «между».
+TEST(UIKit_layout_child_margins_and_even_spacing) {
+    sage::ui::Stack row;
+    row.Direction = sage::ui::Stack::Flow::Horizontal;
+    row.Spacing = 0.0f;
+    row.Padding = glm::vec4(0.0f);
+    row.Cross = sage::ui::Stack::CrossAlign::Start;
+    const sage::ui::UIRect box{0.0f, 0.0f, 100.0f, 20.0f};
+
+    // Два ребёнка по 10 с полем 5 слева у второго: второй встаёт на 15.
+    std::vector<sage::ui::LayoutSlot> slots(2);
+    for (auto& s : slots) s.Size = {10.0f, 10.0f};
+    slots[1].Margin = {5.0f, 3.0f, 0.0f, 0.0f};
+    sage::ui::ApplyLayout(row, box, slots);
+    CHECK_NEAR(slots[1].Pos.x, 15.0f, 1e-4f);
+    CHECK_NEAR(slots[1].Pos.y, 3.0f, 1e-4f);
+    CHECK_NEAR(slots[1].Size.x, 10.0f, 1e-4f);   // размер — свой, без полей
+
+    // Равномерно: три по 10 в 100 — четыре промежутка по 17.5, включая края.
+    row.Justify = sage::ui::Stack::Align::SpaceEvenly;
+    std::vector<sage::ui::LayoutSlot> three(3);
+    for (auto& s : three) s.Size = {10.0f, 10.0f};
+    sage::ui::ApplyLayout(row, box, three);
+    CHECK_NEAR(three[0].Pos.x, 17.5f, 1e-3f);
+    CHECK_NEAR(three[1].Pos.x - (three[0].Pos.x + 10.0f), 17.5f, 1e-3f);
+    CHECK_NEAR(100.0f - (three[2].Pos.x + 10.0f), 17.5f, 1e-3f);
+
+    // Вокруг каждого: у краёв половина промежутка между.
+    row.Justify = sage::ui::Stack::Align::SpaceAround;
+    sage::ui::ApplyLayout(row, box, three);
+    const float between = three[1].Pos.x - (three[0].Pos.x + 10.0f);
+    CHECK_NEAR(three[0].Pos.x * 2.0f, between, 1e-3f);
+}
+
+TEST(UIKit_group_justify_evenly_from_script) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    se.Lua().script(R"(
+        local g = ui.group{name = "Row", w = 300, h = 40, layout = "row", justify = "evenly",
+                           padding = {4, 2, 4, 2}}
+        ui.panel{parent = g, name = "A", w = 50, h = 20, margin = {0, 5, 0, 0}}
+    )");
+    const auto& st = scene.Registry().get<sage::ui::Stack>(Named(scene, "Row"));
+    CHECK_TRUE(st.Justify == sage::ui::Stack::Align::SpaceEvenly);
+    CHECK_NEAR(st.Padding.y, 2.0f, 1e-4f);
+    CHECK_NEAR(scene.Registry().get<sage::ui::Element>(Named(scene, "A")).Margin.y, 5.0f, 1e-4f);
+}
+
+// Слой, маска и целый масштаб экрана из скрипта.
+TEST(UIKit_layer_mask_and_pixel_screen) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    se.Lua().script(R"(
+        local s = ui.screen{name = "Pixel", scale = "pixel", reference = {320, 180}, max = 4}
+        local list = ui.group{parent = s, name = "List", w = 100, h = 60,
+                              mask = {shape = "rounded", rounding = 6, feather = 2}}
+        local tip = ui.panel{parent = list, name = "Tip", layer = 5}
+        local hole = ui.panel{parent = s, name = "Hole", mask = {invert = true, padding = 4}}
+        hole.mask = false
+    )");
+    auto& reg = scene.Registry();
+    const auto& canvas = reg.get<sage::ui::Canvas>(Named(scene, "Pixel"));
+    CHECK_TRUE(canvas.Mode == sage::ui::Canvas::Scale::IntegerFit);
+    CHECK_NEAR(canvas.Reference.x, 320.0f, 1e-4f);
+    CHECK_EQ(canvas.MaxScale, 4);
+    const auto& mask = reg.get<sage::ui::Mask>(Named(scene, "List"));
+    CHECK_TRUE(mask.Form == sage::ui::Mask::Shape::RoundedRect);
+    CHECK_NEAR(mask.Rounding, 6.0f, 1e-4f);
+    CHECK_NEAR(mask.Feather, 2.0f, 1e-4f);
+    CHECK_EQ(reg.get<sage::ui::Element>(Named(scene, "Tip")).DrawLayer, 5);
+    CHECK_FALSE(reg.all_of<sage::ui::Mask>(Named(scene, "Hole")));
+    CHECK_TRUE(Throws(se, "ui.group{mask = 'star'}", "форма 'star'"));
+    CHECK_TRUE(Throws(se, "ui.screen{scale = 'big'}", "scale 'big'"));
+}

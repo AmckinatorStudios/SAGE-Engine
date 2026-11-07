@@ -423,7 +423,13 @@ void DrawLabelPart(const PartDrawContext& c) {
     // съезжала вверх тем сильнее, чем крупнее кегль.
     const float lineH = ui.LineHeight(textScale, style);
     const float blockH = lineH * (float)lines.size();
-    float y = AlignY(label.Vertical, r, blockH);
+    // ПО ЦЕНТРУ — ПО ТЕЛУ БУКВ. Строка шрифта-картинки — 9 пикселей буквы, из
+    // них заглавные занимают верхние 7, а нижние два — хвосты «g», «y» и
+    // промежуток до следующей строки. Центр строки целиком ставил буквы выше
+    // середины кнопки; центр тела ставит их ровно посередине.
+    const float bodyH = lineH * (float)(lines.size() - 1) + ui.TextBodyHeight(textScale, style);
+    float y = label.Vertical == Label::Align::Center ? AlignY(label.Vertical, r, bodyH)
+                                                     : AlignY(label.Vertical, r, blockH);
 
     // Перенесённый текст ОБРЕЗАЕТСЯ своим элементом: он переносился под эту
     // ширину, значит и по высоте обязан остаться внутри. Абзац, вылезший на
@@ -435,7 +441,7 @@ void DrawLabelPart(const PartDrawContext& c) {
     // полупрозрачно, и она выглядит грязной каймой, а не тенью.
     auto px = [&](float v) {
         const float scaled = v * c.Scale;
-        return label.FontSnapPixels ? std::round(scaled) : scaled;
+        return label.FontSnapPixels || label.Sharp() ? std::round(scaled) : scaled;
     };
     const glm::vec2 shadow{px(label.ShadowOffset.x), px(label.ShadowOffset.y)};
     // Тень и обводка — своё оформление; у движка текст чистый.
@@ -445,7 +451,9 @@ void DrawLabelPart(const PartDrawContext& c) {
     const bool hasOutline = !c.EngineSkin && outline > 0.0f && label.OutlineColor.a > 0.0f;
     for (const std::string& line : lines) {
         if (!line.empty()) {
-            const float x = AlignX(label.Horizontal, left, avail, ui.MeasureText(line, textScale, style));
+            // Ширина по чернилам: промежуток после последней буквы не часть
+            // надписи, и по центру она иначе стоит левее (см. Font::MeasureInk).
+            const float x = AlignX(label.Horizontal, left, avail, ui.MeasureTextInk(line, textScale, style));
             // Порядок — снизу вверх: тень, обводка, сам текст.
             if (hasShadow) {
                 ui.Text(x + shadow.x, y + shadow.y, textScale,

@@ -271,23 +271,42 @@ const std::vector<PartField>& InteractableFields() {
     return f;
 }
 
-const char* const kMaskShape[] = {SAGE_UI_TEXT("Rectangle"), SAGE_UI_TEXT("Rounded")};
+const char* const kMaskShape[] = {SAGE_UI_TEXT("Rectangle"), SAGE_UI_TEXT("Rounded"), SAGE_UI_TEXT("Picture")};
+const char* const kMaskFilter[] = {SAGE_UI_TEXT("Smooth"), SAGE_UI_TEXT("Nearest")};
 
 const std::vector<PartField>& MaskFields() {
-    // Обрезка прямоугольная: форма и скругление в файле есть (старые сцены),
-    // но отрисовка режет только прямоугольником — показывать их значило бы
-    // обещать то, чего не происходит.
+    // Форма маски теперь режется по-настоящему (шейдером, см. UIRenderer::
+    // PushMask): прямоугольник, скругление, картинка; плюс мягкий край и
+    // инверсия. Поля картинки видны только у формы «Картинка».
     static const std::vector<PartField> f = [] {
         std::vector<PartField> v = {
-            {"form", SAGE_UI_TEXT("Shape"), PartField::Kind::Enum, offsetof(Mask, Form), 0.0f, 0.0f, nullptr,
-             kMaskShape, 2},
+            {"form", SAGE_UI_TEXT("Shape"), PartField::Kind::Enum, offsetof(Mask, Form), 0.0f, 0.0f,
+             "Rectangle — clip by the element; Rounded — with round corners;\n"
+             "Picture — show only where the picture is opaque.",
+             kMaskShape, 3},
             {"rounding", SAGE_UI_TEXT("Rounding"), PartField::Kind::Float, offsetof(Mask, Rounding), -1.0f,
-             64.0f},
+             256.0f, "Corner radius; -1 — the same as the background."},
+            {"image", SAGE_UI_TEXT("Mask picture"), PartField::Kind::String, offsetof(Mask, Image), 0.0f, 0.0f,
+             nullptr, nullptr, 0, PartField::Widget::Texture},
+            {"sprite", SAGE_UI_TEXT("Sprite (x,y,w,h)"), PartField::Kind::Vec4, offsetof(Mask, Sprite), 0.0f,
+             4096.0f},
+            {"filter", SAGE_UI_TEXT("Filtering"), PartField::Kind::Enum, offsetof(Mask, Filtering), 0.0f, 1.0f,
+             nullptr, kMaskFilter, 2},
+            {"feather", SAGE_UI_TEXT("Soft edge"), PartField::Kind::Float, offsetof(Mask, Feather), 0.0f, 128.0f,
+             "Fade towards the edge of the window, in interface pixels. 0 — sharp."},
+            {"invert", SAGE_UI_TEXT("Invert"), PartField::Kind::Bool, offsetof(Mask, Invert), 0.0f, 1.0f,
+             "Show everything EXCEPT the window: a hole in a dark overlay."},
             {"padding", SAGE_UI_TEXT("Clip inset (l,t,r,b)"), PartField::Kind::Vec4, offsetof(Mask, Padding),
              0.0f, 256.0f, "Shrinks the clipping window inside the container."},
             {"showOutside", SAGE_UI_TEXT("Do not clip"), PartField::Kind::Bool, offsetof(Mask, ShowOutside)},
         };
-        v[0].Hidden = v[1].Hidden = v[3].Hidden = true;
+        v[1].ShowIfKey = "form";
+        v[1].ShowIfValue = 1;
+        for (int i : {2, 3, 4}) {
+            v[i].ShowIfKey = "form";
+            v[i].ShowIfValue = 2;
+        }
+        v[8].Hidden = true;
         return v;
     }();
     return f;
@@ -295,7 +314,7 @@ const std::vector<PartField>& MaskFields() {
 
 const char* const kFlow[] = {SAGE_UI_TEXT("Row"), SAGE_UI_TEXT("Column"), SAGE_UI_TEXT("Grid")};
 const char* const kJustify[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT("Center"), SAGE_UI_TEXT("End"),
-                                SAGE_UI_TEXT("Even")};
+                                SAGE_UI_TEXT("Even"), SAGE_UI_TEXT("Around"), SAGE_UI_TEXT("Evenly")};
 const char* const kCross[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT("Center"), SAGE_UI_TEXT("End"),
                               SAGE_UI_TEXT("Stretch")};
 
@@ -307,8 +326,9 @@ const std::vector<PartField>& LayoutFields() {
          nullptr, kFlow, 3},
         {"justify", SAGE_UI_TEXT("Along"), PartField::Kind::Enum, offsetof(Stack, Justify), 0.0f, 0.0f,
          "Where the children gather along the main direction when there is\n"
-         "room left. Children with Grow take that room instead.",
-         kJustify, 4},
+         "room left. Children with Grow take that room instead.\n"
+         "Even: between the children; Around: around each; Evenly: all gaps equal.",
+         kJustify, 6},
         {"cross", SAGE_UI_TEXT("Across"), PartField::Kind::Enum, offsetof(Stack, Cross), 0.0f, 0.0f,
          "Where each child stands across the main direction — or stretch it\n"
          "to the full width (height) of the container.",

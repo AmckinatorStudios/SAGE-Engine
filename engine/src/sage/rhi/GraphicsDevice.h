@@ -189,6 +189,19 @@ public:
     // перевёрнутых скриншотов на втором бэкенде — дефекта, который не воспроизво-
     // дится на первом и потому ищется долго.
     virtual void ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) = 0;
+    // То же с альфой (RGBA8, строки снизу вверх). Нужна проверкам того, что
+    // интерфейс, нарисованный в прозрачную цель, оставляет в ней правильную
+    // прозрачность. Бэкенд без своей реализации отдаёт RGB и альфу 255.
+    virtual void ReadPixelsRGBA(int x, int y, int width, int height, unsigned char* out) {
+        std::vector<unsigned char> rgb((size_t)width * height * 3);
+        ReadPixelsRGB(x, y, width, height, rgb.data());
+        for (size_t i = 0; i < (size_t)width * height; ++i) {
+            out[i * 4] = rgb[i * 3];
+            out[i * 4 + 1] = rgb[i * 3 + 1];
+            out[i * 4 + 2] = rgb[i * 3 + 2];
+            out[i * 4 + 3] = 255;
+        }
+    }
 
     // Максимальная поддерживаемая анизотропия фильтрации (>= 1.0).
     virtual float MaxAnisotropy() = 0;

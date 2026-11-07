@@ -227,6 +227,13 @@ get.alpha = function(s) return s.e.Alpha end
 set.alpha = function(s, v) s.e.Alpha = v end
 get.order = function(s) return s.e.Order end
 set.order = function(s, v) s.e.Order = v end
+-- Слой поверх всего интерфейса (0 — как у родителя): подсказка из глубины
+-- окна выше соседних окон.
+get.layer = function(s) return s.e.DrawLayer end
+set.layer = function(s, v) s.e.DrawLayer = v end
+-- Маска детей: "rect", "rounded" или таблица (см. ui.SetMask); false — снять.
+get.mask = function(s) return rawget(s, "_mask") end
+set.mask = function(s, v) rawset(s, "_mask", v); U.SetMask(s.obj, v) end
 get.rotation = function(s) return s.e.Rotation end
 set.rotation = function(s, v) s.e.Rotation = v end
 get.color = function(s) return s.e.Color end
@@ -317,7 +324,7 @@ local function bind(s)
 end
 
 local COMMON = {parent = 1, name = 1, x = 1, y = 1, w = 1, h = 1, anchor = 1, stretch = 1, margin = 1,
-    visible = 1, alpha = 1, order = 1, rotation = 1, blend = 1, on_click = 1, on_change = 1}
+    visible = 1, alpha = 1, order = 1, rotation = 1, blend = 1, layer = 1, mask = 1, on_click = 1, on_change = 1}
 
 local function wrap(obj, kind, label)
     local s = {obj = obj, e = obj:GetUI(), kind = kind, label = label}
@@ -361,6 +368,8 @@ local function finish(s, o)
     if o.order then s.order = o.order end
     if o.rotation then s.rotation = o.rotation end
     if o.blend then s.blend = o.blend end
+    if o.layer then s.layer = o.layer end
+    if o.mask ~= nil then s.mask = o.mask end
     if o.visible == false then s.visible = false end
     if o.on_click then s.on_click = o.on_click end
     if o.on_change then s.on_change = o.on_change end
@@ -414,16 +423,25 @@ local function keys(...) local t = {} for _, tbl in ipairs({...}) do for k in pa
 
 ---Экран: элемент во весь экран, корень интерфейса. order — порядок между
 ---экранами (больше — поверх), input = false — показывается, но не ловит мышь.
+---scale = "pixel" — целый масштаб под опорный размер reference {w, h} (для
+---пиксельной графики: на любом разрешении пиксели одинаковые), "fit" —
+---плавный; max — предел целого масштаба. Без scale — единица = пиксель.
 ---@param o? table
 ---@return table
 function U.screen(o)
     o = o or {}
-    local obj, e = new("screen", o, {input = 1})
+    local obj, e = new("screen", o, {input = 1, scale = 1, reference = 1, max = 1})
     e.Stretch = UIStretch.Both
     e.Position = Vec2(0, 0)
-    SetUICanvas(obj, {order = o.order or 0})
+    if o.scale ~= nil and o.scale ~= "pixel" and o.scale ~= "fit" then
+        error("ui.screen: scale '" .. tostring(o.scale) .. "' — нужно pixel или fit", 2)
+    end
+    local ref = o.reference
+    if type(ref) == "table" and getmetatable(ref) == nil then ref = Vec2(ref[1], ref[2]) end
+    SetUICanvas(obj, {order = o.order or 0, pixelScale = o.scale == "pixel", scale = o.scale == "fit",
+                      reference = ref, maxScale = o.max})
     if o.input == false then e.BlockRaycasts = false end
-    return finish(wrap(obj, "screen"), merge(o, {order = false}))
+    return finish(wrap(obj, "screen"), merge(o, {order = false, scale = false}))
 end
 
 ---Панель: прямоугольник цветом или картинкой (девятина, плитка).
@@ -537,7 +555,9 @@ function U.bar(o)
 end
 
 ---Группа: невидимый контейнер. layout = "row" | "column" | "grid" расставляет
----детей сам (gap, padding, columns, justify); clip = true обрезает детей.
+---детей сам: gap — зазор, padding — поля {л, в, п, н} или число, columns,
+---justify = start | center | end | between | around | evenly, cross. У детей
+---работает margin — свои поля вокруг. clip = true обрезает детей.
 ---@param o? table
 ---@return table
 function U.group(o)
@@ -546,7 +566,7 @@ function U.group(o)
     e.Type = UIKind.Panel
     e.Color = Vec4(0, 0, 0, 0)
     if o.layout then
-        SetUILayout(obj, {dir = o.layout, spacing = o.gap or 0, padding = o.padding or 0,
+        SetUILayout(obj, {dir = o.layout, spacing = o.gap or 0, padding = vec4(o.padding or 0),
             columns = o.columns or 0, justify = o.justify or "start", cross = o.cross or "start"})
     end
     if o.clip then e.ClipChildren = true end
@@ -608,6 +628,60 @@ void ScriptEngine::RegisterUIKitApi() {
             throw std::runtime_error("ui.SetLook: часть '" + part +
                                      "' — нужно fill, hover, pressed, disabled, focused, track, filled, knob, check или bar");
         }
+    });
+
+    // Маска поддерева: "rect" | "rounded" | таблица {shape = "rect" | "rounded" |
+    // "image", rounding, image, sprite, feather, invert, padding, sharp};
+    // false/nil — снять. Прямоугольник режут ножницы, остальное — шейдер.
+    Bind("ui", "SetMask", nullptr, [](GameObject& obj, sol::object value) {
+        if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity()))
+            throw std::runtime_error("ui.SetMask: объект не элемент интерфейса");
+        entt::registry& reg = *obj.Registry();
+        if (!value.valid() || value.get_type() == sol::type::lua_nil ||
+            (value.get_type() == sol::type::boolean && !value.as<bool>())) {
+            reg.remove<sage::ui::Mask>(obj.Entity());
+            return;
+        }
+        sage::ui::Mask m;
+        auto shape = [&](const std::string& n) {
+            if (n == "rect") m.Form = sage::ui::Mask::Shape::Rect;
+            else if (n == "rounded") m.Form = sage::ui::Mask::Shape::RoundedRect;
+            else if (n == "image") m.Form = sage::ui::Mask::Shape::Image;
+            else throw std::runtime_error("ui.mask: форма '" + n + "' — нужно rect, rounded или image");
+        };
+        if (value.is<std::string>()) {
+            shape(value.as<std::string>());
+        } else if (value.is<sol::table>() || value.get_type() == sol::type::boolean) {
+            if (value.is<sol::table>()) {
+                sol::table t = value.as<sol::table>();
+                for (const auto& kv : t) {
+                    const std::string k = kv.first.as<std::string>();
+                    static const char* const known[] = {"shape", "rounding", "image", "sprite", "feather",
+                                                        "invert", "padding", "sharp"};
+                    bool ok = false;
+                    for (const char* n : known) ok = ok || k == n;
+                    if (!ok) throw std::runtime_error("ui.mask: неизвестный ключ '" + k + "'");
+                }
+                if (t["image"].valid()) {
+                    m.Form = sage::ui::Mask::Shape::Image;
+                    m.Image = t.get<std::string>("image");
+                }
+                if (t["shape"].valid()) shape(t.get<std::string>("shape"));
+                if (t["rounding"].valid()) {
+                    m.Rounding = t.get<float>("rounding");
+                    if (!t["shape"].valid() && m.Form == sage::ui::Mask::Shape::Rect)
+                        m.Form = sage::ui::Mask::Shape::RoundedRect;
+                }
+                if (t["sprite"].valid()) m.Sprite = Vec4Arg(t["sprite"], "sprite");
+                if (t["feather"].valid()) m.Feather = t.get<float>("feather");
+                if (t["invert"].valid()) m.Invert = t.get<bool>("invert");
+                if (t["padding"].valid()) m.Padding = Vec4Arg(t["padding"], "padding");
+                if (t["sharp"].valid() && t.get<bool>("sharp")) m.Filtering = sage::TextureFiltering::Nearest;
+            }
+        } else {
+            throw std::runtime_error("ui.mask: ожидается имя формы или таблица");
+        }
+        reg.emplace_or_replace<sage::ui::Mask>(obj.Entity(), m);
     });
 
     // Цвет надписи в состояниях кнопки (наведение, нажатие, недоступна).

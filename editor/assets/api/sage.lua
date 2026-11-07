@@ -2653,6 +2653,9 @@ function sage.ui.SetLayout(entity, opts) end
 ---@param value any
 function sage.ui.SetLook(entity, part, value) end
 ---@param entity Entity
+---@param value any
+function sage.ui.SetMask(entity, value) end
+---@param entity Entity
 ---@param v any
 function sage.ui.SetPressedOffset(entity, v) end
 ---@param entity Entity
@@ -3270,6 +3273,9 @@ function cylinder(r, h, segments, caps) end
 -- --- Интерфейс в стиле SAGE (ScriptApi_UIKit.cpp) ----------
 ---Экран: элемент во весь экран, корень интерфейса. order — порядок между
 ---экранами (больше — поверх), input = false — показывается, но не ловит мышь.
+---scale = "pixel" — целый масштаб под опорный размер reference {w, h} (для
+---пиксельной графики: на любом разрешении пиксели одинаковые), "fit" —
+---плавный; max — предел целого масштаба. Без scale — единица = пиксель.
 ---@param o? table
 ---@return table
 function ui.screen(o) end
@@ -3316,7 +3322,9 @@ function ui.slider(o) end
 function ui.bar(o) end
 
 ---Группа: невидимый контейнер. layout = "row" | "column" | "grid" расставляет
----детей сам (gap, padding, columns, justify); clip = true обрезает детей.
+---детей сам: gap — зазор, padding — поля {л, в, п, н} или число, columns,
+---justify = start | center | end | between | around | evenly, cross. У детей
+---работает margin — свои поля вокруг. clip = true обрезает детей.
 ---@param o? table
 ---@return table
 function ui.group(o) end
