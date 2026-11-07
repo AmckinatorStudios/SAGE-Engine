@@ -104,6 +104,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
             j["color"]    = Vec3ToJson(mr.Color);
             j["castShadows"] = mr.CastShadows;
             j["inReflections"] = mr.InReflections;
+            if (!mr.Layer.empty()) j["layer"] = mr.Layer;
             // СВЕЧЕНИЯ И ПРОЗРАЧНОСТИ У ЭКЗЕМПЛЯРА БОЛЬШЕ НЕТ: и то и другое —
             // свойство материала (см. MeshRendererComponent). Ключи opacity,
             // emissive и emissiveStrength не пишутся и не читаются: сцена,
@@ -264,6 +265,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("color"))    mr.Color    = Vec3FromJson(j["color"]);
         mr.CastShadows = j.value("castShadows", mr.CastShadows);
         mr.InReflections = j.value("inReflections", mr.InReflections);
+        mr.Layer = j.value("layer", mr.Layer);
         // opacity / emissive / emissiveStrength из старых сцен НЕ читаются:
         // полей под них больше нет. Прозрачность и свечение задаёт материал, и
         // объект, которому они были нужны, получает свой материал — иначе вид

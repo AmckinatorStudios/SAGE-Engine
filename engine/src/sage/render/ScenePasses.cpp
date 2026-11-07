@@ -2,10 +2,12 @@
 
 #include "sage/render/Framebuffer.h"
 
+#include <algorithm>
 #include <cmath>
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "sage/ecs/CameraView.h"
 #include "sage/ecs/RenderComponents.h"
 #include "sage/render/RenderTexture.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -56,6 +58,99 @@ void RenderLocalShadowDepth(LocalShadowAtlas& atlas, Scene& scene, sage::ecs::Re
     atlas.End(screenWidth, screenHeight);
 }
 
+CameraPassPlan PlanCameraPasses(const CameraComponent* camera) {
+    CameraPassPlan plan;
+    if (!camera || camera->Passes.empty()) return plan;
+    int mainAt = -1;
+    for (size_t i = 0; i < camera->Passes.size(); ++i) {
+        const CameraPass& p = camera->Passes[i];
+        bool isMain = false;
+        for (const std::string& l : p.Layers)
+            if (sage::ecs::IsDefaultLayer(l)) isMain = true;
+        if (isMain && mainAt < 0) {
+            mainAt = (int)i;
+            plan.MainClearDepth = p.ClearDepth;
+            plan.MainFov = p.Fov;
+            plan.MainNear = p.Near;
+            plan.MainFar = p.Far;
+            // Основной рисует ещё и названные здесь слои, кроме "".
+            continue;
+        }
+        for (const std::string& l : p.Layers)
+            if (!sage::ecs::IsDefaultLayer(l)) plan.Main.Exclude.push_back(l);
+    }
+    // Слои, названные в самом основном проходе, у других не отнимаются.
+    if (mainAt >= 0) {
+        for (const std::string& l : camera->Passes[(size_t)mainAt].Layers) {
+            auto& ex = plan.Main.Exclude;
+            ex.erase(std::remove(ex.begin(), ex.end(), l), ex.end());
+        }
+    }
+    for (size_t i = 0; i < camera->Passes.size(); ++i) {
+        if ((int)i == mainAt) continue;
+        if (mainAt >= 0 && (int)i < mainAt) plan.Before.push_back(camera->Passes[i]);
+        else plan.After.push_back(camera->Passes[i]);
+    }
+    return plan;
+}
+
+glm::mat4 PassProjection(const CameraComponent& camera, float fov, float nearClip, float farClip, float aspect) {
+    CameraComponent c = camera;
+    if (fov > 0.0f) c.Fov = fov;
+    if (nearClip > 0.0f) c.NearClip = nearClip;
+    if (farClip > 0.0f) c.FarClip = farClip;
+    return c.ProjectionMatrix(aspect);
+}
+
+void RenderCameraPasses(Scene& scene, sage::ecs::RenderBatch& batch, const SceneColorInput& base,
+                        const std::vector<CameraPass>& passes, const CameraComponent& camera, float aspect) {
+    if (passes.empty()) return;
+    SAGE_PROFILE("Проходы камеры");
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    for (const CameraPass& p : passes) {
+        if (p.ClearDepth) device.Clear(false, true);
+        sage::ecs::LayerFilter filter;
+        filter.Only = p.Layers;
+        // Пустой список — проход ничего не рисует (а не «всё»): слой надо назвать.
+        if (filter.Only.empty()) continue;
+        SceneColorInput in = base;
+        in.Proj = PassProjection(camera, p.Fov, p.Near, p.Far, aspect);
+        in.Layers = &filter;
+        in.OcclusionCulling = false;   // ответы о перекрытии — у основного прохода
+        RenderSceneColor(scene, batch, in);
+    }
+}
+
+void CameraPassFrame::Prepare(Scene& scene, float aspect) {
+    Active = false;
+    Aspect = aspect;
+    const entt::entity e = sage::ecs::PrimaryCameraEntity(scene);
+    if (e == entt::null) return;
+    const CameraComponent* cam = scene.Registry().try_get<CameraComponent>(e);
+    if (!cam || cam->Passes.empty()) return;
+    Camera = *cam;
+    Plan = PlanCameraPasses(cam);
+    Active = true;
+}
+
+void CameraPassFrame::BeforeMain(Scene& scene, sage::ecs::RenderBatch& batch, const SceneColorInput& base) const {
+    if (!Active) return;
+    RenderCameraPasses(scene, batch, base, Plan.Before, Camera, Aspect);
+    if (Plan.MainClearDepth && !Plan.Before.empty()) sage::rhi::GraphicsDevice::Get().Clear(false, true);
+}
+
+void CameraPassFrame::ApplyMain(SceneColorInput& input) const {
+    if (!Active) return;
+    input.Layers = &Plan.Main;
+    if (Plan.MainFov > 0.0f || Plan.MainNear > 0.0f || Plan.MainFar > 0.0f)
+        input.Proj = PassProjection(Camera, Plan.MainFov, Plan.MainNear, Plan.MainFar, Aspect);
+}
+
+void CameraPassFrame::AfterMain(Scene& scene, sage::ecs::RenderBatch& batch, const SceneColorInput& base) const {
+    if (!Active) return;
+    RenderCameraPasses(scene, batch, base, Plan.After, Camera, Aspect);
+}
+
 sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& batch,
                                         const SceneColorInput& input) {
     SAGE_PROFILE("Геометрия");
@@ -68,6 +163,7 @@ sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& ba
     // прохода — то есть от чужой камеры. Раньше вызов стоял ниже, и работало
     // это лишь потому, что вид в кадре был один.
     batch.SetOcclusionCulling(input.OcclusionCulling, input.ViewId);
+    batch.SetLayerFilter(input.Layers);
     const sage::ecs::RenderStats stats =
         batch.RenderColor(scene, input.View, input.Proj, input.ViewPos, *input.Env, input.Shadows,
                           input.ShadingMode, &input.Reflection);
@@ -87,7 +183,8 @@ sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& ba
     device.SetGBufferWrites(true);
     sage::anim::DrawAnimatedModels(scene, input.View, input.Proj, input.ViewPos, *input.Env,
                                    input.Shadows, &input.Reflection, input.ShadingMode,
-                                   &batch.Clusters());
+                                   &batch.Clusters(), input.Layers);
+    batch.SetLayerFilter(nullptr);
     device.SetGBufferWrites(false);
     return stats;
 }

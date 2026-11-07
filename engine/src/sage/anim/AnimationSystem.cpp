@@ -387,13 +387,17 @@ void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& pr
                         const glm::vec3& viewPos, const LightingEnvironment& env,
                         const ShadowBinding& shadows,
                         const sage::render::ReflectionBinding* reflections, int shadingMode,
-                        const sage::render::LightClusters* clusters) {
+                        const sage::render::LightClusters* clusters, const sage::ecs::LayerFilter* layers) {
     SAGE_PROFILE("Скиннинг");
     sage::gi::GIState* gi = scene.GI ? scene.GI.get() : nullptr;
     auto v = scene.Registry().view<AnimationComponent, Transform>();
     for (auto e : v) {
         AnimationComponent& am = v.get<AnimationComponent>(e);
         if (!am.Model) continue;
+        if (layers) {
+            const auto* lmr = scene.Registry().try_get<MeshRendererComponent>(e);
+            if (!layers->Accepts(lmr ? lmr->Layer : std::string())) continue;
+        }
         // Материал, назначенный сущности (инспектор, SetMaterial из скрипта),
         // красит модель вместо материалов файла. Раньше он молча
         // игнорировался: персонажу нельзя было сменить скин или сделать его

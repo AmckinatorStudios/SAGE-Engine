@@ -126,6 +126,7 @@ void ScriptEngine::RegisterComponentTypes() {
         // палубу, ни отражаться в воде (см. RenderComponents.h).
         "CastShadows", &MeshRendererComponent::CastShadows,
         "InReflections", &MeshRendererComponent::InReflections,
+        "Layer", &MeshRendererComponent::Layer,
         "MaterialPath", &MeshRendererComponent::MaterialPath
     );
     m_lua.new_usertype<DecalComponent>("DecalComponent",

@@ -56,6 +56,19 @@ void SaveCamera(json& j, const CameraComponent& cam) {
     j["camera"]["near"] = cam.NearClip;
     j["camera"]["far"] = cam.FarClip;
     j["camera"]["primary"] = cam.Primary;
+    if (!cam.Passes.empty()) {
+        json passes = json::array();
+        for (const CameraPass& p : cam.Passes) {
+            json pj;
+            pj["layers"] = p.Layers;
+            if (p.ClearDepth) pj["clearDepth"] = true;
+            if (p.Fov > 0.0f) pj["fov"] = p.Fov;
+            if (p.Near > 0.0f) pj["near"] = p.Near;
+            if (p.Far > 0.0f) pj["far"] = p.Far;
+            passes.push_back(pj);
+        }
+        j["camera"]["passes"] = passes;
+    }
 }
 
 CameraComponent ParseCamera(const json& cj) {
@@ -69,6 +82,20 @@ CameraComponent ParseCamera(const json& cj) {
     cam.NearClip = cj.value("near", cam.NearClip);
     cam.FarClip = cj.value("far", cam.FarClip);
     cam.Primary = cj.value("primary", cam.Primary);
+    if (cj.contains("passes") && cj["passes"].is_array()) {
+        for (const json& pj : cj["passes"]) {
+            if (!pj.is_object()) continue;
+            CameraPass p;
+            if (pj.contains("layers") && pj["layers"].is_array())
+                for (const json& l : pj["layers"])
+                    if (l.is_string()) p.Layers.push_back(l.get<std::string>());
+            p.ClearDepth = pj.value("clearDepth", false);
+            p.Fov = pj.value("fov", 0.0f);
+            p.Near = pj.value("near", 0.0f);
+            p.Far = pj.value("far", 0.0f);
+            cam.Passes.push_back(std::move(p));
+        }
+    }
     return cam;
 }
 

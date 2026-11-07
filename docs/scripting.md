@@ -1389,6 +1389,11 @@ API не ограничен `Transform`/`Color` — скрипт общаетс�
   не только прицел из центра экрана); `camera.WorldToScreen(pos)` — точка
   экрана или `nil`, если она за спиной камеры (полоска здоровья над головой,
   маркер цели). Координаты — те же, что у `ui.Cursor()`/`ui.ScreenSize()`.
+- **Слои и проходы камеры**: `obj.MeshRenderer.Layer = "viewmodel"` — слой
+  объекта (пусто — основной); `camera.set_passes(cam, {{layers = {"sky"}, far = 4000},
+  {layers = {"default"}}, {layers = {"viewmodel"}, clear_depth = true, fov = 70,
+  near = 0.05}})` — кадр камеры проходами по порядку (`camera.passes(cam)` —
+  прочитать). Подробно — docs/rendering.md, «Слои отрисовки и проходы камеры».
 
 Пример «компоненты общаются» — дверь открывается по сообщению от кнопки:
 ```lua

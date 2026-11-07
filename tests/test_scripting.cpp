@@ -16,6 +16,8 @@
 #include "sage/ui/UI.h"
 #include "sage/ui/UISerialize.h"
 #include "sage/render/ObjectEffects.h"
+#include "sage/render/ScenePasses.h"
+#include "sage/scene/SceneSerializer.h"
 #include "sage/render/PostProcessComponent.h"
 #include "sage/scene/ComponentRegistry.h"
 #include <set>
@@ -2157,4 +2159,54 @@ TEST(Scripting_ui_image_fit_mode) {
     CHECK_TRUE(scene.Registry().get<sage::ui::Image>(bg.Entity()).Fit == sage::ui::Image::Mode::Tile);
     CHECK_EQ(se.Lua()["read_back"].get<std::string>(), std::string("tile"));
     CHECK_TRUE(se.Lua()["bad"].get<bool>());
+}
+
+// Проходы камеры и слой объекта из скрипта; сохраняются в сцене и читаются
+// обратно. План кадра: рука — после основного, небо — до; основной не
+// рисует слоёв, забранных другими проходами.
+TEST(Scripting_camera_passes_and_layers) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject cam = scene.CreateObject("Camera");
+    scene.Registry().emplace<CameraComponent>(cam.Entity());
+    GameObject hand = scene.CreateObject("Hand");
+    se.Lua()["cam"] = cam;
+    se.Lua()["hand"] = hand;
+    se.Lua().script(R"(
+        hand:GetRenderer().Layer = "viewmodel"
+        camera.set_passes(cam, {
+            {layers = {"sky"}, far = 1000},
+            {layers = {"default"}, clear_depth = true},
+            {layers = {"viewmodel"}, clear_depth = true, fov = 70, near = 0.05},
+        })
+        local p = camera.passes(cam)
+        n = #p
+        hand_fov = p[3].fov
+        bad = not pcall(function() camera.set_passes(cam, {{clear_depth = true}}) end)
+    )");
+    CHECK_EQ(se.Lua()["n"].get<int>(), 3);
+    CHECK_NEAR(se.Lua()["hand_fov"].get<float>(), 70.0f, 1e-4f);
+    CHECK_TRUE(se.Lua()["bad"].get<bool>());
+    CHECK_TRUE(scene.Registry().get<MeshRendererComponent>(hand.Entity()).Layer == "viewmodel");
+
+    const auto plan = sage::render::PlanCameraPasses(&scene.Registry().get<CameraComponent>(cam.Entity()));
+    CHECK_EQ((int)plan.Before.size(), 1);
+    CHECK_EQ((int)plan.After.size(), 1);
+    CHECK_TRUE(plan.MainClearDepth);
+    CHECK_FALSE(plan.Main.Accepts("viewmodel"));
+    CHECK_FALSE(plan.Main.Accepts("sky"));
+    CHECK_TRUE(plan.Main.Accepts(""));
+    CHECK_TRUE(plan.Main.Accepts("anything_else"));
+
+    // Сохранение сцены: проходы и слой на месте.
+    auto loaded = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    Scene& back = *loaded;
+    int passes = 0;
+    std::string layer;
+    for (auto e : back.Registry().view<CameraComponent>()) passes = (int)back.Registry().get<CameraComponent>(e).Passes.size();
+    for (auto e : back.Registry().view<MeshRendererComponent, NameComponent>())
+        if (back.Registry().get<NameComponent>(e).Name == "Hand") layer = back.Registry().get<MeshRendererComponent>(e).Layer;
+    CHECK_EQ(passes, 3);
+    CHECK_TRUE(layer == "viewmodel");
 }

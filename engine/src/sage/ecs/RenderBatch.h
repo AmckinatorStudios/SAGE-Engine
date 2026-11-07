@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 #include <entt/entt.hpp>
 
+#include "sage/ecs/RenderLayers.h"
 #include "sage/scene/WorldMatrices.h"
 #include "sage/render/Mesh.h"
 #include "sage/render/Shader.h"
@@ -62,6 +63,10 @@ public:
     // reflections — источники отражений кадра (куб окружения, SSR, плоское).
     // Необязательный: сцена без них рисуется ровно как раньше, только без
     // зеркальной составляющей непрямого света.
+    // Какие слои рисует следующий цветной проход (nullptr — все). Тени
+    // слоями не режутся: тень объекта задаёт его CastShadows.
+    void SetLayerFilter(const LayerFilter* filter) { m_layerFilter = filter; }
+
     RenderStats RenderColor(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
                             const glm::vec3& viewPos, const LightingEnvironment& env,
                             const ShadowBinding& shadows, int shadingMode,
@@ -331,6 +336,7 @@ private:
     bool m_skipPlanarReflectors = false;
     // Сбор идёт для КАРТЫ ТЕНЕЙ: объекты с CastShadows = false пропускаются.
     bool m_collectingShadows = false;
+    const LayerFilter* m_layerFilter = nullptr;
 
     void CollectVisible(Scene& scene, const glm::mat4& cullMatrix);
 
