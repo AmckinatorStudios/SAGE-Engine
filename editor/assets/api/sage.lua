@@ -1470,6 +1470,12 @@ function sage.anim.PlayNamed(entity, name, blend) end
 function sage.anim.Seek(entity, time) end
 ---@param entity Entity
 ---@param joint integer
+---@param x number
+---@param y number
+---@param z number
+function sage.anim.SetJointOffset(entity, joint, x, y, z) end
+---@param entity Entity
+---@param joint integer
 ---@param rx number
 ---@param ry number
 ---@param rz number
@@ -2865,6 +2871,7 @@ SetIKPole = sage.ik.SetPole
 SetIKTarget = sage.ik.SetTarget
 SetIKWeight = sage.ik.SetWeight
 SetInputContextEnabled = sage.input.SetContextEnabled
+SetJointOffset = sage.anim.SetJointOffset
 SetJointRotation = sage.anim.SetJointRotation
 SetLensFlare = sage.lensflare.Set
 SetMasterVolume = sage.audio.SetMasterVolume

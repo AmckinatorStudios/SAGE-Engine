@@ -68,4 +68,24 @@ void AnimChannel::Sample(float t, glm::vec3& outVec3, glm::quat& outQuat) const 
     }
 }
 
+static JointPose* OverrideSlot(std::vector<JointPose>& overrides, const Skeleton& sk, int joint) {
+    if (joint < 0 || joint >= sk.Count()) return nullptr;
+    if ((int)overrides.size() != sk.Count()) overrides.assign((size_t)sk.Count(), {});
+    return &overrides[(size_t)joint];
+}
+
+void OverrideJointRotation(std::vector<JointPose>& overrides, const Skeleton& sk, int joint, const glm::quat& delta) {
+    if (JointPose* p = OverrideSlot(overrides, sk, joint)) {
+        p->HasRotation = true;
+        p->Rotation = sk.Joints[(size_t)joint].Rotation * delta;
+    }
+}
+
+void OverrideJointOffset(std::vector<JointPose>& overrides, const Skeleton& sk, int joint, const glm::vec3& offset) {
+    if (JointPose* p = OverrideSlot(overrides, sk, joint)) {
+        p->HasTranslation = true;
+        p->Translation = sk.Joints[(size_t)joint].Translation + offset;
+    }
+}
+
 } // namespace sage::anim

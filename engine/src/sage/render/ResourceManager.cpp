@@ -510,6 +510,19 @@ std::shared_ptr<Skybox> ResourceManager::GetSkyboxImage(const std::string& file,
     return sky;
 }
 
+bool ResourceManager::UpdateGeneratedTexture(const std::string& name, const unsigned char* pixelsRGBA, int width,
+                                             int height, TextureFilter filter, bool generateMipmaps) {
+    auto it = m_textures.find(CacheKey(name));
+    if (it == m_textures.end() || !it->second.Generated || !it->second.Tex) return false;
+    TextureRecord& rec = it->second;
+    rec.Tex->ReplacePixels(pixelsRGBA, width, height, filter, generateMipmaps);
+    m_textureBytes -= std::min(m_textureBytes, rec.Bytes);
+    rec.Bytes = rec.Tex->GpuBytes();
+    m_textureBytes += rec.Bytes;
+    rec.Tick = NextTick();
+    return true;
+}
+
 void ResourceManager::RegisterTexture(const std::string& name, std::shared_ptr<Texture> texture) {
     if (name.empty() || !texture) return;
     // Имя приводится тем же CacheKey, что и путь файла: спрашивать

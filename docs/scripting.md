@@ -1131,6 +1131,7 @@ img = texture.load("assets/textures/stone.png")  -- картинка с диск
 c = img.get(0, 0)                     -- строки снизу вверх, как у texture(...)
 stone = material("stone", {color = rgb(0.5, 0.45, 0.4), roughness = 0.9})
 stone.texture = tex                   -- текстура грузится на видеокарту здесь
+tex.apply()                           -- повторно — пиксели в ТОЙ ЖЕ текстуре: материал видит новое
 stone.normal_map = "Assets/Textures/rock_n.png"
 stone.tiling = 4
 stone.save("Assets/Materials/stone.sagemat")
