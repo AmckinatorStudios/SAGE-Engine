@@ -1510,21 +1510,44 @@ function OnMessage(entity, name, data) end
 # ScriptApi_ProcGen.cpp, и подсказка к нему — его же аннотации «---» рядом с
 # каждой функцией. Источник правды тот же: код, который движок исполняет.
 PROCGEN = ROOT / "engine/src/sage/scripting/ScriptApi_ProcGen.cpp"
+# Интерфейс в стиле SAGE (ui.button{}, ui.text{}…) — такой же слой на Lua со
+# своими аннотациями; в нём функции объявлены как U.имя, а скрипт видит ui.имя.
+UIKIT = ROOT / "engine/src/sage/scripting/ScriptApi_UIKit.cpp"
+LAYERS = [(PROCGEN, '', 'Процедурная генерация в стиле SAGE (ScriptApi_ProcGen.cpp)'),
+          (UIKIT, 'ui.', 'Интерфейс в стиле SAGE (ScriptApi_UIKit.cpp)')]
+# Строители ui.* в таблице проверки — с любым числом аргументов: у плагинов
+# редактора свой `ui` (ImGui: ui.slider(подпись, v, min, max)), и проверка
+# по сигнатуре строителя ругалась бы на рабочий код плагина. Неверный ключ
+# строитель ловит сам — ошибкой с именем ключа при запуске.
+VARIADIC = {UIKIT}
+
+
+def layer_lua(path):
+    m = re.search(r'R"LUA\((.*?)\)LUA"', path.read_text(encoding='utf-8'), re.S)
+    return m.group(1) if m else ''
+
+
+def layer_function(line, prefix):
+    """Имя и аргументы функции слоя: `function U.button(o)` -> ui.button."""
+    fn = re.match(r'^function (?:U\.)?(\w+)\(([^)]*)\)', line)
+    if not fn:
+        return None
+    if prefix and not line.startswith('function U.'):
+        return None
+    return prefix + fn.group(1), fn.group(2)
 
 
 def procgen_hints():
-    text = PROCGEN.read_text(encoding='utf-8')
-    m = re.search(r'R"LUA\((.*?)\)LUA"', text, re.S)
-    if not m:
-        return ''
-    out = ['-- --- Процедурная генерация в стиле SAGE (ScriptApi_ProcGen.cpp) ----------\n']
-    for line in m.group(1).split('\n'):
-        if line.startswith('---'):
-            out.append(line + '\n')
-        else:
-            fn = re.match(r'^function (\w+)\(([^)]*)\)', line)
-            if fn:
-                out.append(f'function {fn.group(1)}({fn.group(2)}) end\n\n')
+    out = []
+    for path, prefix, title in LAYERS:
+        out.append(f'-- --- {title} ----------\n')
+        for line in layer_lua(path).split('\n'):
+            if line.startswith('---'):
+                out.append(line + '\n')
+            else:
+                fn = layer_function(line, prefix)
+                if fn:
+                    out.append(f'function {fn[0]}({fn[1]}) end\n\n')
     return ''.join(out)
 
 
@@ -1545,28 +1568,30 @@ LUA_STD = ['assert', 'error', 'ipairs', 'pairs', 'next', 'pcall', 'xpcall', 'pri
 
 
 def procgen_sigs():
-    """[(имя, [(арг, тип, необяз)], возврат)] из аннотаций слоя стиля SAGE."""
-    text = PROCGEN.read_text(encoding='utf-8')
-    m = re.search(r'R"LUA\((.*?)\)LUA"', text, re.S)
-    out, params, ret = [], [], None
-    for line in (m.group(1).split('\n') if m else []):
-        # Тип — до конца строки: fun(x:number, z:number): number — с пробелами.
-        pm = re.match(r'^---@param (\w+)(\??) (.+?)\s*$', line)
-        rm = re.match(r'^---@return (\S+)', line)
-        fm = re.match(r'^function (\w+)\(([^)]*)\)', line)
-        if pm:
-            params.append((pm.group(1), pm.group(3), pm.group(2) == '?'))
-        elif rm and ret is None:
-            ret = rm.group(1)
-        elif fm:
-            names = [a.strip() for a in fm.group(2).split(',') if a.strip()]
-            known = {p[0]: p for p in params}
-            # Аргумент без аннотации — any, но обязателен: так читается код.
-            plist = [known.get(n, (n, 'any', False)) for n in names]
-            out.append((fm.group(1), plist, ret or 'any'))
-            params, ret = [], None
-        elif not line.startswith('---'):
-            params, ret = [], None
+    """[(имя, [(арг, тип, необяз)], возврат)] из аннотаций слоёв стиля SAGE."""
+    out = []
+    for path, prefix, _ in LAYERS:
+        params, ret = [], None
+        for line in layer_lua(path).split('\n'):
+            # Тип — до конца строки: fun(x:number, z:number): number — с пробелами.
+            pm = re.match(r'^---@param (\w+)(\??) (.+?)\s*$', line)
+            rm = re.match(r'^---@return (\S+)', line)
+            fm = layer_function(line, prefix)
+            if pm:
+                params.append((pm.group(1), pm.group(3), pm.group(2) == '?'))
+            elif rm and ret is None:
+                ret = rm.group(1)
+            elif fm:
+                names = [a.strip() for a in fm[1].split(',') if a.strip()]
+                known = {p[0]: p for p in params}
+                # Аргумент без аннотации — any, но обязателен: так читается код.
+                plist = [known.get(n, (n, 'any', False)) for n in names]
+                if path in VARIADIC:
+                    plist = [('...', '...', False)]
+                out.append((fm[0], plist, ret or 'any'))
+                params, ret = [], None
+            elif not line.startswith('---'):
+                params, ret = [], None
     return out
 
 

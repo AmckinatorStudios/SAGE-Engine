@@ -83,7 +83,7 @@ void DrawPicture(UIRenderer& ui, const PictureParams& p, const UIRect& r, float 
 const Texture* LookTexture(const Look& look);
 float LookRounding(const Look& look, const UIRect& r, float scale);
 void DrawLookShadow(const PartDrawContext& c, const Look& look, const UIRect& r, float alpha);
-void DrawLookBody(const PartDrawContext& c, const Look& look, const UIRect& r, glm::vec3 rgb, float alpha);
+void DrawLookBody(const PartDrawContext& c, const Look& look, const UIRect& r, glm::vec3 rgb, float opacity);
 void DrawLookBorder(const PartDrawContext& c, const Look& look, const UIRect& r, float alpha);
 const Look& StateLook(const PartDrawContext& c, const Look& normal, bool& stateTinted);
 void DrawLook(const PartDrawContext& c, const Look& look, const UIRect& r, bool tint = true);

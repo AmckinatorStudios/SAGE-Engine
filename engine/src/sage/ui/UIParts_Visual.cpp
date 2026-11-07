@@ -42,8 +42,8 @@ void DrawFill(const PartDrawContext& c) {
     const glm::vec3 rgb = tinted ? StateTint(c, glm::vec3(look.Color)) : glm::vec3(look.Color);
     // Свой вид недоступного состояния уже нарисован бледным — второй раз его
     // не бледнят.
-    const float alpha = tinted ? AlphaOf(c, look.Color.a) : look.Color.a * c.Alpha;
-    DrawLookBody(c, look, c.Rect, rgb, alpha);
+    const float opacity = tinted ? AlphaOf(c, 1.0f) : c.Alpha;
+    DrawLookBody(c, look, c.Rect, rgb, opacity);
 }
 
 // Тень и рамка — разными слоями: тень под всем, рамка поверх всего. Иначе

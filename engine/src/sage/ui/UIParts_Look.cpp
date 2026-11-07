@@ -1,5 +1,7 @@
 #include "sage/ui/UIPartsDetail.h"
 
+#include "sage/render/RenderTexture.h"
+
 // Оформление частей интерфейса (см. UIPartsDetail.h).
 namespace sage::ui::parts {
 
@@ -126,6 +128,15 @@ const Texture* LookTexture(const Look& look) {
         look.TexPath.clear();
         return nullptr;
     }
+    // "rt:<имя>" — картинка, которую рисует движок (съёмка в текстуру). Её
+    // нет на диске, и раньше вид (подложка, состояние кнопки) рисовал на её
+    // месте плашку «файл не найден» — работала она только у части
+    // «Картинка». Ищется каждый кадр: съёмку пересоздают при смене размера.
+    if (look.Texture.rfind("rt:", 0) == 0) {
+        look.Tex = sage::render::RenderTextureRegistry::Resolve(look.Texture);
+        look.TexPath = look.Texture;
+        return look.Tex.get();
+    }
     if (!look.Tex || look.TexPath != look.Texture || look.TexFiltering != look.Filtering) {
         // Резкая фильтрация — ближайшим соседом и без мипмапов: мипмапы ЛИСТА
         // подмешивают в края куска соседний спрайт.
@@ -149,10 +160,19 @@ void DrawLookShadow(const PartDrawContext& c, const Look& look, const UIRect& r,
 }
 
 // Тело вида: картинка или плашка цветом. rgb — уже подкрашенный под
-// состояние цвет, alpha — итоговая прозрачность.
+// состояние цвет, opacity — прозрачность элемента БЕЗ альфы самого цвета
+// (группа, недоступность): альфа верхнего и нижнего цвета градиента у
+// каждого своя.
+//
+// Раньше сюда приходила уже умноженная на альфу ВЕРХНЕГО цвета прозрачность
+// и при нуле функция выходила сразу — градиент «из прозрачного в чёрный»
+// (тень под шапкой экрана, затемнение к низу) не рисовался вовсе.
 void DrawLookBody(const PartDrawContext& c, const Look& look, const UIRect& r, glm::vec3 rgb,
-                  float alpha) {
-    if (alpha <= 0.0f || r.w <= 0.0f || r.h <= 0.0f) return;
+                  float opacity) {
+    const float alpha = opacity * look.Color.a;
+    const float bottomAlpha = opacity * look.Gradient.a;
+    const bool gradient = !look.HasTexture() && look.Gradient.a > 0.0f;
+    if ((alpha <= 0.0f && !(gradient && bottomAlpha > 0.0f)) || r.w <= 0.0f || r.h <= 0.0f) return;
     UIRenderer& ui = *c.Ui;
     if (look.HasTexture()) {
         const Texture* tex = LookTexture(look);
@@ -174,9 +194,8 @@ void DrawLookBody(const PartDrawContext& c, const Look& look, const UIRect& r, g
         return;
     }
     const float rounding = LookRounding(look, r, c.Scale);
-    if (look.Gradient.a > 0.0f) {
-        ui.GradientRect(r.x, r.y, r.w, r.h, rgb, glm::vec3(look.Gradient), alpha,
-                        look.Gradient.a * (alpha / std::max(look.Color.a, 1e-4f)), rounding);
+    if (gradient) {
+        ui.GradientRect(r.x, r.y, r.w, r.h, rgb, glm::vec3(look.Gradient), alpha, bottomAlpha, rounding);
     } else {
         ui.RoundedRect(r.x, r.y, r.w, r.h, rgb, alpha, rounding);
     }
@@ -217,7 +236,7 @@ void DrawLook(const PartDrawContext& c, const Look& look, const UIRect& r, bool 
     const glm::vec3 rgb = tint ? StateTint(c, glm::vec3(look.Color)) : glm::vec3(look.Color);
     const float alpha = AlphaOf(c, 1.0f);
     DrawLookShadow(c, look, r, alpha);
-    DrawLookBody(c, look, r, rgb, alpha * look.Color.a);
+    DrawLookBody(c, look, r, rgb, alpha);
     DrawLookBorder(c, look, r, alpha);
 }
 

@@ -432,6 +432,7 @@ private:
     void RegisterMathTypes();     // Vec2/Vec3/Vec4/Transform + арифметика
     void RegisterComponentTypes();// enum'ы и usertype'ы компонентов ECS
     void RegisterUIApi();         // элемент интерфейса + sage.ui.*
+    void RegisterUIKitApi();      // интерфейс в стиле SAGE: ui.button{}, ui.text{}, …
     // Аксессоры интерфейса на GameObject (HasUI/GetUI/AddUI/RemoveUI).
     //
     // Отдельным вызовом, а не строкой в RegisterGameObject, потому что элемент
