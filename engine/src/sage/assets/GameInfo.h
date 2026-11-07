@@ -22,6 +22,22 @@
 // ---------------------------------------------------------------------------
 namespace sage::assets {
 
+// ПОЛЬЗОВАТЕЛЬСКАЯ ПАПКА — открытая папка, куда игрок кладёт свои файлы
+// (скины, музыку, карты, моды): игра их находит и читает, хотя всё остальное
+// спрятано в пакете. Описание — в разделе "game" файла проекта:
+//   "userFolders": [{"name": "skins", "title": "Skins", "description": "...",
+//                    "extensions": [".png"], "location": "game"}]
+// location: "game" — рядом с собранной игрой (её видно сразу, переносится с
+// игрой), "data" — в папке данных игры этого пользователя (рядом с saves).
+// Код — sage/assets/UserContent.h.
+struct UserFolderSpec {
+    std::string Name;                     // имя папки и ключ для скриптов: латиница, цифры, - _
+    std::string Title;                    // как её назвать игроку (README, интерфейс)
+    std::string Description;              // что сюда класть — пишется в README папки
+    std::vector<std::string> Extensions;  // какие файлы видны скриптам (".png"); пусто — любые
+    bool NextToGame = true;               // location: "game" (true) или "data" (false)
+};
+
 struct GameInfo {
     std::string Name;
     std::string Description;
@@ -30,6 +46,7 @@ struct GameInfo {
     std::string Version = "1.0.0";
     std::string Copyright;
     std::string Icon;            // путь картинки в проекте (PNG, лучше 256×256 и больше)
+    std::vector<UserFolderSpec> UserFolders;
 
     // Из всего project.sageproj (раздел "game"; без него — имя проекта).
     static GameInfo FromProject(const nlohmann::json& project);

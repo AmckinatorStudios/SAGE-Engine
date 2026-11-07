@@ -44,6 +44,23 @@ GameInfo GameInfo::FromProject(const nlohmann::json& project) {
     str("version", g.Version);
     str("copyright", g.Copyright);
     str("icon", g.Icon);
+    auto uf = j.find("userFolders");
+    if (uf != j.end() && uf->is_array()) {
+        for (const nlohmann::json& f : *uf) {
+            if (!f.is_object()) continue;
+            UserFolderSpec spec;
+            spec.Name = f.value("name", std::string());
+            if (spec.Name.empty()) continue;
+            spec.Title = f.value("title", std::string());
+            spec.Description = f.value("description", std::string());
+            auto ex = f.find("extensions");
+            if (ex != f.end() && ex->is_array())
+                for (const nlohmann::json& e : *ex)
+                    if (e.is_string()) spec.Extensions.push_back(e.get<std::string>());
+            spec.NextToGame = f.value("location", std::string("game")) != "data";
+            g.UserFolders.push_back(spec);
+        }
+    }
     if (g.Version.empty()) g.Version = "1.0.0";
     return g;
 }
@@ -57,6 +74,13 @@ void GameInfo::WriteTo(nlohmann::json& project) const {
     j["version"] = Version.empty() ? std::string("1.0.0") : Version;
     j["copyright"] = Copyright;
     j["icon"] = Icon;
+    nlohmann::json folders = nlohmann::json::array();
+    for (const UserFolderSpec& f : UserFolders) {
+        folders.push_back({{"name", f.Name}, {"title", f.Title}, {"description", f.Description},
+                           {"extensions", f.Extensions}, {"location", f.NextToGame ? "game" : "data"}});
+    }
+    if (UserFolders.empty()) j.erase("userFolders");
+    else j["userFolders"] = folders;
 }
 
 std::string GameInfo::FileName() const {

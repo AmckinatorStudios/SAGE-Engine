@@ -7,6 +7,8 @@
 #include "Localization.h"
 #include "Project.h"
 
+#include "sage/assets/UserContent.h"
+
 void GameSettingsPanel::Load(const std::filesystem::path& dir) {
     m_dir = dir;
     m_info = sage::assets::GameInfo{};
@@ -80,6 +82,8 @@ void GameSettingsPanel::Draw(EditorHost& host, bool* open) {
         changed = true;
     }
 
+    changed |= DrawUserFolders();
+
     if (changed) Save();
     if (!m_status.empty()) {
         ImGui::Spacing();
@@ -87,4 +91,82 @@ void GameSettingsPanel::Draw(EditorHost& host, bool* open) {
         else ImGui::TextDisabled("%s", m_status.c_str());
     }
     ImGui::End();
+}
+
+// Пользовательские папки: открытые папки для файлов игрока (скины, музыка,
+// моды) — рядом с собранной игрой или в папке её данных. Возвращает «правили».
+bool GameSettingsPanel::DrawUserFolders() {
+    namespace uc = sage::assets::usercontent;
+    bool changed = false;
+    ImGui::Spacing();
+    ImGui::SeparatorText(T("User folders"));
+    ImGui::TextWrapped("%s", T("Open folders where players put their own files (skins, music, mods). "
+                                "Scripts read them with user_folder.list(name). Example files: "
+                                "userfolders/<name>/ in the project."));
+    int removeAt = -1;
+    for (size_t i = 0; i < m_info.UserFolders.size(); ++i) {
+        sage::assets::UserFolderSpec& f = m_info.UserFolders[i];
+        ImGui::PushID((int)i);
+        const std::string header = (f.Name.empty() ? std::string(T("(no name)")) : f.Name) + "###uf";
+        if (ImGui::TreeNodeEx(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::TextUnformatted(T("Folder name"));
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputTextWithHint("##uf_name", T("skins"), &f.Name);
+            if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+            if (!f.Name.empty() && !uc::ValidName(f.Name))
+                ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", T("Latin letters, digits, - and _ only"));
+            ImGui::TextUnformatted(T("Title"));
+            ImGui::SetNextItemWidth(-1);
+            ImGui::InputTextWithHint("##uf_title", T("Shown to the player"), &f.Title);
+            if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+            ImGui::TextUnformatted(T("What to put here"));
+            ImGui::InputTextMultiline("##uf_desc", &f.Description, ImVec2(-1, ImGui::GetTextLineHeight() * 3));
+            if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+            // Расширения — одной строкой через запятую: «.png, .jpg».
+            std::string ext;
+            for (size_t k = 0; k < f.Extensions.size(); ++k) ext += (k ? ", " : "") + f.Extensions[k];
+            ImGui::TextUnformatted(T("File types"));
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::InputTextWithHint("##uf_ext", T(".png, .ogg — empty: any"), &ext)) {
+                f.Extensions.clear();
+                std::string cur;
+                for (char c : ext + ",") {
+                    if (c == ',' || c == ' ') {
+                        if (!cur.empty()) f.Extensions.push_back(cur[0] == '.' ? cur : "." + cur);
+                        cur.clear();
+                    } else {
+                        cur += c;
+                    }
+                }
+            }
+            if (ImGui::IsItemDeactivatedAfterEdit()) changed = true;
+            ImGui::TextUnformatted(T("Where it lives"));
+            int loc = f.NextToGame ? 0 : 1;
+            const char* locs[] = {T("Next to the game"), T("Player's game data folder")};
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::Combo("##uf_loc", &loc, locs, 2)) { f.NextToGame = loc == 0; changed = true; }
+            if (ImGui::Button(T("Open folder"))) {
+                // Папка Play-режима (данные игры этого пользователя).
+                uc::Configure(m_info.UserFolders, {}, m_dir);
+                uc::OpenInSystem(f.Name);
+            }
+            ImGui::SameLine();
+            if (ImGui::Button(T("Remove folder"))) removeAt = (int)i;
+            ImGui::TreePop();
+        }
+        ImGui::PopID();
+    }
+    if (removeAt >= 0) {
+        m_info.UserFolders.erase(m_info.UserFolders.begin() + removeAt);
+        changed = true;
+    }
+    if (ImGui::Button(T("Add folder"))) {
+        sage::assets::UserFolderSpec f;
+        f.Name = "folder" + std::to_string(m_info.UserFolders.size() + 1);
+        m_info.UserFolders.push_back(f);
+        changed = true;
+    }
+    // Play-режим видит правку сразу, без переоткрытия проекта.
+    if (changed) uc::Configure(m_info.UserFolders, {}, m_dir);
+    return changed;
 }

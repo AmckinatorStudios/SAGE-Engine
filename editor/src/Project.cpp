@@ -1,4 +1,7 @@
 #include "Project.h"
+
+#include "sage/assets/GameInfo.h"
+#include "sage/assets/UserContent.h"
 #include "sage/core/FormatVersion.h"
 
 #include <fstream>
@@ -105,6 +108,13 @@ void Project::Adopt() {
     // проверить работу сохранений в редакторе было бы нечем — она писала бы в
     // одно место, а игра читала из другого.
     sage::save::SetGameName(m_name);
+    // Пользовательские папки проекта — для Play-режима: в папке данных игры,
+    // примеры — из <проект>/userfolders/<имя>.
+    {
+        sage::assets::GameInfo info;
+        sage::assets::LoadGameInfo(m_dir, info);
+        sage::assets::usercontent::Configure(info.UserFolders, {}, m_dir);
+    }
     sage::scene::ClearPrefabCache();   // префабы прошлого проекта тут ни при чём
 
     // Языки проекта (scripting/languages.json) — сразу при открытии: инспектор

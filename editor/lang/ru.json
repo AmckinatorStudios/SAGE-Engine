@@ -3637,6 +3637,22 @@
     "Pass far": "Дальняя плоскость прохода",
     "0 — as the camera": "0 — как у камеры",
     "Remove pass": "Убрать проход",
-    "Add pass": "Добавить проход"
+    "Add pass": "Добавить проход",
+    "User folders": "Пользовательские папки",
+    "Open folders where players put their own files (skins, music, mods). Scripts read them with user_folder.list(name). Example files: userfolders/<name>/ in the project.": "Открытые папки, куда игроки кладут свои файлы (скины, музыку, моды). Скрипт читает их через user_folder.list(имя). Файлы-примеры — папка проекта userfolders/<имя>/.",
+    "(no name)": "(без имени)",
+    "Folder name": "Имя папки",
+    "Latin letters, digits, - and _ only": "Только латиница, цифры, - и _",
+    "Title": "Название",
+    "Shown to the player": "Его видит игрок",
+    "What to put here": "Что сюда класть",
+    "File types": "Типы файлов",
+    ".png, .ogg — empty: any": ".png, .ogg — пусто: любые",
+    "Next to the game": "Рядом с игрой",
+    "Player's game data folder": "В папке данных игры у игрока",
+    "Remove folder": "Убрать папку",
+    "Add folder": "Добавить папку",
+    "Where it lives": "Где лежит",
+    "skins": "skins"
   }
 }

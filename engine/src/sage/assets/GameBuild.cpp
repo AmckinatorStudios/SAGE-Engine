@@ -5,6 +5,7 @@
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/GameInfo.h"
 #include "sage/assets/Pack.h"
+#include "sage/assets/UserContent.h"
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
 
@@ -91,7 +92,9 @@ GameBuildResult BuildGame(const GameBuildRequest& req, const GameBuildHooks& hoo
     // Папка сборок ВНУТРИ проекта (по умолчанию <проект>/Builds) в пакет не
     // идёт: иначе каждая следующая сборка везла бы в себе предыдущую игру.
     const size_t projectFiles =
-        pack.AddDirectory(req.ProjectDir, {".meta"}, "", {req.OutputDir, req.ProjectDir / "Builds"});
+        pack.AddDirectory(req.ProjectDir, {".meta"}, "", {req.OutputDir, req.ProjectDir / "Builds",
+                                                         // примеры пользовательских папок — рядом с игрой, не в пакете
+                                                         req.ProjectDir / "userfolders"});
     if (!req.AssetIndex.empty())
         pack.Add("assetdb.json", std::vector<uint8_t>(req.AssetIndex.begin(), req.AssetIndex.end()));
     LOG_INFO("Build") << "Сборка игры: в пакет идут " << pack.Count() << " файлов (проекта — " << projectFiles
@@ -124,6 +127,10 @@ GameBuildResult BuildGame(const GameBuildRequest& req, const GameBuildHooks& hoo
                       fs::copy_options::overwrite_existing, ec);
         if (ec) return Fail(res, "Could not copy the project file: ", ec.message());
     }
+    // 5. Пользовательские папки (скины, музыка, моды): открытые папки рядом с
+    // игрой с README и примерами из <проект>/userfolders/<имя>.
+    const size_t folders = usercontent::PrepareForBuild(gameDir, req.ProjectDir, info.UserFolders);
+    if (folders > 0) LOG_INFO("Build") << "Пользовательских папок рядом с игрой: " << folders;
     progress(1.0f);
     stage("Done");
     LOG_INFO("Build") << "Игра собрана: " << sage::PathToUtf8(gameDir);

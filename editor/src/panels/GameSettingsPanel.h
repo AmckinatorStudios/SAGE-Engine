@@ -23,6 +23,7 @@ public:
 private:
     void Load(const std::filesystem::path& dir);
     void Save();
+    bool DrawUserFolders();
 
     std::filesystem::path m_dir;          // проект, чьи настройки открыты
     sage::assets::GameInfo m_info;

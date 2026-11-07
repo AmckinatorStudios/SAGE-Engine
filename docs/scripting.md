@@ -1389,6 +1389,10 @@ API не ограничен `Transform`/`Color` — скрипт общаетс�
   не только прицел из центра экрана); `camera.WorldToScreen(pos)` — точка
   экрана или `nil`, если она за спиной камеры (полоска здоровья над головой,
   маркер цели). Координаты — те же, что у `ui.Cursor()`/`ui.ScreenSize()`.
+- **Пользовательские папки** (скины, музыка, моды игрока — открытые папки
+  рядом с собранной игрой): `user_folder.list(name)`, `user_folder.changed(name)`,
+  `user_folder.open(name)`, `user_folder.path(name)`, `user_folder.folders()`.
+  Объявляются в проекте — docs/build.md, «Пользовательские папки».
 - **Слои и проходы камеры**: `obj:GetRenderer().Layer = "viewmodel"` — слой
   объекта (пусто — основной); `camera.set_passes(cam, {{layers = {"sky"}, far = 4000},
   {layers = {"default"}}, {layers = {"viewmodel"}, clear_depth = true, fov = 70,
