@@ -29,6 +29,8 @@ const char* const kTilingKeys[] = {"uniform", "separate", "worldSize"};
 const char* const kTilingLabels[] = {"Общий", "По осям", "По размеру объекта"};
 const char* const kFilterKeys[] = {"smooth", "nearest"};
 const char* const kFilterLabels[] = {"Сглаживание", "Ближайший пиксель"};
+const char* const kBlendKeys[] = {"alpha", "additive"};
+const char* const kBlendLabels[] = {"Обычное", "Сложение"};
 const char* const kCullKeys[] = {"back", "front", "none"};
 const char* const kCullLabels[] = {"Задние", "Передние", "Не отсекать"};
 } // namespace
@@ -46,6 +48,15 @@ const std::vector<MaterialRenderField>& MaterialRenderFields() {
          [](const MaterialRender& r) { return (int)r.Cull; },
          [](MaterialRender& r, int v) { r.Cull = (CullFaces)v; },
          kCullKeys, kCullLabels, 3},
+        {"blend", "Смешение", MaterialRenderField::Kind::Enum,
+         MaterialRenderField::Group::Render, nullptr, nullptr, 0.0f, 0.0f,
+         "Как полупрозрачная поверхность ложится на то, что за ней.\n"
+         "«Обычное» — цвет поверх с прозрачностью.\n"
+         "«Сложение» — цвет прибавляется к фону: свет, огонь, искры, светила.\n"
+         "Чёрное при сложении исчезает, яркое на ярком становится белым.",
+         [](const MaterialRender& r) { return (int)r.Blend; },
+         [](MaterialRender& r, int v) { r.Blend = (MaterialRender::Blending)v; },
+         kBlendKeys, kBlendLabels, 2},
         {"planarReflectivity", "Плоское отражение", MaterialRenderField::Kind::Float,
          MaterialRenderField::Group::Render, nullptr, &MaterialRender::PlanarReflectivity,
          0.0f, 1.0f,

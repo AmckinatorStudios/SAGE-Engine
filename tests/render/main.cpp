@@ -86,6 +86,7 @@ int main(int argc, char** argv) {
         RunImageEffectChecks();
         RunScreenshotChecks();
         RunCameraPassChecks();
+        RunMaterialBlendChecks();
         RunStabilityChecks(renderer, *scene);
         RunDisplayChecks(window);
     }
