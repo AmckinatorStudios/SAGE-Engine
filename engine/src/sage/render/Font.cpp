@@ -2,6 +2,7 @@
 #include "Font.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cstring>
 #include <fstream>
 #include <iterator>
@@ -66,6 +67,13 @@ constexpr int kGlyphPadding = 8;
 } // namespace
 
 std::unique_ptr<Font> Font::Load(const std::string& path, float pixelHeight, bool nearest) {
+    // Картинка — не TrueType: свой разбор (FontImage.cpp), размер запекания
+    // у неё — сама сетка.
+    {
+        std::string ext = path.size() > 4 ? path.substr(path.size() - 4) : std::string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c) { return (char)std::tolower(c); });
+        if (ext == ".png") return LoadImageSheet(path);
+    }
     // Через vfs: в собранной игре шрифт лежит в пакете, а не на диске.
     std::vector<unsigned char> ttf;
     if (!sage::assets::vfs::ReadFile(path, ttf)) {

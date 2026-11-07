@@ -146,6 +146,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/ModelLoader.cpp
     src/sage/render/ModelMaterial.cpp
     src/sage/render/Font.cpp
+    src/sage/render/FontImage.cpp
     src/sage/render/GridRenderer.cpp
     src/sage/render/ParticleECS.cpp
     src/sage/render/ParticleSystem.cpp
