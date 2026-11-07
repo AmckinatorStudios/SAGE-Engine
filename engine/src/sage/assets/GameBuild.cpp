@@ -3,6 +3,7 @@
 #include <cctype>
 
 #include "sage/assets/AssetDatabase.h"
+#include "sage/assets/GameInfo.h"
 #include "sage/assets/Pack.h"
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
@@ -33,10 +34,17 @@ GameBuildResult BuildGame(const GameBuildRequest& req, const GameBuildHooks& hoo
     std::error_code ec;
     const std::string exeSuffix = req.Player.extension().string();
 
+    // Сведения об игре (раздел "game" файла проекта): имя папки и exe —
+    // название игры, а не папки проекта; иконка и сведения о файле — в exe.
+    GameInfo info;
+    const bool hasInfo = LoadGameInfo(req.ProjectDir, info);
+    if (!hasInfo || info.Name.empty()) info.Name = req.ProjectName;
+    const std::string fileName = req.ProjectName.empty() || hasInfo ? info.FileName() : req.ProjectName;
+
     // 1. Папка игры. Пересборка затирает прошлую: это артефакт, не данные.
     stage("Preparing the game folder");
     progress(0.02f);
-    const fs::path gameDir = req.OutputDir / sage::PathFromUtf8(req.ProjectName);
+    const fs::path gameDir = req.OutputDir / sage::PathFromUtf8(fileName);
     res.GameDir = gameDir;
     fs::remove_all(gameDir, ec);
     ec.clear();
@@ -48,9 +56,25 @@ GameBuildResult BuildGame(const GameBuildRequest& req, const GameBuildHooks& hoo
     // MinGW, тянет рядом с собой .dll (libstdc++ и прочие): без них игра у
     // игрока не запускалась бы вовсе — с сообщением системы, а не движка.
     stage("Copying the player");
-    fs::copy_file(req.Player, gameDir / sage::PathFromUtf8(req.ProjectName + exeSuffix),
-                  fs::copy_options::overwrite_existing, ec);
+    const fs::path exe = gameDir / sage::PathFromUtf8(fileName + exeSuffix);
+    fs::copy_file(req.Player, exe, fs::copy_options::overwrite_existing, ec);
     if (ec) return Fail(res, "Player copy failed: ", ec.message());
+    res.Exe = exe;
+    // Иконка и «Свойства» файла (версия, автор, описание) — в сам exe. Это
+    // украшение, а не условие запуска: не вышло — предупреждение, игра
+    // собирается дальше.
+    if (exeSuffix == ".exe" || exeSuffix == ".EXE") {
+        IconImage icon;
+        const bool haveIcon = !info.Icon.empty() &&
+                              LoadIconImage(sage::PathToUtf8(req.ProjectDir / sage::PathFromUtf8(info.Icon)), icon);
+        if (!info.Icon.empty() && !haveIcon)
+            LOG_WARN("Build") << "Иконка игры не прочиталась: " << info.Icon;
+        std::string why;
+        if (EmbedWindowsResources(exe, info, haveIcon ? &icon : nullptr, why))
+            LOG_INFO("Build") << "В exe вшиты " << (haveIcon ? "иконка и " : "") << "сведения о файле";
+        else
+            LOG_WARN("Build") << "Сведения о файле не вшиты: " << why;
+    }
     for (const fs::directory_entry& e : fs::directory_iterator(req.Player.parent_path(), ec)) {
         std::string ext = e.path().extension().string();
         for (char& c : ext) c = (char)std::tolower((unsigned char)c);

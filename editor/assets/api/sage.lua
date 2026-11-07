@@ -1514,6 +1514,10 @@ sage.audio = {}
 ---@type sage.audio
 audio = nil
 
+---@param seconds number
+function sage.audio.FadeOutMusic(seconds) end
+---@return boolean
+function sage.audio.IsMusicPlaying() end
 ---@param entity Entity
 ---@return boolean
 function sage.audio.IsPlaying(entity) end
@@ -1521,7 +1525,9 @@ function sage.audio.IsPlaying(entity) end
 function sage.audio.Play(entity) end
 ---@param path string
 ---@param volume? number
-function sage.audio.PlayMusic(path, volume) end
+---@param loop? boolean
+---@param fade? number
+function sage.audio.PlayMusic(path, volume, loop, fade) end
 ---@param path string
 ---@param volume? number
 function sage.audio.PlaySound(path, volume) end
@@ -1534,6 +1540,8 @@ function sage.audio.PlaySound3D(path, pos, volume) end
 function sage.audio.SetClip(entity, clip) end
 ---@param volume number
 function sage.audio.SetMasterVolume(volume) end
+---@param volume number
+function sage.audio.SetMusicVolume(volume) end
 ---@param entity Entity
 ---@param pitch number
 function sage.audio.SetPitch(entity, pitch) end
@@ -2688,6 +2696,7 @@ EmitEvent = sage.events.Emit
 EmitFromObject = sage.fx.EmitFrom
 EmitParticles = sage.fx.Emit
 EventCount = sage.events.Count
+FadeOutMusic = sage.audio.FadeOutMusic
 FindObject = sage.scene.Find
 FindObjectById = sage.scene.FindById
 GenerateTexture = sage.texture.Generate
@@ -2720,6 +2729,7 @@ IsGrounded = sage.physics.IsGrounded
 IsInTrigger = sage.physics.IsInTrigger
 IsInputContextEnabled = sage.input.IsContextEnabled
 IsMouseCaptured = sage.input.IsMouseCaptured
+IsMusicPlaying = sage.audio.IsMusicPlaying
 IsPlaying = sage.audio.IsPlaying
 IsSleeping = sage.physics.IsSleeping
 JointIndex = sage.anim.JointIndex
@@ -2810,6 +2820,7 @@ SetMeshNone = sage.render.SetMeshNone
 SetMeshPlane = sage.render.SetMeshPlane
 SetMeshSphere = sage.render.SetMeshSphere
 SetMouseCaptured = sage.input.SetMouseCaptured
+SetMusicVolume = sage.audio.SetMusicVolume
 SetParticleStreamActive = sage.fx.SetStreamActive
 SetParticleStreamPosition = sage.fx.SetStreamPosition
 SetPauseMenu = sage.game.SetPauseMenu

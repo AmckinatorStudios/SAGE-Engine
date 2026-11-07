@@ -5,6 +5,7 @@
 #include "sage/render/SkyDraw.h"
 #include "sage/render/DebugView.h"
 #include "sage/assets/Pack.h"
+#include "sage/assets/GameInfo.h"
 #include "sage/core/Paths.h"
 
 #include <algorithm>
@@ -217,7 +218,24 @@ void PlayerLayer::OnAttach() {
         sage::AssetDatabase::Instance().ScanProject(".");
     }
 
-    glfwSetWindowTitle(app.GetWindow().Handle(), m_projectName.c_str());
+    // Заголовок и иконка окна — из сведений об игре (раздел "game" файла
+    // проекта): название игры, а не папки проекта, и её иконка вместо
+    // безликой иконки окна по умолчанию.
+    {
+        sage::assets::GameInfo info;
+        if (!sage::assets::LoadGameInfo(m_projectDir, info) || info.Name.empty()) info.Name = m_projectName;
+        app.GetWindow().SetTitle(info.Name);
+        sage::assets::IconImage icon;
+        if (!info.Icon.empty() && sage::assets::LoadIconImage(info.Icon, icon)) {
+            m_windowIcons.clear();
+            for (int size : {16, 32, 48, 64, 128}) m_windowIcons.push_back(sage::assets::ResizeIcon(icon, size));
+            std::vector<Window::IconPixels> pixels;
+            for (const auto& i : m_windowIcons) pixels.push_back({i.Width, i.Height, i.Rgba.data()});
+            app.GetWindow().SetIcon(pixels);
+        } else if (!info.Icon.empty()) {
+            LOG_WARN("Player") << "Иконка игры не прочиталась: " << info.Icon;
+        }
+    }
 
     // Имя игры определяет папку сохранений. Ставится ДО загрузки сцены: скрипт
     // с OnStart вправе сразу прочитать прогресс, и к этому моменту он обязан

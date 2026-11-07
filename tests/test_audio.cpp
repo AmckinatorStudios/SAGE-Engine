@@ -350,3 +350,38 @@ TEST(Audio_scrub_pauses_while_dragging_and_seeks_once) {
     CHECK_EQ(seeks, 1);
     CHECK_EQ(resumes, 0);
 }
+
+// OGG Vorbis открывается и декодируется: miniaudio сам Vorbis не умеет, ему
+// нужен подключённый stb_vorbis — без него .ogg молча не звучал. Тестовый файл
+// — тон 440 Гц на 0.25 с, моно, 22050 Гц (сгенерирован ffmpeg + libvorbis).
+TEST(Audio_ogg_vorbis_is_decoded) {
+    AudioFileInfo info;
+    const std::string path = (std::filesystem::path(SAGE_TEST_DATA_DIR) / "tone.ogg").string();
+    CHECK_TRUE(ReadAudioInfo(path, info));
+    CHECK_EQ(info.Channels, 1u);
+    CHECK_EQ(info.SampleRate, 22050u);
+    CHECK_NEAR(info.Seconds(), 0.25, 0.02);
+
+    // Не звук (текст с расширением .ogg) — честный отказ, а не мусорная длина.
+    const std::filesystem::path fake = std::filesystem::temp_directory_path() / "sage_not_audio.ogg";
+    { std::ofstream(fake) << "not an ogg file"; }
+    AudioFileInfo bad;
+    CHECK_FALSE(ReadAudioInfo(fake.string(), bad));
+    std::error_code ec;
+    std::filesystem::remove(fake, ec);
+}
+
+// Музыка плейлистом: трек без повтора играет, IsMusicPlaying это видит,
+// FadeOutMusic(0) гасит сразу. Без звукового устройства (CI) — все вызовы
+// безопасны и музыка честно «не играет».
+TEST(Audio_music_state_and_fade) {
+    AudioEngine engine;
+    const std::string path = (std::filesystem::path(SAGE_TEST_DATA_DIR) / "tone.ogg").string();
+    engine.PlayMusic(path, 0.5f, /*loop=*/false, /*fadeSeconds=*/0.1f);
+    if (engine.IsAvailable()) CHECK_TRUE(engine.IsMusicPlaying());
+    else CHECK_FALSE(engine.IsMusicPlaying());
+    engine.SetMusicVolume(0.2f);
+    engine.FadeOutMusic(0.0f);
+    CHECK_FALSE(engine.IsMusicPlaying());
+    engine.FadeOutMusic(1.0f);   // нечего уводить — не падает
+}

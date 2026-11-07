@@ -195,6 +195,17 @@ void EditorLayer::RegisterPanels() {
         m_panelRegistry.Register(std::move(s));
     }
     {
+        // Настройки игры: название, автор, версия, иконка собранной игры.
+        PanelSpec s;
+        s.Id = "GameSettings";
+        s.Title = "Game Settings";
+        s.Icon = "gear";
+        s.Section = PanelSection::Tools;
+        s.WrapWindow = false;
+        s.Draw = [this](EditorHost& host, bool* open, const std::string&) { m_gameSettings.Draw(host, open); };
+        m_panelRegistry.Register(std::move(s));
+    }
+    {
         PanelSpec s;
         s.Id = "AiDebugger";
         s.Title = "AI Debugger";

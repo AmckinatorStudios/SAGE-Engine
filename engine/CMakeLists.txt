@@ -84,6 +84,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/assets/ModelData.cpp
     src/sage/assets/Pack.cpp
     src/sage/assets/GameBuild.cpp
+    src/sage/assets/GameInfo.cpp
     src/sage/assets/VfsImage.cpp
     src/sage/assets/Zip.cpp
     src/sage/render/DebugDraw.cpp

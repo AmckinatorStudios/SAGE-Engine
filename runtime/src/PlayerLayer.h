@@ -10,6 +10,7 @@
 #include "sage/input/GlfwBridge.h"
 #include "sage/input/InputSystem.h"
 #include "sage/audio/AudioEngine.h"
+#include "sage/assets/GameInfo.h"
 #include "sage/render/Shader.h"
 #include "sage/render/Camera.h"
 #include "sage/render/ShadowMap.h"
@@ -74,6 +75,9 @@ private:
 
     std::filesystem::path m_projectDir;
     std::string m_projectName = "SAGE Game";
+    // Пиксели иконки окна: GLFW копирует их при установке, но держим до
+    // конца — дешевле, чем выяснять, где он копирует, а где нет.
+    std::vector<sage::assets::IconImage> m_windowIcons;
     std::string m_launchArgs; // "autopilot=1 seed=42" -> LaunchArg в Lua
 
     std::unique_ptr<Scene> m_scene;

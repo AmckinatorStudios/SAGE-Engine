@@ -36,6 +36,17 @@
 //   ...
 //   audio.Update(); // раз в кадр — освобождает доигравшие one-shot'ы
 // ---------------------------------------------------------------------
+// Сведения о звуковом файле (WAV, MP3, FLAC, OGG Vorbis) без проигрывания:
+// длительность для инспектора и проверка «этот файл движок вообще откроет».
+// Путь — как у клипа (относительно проекта, из пакета игры тоже).
+struct AudioFileInfo {
+    unsigned Channels = 0;
+    unsigned SampleRate = 0;
+    unsigned long long Frames = 0;
+    double Seconds() const { return SampleRate ? (double)Frames / SampleRate : 0.0; }
+};
+bool ReadAudioInfo(const std::string& path, AudioFileInfo& out);
+
 class AudioEngine {
 public:
     // Категории для раздельной регулировки громкости (микс-группы). Мастер-
@@ -133,8 +144,15 @@ public:
     static bool DecodeToMono(const void* data, size_t bytes, std::vector<float>& outSamples,
                              int& outSampleRate);
 
-    void PlayMusic(const std::string& path, float volume = 1.0f, bool loop = true);
+    // Музыка — один поток за раз. fadeSeconds > 0 — нарастает из тишины.
+    // loop = false — трек играет один раз: так устроены плейлисты с паузами
+    // между треками (IsMusicPlaying скажет, когда пора следующий).
+    void PlayMusic(const std::string& path, float volume = 1.0f, bool loop = true, float fadeSeconds = 0.0f);
     void StopMusic();
+    bool IsMusicPlaying() const;
+    void SetMusicVolume(float volume);
+    // Плавно увести и остановить (переход из меню в игру, смена сцены).
+    void FadeOutMusic(float seconds);
 
     // --- Управление по дескриптору (безопасно для InvalidHandle/чужих id) ---
     void StopSound(SoundHandle handle);
