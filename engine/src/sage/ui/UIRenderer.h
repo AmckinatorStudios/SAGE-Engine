@@ -1,4 +1,5 @@
 #pragma once
+#include "sage/ui/UIBlend.h"
 #include "sage/render/Shader.h"
 #include "sage/render/Font.h"
 #include "sage/render/Texture.h"
@@ -156,6 +157,10 @@ public:
     // делать вид, что оно есть.
     // Поворот и масштаб вокруг центра — на всё, что нарисуют до PopRotation.
     void PushRotation(glm::vec2 center, float degrees, float scale = 1.0f);
+    // Режим смешивания для всего, что рисуется дальше (до следующего вызова).
+    // Смена режима — граница пачки, как смена текстуры.
+    void SetBlend(UIBlend blend) { m_blend = blend; }
+    UIBlend Blend() const { return m_blend; }
     void PopRotation();
 
     // Девятина («9-slice»): рамка растягивается, углы — нет.
@@ -286,6 +291,7 @@ private:
     // (текстура картинки или атлас шрифта; текущая clip-маска).
     struct Segment {
         size_t FirstQuad = 0, QuadCount = 0;
+        UIBlend Blend = UIBlend::Normal;
         const Texture* Image = nullptr; // nullptr — шрифт/сплошные квады
         // Чей атлас привязывать глифам этого куска. nullptr — шрифт интерфейса.
         // Без этого поля вся надпись рисовалась ОДНИМ атласом: у второго шрифта
@@ -309,6 +315,7 @@ private:
     glm::vec2 m_rotCenter{0.0f, 0.0f};
     float m_rotCos = 1.0f, m_rotSin = 0.0f;   // уже умножены на масштаб
     bool m_rotActive = false;
+    UIBlend m_blend = UIBlend::Normal;
 
     void PushImageQuad(float x, float y, float w, float h, glm::vec2 uv0, glm::vec2 uv1,
                        glm::vec3 tint, float alpha);

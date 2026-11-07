@@ -385,3 +385,20 @@ TEST(Audio_music_state_and_fade) {
     CHECK_FALSE(engine.IsMusicPlaying());
     engine.FadeOutMusic(1.0f);   // нечего уводить — не падает
 }
+
+// Высота разового звука: шаги и удары звучат по-разному (pitch), а не одной
+// записью. Без звуковой карты (CI) звук не стартует — проверять нечего.
+TEST(Audio_one_shot_pitch_is_applied) {
+    AudioEngine engine;
+    const std::string path = (std::filesystem::path(SAGE_TEST_DATA_DIR) / "tone.ogg").string();
+    engine.PlaySound2D(path, 0.0f, AudioEngine::Category::Sfx, 1.5f);
+    engine.PlaySound3D(path, glm::vec3(0.0f), 0.0f, AudioEngine::Category::Sfx, 0.5f);
+    const std::vector<float> pitches = engine.OneShotPitches();
+    if (!engine.IsAvailable()) {
+        CHECK_TRUE(pitches.empty());
+        return;
+    }
+    CHECK_EQ((int)pitches.size(), 2);
+    CHECK_NEAR(pitches[0], 1.5f, 1e-4f);
+    CHECK_NEAR(pitches[1], 0.5f, 1e-4f);
+}

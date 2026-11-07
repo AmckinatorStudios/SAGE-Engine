@@ -36,6 +36,7 @@
 #include "EditorHost.h"
 #include "PostChainUi.h"
 #include "ParticleUi.h"
+#include "sage/render/ObjectEffects.h"
 #include "sage/render/ParticleEffectIO.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Paths.h"
@@ -213,6 +214,20 @@ static void DrawPostProcessSection(EditorHost& host, entt::registry& reg, entt::
     ImGui::BeginDisabled(!component->Enabled);
     sage::editor::DrawPostChainEditor(&host, component->Chain, "camera");
     ImGui::EndDisabled();
+}
+
+// Эффекты отдельного объекта (ObjectEffectsComponent): тот же редактор
+// цепочки, но только звенья готового кадра — они и накладываются на объект.
+static void DrawObjectEffectsSection(EditorHost& host, entt::registry& reg, entt::entity entity, bool* removed) {
+    using namespace sage::render;
+    if (!reg.all_of<ObjectEffectsComponent>(entity)) return;
+    if (!EditorTheme::SectionHeader("particles", T("Object Effects" "###Object Effects"), ImGuiTreeNodeFlags_DefaultOpen,
+                                    removed))
+        return;
+    ObjectEffectsComponent* component = reg.try_get<ObjectEffectsComponent>(entity);
+    if (!component) return;
+    EditorTheme::Hint(T("Applied to this object and its children, where they are visible"));
+    sage::editor::DrawPostChainEditor(&host, component->Effects, "objectfx", /*imageOnly=*/true);
 }
 
 void InspectorPanel::DrawEntityProperties(EditorHost& host) {
@@ -514,6 +529,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
 
     // --- Тракт пост-обработки камеры ---
     DrawPostProcessSection(host, reg, obj.Entity(), &rm.PostProcess);
+    DrawObjectEffectsSection(host, reg, obj.Entity(), &rm.ObjectEffects);
 
     // --- Наклейка (проекция картинки на геометрию сцены) ---
     if (reg.all_of<DecalComponent>(obj.Entity()) &&
@@ -747,6 +763,10 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     if (rm.PostProcess) {
         host.PushUndoSnapshot();
         reg.remove<sage::render::PostProcessComponent>(obj.Entity());
+    }
+    if (rm.ObjectEffects) {
+        host.PushUndoSnapshot();
+        reg.remove<sage::render::ObjectEffectsComponent>(obj.Entity());
     }
 
     if (rm.Interface) {

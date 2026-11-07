@@ -271,13 +271,17 @@ void ScriptEngine::RegisterAudioApi() {
     // --- Звук: доступно после BindAudio. Скрипты (катсцены, события уровня)
     // могут проигрывать эффекты/музыку и рулить громкостью. Если аудио-
     // устройство недоступно (headless), вызовы безопасно ничего не делают. ---
-    Bind("audio", "PlaySound", "PlaySound", [this](const std::string& path, sol::optional<float> volume) {
+    // pitch — множитель частоты (необязательный): 0.5 — октавой ниже. Звуки
+    // шагов и ударов в играх берут его, чтобы один файл звучал по-разному.
+    Bind("audio", "PlaySound", "PlaySound", [this](const std::string& path, sol::optional<float> volume,
+                                                   sol::optional<float> pitch) {
         if (!m_audio) throw std::runtime_error("PlaySound: аудио не привязано (ScriptEngine::BindAudio не вызван)");
-        m_audio->PlaySound2D(path, volume.value_or(1.0f));
+        m_audio->PlaySound2D(path, volume.value_or(1.0f), AudioEngine::Category::Sfx, pitch.value_or(1.0f));
     });
-    Bind("audio", "PlaySound3D", "PlaySound3D", [this](const std::string& path, glm::vec3 pos, sol::optional<float> volume) {
+    Bind("audio", "PlaySound3D", "PlaySound3D", [this](const std::string& path, glm::vec3 pos, sol::optional<float> volume,
+                                                       sol::optional<float> pitch) {
         if (!m_audio) throw std::runtime_error("PlaySound3D: аудио не привязано (ScriptEngine::BindAudio не вызван)");
-        m_audio->PlaySound3D(path, pos, volume.value_or(1.0f));
+        m_audio->PlaySound3D(path, pos, volume.value_or(1.0f), AudioEngine::Category::Sfx, pitch.value_or(1.0f));
     });
     // PlayMusic(путь, громкость = 1, loop = true, fade = 0): loop = false — трек
     // один раз (плейлист с паузами — скриптом через IsMusicPlaying), fade —

@@ -71,10 +71,15 @@ public:
     // --- Одноразовые эффекты (fire-and-forget) ---
     // 2D — непозиционный, всегда по центру (UI, оповещения). volume 0..1
     // относительно громкости категории.
-    void PlaySound2D(const std::string& path, float volume = 1.0f, Category category = Category::Sfx);
+    // pitch — множитель частоты: 0.5 — октавой ниже (и вдвое дольше).
+    void PlaySound2D(const std::string& path, float volume = 1.0f, Category category = Category::Sfx,
+                     float pitch = 1.0f);
     // 3D — позиционный, микшируется относительно слушателя (звук в точке мира).
     void PlaySound3D(const std::string& path, const glm::vec3& position,
-                     float volume = 1.0f, Category category = Category::Sfx);
+                     float volume = 1.0f, Category category = Category::Sfx, float pitch = 1.0f);
+    // Высоты звучащих сейчас разовых эффектов — для отладки («почему шаги
+    // звучат одинаково») и проверок. Пусто — звука нет или он уже доиграл.
+    std::vector<float> OneShotPitches() const;
 
     // --- Звук с полным набором параметров -----------------------------------
     //

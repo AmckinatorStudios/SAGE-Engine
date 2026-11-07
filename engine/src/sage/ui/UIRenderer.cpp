@@ -62,6 +62,9 @@ uniform int uMode; // 0 — сплошные квады + глифы шрифт�
 // есть, без кодирования. Без обратного перевода такая картинка в интерфейсе
 // заметно темнее себя самой.
 uniform int uTexSrgb;
+// Особые режимы смешивания (умножение, экран, инверсия) берут цвет, УЖЕ
+// умноженный на альфу: прозрачное обязано не трогать фон.
+uniform int uPremul;
 vec3 LinearToSrgb(vec3 c) {
     c = clamp(c, 0.0, 1.0);
     return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c));
@@ -99,6 +102,7 @@ void main() {
             col.a *= 1.0 - smoothstep(-aa, aa, d);
         }
     }
+    if (uPremul == 1) col.rgb *= col.a;
     FragColor = col;
 }
 )";
@@ -188,6 +192,7 @@ void UIRenderer::Begin(int screenWidth, int screenHeight) {
     m_vertices.clear();
     m_segments.clear();
     m_clipStack.clear();
+    m_blend = UIBlend::Normal;
     m_quadCount = 0;
 }
 
@@ -200,7 +205,7 @@ UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image, const Font
         // и склеить в один кусок глифы двух шрифтов значит взять буквы второго
         // из картинки первого.
         if (last.Image == image && last.TextFont == font && last.Clipped == clipped &&
-            (!clipped || last.Clip == clip)) {
+            last.Blend == m_blend && (!clipped || last.Clip == clip)) {
             return last; // состояние не изменилось — продолжаем батч
         }
     }
@@ -208,6 +213,7 @@ UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image, const Font
     seg.FirstQuad = m_quadCount;
     seg.Image = image;
     seg.TextFont = font;
+    seg.Blend = m_blend;
     seg.Clipped = clipped;
     seg.Clip = clip;
     m_segments.push_back(seg);
@@ -760,6 +766,19 @@ void UIRenderer::End() {
         } else {
             device.SetScissor(false);
         }
+        {
+            using BM = sage::rhi::GraphicsDevice::BlendMode;
+            BM mode = BM::Alpha;
+            switch (seg.Blend) {
+                case UIBlend::Additive: mode = BM::Additive; break;
+                case UIBlend::Multiply: mode = BM::Multiply; break;
+                case UIBlend::Screen:   mode = BM::Screen; break;
+                case UIBlend::Invert:   mode = BM::Invert; break;
+                default: break;
+            }
+            device.SetBlendMode(mode);
+            m_shader.SetInt("uPremul", seg.Blend == UIBlend::Normal ? 0 : 1);
+        }
         if (seg.Image) {
             m_shader.SetInt("uMode", 1);
             m_shader.SetInt("uTexSrgb", seg.Image->Srgb() ? 1 : 0);
@@ -772,6 +791,7 @@ void UIRenderer::End() {
         m_geometry->DrawIndexedRange(seg.FirstQuad * 6, seg.QuadCount * 6);
     }
     device.SetScissor(false);
+    device.SetBlendMode(sage::rhi::GraphicsDevice::BlendMode::Alpha);
 
     device.SetCullMode(sage::rhi::CullMode::Back);
     device.SetDepthTest(true);

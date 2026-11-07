@@ -14,6 +14,12 @@
 #include "sage/scene/Components.h"
 #include "sage/core/Log.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UISerialize.h"
+#include "sage/render/ObjectEffects.h"
+#include "sage/render/PostProcessComponent.h"
+#include "sage/scene/ComponentRegistry.h"
+#include <set>
+#include <nlohmann/json.hpp>
 #include "sage/assets/Pack.h"
 #include "sage/vars/VarsComponent.h"
 #include "sage/events/Events.h"
@@ -1965,4 +1971,119 @@ TEST(Scripting_ui_text_align_reaches_end_on_both_axes) {
     CHECK_TRUE(label.Vertical == sage::ui::Label::Align::End);
     CHECK_TRUE(se.Lua()["ok_read"].get<bool>());
     CHECK_TRUE(se.Lua()["bad"].get<bool>());   // опечатка — ошибка, а не «по центру»
+}
+
+// Режим смешивания элемента: из скрипта ("invert" — прицел, видный на любом
+// фоне), опечатка — ошибка, и режим переживает сохранение сцены.
+TEST(Scripting_ui_blend_mode_set_saved_and_loaded) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    GameObject cross = scene.CreateObject("Crosshair");
+    se.Lua()["cross"] = cross;
+    se.Lua().script(R"(
+        local e = cross:AddUI()
+        e.Type = UIKind.Image
+        e.Blend = "invert"
+        read_back = e.Blend
+        bad = not pcall(function() e.Blend = "inverted" end)
+    )");
+    CHECK_TRUE(scene.Registry().get<sage::ui::Element>(cross.Entity()).Blend == UIBlend::Invert);
+    CHECK_EQ(se.Lua()["read_back"].get<std::string>(), std::string("invert"));
+    CHECK_TRUE(se.Lua()["bad"].get<bool>());
+
+    nlohmann::json j;
+    CHECK_TRUE(sage::ui::SaveElement(j, scene.Registry(), cross.Entity()));
+    Scene other("O");
+    GameObject copy = other.CreateObject("Copy");
+    sage::ui::LoadElement(j, other.Registry(), copy.Entity());
+    CHECK_TRUE(other.Registry().get<sage::ui::Element>(copy.Entity()).Blend == UIBlend::Invert);
+}
+
+// Эффекты экрана из скрипта: звено заводится на главной камере, параметры
+// меняются на ходу, выключается и убирается; неизвестный вид или параметр —
+// ошибка, а не тишина. Все эффекты изображения есть в каталоге.
+TEST(Scripting_post_effects_controlled_at_runtime) {
+    ScriptEngine se;
+    Scene scene("S");
+    GameObject cam = scene.CreateObject("Camera");
+    scene.Registry().emplace<CameraComponent>(cam.Entity());
+    se.BindScene(scene);
+    se.Lua().script(R"(
+        kinds = post.kinds()
+        post.add("blur")
+        post.set("blur", {intensity = 0.25, radius = 4})
+        post.set("grayscale", {intensity = 0.5})          -- заводится сам
+        post.set("glow", {color = {1, 0.5, 0.25}})
+        post.enable("glow", false)
+        blur = post.get("blur", "intensity")
+        radius = post.get("blur", "radius")
+        had = post.has("grayscale")
+        post.remove("grayscale")
+        gone = not post.has("grayscale")
+        bad_kind = not pcall(function() post.add("no_such_effect") end)
+        bad_param = not pcall(function() post.set("blur", {nope = 1}) end)
+    )");
+    CHECK_NEAR(se.Lua()["radius"].get<float>(), 4.0f, 1e-5f);
+    CHECK_NEAR(se.Lua()["blur"].get<float>(), 0.25f, 1e-5f);
+    CHECK_TRUE(se.Lua()["had"].get<bool>());
+    CHECK_TRUE(se.Lua()["gone"].get<bool>());
+    CHECK_TRUE(se.Lua()["bad_kind"].get<bool>());
+    CHECK_TRUE(se.Lua()["bad_param"].get<bool>());
+
+    const auto& chain = scene.Registry().get<sage::render::PostProcessComponent>(cam.Entity()).Chain;
+    const sage::render::PostEffect* glow = nullptr;
+    for (const auto& e : chain.Effects)
+        if (e.Kind == "glow") glow = &e;
+    CHECK_TRUE(glow != nullptr);
+    CHECK_FALSE(glow->Enabled);
+    CHECK_NEAR(glow->Find("color")->V[1], 0.5f, 1e-5f);
+
+    sol::table kinds = se.Lua()["kinds"];
+    std::set<std::string> have;
+    for (auto& kv : kinds) have.insert(kv.second.as<std::string>());
+    for (const char* k : {"invert", "negative", "grayscale", "sepia", "posterize", "pixelate", "blur", "glow",
+                          "distortion", "dissolve"})
+        CHECK_TRUE(have.count(k) == 1);
+}
+
+// Эффекты отдельного объекта: компонент заводится скриптом, несколько
+// эффектов со своей интенсивностью, пишется в файл сцены и читается обратно.
+TEST(Scripting_object_effects_controlled_at_runtime_and_saved) {
+    ScriptEngine se;
+    Scene scene("S");
+    GameObject box = scene.CreateObject("Box");
+    se.BindScene(scene);
+    se.Lua().script(R"(
+        local b = FindObject("Box")
+        post.object_add(b, "glow")
+        post.object_set(b, "dissolve", {intensity = 0.4, color = Vec3(1, 0, 0)})
+        post.object_set(b, "invert", {intensity = 1})
+        post.object_enable(b, "invert", false)
+        d = post.object_get(b, "dissolve", "intensity")
+        removed = post.object_remove(b, "glow")
+        bad = not pcall(function() post.object_set(b, "dissolve", {nope = 1}) end)
+    )");
+    CHECK_NEAR(se.Lua()["d"].get<float>(), 0.4f, 1e-5f);
+    CHECK_TRUE(se.Lua()["removed"].get<bool>());
+    CHECK_TRUE(se.Lua()["bad"].get<bool>());
+
+    const auto* fx = scene.Registry().try_get<sage::render::ObjectEffectsComponent>(box.Entity());
+    CHECK_TRUE(fx != nullptr);
+    CHECK_EQ((int)fx->Effects.Effects.size(), 2);   // dissolve + invert
+    CHECK_TRUE(fx->Any());
+
+    nlohmann::json obj;
+    sage::scene::SaveRegisteredComponents(scene.Registry(), box.Entity(), obj);
+    Scene other("O");
+    GameObject copy = other.CreateObject("Copy");
+    sage::scene::LoadRegisteredComponents(other.Registry(), copy.Entity(), obj);
+    const auto* back = other.Registry().try_get<sage::render::ObjectEffectsComponent>(copy.Entity());
+    CHECK_TRUE(back != nullptr);
+    CHECK_EQ((int)back->Effects.Effects.size(), 2);
+    CHECK_NEAR(back->Effects.Effects[0].Find("color")->V[0], 1.0f, 1e-5f);
+    CHECK_FALSE(back->Effects.Effects[1].Enabled);
+
+    se.Lua().script(R"(post.object_clear(FindObject("Box")))");
+    CHECK_FALSE(scene.Registry().all_of<sage::render::ObjectEffectsComponent>(box.Entity()));
 }

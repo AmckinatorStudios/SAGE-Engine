@@ -277,6 +277,21 @@ void ScriptEngine::RegisterUIApi() {
         "Position", UI_FIELD(sage::ui::Element, Position),
         "Size", UI_FIELD(sage::ui::Element, Size),
         "Rotation", UI_FIELD(sage::ui::Element, Rotation),
+        // Как элемент ложится на фон: "normal", "add", "multiply", "screen",
+        // "invert" (прицел, видный на любом фоне). Опечатка — ошибка.
+        "Blend", sol::property(
+                     [](UIRef& r) {
+                         const sage::ui::Element* el = r.Peek<sage::ui::Element>();
+                         return std::string(UIBlendName(el ? el->Blend : UIBlend::Normal));
+                     },
+                     [](UIRef& r, const std::string& name) {
+                         if (!r.Alive()) return;
+                         UIBlend b;
+                         if (!UIBlendFromName(name, b))
+                             throw std::runtime_error("Blend: \"" + name +
+                                                      "\" — нужно normal, add, multiply, screen или invert");
+                         r.Part<sage::ui::Element>().Blend = b;
+                     }),
         "Order", UI_FIELD(sage::ui::Element, Order),
         // В контейнере: доля свободного места и «стоять по своему якорю».
         "Grow", UI_FIELD(sage::ui::Element, Grow),

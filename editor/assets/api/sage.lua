@@ -1327,6 +1327,7 @@ function Script:OnAnimationEvent(name) end
 ---@field msg sage.msg
 ---@field noise sage.noise
 ---@field physics sage.physics
+---@field post sage.post
 ---@field reflect sage.reflect
 ---@field render sage.render
 ---@field rt sage.rt
@@ -1530,11 +1531,13 @@ function sage.audio.Play(entity) end
 function sage.audio.PlayMusic(path, volume, loop, fade) end
 ---@param path string
 ---@param volume? number
-function sage.audio.PlaySound(path, volume) end
+---@param pitch? number
+function sage.audio.PlaySound(path, volume, pitch) end
 ---@param path string
 ---@param pos Vec3
 ---@param volume? number
-function sage.audio.PlaySound3D(path, pos, volume) end
+---@param pitch? number
+function sage.audio.PlaySound3D(path, pos, volume, pitch) end
 ---@param entity Entity
 ---@param clip string
 function sage.audio.SetClip(entity, clip) end
@@ -2213,6 +2216,60 @@ function sage.physics.SetVelocity(entity, v) end
 ---@param entity Entity
 ---@return table
 function sage.physics.TriggersOf(entity) end
+
+---@class sage.post
+sage.post = {}
+
+---Короткое имя того же модуля: `post.X()` — это ТОТ ЖЕ объект,
+---что `sage.post`, а не копия. Движок ставит его, только если имя
+---свободно: игра, объявившая своё, остаётся при своём.
+---@type sage.post
+post = nil
+
+---@param kind string
+---@return boolean
+function sage.post.add(kind) end
+---@param kind string
+---@param on boolean
+function sage.post.enable(kind, on) end
+---@param kind string
+---@param param string
+---@return number
+function sage.post.get(kind, param) end
+---@param kind string
+---@return boolean
+function sage.post.has(kind) end
+---@return table
+function sage.post.kinds() end
+---@param entity Entity
+---@param kind string
+---@return boolean
+function sage.post.object_add(entity, kind) end
+---@param entity Entity
+function sage.post.object_clear(entity) end
+---@param entity Entity
+---@param kind string
+---@param on boolean
+function sage.post.object_enable(entity, kind, on) end
+---@param entity Entity
+---@param kind string
+---@param param string
+---@return number
+function sage.post.object_get(entity, kind, param) end
+---@param entity Entity
+---@param kind string
+---@return boolean
+function sage.post.object_remove(entity, kind) end
+---@param entity Entity
+---@param kind string
+---@param params table
+function sage.post.object_set(entity, kind, params) end
+---@param kind string
+---@return boolean
+function sage.post.remove(kind) end
+---@param kind string
+---@param params table
+function sage.post.set(kind, params) end
 
 ---@class sage.reflect
 sage.reflect = {}

@@ -11,6 +11,7 @@
 #include "sage/input/InputSystem.h"
 #include "sage/audio/AudioEngine.h"
 #include "sage/assets/GameInfo.h"
+#include "sage/render/ObjectEffects.h"
 #include "sage/render/Shader.h"
 #include "sage/render/Camera.h"
 #include "sage/render/ShadowMap.h"
@@ -156,6 +157,7 @@ private:
     sage::render::ReflectionProbeSet m_probeSet;
     // Буфер скоростей для смаза движения (см. sage/render/ScenePasses.h).
     sage::render::VelocityBuffer m_velocity;
+    sage::render::ObjectEffectsMask m_objectFx;   // эффекты отдельных объектов
     sage::render::PlanarReflection m_planar;
 
     // Состав и порядок кадра — см. sage/core/SystemScheduler.h. Игра может

@@ -33,6 +33,7 @@
 #include "EditorHost.h"
 #include "PostChainUi.h"
 #include "ParticleUi.h"
+#include "sage/render/ObjectEffects.h"
 #include "sage/render/ParticleEffectIO.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Paths.h"
@@ -162,6 +163,10 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
          "What is done to this camera's frame before it is shown",
          HasComp<sage::render::PostProcessComponent>,
          AddComp<sage::render::PostProcessComponent>},
+        {"Object Effects", "View", "particles",
+         "Invert, glow, blur, dissolve… on this object only",
+         HasComp<sage::render::ObjectEffectsComponent>,
+         AddComp<sage::render::ObjectEffectsComponent>},
         {"Light", "View", "light",
          "Point, spot or directional light", HasComp<LightComponent>, AddComp<LightComponent>},
 

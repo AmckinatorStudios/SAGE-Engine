@@ -223,21 +223,30 @@ AudioEngine::~AudioEngine() {
 
 bool AudioEngine::IsAvailable() const { return m_impl->Available; }
 
-void AudioEngine::PlaySound2D(const std::string& path, float volume, Category category) {
+void AudioEngine::PlaySound2D(const std::string& path, float volume, Category category, float pitch) {
     if (!m_impl->Available) return;
     if (ma_sound* s = m_impl->StartSound(path, category, volume, /*spatial=*/false,
                                          glm::vec3(0.0f), /*looping=*/false, /*streaming=*/false)) {
+        if (pitch != 1.0f) ma_sound_set_pitch(s, std::max(pitch, 0.01f));
         m_impl->OneShots.push_back(s);
     }
 }
 
 void AudioEngine::PlaySound3D(const std::string& path, const glm::vec3& position,
-                              float volume, Category category) {
+                              float volume, Category category, float pitch) {
     if (!m_impl->Available) return;
     if (ma_sound* s = m_impl->StartSound(path, category, volume, /*spatial=*/true,
                                          position, /*looping=*/false, /*streaming=*/false)) {
+        if (pitch != 1.0f) ma_sound_set_pitch(s, std::max(pitch, 0.01f));
         m_impl->OneShots.push_back(s);
     }
+}
+
+std::vector<float> AudioEngine::OneShotPitches() const {
+    std::vector<float> out;
+    for (ma_sound* s : m_impl->OneShots)
+        if (s) out.push_back(ma_sound_get_pitch(s));
+    return out;
 }
 
 AudioEngine::SoundHandle AudioEngine::Play(const std::string& path, const SoundParams& p) {

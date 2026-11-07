@@ -3,6 +3,7 @@
 #include <algorithm>
 
 #include "sage/core/Log.h"
+#include "sage/render/ObjectEffects.h"
 #include "sage/scene/AiAgentComponent.h"
 #include "sage/scene/VisualScriptComponent.h"
 #include "sage/scene/Signals.h"
@@ -28,6 +29,7 @@ void EnsureBuiltins() {
     done = true;
     RegisterAiAgentComponent();
     RegisterVisualScriptComponent();
+    sage::render::RegisterObjectEffectsComponent();
 }
 } // namespace
 

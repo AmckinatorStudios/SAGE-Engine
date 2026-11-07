@@ -160,6 +160,9 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/PostEffect.cpp
     src/sage/render/PostFX.cpp
     src/sage/render/PostFXCatalog.cpp
+    src/sage/render/PostFXImage.cpp
+    src/sage/render/PostFXObjects.cpp
+    src/sage/render/ObjectEffects.cpp
     src/sage/render/PostFXPasses.cpp
     src/sage/render/PostFXShaders_Color.cpp
     src/sage/render/PostFXShaders_Light.cpp
@@ -262,6 +265,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_Runtime.cpp
     src/sage/scripting/LuaJson.cpp
     src/sage/scripting/ScriptApi_Lighting.cpp
+    src/sage/scripting/ScriptApi_Post.cpp
     src/sage/scripting/ScriptApi_Events.cpp
     src/sage/scripting/ScriptApi_Physics.cpp
     src/sage/ui/UIParts.cpp

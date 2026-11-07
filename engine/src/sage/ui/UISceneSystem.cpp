@@ -202,6 +202,8 @@ void DrawElement(const entt::registry& reg, entt::entity e, const UIRect& r, flo
     c.OwnerEnabled = !owner || owner->Enabled;
     c.EngineSkin = box && box->Skin == Element::SkinMode::Engine;
 
+    const UIBlend blend = box ? box->Blend : UIBlend::Normal;
+    ui.SetBlend(blend);
     for (const PartType& p : Parts()) {
         if (!p.Draw || !p.Has || !p.Has(reg, e)) continue;
         c.Data = p.Get(reg, e);
@@ -212,6 +214,7 @@ void DrawElement(const entt::registry& reg, entt::entity e, const UIRect& r, flo
         c.Data = p.Get(reg, e);
         p.DrawOver(c);
     }
+    if (blend != UIBlend::Normal) ui.SetBlend(UIBlend::Normal);
 
     if (rotated) ui.PopRotation();
 }

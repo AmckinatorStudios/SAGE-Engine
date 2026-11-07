@@ -269,6 +269,29 @@ void DrawGroupSettings(EditorHost& host, entt::entity e) {
     }
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", T("Off — this element and everything inside ignore the mouse."));
+
+    // Как элемент ложится на фон (UIBlend.h): инверсия — прицел, видный на
+    // любом фоне; умножение — затемнение; экран — осветление.
+    if (ui::Element* xf = reg.try_get<ui::Element>(e)) {
+        const UIBlend modes[] = {UIBlend::Normal, UIBlend::Additive, UIBlend::Multiply, UIBlend::Screen,
+                                 UIBlend::Invert};
+        const char* labels[] = {T("Normal"), T("Add (glow)"), T("Multiply"), T("Screen"), T("Invert background")};
+        int cur = 0;
+        for (int i = 0; i < 5; ++i)
+            if (modes[i] == xf->Blend) cur = i;
+        if (ImGui::BeginCombo(T("Blend"), labels[cur])) {
+            for (int i = 0; i < 5; ++i) {
+                if (ImGui::Selectable(labels[i], i == cur) && i != cur) {
+                    host.PushUndoSnapshot();
+                    xf->Blend = modes[i];
+                }
+            }
+            ImGui::EndCombo();
+        }
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("How the element lays over what is behind it.\n"
+                                      "Invert background — like a crosshair that stays visible on any surface."));
+    }
 }
 
 } // namespace uiprops_detail

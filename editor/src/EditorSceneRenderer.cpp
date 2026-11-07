@@ -485,6 +485,15 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
             device.SetViewport(0, 0, w, h);
         }
     }
+    // Маска эффектов объектов — тоже сразу после геометрии (список видимого).
+    bool viewportObjectFx = false;
+    if (mode == EditorRenderMode::Shaded && !viewOverride.Use) {
+        viewportObjectFx = m_viewportObjectFx.Render(scene, m_batch, outView, outProj, w, h);
+        if (viewportObjectFx) {
+            sceneFbo.Bind();
+            device.SetViewport(0, 0, w, h);
+        }
+    }
     m_particles->Draw(camera, outView, outProj);
 
     GameObject selectedObj = scene.Get(selectedId);
@@ -532,6 +541,8 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
         postFbo.Resize(w, h);
         m_postfx->SetLighting(&env);   // солнце — звену «Lens Flare»
         m_postfx->SetGBuffer(sceneFbo.AlbedoTexture(), sceneFbo.NormalTexture());
+        m_postfx->SetObjectLayers(viewportObjectFx ? m_viewportObjectFx.Mask() : sage::rhi::TextureHandle{},
+                                  &m_viewportObjectFx.Layers());
         m_postfx->Render(sceneFbo.ColorTexture(), sceneFbo.DepthTexture(), sceneFbo.Width(),
                          sceneFbo.Height(), outProj, outView, viewportChain,
                          /*output=*/&postFbo, 0, 0, w, h, viewportVelocity);

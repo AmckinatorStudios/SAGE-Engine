@@ -169,6 +169,7 @@ void ScriptEngine::RegisterEngineApi() {
         mod("game", "сцены, пауза, время, выход", {}, false, &ScriptEngine::RegisterGameFlowApi),
         mod("mathx", "Lerp/Clamp и прочие помощники", {"math"}, false, &ScriptEngine::RegisterMathHelpers),
         mod("lighting", "освещение и окружение", {"components"}, true, &ScriptEngine::RegisterLightingApi),
+        mod("post", "эффекты экрана во время игры", {}, true, &ScriptEngine::RegisterPostApi),
         mod("physics", "скорость, гравитация, лучи", {"object"}, true, &ScriptEngine::RegisterPhysicsApi),
         mod("events", "sage.events: шина событий", {}, false, &ScriptEngine::RegisterEventsApi),
         mod("vars", "публичные переменные объектов", {"object"}, true, &ScriptEngine::RegisterVarsApi),

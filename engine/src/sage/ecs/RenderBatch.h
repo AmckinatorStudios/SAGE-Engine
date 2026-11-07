@@ -169,6 +169,15 @@ public:
     // первый кадр после скачка смазался бы по всей длине прыжка.
     void ResetVelocityHistory();
 
+    // Видимое ПОСЛЕДНЕГО RenderColor: сущность, её меш и мировая матрица.
+    // Для своих проходов поверх уже собранного кадра (маска эффектов
+    // объектов и т.п.): повторного отсечения не делается.
+    template <typename Fn>
+    void ForEachVisible(Fn&& fn) const {
+        for (const CullItem& c : m_cull)
+            if (c.Visible && c.Mesh_) fn(c.Entity, *c.Mesh_, c.Model);
+    }
+
     const RenderStats& LastStats() const { return m_stats; }
 
 private:

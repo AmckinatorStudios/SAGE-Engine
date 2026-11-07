@@ -42,6 +42,9 @@ namespace sage::editor {
 using PostSourceSlotFn = std::function<bool(EditorHost* host, sage::render::PostEffect& effect)>;
 void SetPostSourceSlot(PostSourceSlotFn fn);
 
-bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const char* idScope);
+// imageOnly — только звенья ГОТОВОГО кадра (LDR, без глубины): то, что
+// годится в эффекты отдельного объекта (ObjectEffectsComponent).
+bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const char* idScope,
+                         bool imageOnly = false);
 
 } // namespace sage::editor

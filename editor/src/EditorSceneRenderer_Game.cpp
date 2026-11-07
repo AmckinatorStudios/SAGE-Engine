@@ -157,6 +157,12 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
         m_gameFbo->Bind();
         device.SetViewport(0, 0, m_gameW, m_gameH);
     }
+    // Маска эффектов объектов — сразу после геометрии, как у собранной игры.
+    const bool gameObjectFx = m_gameObjectFx.Render(scene, m_batch, view, proj, m_gameW, m_gameH);
+    if (gameObjectFx) {
+        m_gameFbo->Bind();
+        device.SetViewport(0, 0, m_gameW, m_gameH);
+    }
     m_particles->DrawFromView(view, proj);
 
     // Отладочная графика игры (Debug:DrawLine) — и в панели Game тоже: она
@@ -193,6 +199,8 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
         m_gamePostFbo->Resize(m_gameW, m_gameH);
         m_gamePostfx->SetLighting(&env);
         m_gamePostfx->SetGBuffer(m_gameFbo->AlbedoTexture(), m_gameFbo->NormalTexture());
+        m_gamePostfx->SetObjectLayers(gameObjectFx ? m_gameObjectFx.Mask() : sage::rhi::TextureHandle{},
+                                      &m_gameObjectFx.Layers());
         m_gamePostfx->Render(m_gameFbo->ColorTexture(), m_gameFbo->DepthTexture(),
                              m_gameFbo->Width(), m_gameFbo->Height(), proj, view, gameChain,
                              /*output=*/&*m_gamePostFbo, 0, 0, m_gameW, m_gameH, gameVelocity);
