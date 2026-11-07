@@ -202,6 +202,8 @@ sage::ui::Stack::Align AlignFromName(const std::string& name) {
     if (name == "center") return sage::ui::Stack::Align::Center;
     if (name == "end") return sage::ui::Stack::Align::End;
     if (name == "between" || name == "space-between") return sage::ui::Stack::Align::SpaceBetween;
+    if (name == "around" || name == "space-around") return sage::ui::Stack::Align::SpaceAround;
+    if (name == "evenly" || name == "space-evenly") return sage::ui::Stack::Align::SpaceEvenly;
     return sage::ui::Stack::Align::Start;
 }
 
@@ -296,6 +298,8 @@ void ScriptEngine::RegisterUIApi() {
                          r.Part<sage::ui::Element>().Blend = b;
                      }),
         "Order", UI_FIELD(sage::ui::Element, Order),
+        // Слой отрисовки поверх всего интерфейса (0 — как у родителя).
+        "DrawLayer", UI_FIELD(sage::ui::Element, DrawLayer),
         // В контейнере: доля свободного места и «стоять по своему якорю».
         "Grow", UI_FIELD(sage::ui::Element, Grow),
         "IgnoreLayout", UI_FIELD(sage::ui::Element, IgnoreLayout),
@@ -627,7 +631,8 @@ void ScriptEngine::RegisterUIApi() {
             im.Tex = path.empty() ? nullptr
                      : im.Sharp()
                          ? ResourceManager::Instance().GetTexture(path, TextureFilter::Nearest, false)
-                         : ResourceManager::Instance().GetTexture(path);
+                         : ResourceManager::Instance().GetTexture(path, TextureFilter::Trilinear, true,
+                                                                  /*bleed=*/true);   // без каймы у прозрачности
         }
     });
 
@@ -779,7 +784,8 @@ end
             im.Filtering = sharp.value_or(true) ? sage::ui::TextureFiltering::Nearest
                                                 : sage::ui::TextureFiltering::Smooth;
             im.Tex = im.Sharp() ? ResourceManager::Instance().GetTexture(path, TextureFilter::Nearest, false)
-                                : ResourceManager::Instance().GetTexture(path);
+                                : ResourceManager::Instance().GetTexture(path, TextureFilter::Trilinear, true,
+                                                                         /*bleed=*/true);
         }
         im.Sprite = glm::vec4(r->Rect);
         if (r->Slice != glm::vec4(0.0f)) {

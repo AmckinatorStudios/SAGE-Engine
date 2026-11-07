@@ -186,6 +186,12 @@ void OpenGLDevice::ReadPixelsRGB(int x, int y, int width, int height, unsigned c
     glReadPixels(x, y, width, height, GL_RGB, GL_UNSIGNED_BYTE, out);
 }
 
+void OpenGLDevice::ReadPixelsRGBA(int x, int y, int width, int height, unsigned char* out) {
+    glFinish();
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(x, y, width, height, GL_RGBA, GL_UNSIGNED_BYTE, out);
+}
+
 float OpenGLDevice::MaxAnisotropy() {
     return QueryMaxAnisotropy();
 }

@@ -242,6 +242,20 @@ float Font::BuildQuads(const std::string& utf8, float startX, float startY, floa
     return penX;
 }
 
+float Font::MeasureInk(const std::string& utf8, float scale) const {
+    float pen = 0.0f, ink = 0.0f, maxW = 0.0f;
+    size_t i = 0;
+    while (i < utf8.size()) {
+        uint32_t cp = Utf8Next(utf8, i);
+        if (cp == '\n') { maxW = std::max(maxW, ink); pen = ink = 0.0f; continue; }
+        const Glyph* g = Find(cp);
+        if (!g) continue;
+        if (g->size.x > 0.0f && g->size.y > 0.0f) ink = std::max(ink, pen + (g->offset.x + g->size.x) * scale);
+        pen += g->advance * scale;
+    }
+    return std::max(maxW, ink);
+}
+
 float Font::MeasureWidth(const std::string& utf8, float scale) const {
     float w = 0.0f, maxW = 0.0f;
     size_t i = 0;

@@ -13,7 +13,11 @@
 #include "sage/scene/Signals.h"
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 #include <vector>
+
+#include "sage/ui/UIMasks.h"
+#include "sage/ui/UISceneSolved.h"
 
 namespace sage::ui {
 
@@ -227,29 +231,6 @@ void DrawElement(const entt::registry& reg, entt::entity e, const UIRect& r, flo
 // брал заданную, и по кнопке с авто-шириной приходилось попадать не туда, где
 // она нарисована. Теперь раскладка считается ОДИН раз за кадр, а рисование,
 // попадание и ввод читают её результат.
-struct Solved {
-    entt::entity Entity;
-    UIRect Rect;
-    UIRect Clip;      // окно обрезки (нулевая ширина/высота — не обрезан)
-    bool Clipped = false;
-    float Alpha = 1.0f;      // накопленная прозрачность групп
-    bool Interactive = true; // группа может запретить ввод всему поддереву
-    // Масштаб холста этого корня: раскладка считается в опорных единицах, а
-    // прямоугольник ниже — уже экранный. Число нужно отрисовке для всего, что
-    // задано рядом с прямоугольником, но не выводится из него: кегль шрифта,
-    // скругление, толщина рамки.
-    float Scale = 1.0f;
-    // Виден ли элемент сам по себе.
-    //
-    // Невидимые ОСТАЮТСЯ в списке, и это не недосмотр: спрятанный элемент
-    // держит своё место в раскладке родителя, иначе «спрятать кнопку на время»
-    // означало бы, что все соседи в списке разъехались и вернулись обратно
-    // рывком. Не рисуют и не ловят мышь их те, кто читает этот список.
-    //
-    // Редактору флаг нужен отдельно: выключенный элемент надо ПОКАЗАТЬ рамкой,
-    // иначе его нельзя найти и включить обратно.
-    bool Visible = true;
-};
 
 // Насколько сдвинуть содержимое прокручиваемого элемента.
 //
@@ -356,7 +337,8 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
     }
     if (mask) {
         const UIRect window = MaskWindow(*mask, r);
-        if (!mask->ShowOutside) {
+        // Инверсия видна СНАРУЖИ окна — ножницами её не режут.
+        if (!mask->ShowOutside && !mask->Invert) {
             childClip = childClipped ? Intersect(childClip, window) : window;
             childClipped = true;
         }
@@ -382,6 +364,9 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
                 slots[i].Size = ResolveSize(kt, r);
                 if (ui) slots[i].Size = MeasuredWidth(reg, kids[i], slots[i].Size, *ui);
                 slots[i].Grow = kt.Grow;
+                // Поля: у растянутой оси ResolveSize их уже вычел из размера,
+                // раскладка добавит обратно — ребёнок займёт ровно контейнер.
+                slots[i].Margin = kt.Margin;
             }
         };
         measure();
@@ -524,6 +509,7 @@ std::vector<Solved> SolveScene(Scene& scene, UIRenderer* ui, int screenW, int sc
                 it.Scale = scale;
             }
         }
+        ResolveLayersAndMasks(reg, out, first, scale);
     }
     return out;
 }
@@ -661,10 +647,13 @@ void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH, const U
             if (it.Clip.w <= 0.0f || it.Clip.h <= 0.0f) continue; // полностью обрезан
             ui.PushClipRect(it.Clip.x, it.Clip.y, it.Clip.w, it.Clip.h);
         }
+        const bool masked = it.MaskOwner != entt::null;
+        if (masked) ui.PushMask(ShapeMaskFor(reg, it.MaskOwner, it.MaskRect, it.Scale));
         // Прозрачность группы идёт отдельным числом и множится на КАЖДЫЙ цвет:
         // панель с полупрозрачным фоном не должна становиться непрозрачной от
         // того, что группу показали наполовину.
         DrawElement(reg, it.Entity, it.Rect, it.Scale, it.Alpha, ui);
+        if (masked) ui.PopMask();
         if (it.Clipped) ui.PopClipRect();
     }
 }

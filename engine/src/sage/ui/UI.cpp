@@ -113,6 +113,22 @@ float PlaceAcross(Stack::CrossAlign a, float lineCross, float& size) {
 glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
                       std::vector<LayoutSlot>& slots) {
     if (slots.empty()) return glm::vec2(0.0f);
+    // ПОЛЯ РЕБЁНКА. Раньше их не было вовсе: отступ между двумя кнопками
+    // списка задавался только общим зазором контейнера, и «эту карточку чуть
+    // отодвинуть» значило вставлять пустой элемент-распорку. Раскладка
+    // считает место под ребёнка вместе с его полями, а сам он встаёт внутри —
+    // так поля работают одинаково в ряду, столбце, сетке и при растяжении.
+    for (LayoutSlot& s : slots) s.Size += glm::vec2(s.Margin.x + s.Margin.z, s.Margin.y + s.Margin.w);
+    struct Unpad {
+        std::vector<LayoutSlot>& Slots;
+        ~Unpad() {
+            for (LayoutSlot& s : Slots) {
+                s.Pos += glm::vec2(s.Margin.x, s.Margin.y);
+                s.Size = glm::max(glm::vec2(0.0f),
+                                  s.Size - glm::vec2(s.Margin.x + s.Margin.z, s.Margin.y + s.Margin.w));
+            }
+        }
+    } unpad{slots};
 
     const float left = container.x + stack.Padding.x;
     const float top = container.y + stack.Padding.y;
@@ -223,6 +239,21 @@ glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
                 // так выглядит строка «Назад ... Далее» внизу окна.
                 if (n > 1) gap = sp + std::max(0.0f, free) / (float)(n - 1);
                 break;
+            case Stack::Align::SpaceAround: {
+                // Каждому — поровну с обеих сторон: у края половина промежутка.
+                const float each = std::max(0.0f, free) / (float)n;
+                cursor = each * 0.5f;
+                gap = sp + each;
+                break;
+            }
+            case Stack::Align::SpaceEvenly: {
+                // Все промежутки равны, включая края: ряд кнопок меню, который
+                // выглядит ровным на любой ширине окна.
+                const float each = std::max(0.0f, free) / (float)(n + 1);
+                cursor = each;
+                gap = sp + each;
+                break;
+            }
         }
 
         float lineExtent = 0.0f;

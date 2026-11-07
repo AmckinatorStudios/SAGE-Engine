@@ -9,6 +9,7 @@
 
 #include "sage/assets/import/Importer.h"
 #include "sage/core/Log.h"
+#include "sage/core/Paths.h"
 
 namespace sage::assets {
 
@@ -49,6 +50,22 @@ TextureIntent GuessIntent(const std::string& path) {
         has("specular") || has("gloss"))
         return TextureIntent::DataMap;
     return TextureIntent::Albedo;
+}
+
+// Картинка, которую нельзя жать с потерями: у неё есть описание листа или
+// девятины рядом, она лежит в папке интерфейса/шрифтов/иконок или она мелкая
+// (до 256 по большей стороне — такие рисуют крупно, и каждый пиксель виден).
+bool LooksLikePixelArt(const std::string& path, int w, int h) {
+    std::error_code ec;
+    if (fs::exists(sage::PathFromUtf8(path + ".sagesheet"), ec) || fs::exists(sage::PathFromUtf8(path + ".sage9"), ec))
+        return true;
+    std::string lower = path;
+    std::replace(lower.begin(), lower.end(), '\\', '/');
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return (char)std::tolower(c); });
+    for (const char* dir : {"/ui/", "/gui/", "/hud/", "/fonts/", "/font/", "/icons/", "/sprites/", "/pixel"})
+        if (lower.find(dir) != std::string::npos) return true;
+    return std::max(w, h) <= 256;
 }
 
 } // namespace
@@ -128,8 +145,16 @@ ConvertResult ConvertTextureToNative(const std::string& sourcePath, const std::s
     TextureWriteOptions texOpts = opts.Texture;
     // Назначение угадываем ТОЛЬКО если его не задали явно: пакетная конвертация
     // с одним назначением на всю папку испортила бы карты нормалей.
-    if (texOpts.Intent == TextureIntent::Albedo && !texOpts.ForceFormat)
+    if (texOpts.Intent == TextureIntent::Albedo && !texOpts.ForceFormat) {
         texOpts.Intent = GuessIntent(sourcePath);
+        // ПИКСЕЛЬНУЮ КАРТИНКУ НЕ ЖАТЬ. «Цвет» шёл в BC1/BC3 — блоки 4×4 с
+        // двумя опорными цветами: у спрайта интерфейса 16×16 это значит
+        // другие цвета у каждого второго пикселя и рваные однопиксельные
+        // линии. Набор интерфейса, лист спрайтов, шрифт-картинка и всё
+        // мелкое — без потерь, без мипмапов (TextureIntent::Nearest).
+        if (texOpts.Intent == TextureIntent::Albedo && LooksLikePixelArt(sourcePath, w, h))
+            texOpts.Intent = TextureIntent::Nearest;
+    }
 
     std::error_code ec;
     fs::create_directories(fs::path(r.OutputPath).parent_path(), ec);

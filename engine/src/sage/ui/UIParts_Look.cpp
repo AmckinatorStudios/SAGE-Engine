@@ -50,6 +50,19 @@ void DrawPicture(UIRenderer& ui, const PictureParams& p, const UIRect& r, float 
     if (!p.Tex || alpha <= 0.0f || r.w <= 0.0f || r.h <= 0.0f) return;
     const UIRenderer::Sprite& src = p.Src;
     const auto mode = (Image::Mode)p.Fit;
+    // ПИКСЕЛЬНАЯ КАРТИНКА ПОД МАСШТАБИРУЕМЫМ ХОЛСТОМ — ЦЕЛЫМ ШАГОМ. Холст
+    // «подгонять под разрешение» даёт дробный масштаб (1366×768 при опорном
+    // 1920×1080 — 0.71), и картинка ближайшим соседом выходила с линиями
+    // разной толщины — каждая своя на каждом разрешении. Шаг пикселя такой
+    // картинки округляется (PixelStep), а её место в раскладке не меняется:
+    // она встаёт по центру своего прямоугольника. На холсте «в пикселях»
+    // размеры задаёт автор, и движок их не трогает.
+    const bool sharp = p.Tex->Filter() == TextureFilter::Nearest;
+    const bool pixelArt = sharp && std::fabs(canvasScale - 1.0f) > 1e-3f;
+    auto sliceScale = [&]() {
+        const float k = SlicedPixelScale(p.PixelScale, p.SnapPixels, canvasScale);
+        return pixelArt && !p.SnapPixels ? PixelStep(k) : k;
+    };
 
     // РЕЖИМ РЕШАЕТ, ЧЕМ РИСОВАТЬ: девятина и замощение — нарезкой, остальное
     // одним квадом.
@@ -60,7 +73,7 @@ void DrawPicture(UIRenderer& ui, const PictureParams& p, const UIRect& r, float 
         const float srcH = src.Whole() ? (float)p.Tex->Height() : src.H;
         float tileW = 0.0f, tileH = 0.0f;
         TileSize(srcW, srcH, p.Repeat.x, p.Repeat.y, r.w, r.h,
-                 SlicedPixelScale(p.PixelScale, p.SnapPixels, canvasScale), tileW, tileH);
+                 sliceScale(), tileW, tileH);
         ui.ImageTiled(r.x, r.y, r.w, r.h, p.Tex, src, tileW, tileH, rgb, alpha);
         return;
     }
@@ -75,7 +88,7 @@ void DrawPicture(UIRenderer& ui, const PictureParams& p, const UIRect& r, float 
             slice.DrawCenter = true;
         }
         ui.ImageSliced(r.x, r.y, r.w, r.h, p.Tex, src, slice,
-                       SlicedPixelScale(p.PixelScale, p.SnapPixels, canvasScale), rgb, alpha);
+                       sliceScale(), rgb, alpha);
         return;
     }
 
@@ -92,7 +105,7 @@ void DrawPicture(UIRenderer& ui, const PictureParams& p, const UIRect& r, float 
     if (mode == Image::Mode::Fit || mode == Image::Mode::Cover) {
         const ImagePlacement fit =
             PlaceImage(r, src.Whole() ? 0.0f : src.X, src.Whole() ? 0.0f : src.Y, srcW, srcH,
-                       mode == Image::Mode::Cover, p.SnapPixels);
+                       mode == Image::Mode::Cover, p.SnapPixels || pixelArt);
         ui.ImageSprite(fit.Dst.x, fit.Dst.y, fit.Dst.w, fit.Dst.h, p.Tex,
                        {fit.SrcX, fit.SrcY, fit.SrcW, fit.SrcH}, rgb, alpha);
         return;
@@ -104,7 +117,16 @@ void DrawPicture(UIRenderer& ui, const PictureParams& p, const UIRect& r, float 
     // картинки, честнее.
     UIRect dst = r;
     float pixels = p.PixelScale * canvasScale;
-    if ((p.SnapPixels || pixels > 0.0f) && srcW > 0.0f && srcH > 0.0f) {
+    if (pixelArt && !p.SnapPixels && srcW > 0.0f && srcH > 0.0f) {
+        // По осям отдельно: растянутая в полосу картинка (линия, шкала)
+        // остаётся полосой, просто каждый её пиксель — целого размера.
+        const float kx = PixelStep(pixels > 0.0f ? pixels : r.w / srcW);
+        const float ky = PixelStep(pixels > 0.0f ? pixels : r.h / srcH);
+        dst.w = srcW * kx;
+        dst.h = srcH * ky;
+        dst.x = r.x + std::round((r.w - dst.w) * 0.5f);
+        dst.y = r.y + std::round((r.h - dst.h) * 0.5f);
+    } else if ((p.SnapPixels || pixels > 0.0f) && srcW > 0.0f && srcH > 0.0f) {
         if (pixels <= 0.0f) {
             pixels = std::min(r.w / srcW, r.h / srcH);
             if (p.SnapPixels) pixels = std::max(1.0f, std::floor(pixels));
@@ -142,7 +164,12 @@ const Texture* LookTexture(const Look& look) {
         // подмешивают в края куска соседний спрайт.
         look.Tex = look.Sharp() ? ResourceManager::Instance().GetTexture(
                                       look.Texture, TextureFilter::Nearest, /*mipmaps=*/false)
-                                : ResourceManager::Instance().GetTexture(look.Texture);
+                                // Гладкая — с цветом под прозрачностью от соседей
+                                // (bleed): иначе фильтр подмешивал к краю
+                                // невидимый чёрный или белый, и вокруг картинки
+                                // с прозрачностью шла тёмная или светлая кайма.
+                                : ResourceManager::Instance().GetTexture(look.Texture, TextureFilter::Trilinear,
+                                                                         /*mipmaps=*/true, /*bleed=*/true);
         look.TexPath = look.Texture;
         look.TexFiltering = look.Filtering;
     }

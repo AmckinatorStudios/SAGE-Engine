@@ -230,6 +230,27 @@ public:
     void PushClipRect(float x, float y, float w, float h);
     void PopClipRect();
 
+    // МАСКА ПО ФОРМЕ — то, чего не умеют ножницы: скруглённое окно, картинка
+    // (видно там, где у неё альфа), мягкий край, инверсия (видно всё, кроме
+    // окна). Режется в шейдере по пикселям. Вложенная маска заменяет внешнюю
+    // форму (ножницы при этом по-прежнему пересекаются).
+    struct Mask {
+        glm::vec4 Rect{0.0f};            // окно маски: x, y, w, h (экранные)
+        float Radius = 0.0f;             // скругление углов окна
+        float Feather = 0.0f;            // мягкий край, пикселей
+        bool Invert = false;
+        const Texture* Image = nullptr;  // маска-картинка (альфа)
+        glm::vec4 UV{0.0f, 1.0f, 1.0f, 0.0f}; // её кусок: u0, v0, u1, v1
+        bool operator==(const Mask& o) const {
+            return Rect == o.Rect && Radius == o.Radius && Feather == o.Feather && Invert == o.Invert &&
+                   Image == o.Image && UV == o.UV;
+        }
+    };
+    void PushMask(const Mask& mask);
+    void PopMask();
+    // Кусок картинки (в пикселях файла, сверху вниз) — в UV маски.
+    static glm::vec4 MaskUV(const Texture& tex, Sprite src);
+
     // Шрифт из файла (.ttf/.otf) с запоминанием: одна и та же надпись рисуется
     // каждый кадр, и читать файл заново было бы разорительно. nullptr — файл
     // не открылся (о причине — один раз в лог, дальше молча: иначе битый путь
@@ -249,6 +270,12 @@ public:
     // Ширина строки в экранных пикселях при данном масштабе (для вёрстки).
     // Учитывает текущий шрифт (пропорциональные метрики TrueType).
     float MeasureText(const std::string& text, float scale, const UITextStyle& style = UITextStyle{}) const;
+    // Ширина по чернилам букв (см. Font::MeasureInk) — для выравнивания.
+    float MeasureTextInk(const std::string& text, float scale, const UITextStyle& style = UITextStyle{}) const;
+    // Высота «тела» строки для центрирования по вертикали: у шрифта с
+    // пиксельной сеткой — от верха до базовой линии (заглавные буквы), у
+    // остальных — строка целиком.
+    float TextBodyHeight(float scale, const UITextStyle& style = UITextStyle{}) const;
     // Множитель шрифта относительно базовой высоты запекания (у пиксельного
     // шрифта — целый). Открыт наружу, потому что по нему выравнивают вёрстку.
     float FontScale(float scale, const Font* font = nullptr, bool snapPixels = false) const;
@@ -300,6 +327,8 @@ private:
         const Font* TextFont = nullptr;
         bool Clipped = false;
         glm::vec4 Clip{0.0f}; // x, y, w, h (экранные координаты, верхний левый угол)
+        bool Masked = false;
+        Mask Shape;           // маска по форме (если Masked)
     };
 
     // bottomColor/bottomAlpha — необязательный цвет НИЖНИХ вершин: так один
@@ -313,6 +342,10 @@ private:
     glm::vec2 Rotated(float x, float y) const;
     // Края прямоугольника — на целые пиксели (кроме повёрнутого). См. .cpp.
     void SnapRect(float& x, float& y, float& w, float& h) const;
+    // Ограничить выборку куском листа (см. .cpp); снимается после куска.
+    void BeginSpriteClamp(const Texture& tex, Sprite src);
+    glm::vec4 m_uvClamp{0.0f, 0.0f, 1.0f, 1.0f};
+    bool m_uvClampOn = false;
 
     glm::vec2 m_rotCenter{0.0f, 0.0f};
     float m_rotCos = 1.0f, m_rotSin = 0.0f;   // уже умножены на масштаб
@@ -346,6 +379,7 @@ private:
     std::vector<UIVertex> m_vertices; // все квады кадра (прямоугольники, картинки, глифы)
     std::vector<Segment> m_segments;
     std::vector<glm::vec4> m_clipStack; // текущие маски (уже пересечённые)
+    std::vector<Mask> m_maskStack;      // маски по форме (действует верхняя)
     size_t m_quadCount = 0;
 
     std::unique_ptr<sage::rhi::Geometry> m_geometry;

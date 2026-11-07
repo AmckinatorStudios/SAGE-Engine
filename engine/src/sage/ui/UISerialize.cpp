@@ -159,6 +159,7 @@ void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
     if (t->Scale != 1.0f) tj["scale"] = t->Scale;
     if (t->Opacity != 1.0f) tj["opacity"] = t->Opacity;
     tj["order"] = t->Order;
+    if (t->DrawLayer != 0) tj["drawLayer"] = t->DrawLayer;
     tj["visible"] = t->Visible;
     tj["active"] = t->Active;
     tj["locked"] = t->Locked;
@@ -201,7 +202,8 @@ void ResolveImageTextureImpl(sage::ui::Image& im) {
     } else {
         im.Tex = im.Sharp() ? ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Nearest,
                                                                      /*mipmaps=*/false)
-                            : ResourceManager::Instance().GetTexture(im.Path);
+                            : ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Trilinear,
+                                                                     /*mipmaps=*/true, /*bleed=*/true);   // без каймы
     }
     im.TexPath = im.Path;
     im.TexFiltering = im.Filtering;
@@ -234,6 +236,7 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
         t.Scale = tj.value("scale", t.Scale);
         t.Opacity = tj.value("opacity", t.Opacity);
         t.Order = tj.value("order", tj.value("layer", t.Order));
+        t.DrawLayer = tj.value("drawLayer", t.DrawLayer);
         t.Visible = tj.value("visible", t.Visible);
         t.Active = tj.value("active", t.Active);
         t.Locked = tj.value("locked", t.Locked);

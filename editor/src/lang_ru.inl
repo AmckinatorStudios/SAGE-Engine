@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 3653.
+// Язык: Русский. Строк: 3660.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -374,6 +374,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "О SAGE"},
     {"About SAGE...",
      "О SAGE…"},
+    {"Above the whole interface, not only the siblings: a higher layer is\ndrawn over everything with a lower one. 0 — as the parent.",
+     "Поверх всего интерфейса, а не только соседей: элемент с большим слоем\nрисуется поверх всех с меньшим. 0 — как у родителя."},
     {"Abs",
      "Модуль"},
     {"Accent colour",
@@ -668,6 +670,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Площадной свет"},
     {"Argument",
      "Аргумент"},
+    {"Around",
+     "Вокруг каждого"},
     {"Around the element centre. The handle above the top edge\ndoes the same with the mouse.",
      "Вокруг центра элемента. Ручка над верхним краем\nделает то же мышью."},
     {"Arrange:",
@@ -1966,6 +1970,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Вызовов"},
     {"Draw as",
      "Рисовать как"},
+    {"Draw layer",
+     "Слой отрисовки"},
     {"Draw the middle",
      "Рисовать середину"},
     {"Draw the particle too",
@@ -2206,6 +2212,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ошибки: показать или скрыть. Ctrl+щелчок — только они."},
     {"Even",
      "Поровну"},
+    {"Evenly",
+     "Равномерно"},
     {"Event",
      "Событие"},
     {"Events",
@@ -3080,6 +3088,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Между ключами"},
     {"Invalid project file: ",
      "Файл проекта испорчен: "},
+    {"Invert",
+     "Наоборот"},
     {"Invert background",
      "Инверсия фона"},
     {"Invert, glow, blur, dissolve… on this object only",
@@ -3418,6 +3428,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Помечает объект статикой для запекания света"},
     {"Mask",
      "Маска"},
+    {"Mask picture",
+     "Картинка маски"},
     {"Mass",
      "Масса"},
     {"Match width/height",
@@ -5724,6 +5736,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Мягкие"},
     {"Soft circle",
      "Мягкий круг"},
+    {"Soft edge",
+     "Мягкий край"},
     {"Soft landing",
      "Сильное замедление"},
     {"Soft light from all around: from the sky or your own colours",

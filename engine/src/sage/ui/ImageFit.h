@@ -70,6 +70,16 @@ inline ImagePlacement PlaceImage(const UIRect& rect, float srcX, float srcY, flo
 // выглядело как «девятина не работает вовсе». Теперь пиксель исходника — это
 // пиксель интерфейса (помноженный на масштаб холста), и угол остаётся своего
 // размера при любом размере элемента. Крупнее — поле «размер пикселя».
+// ЦЕЛЫЙ ШАГ ПИКСЕЛЯ КАРТИНКИ: сколько экранных пикселей на её пиксель,
+// округлённое до целого (крупнее единицы) или до 1/n (мельче). При дробном
+// шаге ближайший сосед рисует одни пиксели картинки в два экранных, соседние —
+// в один, и однопиксельные линии рисунка выходят разной толщины.
+inline float PixelStep(float k) {
+    if (k <= 0.0f) return k;
+    if (k >= 1.0f) return std::max(1.0f, std::round(k));
+    return 1.0f / std::max(1.0f, std::round(1.0f / k));
+}
+
 inline float SlicedPixelScale(float pixelScale, bool snapPixels, float canvasScale) {
     float k = (pixelScale > 0.0f ? pixelScale : 1.0f) * (canvasScale > 0.0f ? canvasScale : 1.0f);
     if (snapPixels) k = std::max(1.0f, std::floor(k));

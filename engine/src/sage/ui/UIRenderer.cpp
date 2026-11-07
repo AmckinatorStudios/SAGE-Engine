@@ -38,8 +38,10 @@ out vec2 vUV;
 out vec2 vLocal;
 out vec2 vHalf;
 out vec2 vParams;
+out vec2 vScreen;
 uniform mat4 uProjection;
 void main() {
+    vScreen = aPos.xy;
     vColor = aColor;
     vUV = aUV;
     vLocal = aLocal;
@@ -55,8 +57,18 @@ in vec2 vUV;
 in vec2 vLocal;
 in vec2 vHalf;
 in vec2 vParams;
+in vec2 vScreen;
 out vec4 FragColor;
 uniform sampler2D uTex;
+// Маска по форме (UIRenderer::PushMask): 0 — нет, 1 — окно со скруглением,
+// 2 — картинка. uMaskRect — окно (x, y, w, h), uMaskUV — кусок картинки.
+uniform int uMaskMode;
+uniform vec4 uMaskRect;
+uniform float uMaskRadius;
+uniform float uMaskFeather;
+uniform int uMaskInvert;
+uniform sampler2D uMaskTex;
+uniform vec4 uMaskUV;
 uniform int uMode; // 0 — сплошные квады + глифы шрифта; 1 — текстурная картинка
 // Картинка хранится в sRGB-формате (цвет, собранный кодом, текстура
 // материала): выборка отдаёт ЛИНЕЙНЫЕ значения, а интерфейс пишет в кадр как
@@ -102,6 +114,22 @@ void main() {
         } else {
             col.a *= 1.0 - smoothstep(-aa, aa, d);
         }
+    }
+    if (uMaskMode != 0) {
+        float m = 1.0;
+        vec2 hs = uMaskRect.zw * 0.5;
+        vec2 p = vScreen - (uMaskRect.xy + hs);
+        // Расстояние до окна: мягкий край — затухание на uMaskFeather внутрь,
+        // без него — сглаживание в пиксель (как у скруглённой подложки).
+        float d = RoundedBoxSDF(p, hs, min(uMaskRadius, min(hs.x, hs.y)));
+        float soft = max(uMaskFeather, max(fwidth(d), 0.0001) * 0.75);
+        m = uMaskFeather > 0.0 ? clamp(-d / uMaskFeather, 0.0, 1.0) : 1.0 - smoothstep(-soft, soft, d);
+        if (uMaskMode == 2) {
+            vec2 t = clamp((vScreen - uMaskRect.xy) / max(uMaskRect.zw, vec2(1e-4)), 0.0, 1.0);
+            m *= texture(uMaskTex, mix(uMaskUV.xy, uMaskUV.zw, t)).a;
+        }
+        if (uMaskInvert == 1) m = 1.0 - m;
+        col.a *= m;
     }
     if (uPremul == 1) col.rgb *= col.a;
     FragColor = col;
@@ -193,6 +221,7 @@ void UIRenderer::Begin(int screenWidth, int screenHeight) {
     m_vertices.clear();
     m_segments.clear();
     m_clipStack.clear();
+    m_maskStack.clear();
     m_blend = UIBlend::Normal;
     m_quadCount = 0;
 }
@@ -200,13 +229,15 @@ void UIRenderer::Begin(int screenWidth, int screenHeight) {
 UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image, const Font* font) {
     bool clipped = !m_clipStack.empty();
     glm::vec4 clip = clipped ? m_clipStack.back() : glm::vec4(0.0f);
+    const bool masked = !m_maskStack.empty();
     if (!m_segments.empty()) {
         Segment& last = m_segments.back();
         // Шрифт — такая же смена состояния, как текстура: у каждого свой атлас,
         // и склеить в один кусок глифы двух шрифтов значит взять буквы второго
         // из картинки первого.
         if (last.Image == image && last.TextFont == font && last.Clipped == clipped &&
-            last.Blend == m_blend && (!clipped || last.Clip == clip)) {
+            last.Blend == m_blend && (!clipped || last.Clip == clip) && last.Masked == masked &&
+            (!masked || last.Shape == m_maskStack.back())) {
             return last; // состояние не изменилось — продолжаем батч
         }
     }
@@ -217,6 +248,8 @@ UIRenderer::Segment& UIRenderer::CurrentSegment(const Texture* image, const Font
     seg.Blend = m_blend;
     seg.Clipped = clipped;
     seg.Clip = clip;
+    seg.Masked = masked;
+    if (masked) seg.Shape = m_maskStack.back();
     m_segments.push_back(seg);
     return m_segments.back();
 }
@@ -363,6 +396,10 @@ void UIRenderer::PushImageQuad(float x, float y, float w, float h, glm::vec2 uv0
     // фоном и подписью поворачивалось всё, кроме её значка.
     const glm::vec2 p0 = Rotated(x, y), p1 = Rotated(x + w, y);
     const glm::vec2 p2 = Rotated(x + w, y + h), p3 = Rotated(x, y + h);
+    if (m_uvClampOn) {
+        uv0 = glm::clamp(uv0, glm::vec2(m_uvClamp.x, m_uvClamp.y), glm::vec2(m_uvClamp.z, m_uvClamp.w));
+        uv1 = glm::clamp(uv1, glm::vec2(m_uvClamp.x, m_uvClamp.y), glm::vec2(m_uvClamp.z, m_uvClamp.w));
+    }
     // Half = 0 — SDF выключен: у куска листа нет своей формы, он прямоугольный.
     m_vertices.push_back({p0.x, p0.y, 0.0f, r, g, b, a, uv0.x, uv0.y, 0, 0, 0, 0, 0, 0});
     m_vertices.push_back({p1.x, p1.y, 0.0f, r, g, b, a, uv1.x, uv0.y, 0, 0, 0, 0, 0, 0});
@@ -394,12 +431,33 @@ SpriteUV ResolveSprite(const Texture& tex, const UIRenderer::Sprite& s) {
 }
 } // namespace
 
+// ОТСТУП ВЫБОРКИ ВНУТРИ КУСКА ЛИСТА. Гладкая фильтрация берёт четыре соседних
+// пикселя атласа, и на краю куска это пиксели СОСЕДНЕГО спрайта: у кнопки
+// проступала кайма чужого цвета. Выборка ограничивается куском с отступом в
+// полпикселя — дальше неё фильтр не дотягивается. Ближайшему соседу отступ не
+// нужен (он берёт ровно один пиксель, а центры экранных пикселей и так внутри
+// куска), и полпикселя сдвинули бы ему крайний столбец — ему оставлена
+// тысячная доля пикселя против ошибки округления на самой границе.
+void UIRenderer::BeginSpriteClamp(const Texture& tex, Sprite src) {
+    m_uvClampOn = false;
+    if (src.Whole() || tex.Width() <= 0 || tex.Height() <= 0) return;
+    const float tw = (float)tex.Width(), th = (float)tex.Height();
+    const float inset = tex.Filter() == TextureFilter::Nearest ? 0.001f : 0.5f;
+    const float ix = std::min(inset, src.W * 0.5f), iy = std::min(inset, src.H * 0.5f);
+    const float u0 = (src.X + ix) / tw, u1 = (src.X + src.W - ix) / tw;
+    const float va = SheetV(src.Y + iy, th), vb = SheetV(src.Y + src.H - iy, th);
+    m_uvClamp = {u0, std::min(va, vb), u1, std::max(va, vb)};
+    m_uvClampOn = true;
+}
+
 void UIRenderer::ImageSprite(float x, float y, float w, float h, const Texture* texture,
                              Sprite src, glm::vec3 tint, float alpha) {
     if (!texture) return;
     CurrentSegment(texture).QuadCount++;
     const SpriteUV uv = ResolveSprite(*texture, src);
+    BeginSpriteClamp(*texture, src);
     PushImageQuad(x, y, w, h, uv.uv0, uv.uv1, tint, alpha);
+    m_uvClampOn = false;
 }
 
 void UIRenderer::ImageNineSlice(float x, float y, float w, float h, const Texture* texture,
@@ -456,11 +514,13 @@ void UIRenderer::ImageSliced(float x, float y, float w, float h, const Texture* 
 
     const float tw = (float)texture->Width(), th = (float)texture->Height();
     CurrentSegment(texture).QuadCount += (int)quads.size();
+    BeginSpriteClamp(*texture, src);
     for (const sage::ui::SliceQuad& q : quads) {
         PushImageQuad(q.DstX, q.DstY, q.DstW, q.DstH,
                       {q.SrcX / tw, SheetV(q.SrcY, th)},
                       {(q.SrcX + q.SrcW) / tw, SheetV(q.SrcY + q.SrcH, th)}, tint, alpha);
     }
+    m_uvClampOn = false;
 }
 
 void UIRenderer::ImageTiled(float x, float y, float w, float h, const Texture* texture, Sprite src,
@@ -474,11 +534,13 @@ void UIRenderer::ImageTiled(float x, float y, float w, float h, const Texture* t
     if (quads.empty()) return;
     const float tw = (float)texture->Width(), th = (float)texture->Height();
     CurrentSegment(texture).QuadCount += (int)quads.size();
+    BeginSpriteClamp(*texture, src);
     for (const sage::ui::SliceQuad& q : quads) {
         PushImageQuad(q.DstX, q.DstY, q.DstW, q.DstH,
                       {q.SrcX / tw, SheetV(q.SrcY, th)},
                       {(q.SrcX + q.SrcW) / tw, SheetV(q.SrcY + q.SrcH, th)}, tint, alpha);
     }
+    m_uvClampOn = false;
 }
 
 void UIRenderer::PushFreeQuad(const glm::vec2 p[4], const glm::vec3 c[4], const float a[4]) {
@@ -559,6 +621,22 @@ void UIRenderer::PushClipRect(float x, float y, float w, float h) {
         rect = {x0, y0, glm::max(x1 - x0, 0.0f), glm::max(y1 - y0, 0.0f)};
     }
     m_clipStack.push_back(rect);
+}
+
+void UIRenderer::PushMask(const Mask& mask) { m_maskStack.push_back(mask); }
+
+void UIRenderer::PopMask() {
+    if (m_maskStack.empty()) {
+        LOG_WARN("UIRenderer") << "PopMask без парного PushMask — игнорирую";
+        return;
+    }
+    m_maskStack.pop_back();
+}
+
+glm::vec4 UIRenderer::MaskUV(const Texture& tex, Sprite src) {
+    if (src.Whole() || tex.Width() <= 0 || tex.Height() <= 0) return {0.0f, 1.0f, 1.0f, 0.0f};
+    const float tw = (float)tex.Width(), th = (float)tex.Height();
+    return {src.X / tw, 1.0f - src.Y / th, (src.X + src.W) / tw, 1.0f - (src.Y + src.H) / th};
 }
 
 void UIRenderer::PopClipRect() {
@@ -733,6 +811,21 @@ float UIRenderer::LineHeight(float scale, const UITextStyle& style) const {
     return TextHeight(scale) * 1.6f; // без шрифта — векторный fallback
 }
 
+float UIRenderer::MeasureTextInk(const std::string& text, float scale, const UITextStyle& style) const {
+    const Font* font = FontOf(style);
+    if (!font || text.empty()) return MeasureText(text, scale, style);
+    float extra = 0.0f;
+    if (style.Bold) extra += BoldOffset(scale, font);
+    if (style.Italic) extra += LineHeight(scale, style) * 0.21f * 0.5f;
+    return font->MeasureInk(text, FontScale(scale, font, style.SnapPixels)) + extra;
+}
+
+float UIRenderer::TextBodyHeight(float scale, const UITextStyle& style) const {
+    const Font* font = FontOf(style);
+    if (font && font->GridUnit() > 0.0f) return font->Ascent(FontScale(scale, font, style.SnapPixels));
+    return LineHeight(scale, style);
+}
+
 float UIRenderer::MeasureText(const std::string& text, float scale, const UITextStyle& style) const {
     if (text.empty()) return 0.0f;
     const Font* font = FontOf(style);
@@ -770,6 +863,10 @@ void UIRenderer::End() {
                                << " незакрытых PushClipRect — закрываю принудительно";
         m_clipStack.clear();
     }
+    if (!m_maskStack.empty()) {
+        LOG_WARN("UIRenderer") << "End(): " << m_maskStack.size() << " незакрытых PushMask — закрываю";
+        m_maskStack.clear();
+    }
     if (m_quadCount == 0) return;
 
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
@@ -806,14 +903,22 @@ void UIRenderer::End() {
             const float cw = seg.Clip.z * m_viewScale;
             const float ch = seg.Clip.w * m_viewScale;
             // glScissor ждёт левый НИЖНИЙ угол — переворачиваем Y.
-            const int sy = m_fbHeight - (int)(cy + ch);
-            device.SetScissor(true, (int)cx, sy, (int)cw, (int)ch);
+            // Края — ОКРУГЛЕНИЕМ: отбрасывание дробной части срезало у списка
+            // крайний столбец пикселей при отдалённом холсте редактора.
+            const int x0 = (int)std::lround(cx), x1 = (int)std::lround(cx + cw);
+            const int y0 = (int)std::lround(cy), y1 = (int)std::lround(cy + ch);
+            device.SetScissor(true, x0, m_fbHeight - y1, std::max(0, x1 - x0), std::max(0, y1 - y0));
         } else {
             device.SetScissor(false);
         }
         {
+            // ОБЫЧНОЕ СМЕШИВАНИЕ — С ДОМНОЖЕННОЙ АЛЬФОЙ (ONE, 1 - a). Цвет тот
+            // же, что у (a, 1 - a), но альфа цели считается верно: a + d·(1 - a).
+            // Прежнее смешивание умножало альфу саму на себя, и интерфейс,
+            // нарисованный в прозрачную цель (съёмка в текстуру, слой),
+            // выходил там вдвое прозрачнее: полупрозрачная панель — на четверть.
             using BM = sage::rhi::GraphicsDevice::BlendMode;
-            BM mode = BM::Alpha;
+            BM mode = BM::Premultiplied;
             switch (seg.Blend) {
                 case UIBlend::Additive: mode = BM::Additive; break;
                 case UIBlend::Multiply: mode = BM::Multiply; break;
@@ -822,7 +927,22 @@ void UIRenderer::End() {
                 default: break;
             }
             device.SetBlendMode(mode);
-            m_shader.SetInt("uPremul", seg.Blend == UIBlend::Normal ? 0 : 1);
+            m_shader.SetInt("uPremul", 1);
+        }
+        if (seg.Masked) {
+            const Mask& m = seg.Shape;
+            m_shader.SetInt("uMaskMode", m.Image ? 2 : 1);
+            m_shader.SetVec4("uMaskRect", m.Rect);
+            m_shader.SetFloat("uMaskRadius", m.Radius);
+            m_shader.SetFloat("uMaskFeather", m.Feather);
+            m_shader.SetInt("uMaskInvert", m.Invert ? 1 : 0);
+            m_shader.SetVec4("uMaskUV", m.UV);
+            if (m.Image) {
+                m_shader.SetInt("uMaskTex", 1);
+                m.Image->Bind(1);
+            }
+        } else {
+            m_shader.SetInt("uMaskMode", 0);
         }
         if (seg.Image) {
             m_shader.SetInt("uMode", 1);

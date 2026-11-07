@@ -210,6 +210,10 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
                                       "does the same with the mouse."));
         ImGui::DragInt(T("Order"), &xf->Order, 1); host.TrackLastImGuiItem();
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Higher draws on top of its siblings"));
+        ImGui::DragInt(T("Draw layer"), &xf->DrawLayer, 1); host.TrackLastImGuiItem();
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Above the whole interface, not only the siblings: a higher layer is\n"
+                                      "drawn over everything with a lower one. 0 — as the parent."));
         DrawGroupSettings(host, e);
         ImGui::TreePop();
     }

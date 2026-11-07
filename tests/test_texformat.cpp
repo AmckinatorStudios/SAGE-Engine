@@ -8,6 +8,9 @@
 
 #include "sage/assets/format/TextureFormat.h"
 #include "sage/assets/import/Convert.h"
+#include <filesystem>
+#include <system_error>
+#include <stb_image_write.h>
 
 #include <algorithm>
 #include <cmath>
@@ -286,4 +289,28 @@ TEST(convert_guesses_texture_intent_from_name) {
     CHECK_TRUE(IsConvertibleModel("thing.bbmodel"));
     // Свой формат конвертировать в себя незачем.
     CHECK_FALSE(IsConvertibleModel("already.sagemesh"));
+}
+
+// Конвертация в .sagetex не жмёт пиксельную картинку: спрайт интерфейса 16×16
+// уходил в BC1/BC3 (блоки 4×4 с двумя опорными цветами) — у каждого второго
+// пикселя другой цвет и рваные однопиксельные линии.
+TEST(texture_convert_keeps_pixel_art_lossless) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "sage_convert_pixelart";
+    fs::create_directories(dir);
+    const int w = 16, h = 16;
+    const std::vector<uint8_t> src = MakeImage(w, h, true);
+    const std::string png = (dir / "heart.png").string();
+    CHECK_TRUE(stbi_write_png(png.c_str(), w, h, 4, src.data(), w * 4) != 0);
+    ConvertOptions opts;
+    opts.Overwrite = true;
+    const ConvertResult r = ConvertAnyToNative(png, {}, opts);
+    CHECK_TRUE(r.Ok);
+    TextureData t;
+    std::string err;
+    CHECK_TRUE(ReadTextureFile(r.OutputPath, t, err));
+    CHECK_TRUE(t.Format == TexturePixelFormat::RGBA8);
+    CHECK_EQ((int)t.Levels.size(), 1);
+    std::error_code ec;
+    fs::remove_all(dir, ec);
 }
