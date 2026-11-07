@@ -6,6 +6,7 @@
 #include "sage/render/DebugView.h"
 #include "sage/assets/Pack.h"
 #include "sage/assets/GameInfo.h"
+#include "sage/assets/UserContent.h"
 #include "sage/core/Paths.h"
 
 #include <algorithm>
@@ -224,6 +225,11 @@ void PlayerLayer::OnAttach() {
     {
         sage::assets::GameInfo info;
         if (!sage::assets::LoadGameInfo(m_projectDir, info) || info.Name.empty()) info.Name = m_projectName;
+        // Пользовательские папки: у собранной игры (пакет смонтирован) — рядом
+        // с ней, у запуска из проекта — в папке данных игры.
+        sage::assets::usercontent::Configure(
+            info.UserFolders, sage::assets::vfs::Mounted() ? sage::ExecutableDir() : std::filesystem::path(),
+            sage::assets::vfs::Mounted() ? std::filesystem::path() : m_projectDir);
         app.GetWindow().SetTitle(info.Name);
         sage::assets::IconImage icon;
         if (!info.Icon.empty() && sage::assets::LoadIconImage(info.Icon, icon)) {

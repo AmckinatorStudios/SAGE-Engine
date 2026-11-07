@@ -453,6 +453,7 @@ private:
     void RegisterBillboardApi();  // AddBillboard/…
     void RegisterAudioApi();      // PlaySound/PlayMusic/…
     void RegisterSaveApi();       // sage.save.* — прогресс игрока
+    void RegisterUserFolderApi(); // user_folder.*: открытые папки для файлов игрока
     void RegisterTimerApi();      // Schedule/Repeat/StartCoroutine + wait()
     void RegisterMessagingApi();  // SendMessage/Broadcast (см. DispatchMessage)
     void RegisterLaunchArgsApi(); // LaunchArg/LaunchFlag
@@ -562,6 +563,8 @@ private:
     // Параметры запуска (LaunchArg из Lua). Таблица Lua завести нельзя до
     // RegisterEngineApi, поэтому храним на стороне C++ и отдаём по запросу.
     std::unordered_map<std::string, std::string> m_launchArgs;
+    // user_folder.changed: последний отпечаток содержимого каждой папки.
+    std::unordered_map<std::string, std::string> m_userFolderSignatures;
 
     // Папки, в которых require ищет модули (с завершающим '/'). Свои, а не
     // разбор package.path обратно: строка шаблонов — формат для человека, а не

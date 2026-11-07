@@ -1337,6 +1337,7 @@ function Script:OnAnimationEvent(name) end
 ---@field time sage.time
 ---@field tween sage.tween
 ---@field ui sage.ui
+---@field user_folder sage.user_folder
 ---@field visual sage.visual
 ---@field volumetric sage.volumetric
 sage = {}
@@ -2678,6 +2679,31 @@ function sage.ui.Sheet(path) end
 function sage.ui.SpawnDemo(name) end
 ---@return integer
 function sage.ui.SpawnShowcase() end
+
+---@class sage.user_folder
+sage.user_folder = {}
+
+---Короткое имя того же модуля: `user_folder.X()` — это ТОТ ЖЕ объект,
+---что `sage.user_folder`, а не копия. Движок ставит его, только если имя
+---свободно: игра, объявившая своё, остаётся при своём.
+---@type sage.user_folder
+user_folder = nil
+
+---@param name string
+---@return boolean
+function sage.user_folder.changed(name) end
+---@return table
+function sage.user_folder.folders() end
+---@param name string
+---@param recursive? boolean
+---@return table
+function sage.user_folder.list(name, recursive) end
+---@param name string
+---@return boolean
+function sage.user_folder.open(name) end
+---@param name string
+---@return string
+function sage.user_folder.path(name) end
 
 ---@class sage.visual
 sage.visual = {}

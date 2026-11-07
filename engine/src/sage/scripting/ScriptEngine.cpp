@@ -163,6 +163,8 @@ void ScriptEngine::RegisterEngineApi() {
         mod("billboards", "спрайты-билборды", {"math"}, true, &ScriptEngine::RegisterBillboardApi),
         mod("audio", "звук и музыка", {"object"}, true, &ScriptEngine::RegisterAudioApi),
         mod("save", "сохранение прогресса", {}, true, &ScriptEngine::RegisterSaveApi),
+        mod("user_folder", "пользовательские папки игры: скины, музыка, моды", {}, true,
+            &ScriptEngine::RegisterUserFolderApi),
         mod("timers", "Schedule/Repeat, корутины", {}, false, &ScriptEngine::RegisterTimerApi),
         mod("messaging", "SendMessage/Broadcast", {"object"}, true, &ScriptEngine::RegisterMessagingApi),
         mod("args", "параметры запуска", {}, true, &ScriptEngine::RegisterLaunchArgsApi),

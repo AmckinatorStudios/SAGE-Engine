@@ -85,6 +85,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/assets/Pack.cpp
     src/sage/assets/GameBuild.cpp
     src/sage/assets/GameInfo.cpp
+    src/sage/assets/UserContent.cpp
     src/sage/assets/VfsImage.cpp
     src/sage/assets/Zip.cpp
     src/sage/render/DebugDraw.cpp
@@ -369,7 +370,8 @@ endif()
 if (WIN32)
     # dbghelp — символы в стеке вызовов отчёта о падении (CrashHandler).
     # ws2_32 — Winsock: UDP-сокеты сетевого модуля (sage/net/UdpSocket).
-    target_link_libraries(sage_engine PUBLIC opengl32 dbghelp ws2_32)
+    # shell32 — ShellExecuteW: открыть пользовательскую папку игры в проводнике.
+    target_link_libraries(sage_engine PUBLIC opengl32 dbghelp ws2_32 shell32)
 elseif (APPLE)
     # macOS: OpenGL — системный фреймворк (3.3 core есть на любом Mac с
     # 10.9); Cocoa/IOKit/CoreVideo — окно GLFW; CoreAudio/AudioToolbox —

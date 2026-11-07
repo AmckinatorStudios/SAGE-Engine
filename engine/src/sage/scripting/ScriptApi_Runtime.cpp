@@ -1,6 +1,7 @@
 #include "sage/core/LocalTime.h"
 #include <filesystem>
 #include "sage/core/Paths.h"
+#include "sage/assets/UserContent.h"
 #include "sage/render/Screenshot.h"
 #include "ScriptEngine.h"
 
@@ -149,6 +150,72 @@ void ScriptEngine::RegisterSaveApi() {
         int i = 1;
         for (const sage::save::SlotInfo& s : sage::save::Slots()) {
             out[i++] = SlotInfoToLua(s, m_lua);
+        }
+        return out;
+    });
+}
+
+// Пользовательские папки игры (sage/assets/UserContent.h): скины, музыка,
+// моды игрока. Только объявленные в проекте имена — произвольный путь диска
+// через этот вход не открыть.
+void ScriptEngine::RegisterUserFolderApi() {
+    namespace uc = sage::assets::usercontent;
+    auto require = [](const std::string& name, const char* fn) {
+        if (!uc::Find(name))
+            throw std::runtime_error(std::string("user_folder.") + fn + ": папка «" + name +
+                                     "» не объявлена в проекте (Настройки игры → Пользовательские папки)");
+    };
+    // user_folder.path(имя) — полный путь папки (создаётся при первом обращении).
+    Bind("user_folder", "path", nullptr, [require](const std::string& name) -> std::string {
+        require(name, "path");
+        return sage::PathToUtf8(uc::Resolve(name));
+    });
+    // user_folder.list(имя, с_подпапками = true) — файлы нужных расширений по
+    // имени: {name, path, relative, size, modified}.
+    Bind("user_folder", "list", nullptr, [this, require](const std::string& name, sol::optional<bool> recursive) {
+        require(name, "list");
+        sol::table out = m_lua.create_table();
+        int i = 1;
+        for (const uc::Entry& e : uc::List(name, recursive.value_or(true))) {
+            sol::table t = m_lua.create_table();
+            t["name"] = e.Name;
+            t["path"] = e.Path;
+            t["relative"] = e.Relative;
+            t["size"] = (double)e.Size;
+            t["modified"] = (double)e.Modified;
+            out[i++] = t;
+        }
+        return out;
+    });
+    // user_folder.changed(имя) — изменилось ли содержимое с прошлого вопроса
+    // (первый вопрос — true): игра перечитывает папку без перезапуска.
+    Bind("user_folder", "changed", nullptr, [this, require](const std::string& name) -> bool {
+        require(name, "changed");
+        const std::string sig = uc::Signature(name);
+        auto it = m_userFolderSignatures.find(name);
+        const bool changed = it == m_userFolderSignatures.end() || it->second != sig;
+        m_userFolderSignatures[name] = sig;
+        return changed;
+    });
+    // user_folder.open(имя) — открыть папку в проводнике (кнопка «Открыть папку скинов»).
+    Bind("user_folder", "open", nullptr, [require](const std::string& name) -> bool {
+        require(name, "open");
+        return uc::OpenInSystem(name);
+    });
+    // user_folder.folders() — объявленные папки: {name, title, description, extensions, location}.
+    Bind("user_folder", "folders", nullptr, [this]() {
+        sol::table out = m_lua.create_table();
+        int i = 1;
+        for (const sage::assets::UserFolderSpec& f : uc::Folders()) {
+            sol::table t = m_lua.create_table();
+            t["name"] = f.Name;
+            t["title"] = f.Title;
+            t["description"] = f.Description;
+            sol::table ex = m_lua.create_table();
+            for (size_t k = 0; k < f.Extensions.size(); ++k) ex[k + 1] = f.Extensions[k];
+            t["extensions"] = ex;
+            t["location"] = f.NextToGame ? "game" : "data";
+            out[i++] = t;
         }
         return out;
     });
