@@ -611,11 +611,13 @@ void ScriptEngine::RegisterProceduralApi() {
         },
         // Загрузить на видеокарту под своим именем — теперь его можно ставить
         // в материал (texture = имя).
+        // Повторный Apply перерисовывает ту же текстуру: материал, уже
+        // поставленный на объект, видит новые пиксели (см. UpdateGeneratedTexture).
         "Apply", [](const TextureCanvas& c) {
-            auto tex = std::make_shared<Texture>(c.Px.data(), c.W, c.H,
-                                                 c.Nearest ? TextureFilter::Nearest : TextureFilter::Trilinear,
-                                                 !c.Nearest, true);
-            ResourceManager::Instance().RegisterTexture(c.Name, tex);
+            const TextureFilter filter = c.Nearest ? TextureFilter::Nearest : TextureFilter::Trilinear;
+            ResourceManager& rm = ResourceManager::Instance();
+            if (rm.UpdateGeneratedTexture(c.Name, c.Px.data(), c.W, c.H, filter, !c.Nearest)) return c.Name;
+            rm.RegisterTexture(c.Name, std::make_shared<Texture>(c.Px.data(), c.W, c.H, filter, !c.Nearest, true));
             return c.Name;
         });
     Bind("texture", "New", nullptr, [](const std::string& name, int w, int h) {

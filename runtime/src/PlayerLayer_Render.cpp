@@ -501,6 +501,16 @@ void PlayerLayer::OnRender() {
         m_ui->End();
     }
 
+    // Снимок, заказанный игрой (game.screenshot), — готовый кадр целиком, с
+    // интерфейсом: ровно то, что видит игрок.
+    if (m_scripts) {
+        std::string shot;
+        if (m_scripts->TakeScreenshotRequest(shot)) {
+            device.BindDefaultFramebuffer();
+            SaveScreenshot(shot, window.Width(), window.Height());
+        }
+    }
+
     TakeAutoScreenshot();
 }
 

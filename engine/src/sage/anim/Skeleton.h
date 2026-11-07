@@ -111,4 +111,12 @@ struct AnimationClip {
     std::vector<AnimChannel> Channels;
 };
 
+// Ручная поза поверх позы покоя (SetJointRotation / SetJointOffset скриптов).
+// И поворот, и сдвиг ДОБАВЛЯЮТСЯ к тому, как кость стоит в файле: «отклонить
+// плечо на 30°», «опустить голову на пиксель» читаются одинаково на любой
+// модели, а абсолютные значения стёрли бы её собственную расстановку костей.
+// overrides растягивается до числа костей; неверный номер кости — ничего.
+void OverrideJointRotation(std::vector<JointPose>& overrides, const Skeleton& sk, int joint, const glm::quat& delta);
+void OverrideJointOffset(std::vector<JointPose>& overrides, const Skeleton& sk, int joint, const glm::vec3& offset);
+
 } // namespace sage::anim

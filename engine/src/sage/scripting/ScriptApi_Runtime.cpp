@@ -1,3 +1,6 @@
+#include <filesystem>
+#include "sage/core/Paths.h"
+#include "sage/render/Screenshot.h"
 #include "ScriptEngine.h"
 
 #include "sage/core/Log.h"
@@ -401,6 +404,24 @@ void ScriptEngine::RegisterGameFlowApi() {
     // Выход из игры. В редакторе Play-режим просто останавливается — там это
     // «выйти из игры», а не «закрыть редактор».
     Bind("game", "Quit", nullptr, [this]() { m_quitRequested = true; });
+
+    // Снимок экрана: game.screenshot() — в папку screenshots/ пользовательского
+    // каталога игры, файл по времени (ГГГГ-ММ-ДД_ЧЧ.ММ.СС.png). Свой путь —
+    // game.screenshot("shots/boss.png"), относительный — от каталога игры.
+    // Возвращает путь файла сразу (чтобы сказать игроку, куда сохранено), а
+    // пишется файл в конце кадра — уже с интерфейсом, как его видит игрок.
+    Bind("game", "screenshot", nullptr, [this](sol::optional<std::string> path) -> std::string {
+        const std::string root = sage::save::GameDirectory();
+        std::string target;
+        if (!path || path->empty()) {
+            target = sage::render::TimestampedScreenshotPath(root + "/screenshots");
+        } else {
+            const std::filesystem::path p = sage::PathFromUtf8(*path);
+            target = p.is_absolute() ? *path : root + "/" + *path;
+        }
+        m_screenshotPath = target;
+        return target;
+    });
 
     Bind("game", "Pause", nullptr, [this](bool paused) { m_paused = paused; });
     Bind("game", "IsPaused", nullptr, [this]() { return m_paused; });

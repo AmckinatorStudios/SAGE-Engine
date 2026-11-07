@@ -1177,3 +1177,28 @@ TEST(Skinned_entity_material_becomes_the_model_material) {
     CHECK_FALSE(g.Unlit);
     CHECK_FALSE(g.DoubleSided);
 }
+
+// Сдвиг кости (SetJointOffset) прибавляется к её позе покоя, а не заменяет её:
+// ребёнок на (0,1,0) со сдвигом (0.5,0,0) встаёт в (0.5,1,0). Поворот — так же
+// поверх покоя; неверный номер кости ничего не делает.
+TEST(Animator_joint_offset_adds_to_rest_pose) {
+    Skeleton sk = MakeTwoBoneRig();
+    std::vector<AnimationClip> clips;
+    Animator a;
+    a.SetRig(&sk, &clips);
+    std::vector<JointPose> pose;
+    OverrideJointOffset(pose, sk, 1, glm::vec3(0.5f, 0.0f, 0.0f));
+    OverrideJointOffset(pose, sk, 7, glm::vec3(9.0f));   // нет такой кости
+    CHECK_EQ((int)pose.size(), 2);
+    a.SetPoseOverride(&pose);
+    a.RefreshPose();
+    glm::vec4 p1 = a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1);
+    CHECK_NEAR(p1.x, 0.5f, 1e-4);
+    CHECK_NEAR(p1.y, 1.0f, 1e-4);
+
+    OverrideJointRotation(pose, sk, 0, glm::angleAxis(glm::radians(90.0f), glm::vec3(0, 0, 1)));
+    a.RefreshPose();
+    p1 = a.BoneMatrices()[1] * glm::vec4(0, 0, 0, 1);
+    CHECK_NEAR(p1.x, -1.0f, 1e-4);   // (0.5, 1, 0) повёрнуто на 90° вокруг Z
+    CHECK_NEAR(p1.y, 0.5f, 1e-4);
+}

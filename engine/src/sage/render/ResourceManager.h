@@ -184,6 +184,14 @@ public:
     // ровно затем, чтобы заменить прежнюю (сменился размер клетки, цвет,
     // разрешение), и молча оставить старую значило бы «правка не применилась».
     void RegisterTexture(const std::string& name, std::shared_ptr<Texture> texture);
+    // Пересчитанные пиксели уже зарегистрированной процедурной текстуры — В ТУ
+    // ЖЕ текстуру (Texture::ReplacePixels). Кто её уже держит (материал,
+    // интерфейс), видит новое сразу; новый объект под тем же именем увидели бы
+    // только те, кто спросит заново, — и холст, который перерисовывают каждый
+    // кадр (карта, экран в игре), навсегда остался бы первым кадром.
+    // false — такой процедурной текстуры нет (её надо зарегистрировать).
+    bool UpdateGeneratedTexture(const std::string& name, const unsigned char* pixelsRGBA, int width, int height,
+                                TextureFilter filter, bool generateMipmaps);
     // Материал, собранный кодом (sage.material.Create), — под именем, как файл:
     // GetMaterial(name) отдаёт его, а с диска он не перечитывается.
     void RegisterMaterial(const std::string& name, std::shared_ptr<Material> material);

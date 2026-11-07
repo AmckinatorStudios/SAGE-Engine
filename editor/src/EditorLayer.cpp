@@ -568,6 +568,14 @@ void EditorLayer::OnRender() {
         m_coverShotDone = true;
     }
 
+    // Снимок, заказанный игрой в Play (game.screenshot), — тоже здесь: кадр
+    // окна Game с интерфейсом, как в собранной игре.
+    if (m_play.Scripts()) {
+        std::string shot;
+        if (m_play.Scripts()->TakeScreenshotRequest(shot) && !m_renderer.SaveGameFrame(shot))
+            LOG_WARN("Editor") << "Снимок экрана не сохранён: игрового кадра нет";
+    }
+
     // Обложка СЦЕНЫ — здесь же и по той же причине: игровой кадр существует
     // ровно после RenderGame (см. EditorLayer::TakeSceneShot).
     TakeSceneShot();

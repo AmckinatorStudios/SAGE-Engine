@@ -1010,7 +1010,16 @@ sage.game.Restart()         -- начать текущий уровень зан
 sage.game.Quit()
 sage.game.Pause(true)       -- и sage.game.IsPaused()
 sage.time.SetScale(0.5)     -- замедление; 0 — стоп, 2 — ускорение
+local file = game.screenshot()   -- снимок экрана (см. ниже)
 ```
+
+**Снимок экрана** — `game.screenshot()`: файл `ГГГГ-ММ-ДД_ЧЧ.ММ.СС.png` в
+папке `screenshots/` пользовательского каталога игры (рядом с `saves/`; второй
+снимок за ту же секунду — `_2`). `game.screenshot("shots/boss.png")` — свой
+путь, относительный — от каталога игры. Путь возвращается сразу (сказать
+игроку, куда сохранено), а снимается ГОТОВЫЙ кадр в конце кадра — с
+интерфейсом, как его видит игрок; в редакторе — кадр окна Game. Клавишу и
+сообщение выбирает игра.
 
 **Всё это ЗАПРОСЫ, а не действия, и это принципиально.** Скрипт зовёт их
 изнутри `OnUpdate` — то есть когда движок идёт по сущностям текущей сцены, а сам
@@ -1122,6 +1131,7 @@ img = texture.load("assets/textures/stone.png")  -- картинка с диск
 c = img.get(0, 0)                     -- строки снизу вверх, как у texture(...)
 stone = material("stone", {color = rgb(0.5, 0.45, 0.4), roughness = 0.9})
 stone.texture = tex                   -- текстура грузится на видеокарту здесь
+tex.apply()                           -- повторно — пиксели в ТОЙ ЖЕ текстуре: материал видит новое
 stone.normal_map = "Assets/Textures/rock_n.png"
 stone.tiling = 4
 stone.save("Assets/Materials/stone.sagemat")

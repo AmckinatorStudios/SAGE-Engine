@@ -132,6 +132,9 @@ bool LoadIconImage(const std::string& path, IconImage& out) {
         EngineContext::CurrentOrNull() ? sage::AssetDatabase::Instance().LocatePath(path) : path;
     if (!vfs::ReadFile(located, bytes) && !vfs::ReadFile(path, bytes)) return false;
     int w = 0, h = 0, n = 0;
+    // Флаг переворота у stb — на поток, и загрузчики текстур ставят его в
+    // «перевернуть» (так нужно GPU). Иконка нужна как картинка — сверху вниз.
+    stbi_set_flip_vertically_on_load_thread(false);
     stbi_uc* px = stbi_load_from_memory(bytes.data(), (int)bytes.size(), &w, &h, &n, 4);
     if (!px) return false;
     out.Width = w;

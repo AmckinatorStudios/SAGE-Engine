@@ -154,10 +154,12 @@ long long NowUnix() {
 void SetGameName(const std::string& name) { g_gameName = name; }
 const std::string& GameName() { return g_gameName; }
 
-std::string Directory() {
+std::string GameDirectory() {
     std::string game = g_gameName.empty() ? "sage-game" : SafeSlot(g_gameName);
-    return UserDataRoot() + "/" + game + "/saves";
+    return UserDataRoot() + "/" + game;
 }
+
+std::string Directory() { return GameDirectory() + "/saves"; }
 
 bool Write(const std::string& slot, const std::string& payloadJson, int version) {
     WriteOptions o;

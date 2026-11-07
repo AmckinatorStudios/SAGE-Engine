@@ -917,3 +917,24 @@ TEST(Generated_texture_is_found_by_async_request_with_any_sampling) {
     }
     sage::rhi::GraphicsDevice::SetCurrent(nullptr);
 }
+
+// Пересчитанная процедурная текстура обновляется В ТОМ ЖЕ объекте: материал,
+// взявший её раньше, видит новый размер и пиксели. Раньше новый Apply ставил
+// под имя другой объект — карта в руке игрока оставалась пустой навсегда.
+TEST(Generated_texture_update_is_seen_by_existing_holders) {
+    auto device = sage::rhi::GraphicsDevice::Create(sage::rhi::Backend::Null);
+    device->Init(nullptr);
+    sage::rhi::GraphicsDevice::SetCurrent(device.get());
+    {
+        ResourceManager rm;
+        const unsigned char one[4] = {0, 0, 0, 0};
+        rm.RegisterTexture("map_1", std::make_shared<Texture>(one, 1, 1, TextureFilter::Nearest, false, true));
+        std::shared_ptr<Texture> held = rm.GetTexture("map_1");   // как материал
+        std::vector<unsigned char> px(2 * 2 * 4, 200);
+        CHECK_TRUE(rm.UpdateGeneratedTexture("map_1", px.data(), 2, 2, TextureFilter::Nearest, false));
+        CHECK_EQ(held->Width(), 2);
+        CHECK_TRUE(rm.GetTexture("map_1") == held);
+        CHECK_FALSE(rm.UpdateGeneratedTexture("no_such", px.data(), 2, 2, TextureFilter::Nearest, false));
+    }
+    sage::rhi::GraphicsDevice::SetCurrent(nullptr);
+}

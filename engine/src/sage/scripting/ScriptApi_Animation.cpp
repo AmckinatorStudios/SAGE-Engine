@@ -77,14 +77,17 @@ void ScriptEngine::RegisterAnimationApi() {
         if (!obj.Valid()) return;
         auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
         if (!am || !am->Model) return;
-        const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
-        if (joint < 0 || joint >= sk.Count()) return;
-        if ((int)am->PoseOverrides.size() != sk.Count())
-            am->PoseOverrides.assign((size_t)sk.Count(), {});
-        sage::anim::JointPose& p = am->PoseOverrides[(size_t)joint];
-        p.HasRotation = true;
-        p.Rotation = sk.Joints[(size_t)joint].Rotation *
-                     sage::QuatFromEulerDegrees(glm::vec3(rx, ry, rz));
+        sage::anim::OverrideJointRotation(am->PoseOverrides, am->Model->GetSkeleton(), joint,
+                                          sage::QuatFromEulerDegrees(glm::vec3(rx, ry, rz)));
+    });
+    // Сдвиг кости от позы покоя, в единицах модели (точка вращения: колено
+    // ушло назад в приседе, плечо — по кругу за поворотом тела). Тоже
+    // ДОБАВЛЯЕТСЯ к расстановке из файла, как и поворот.
+    Bind("anim", "SetJointOffset", "SetJointOffset", [](GameObject obj, int joint, float x, float y, float z) {
+        if (!obj.Valid()) return;
+        auto* am = obj.Registry()->try_get<AnimationComponent>(obj.Entity());
+        if (!am || !am->Model) return;
+        sage::anim::OverrideJointOffset(am->PoseOverrides, am->Model->GetSkeleton(), joint, glm::vec3(x, y, z));
     });
     Bind("anim", "ClearJointPoses", "ClearJointPoses", [](GameObject obj) {
         if (!obj.Valid()) return;

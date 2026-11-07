@@ -384,6 +384,14 @@ public:
         m_restartRequested = false;
         return r;
     }
+    // Снимок экрана, заказанный скриптом (game.screenshot): путь файла.
+    // Хозяин кадра снимает ГОТОВЫЙ кадр (с интерфейсом) в конце кадра.
+    bool TakeScreenshotRequest(std::string& path) {
+        if (m_screenshotPath.empty()) return false;
+        path = std::move(m_screenshotPath);
+        m_screenshotPath.clear();
+        return true;
+    }
     bool TakeQuitRequest() {
         const bool r = m_quitRequested;
         m_quitRequested = false;
@@ -575,6 +583,7 @@ private:
     bool m_sceneRequested = false;
     bool m_restartRequested = false;
     bool m_quitRequested = false;
+    std::string m_screenshotPath;   // заказанный снимок экрана (пусто — нет)
     bool m_paused = false;
     float m_timeScale = 1.0f;
 
