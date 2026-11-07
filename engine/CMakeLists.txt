@@ -252,6 +252,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_Net.cpp
     src/sage/scripting/ScriptApi_Components.cpp
     src/sage/scripting/ScriptApi_UI.cpp
+    src/sage/scripting/ScriptApi_UIKit.cpp
     src/sage/scripting/ScriptApi_Vars.cpp
     src/sage/scripting/ScriptApi_AI.cpp
     src/sage/scripting/ScriptApi_AIGraph.cpp

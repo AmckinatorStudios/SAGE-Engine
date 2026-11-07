@@ -26,6 +26,7 @@ add_executable(sage_tests
     test_config.cpp
     test_paths.cpp
     test_ui.cpp
+    test_ui_kit.cpp
     test_image_font.cpp
     test_user_content.cpp
     test_ui_skins.cpp

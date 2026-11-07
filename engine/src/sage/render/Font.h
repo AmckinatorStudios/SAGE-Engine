@@ -60,6 +60,14 @@ public:
 
     bool IsNearest() const { return m_nearest; }
 
+    // Сколько пикселей атласа приходится на ОДИН пиксель рисунка шрифта (0 —
+    // у шрифта нет пиксельной сетки, это TrueType). У шрифта-картинки 32×
+    // это 4: буква нарисована сеткой 8×8, а ячейка — 32×32. Масштаб такого
+    // шрифта обязан быть кратен 1/шаг: иначе ближайший сосед выбрасывает
+    // разные строки пикселей у разных букв, и штрихи выходят то в один, то в
+    // два экранных пикселя.
+    float GridUnit() const { return m_gridUnit; }
+
     // Раскладывает UTF-8 строку в квады, начиная с (startX, startY) —
     // startY — координата ВЕРХА строки. scale домножает базовый размер.
     // Возвращает перо в конце (для продолжения строки). out дополняется.
@@ -94,6 +102,7 @@ private:
 
     std::unordered_map<uint32_t, Glyph> m_glyphs;
     bool m_nearest = false;
+    float m_gridUnit = 0.0f;
     std::unique_ptr<sage::rhi::Texture2D> m_atlas;
     float m_pixelHeight = 48.0f;
     float m_lineHeight = 0.0f; // ascent - descent + lineGap, в пикселях базового размера

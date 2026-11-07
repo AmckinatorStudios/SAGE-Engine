@@ -311,6 +311,8 @@ private:
     // девятины; SDF выключен, углы у куска листа скруглять нечем.
     // Поворачивает точку текущим поворотом (без поворота — отдаёт как есть).
     glm::vec2 Rotated(float x, float y) const;
+    // Края прямоугольника — на целые пиксели (кроме повёрнутого). См. .cpp.
+    void SnapRect(float& x, float& y, float& w, float& h) const;
 
     glm::vec2 m_rotCenter{0.0f, 0.0f};
     float m_rotCos = 1.0f, m_rotSin = 0.0f;   // уже умножены на масштаб

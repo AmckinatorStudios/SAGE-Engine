@@ -2597,6 +2597,11 @@ function sage.ui.ClearImage(entity) end
 function sage.ui.ClearLayout(entity) end
 ---@return string
 function sage.ui.ClickedAction() end
+---@param entity Entity
+---@param signal string
+---@param fn function
+---@return integer
+function sage.ui.Connect(entity, signal, fn) end
 ---@return Vec2
 function sage.ui.Cursor() end
 ---@param x number
@@ -2644,6 +2649,16 @@ function sage.ui.SetImage(entity, path, sharp) end
 ---@param opts table
 function sage.ui.SetLayout(entity, opts) end
 ---@param entity Entity
+---@param part string
+---@param value any
+function sage.ui.SetLook(entity, part, value) end
+---@param entity Entity
+---@param v any
+function sage.ui.SetPressedOffset(entity, v) end
+---@param entity Entity
+---@param step number
+function sage.ui.SetRangeStep(entity, step) end
+---@param entity Entity
 ---@param l number
 ---@param t number
 ---@param r number
@@ -2668,6 +2683,9 @@ function sage.ui.SetSprite(entity, x, y, w, h) end
 ---@param sharp? boolean
 ---@return boolean
 function sage.ui.SetSpriteNamed(entity, path, name, sharp) end
+---@param entity Entity
+---@param t table
+function sage.ui.SetTextColors(entity, t) end
 ---@param entity Entity
 ---@param value number
 function sage.ui.SetValue(entity, value) end
@@ -3249,6 +3267,72 @@ function cylinder(r, h, segments, caps) end
 ---Материал из кода: material("stone", {color = rgb(0.5, 0.45, 0.4), roughness = 0.9}).
 ---@class sage.material
 ---@overload fun(name: string, props?: table): Material
+-- --- Интерфейс в стиле SAGE (ScriptApi_UIKit.cpp) ----------
+---Экран: элемент во весь экран, корень интерфейса. order — порядок между
+---экранами (больше — поверх), input = false — показывается, но не ловит мышь.
+---@param o? table
+---@return table
+function ui.screen(o) end
+
+---Панель: прямоугольник цветом или картинкой (девятина, плитка).
+---@param o table
+---@return table
+function ui.panel(o) end
+
+---Картинка: файл или кусок листа (sprite = "имя" из .sagesheet или {x, y, w, h}).
+---@param o table
+---@return table
+function ui.image(o) end
+
+---Надпись. size — высота строки в пикселях, align — left/center/right,
+---valign — top/center/bottom; shadow_offset — тень (цвет вчетверо темнее).
+---@param o table
+---@return table
+function ui.text(o) end
+
+---Кнопка: вид (как у панели) и вид в состояниях hover/pressed/disabled —
+---таблицами с теми же ключами; надпись — text и ключи надписи; цвет надписи в
+---состояниях — hover_text_color, disabled_text_color. on_click = function(btn).
+---@param o table
+---@return table
+function ui.button(o) end
+
+---Поле ввода: text, max (длина), placeholder, password; вид — как у панели,
+---focused — вид, пока в поле печатают.
+---@param o table
+---@return table
+function ui.field(o) end
+
+---Ползунок: value, min, max, step; вид частей — track, filled, knob
+---(таблицы вида). on_change = function(slider, value).
+---@param o table
+---@return table
+function ui.slider(o) end
+
+---Полоса (здоровье, загрузка): value 0..1; вид фона — как у панели,
+---заполнения — fill = {...}.
+---@param o table
+---@return table
+function ui.bar(o) end
+
+---Группа: невидимый контейнер. layout = "row" | "column" | "grid" расставляет
+---детей сам (gap, padding, columns, justify); clip = true обрезает детей.
+---@param o? table
+---@return table
+function ui.group(o) end
+
+---Курсор мыши в пикселях интерфейса.
+---@return Vec2
+function ui.cursor() end
+
+---Размер экрана в пикселях интерфейса.
+---@return Vec2
+function ui.size() end
+
+---Зажата ли левая кнопка мыши.
+---@return boolean
+function ui.mouse_down() end
+
 
 -- --- Хуки скрипта ---------------------------------------------------------
 -- Объявляются в файле скрипта; движок зовёт их сам. Ни один не обязателен.

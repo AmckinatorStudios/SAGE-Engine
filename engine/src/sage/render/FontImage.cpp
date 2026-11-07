@@ -87,6 +87,7 @@ std::unique_ptr<Font> Font::LoadImageSheet(const std::string& path) {
     font->m_lineHeight = 9.0f * k;
     font->m_ascent = 7.0f * k;
     font->m_nearest = true;
+    font->m_gridUnit = k;
 
     // Покрытие — альфа, умноженная на яркость: серые пиксели рисунка — это
     // полутона буквы, а не прозрачность.

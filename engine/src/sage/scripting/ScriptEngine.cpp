@@ -174,6 +174,8 @@ void ScriptEngine::RegisterEngineApi() {
         mod("post", "эффекты экрана во время игры", {}, true, &ScriptEngine::RegisterPostApi),
         mod("physics", "скорость, гравитация, лучи", {"object"}, true, &ScriptEngine::RegisterPhysicsApi),
         mod("events", "sage.events: шина событий", {}, false, &ScriptEngine::RegisterEventsApi),
+        mod("uikit", "интерфейс в стиле SAGE: ui.screen{}, ui.button{}, ui.text{}", {"scene", "events"}, true,
+            &ScriptEngine::RegisterUIKitApi),
         mod("vars", "публичные переменные объектов", {"object"}, true, &ScriptEngine::RegisterVarsApi),
         mod("rt", "съёмка сцены в картинку", {"object"}, true, &ScriptEngine::RegisterRenderTextureApi),
         mod("net", "мультиплеер", {}, true, &ScriptEngine::RegisterNetApi),

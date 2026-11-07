@@ -18,6 +18,7 @@ add_executable(sage_render_tests
     Checks_Scene.cpp         # детализация, отсечение, кэш, небо, RHI
     Checks_Materials.cpp     # материал: от файла до пикселей
     Checks_UI.cpp            # интерфейс: части не наезжают и не красят друг друга
+    Checks_UIPixels.cpp      # интерфейс по пикселям: края, градиент, шрифт-картинка
     Checks_Volumetrics.cpp   # объёмный свет: зерно, полосы, кайма
     Checks_Stability.cpp     # дрейф, утечки, разрешения, смена размера
     Checks_Textures.cpp      # мипмапы, детализация, анизотропия

@@ -11,6 +11,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <algorithm>
 #include <cstdio>
+#include <cmath>
 
 namespace {
     // Временный буфер под геометрию одного вызова Text (stb_easy_font пишет
@@ -234,6 +235,25 @@ void UIRenderer::PushRotation(glm::vec2 center, float degrees, float scale) {
 
 void UIRenderer::PopRotation() { m_rotActive = false; }
 
+// ПРИВЯЗКА К ПИКСЕЛЬНОЙ СЕТКЕ — у каждого прямоугольника, который рисует
+// интерфейс. Края округляются по отдельности (а не «позиция и размер»): тогда
+// общий край двух соседних кусков — одно и то же число и у одного, и у другого,
+// и между кусками девятины или плиткой фона не бывает ни щели, ни нахлёста.
+//
+// Без этого элемент, поставленный по центру экрана нечётной ширины, стоит на
+// полпикселе: картинка ближайшим соседом выходит с одним столбцом пикселей
+// шире прочих, рамка — то в один, то в два пикселя, а между частями девятины
+// просвечивает фон. Повёрнутый элемент не привязывается — у него нет «края
+// по сетке», а дёргание на поворачивающейся кнопке хуже лёгкой мягкости.
+void UIRenderer::SnapRect(float& x, float& y, float& w, float& h) const {
+    if (m_rotActive) return;
+    const float x1 = std::round(x + w), y1 = std::round(y + h);
+    x = std::round(x);
+    y = std::round(y);
+    w = x1 - x;
+    h = y1 - y;
+}
+
 glm::vec2 UIRenderer::Rotated(float x, float y) const {
     if (!m_rotActive) return {x, y};
     const float dx = x - m_rotCenter.x, dy = y - m_rotCenter.y;
@@ -252,6 +272,7 @@ void UIRenderer::PushQuad(float x, float y, float w, float h, glm::vec3 color, f
     unsigned char r2 = byte(bc.r), g2 = byte(bc.g), b2 = byte(bc.b);
     unsigned char a2 = byte(bottomAlpha ? *bottomAlpha : alpha);
 
+    SnapRect(x, y, w, h);
     float hw = w * 0.5f, hh = h * 0.5f;
     // Радиус не может превышать половину меньшей стороны (иначе SDF ломает форму).
     float rad = glm::clamp(radius, 0.0f, glm::min(hw, hh));
@@ -259,12 +280,19 @@ void UIRenderer::PushQuad(float x, float y, float w, float h, glm::vec3 color, f
     float u0 = solidUv ? -1.0f : 0.0f, v0 = solidUv ? -1.0f : 0.0f;
     float u1 = solidUv ? -1.0f : 1.0f, v1 = solidUv ? -1.0f : 1.0f;
 
+    // ПРЯМОУГОЛЬНИК БЕЗ СКРУГЛЕНИЯ И РАМКИ — БЕЗ SDF. Край у него и так по
+    // сетке (SnapRect), а сглаживание SDF красило крайний ряд пикселей на
+    // ~7% прозрачнее: на стыке двух панелей проступала тёмная полоса, у
+    // плашки на тёмном фоне — светлая кайма. Повёрнутому сглаживание нужно:
+    // его край косой. Half = 0 выключает SDF в шейдере.
+    const bool sdf = rad > 0.0f || border > 0.0f || m_rotActive;
+    const float sw = sdf ? hw : 0.0f, sh = sdf ? hh : 0.0f;
     const glm::vec2 p0 = Rotated(x, y), p1 = Rotated(x + w, y);
     const glm::vec2 p2 = Rotated(x + w, y + h), p3 = Rotated(x, y + h);
-    m_vertices.push_back({p0.x, p0.y, 0.0f, r,  g,  b,  a,  u0, v0, -hw, -hh, hw, hh, rad, border});
-    m_vertices.push_back({p1.x, p1.y, 0.0f, r,  g,  b,  a,  u1, v0,  hw, -hh, hw, hh, rad, border});
-    m_vertices.push_back({p2.x, p2.y, 0.0f, r2, g2, b2, a2, u1, v1,  hw,  hh, hw, hh, rad, border});
-    m_vertices.push_back({p3.x, p3.y, 0.0f, r2, g2, b2, a2, u0, v1, -hw,  hh, hw, hh, rad, border});
+    m_vertices.push_back({p0.x, p0.y, 0.0f, r,  g,  b,  a,  u0, v0, -hw, -hh, sw, sh, rad, border});
+    m_vertices.push_back({p1.x, p1.y, 0.0f, r,  g,  b,  a,  u1, v0,  hw, -hh, sw, sh, rad, border});
+    m_vertices.push_back({p2.x, p2.y, 0.0f, r2, g2, b2, a2, u1, v1,  hw,  hh, sw, sh, rad, border});
+    m_vertices.push_back({p3.x, p3.y, 0.0f, r2, g2, b2, a2, u0, v1, -hw,  hh, sw, sh, rad, border});
     ++m_quadCount;
 }
 
@@ -327,6 +355,7 @@ void UIRenderer::PushImageQuad(float x, float y, float w, float h, glm::vec2 uv0
         return static_cast<unsigned char>(glm::clamp(v, 0.0f, 1.0f) * 255.0f);
     };
     const unsigned char r = byte(tint.r), g = byte(tint.g), b = byte(tint.b), a = byte(alpha);
+    SnapRect(x, y, w, h);
     // ПОВОРОТ ПРИМЕНЯЕТСЯ И К КАРТИНКЕ. Здесь его не было, и это единственное
     // место, где он пропускался: подложка (PushQuad) и буквы (PushGlyphQuad)
     // поворачивались, а картинка оставалась стоять прямо. Снаружи это
@@ -563,6 +592,15 @@ float UIRenderer::FontScale(float scale, const Font* font, bool snapPixels) cons
     const float line = f->LineHeightUnits();
     const float raw = line > 0.0f ? (scale * m_scaleToPixels) / line
                                   : (scale * m_scaleToPixels) / f->PixelHeight();
+    // ШРИФТ С ПИКСЕЛЬНОЙ СЕТКОЙ (картинка) — ВСЕГДА кратно её пикселю. Не по
+    // галке: у такого шрифта дробный масштаб не бывает «чуть мягче», он
+    // всегда ломает буквы — ближайший сосед берёт из каждой клетки рисунка то
+    // одну, то две строки, и штрихи соседних букв выходят разной толщины.
+    // Шаг — пиксель РИСУНКА (у набора 32× это 4 пикселя атласа), поэтому
+    // «кегль 16» у шрифта 8×8 становится строкой 18: ровно 2 экранных пикселя
+    // на пиксель буквы.
+    if (const float grid = f->GridUnit(); grid > 0.0f)
+        return glm::max(1.0f, std::round(raw * grid)) / grid;
     if (!snapPixels) return raw;
     // Целый масштаб сохраняет рисунок пиксельного шрифта: дробный растягивает
     // одни штрихи буквы на два экранных пикселя, а соседние на один, и «M»
@@ -623,6 +661,13 @@ void UIRenderer::Text(float x, float y, float scale, glm::vec3 color, const std:
         CurrentSegment(nullptr, style.UseFont); // глифы идут в сегмент СВОЕГО шрифта
         // Масштаб API → множитель шрифта относительно базовой высоты запекания.
         const float fontScale = FontScale(scale, font, style.SnapPixels);
+        // Начало строки — на целый пиксель: у шрифта с пиксельной сеткой все
+        // шаги и так целые, и сдвиг всей строки на полпикселя (надпись по
+        // центру кнопки нечётной ширины) — единственное, что ломает её буквы.
+        if (!m_rotActive) {
+            x = std::round(x);
+            y = std::round(y);
+        }
         std::vector<Font::PositionedGlyph> quads;
         font->BuildQuads(text, x, y, fontScale, quads);
         // Наклон курсива — 0.21 ≈ 12°, столько же берут настоящие курсивные
