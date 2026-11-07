@@ -1,3 +1,4 @@
+#include "sage/core/LocalTime.h"
 #include <filesystem>
 #include "sage/core/Paths.h"
 #include "sage/render/Screenshot.h"
@@ -154,6 +155,24 @@ void ScriptEngine::RegisterSaveApi() {
 }
 
 void ScriptEngine::RegisterTimerApi() {
+    // Местные дата и время (sage/core/LocalTime.h): time.local_date() — сейчас,
+    // time.local_date(unix) — для отметки сохранения (save.Slots()[i].savedAt).
+    // Таблицей чисел: формат даты у каждой игры свой.
+    Bind("time", "local_date", nullptr, [this](sol::optional<double> unixSeconds) -> sol::table {
+        const sage::DateParts d =
+            sage::LocalDate(unixSeconds ? (long long)*unixSeconds : sage::UnixNow());
+        sol::table t = m_lua.create_table();
+        t["year"] = d.Year;
+        t["month"] = d.Month;
+        t["day"] = d.Day;
+        t["hour"] = d.Hour;
+        t["minute"] = d.Minute;
+        t["second"] = d.Second;
+        t["weekday"] = d.Weekday;
+        return t;
+    });
+    Bind("time", "unix_now", nullptr, []() -> double { return (double)sage::UnixNow(); });
+
     // --- Таймеры: отложенные/повторяющиеся вызовы без ручного хранения
     // "сколько осталось" в самом скрипте. Возвращают id для CancelTimer. ---
     Bind("time", "Schedule", "Schedule", [this](float seconds, sol::protected_function fn) -> int {

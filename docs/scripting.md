@@ -1013,6 +1013,10 @@ sage.time.SetScale(0.5)     -- замедление; 0 — стоп, 2 — ус�
 local file = game.screenshot()   -- снимок экрана (см. ниже)
 ```
 
+**Местная дата** — `time.local_date(unix)` (без аргумента — сейчас):
+таблица `year, month, day, hour, minute, second, weekday`; `time.unix_now()`.
+Библиотека `os` скриптам не открыта, а дата сохранения в меню нужна.
+
 **Снимок экрана** — `game.screenshot()`: файл `ГГГГ-ММ-ДД_ЧЧ.ММ.СС.png` в
 папке `screenshots/` пользовательского каталога игры (рядом с `saves/`; второй
 снимок за ту же секунду — `_2`). `game.screenshot("shots/boss.png")` — свой

@@ -62,6 +62,9 @@ struct UIRef {
 
 // Поле части: чтение отдаёт значение по умолчанию, если части нет (у надписи
 // нет скругления — и спрашивать его не ошибка), запись часть создаёт.
+// Имена режимов картинки для скриптов — в порядке sage::ui::Image::Mode.
+const char* const kFitNames[] = {"stretch", "nineslice", "tile", "fit", "cover"};
+
 #define UI_FIELD(Comp, field)                                                        \
     sol::property([](UIRef& r) { const Comp* c = r.Peek<Comp>();                     \
                                  return c ? c->field : Comp{}.field; },              \
@@ -458,6 +461,23 @@ void ScriptEngine::RegisterUIApi() {
                               mode == "nearest" ? sage::ui::TextureFiltering::Nearest
                                                 : sage::ui::TextureFiltering::Smooth;
                       }),
+        // Как картинка ложится в элемент: "stretch" (растянуть), "nineslice"
+        // (углы неподвижны), "tile" (повторить куском своего размера ×
+        // PixelScale — фон из плитки), "fit" (целиком), "cover" (заполнить).
+        "Fit", sol::property(
+                   [](UIRef& r) {
+                       const sage::ui::Image* im = r.Peek<sage::ui::Image>();
+                       return std::string(kFitNames[(int)(im ? im->Fit : sage::ui::Image::Mode::Normal)]);
+                   },
+                   [](UIRef& r, const std::string& name) {
+                       for (int i = 0; i < 5; ++i) {
+                           if (name == kFitNames[i]) {
+                               if (r.Alive()) r.Part<sage::ui::Image>().Fit = (sage::ui::Image::Mode)i;
+                               return;
+                           }
+                       }
+                       throw std::runtime_error("ui.Fit: «" + name + "» — нужно stretch, nineslice, tile, fit или cover");
+                   }),
         // Полоса и значок.
         // Цвет заполнения — цвет его вида (sage::ui::Bar::Filled); имя свойства
         // прежнее, скрипты игр им пользуются.
