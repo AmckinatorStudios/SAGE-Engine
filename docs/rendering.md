@@ -700,7 +700,7 @@ sage::render::RenderSceneColor(scene, batch, color);
 Движок не знает, что за слои: «небо», «руки», «интерфейс в мире» — имена игры.
 Скрипт: `camera.set_passes(obj, {{layers = {"sky"}, far = 4000},
 {layers = {"default"}}, {layers = {"viewmodel"}, clear_depth = true, fov = 70,
-near = 0.05}})`, слой объекта — `obj.MeshRenderer.Layer = "viewmodel"`.
+near = 0.05}})`, слой объекта — `obj:GetRenderer().Layer = "viewmodel"`.
 Код — `sage/ecs/RenderLayers.h`, `PlanCameraPasses`/`CameraPassFrame`
 (`sage/render/ScenePasses.h`); в инспекторе — поле «Слой» у отрисовщика и
 раздел «Проходы отрисовки» у камеры.
