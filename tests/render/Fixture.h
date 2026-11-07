@@ -121,6 +121,7 @@ void RunParticleChecks();                                   // частицы: �
 void RunDisplayChecks(::Window& window);                    // режим экрана: проба и откат по времени
 void RunPipelineChecks(Scene& scene);                       // свой рендер: вычисления, граф, шейдеры
 void RunCameraPassChecks();                                  // проходы камеры
+void RunMaterialBlendChecks();                               // смешение материала
 void RunScreenshotChecks();                                  // снимок экрана
 void RunImageEffectChecks();                                // эффекты изображения
 void RunLensChecks();                                       // хроматическая аберрация

@@ -309,6 +309,12 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         //
         // Замкнутым телам (вода) материал ставит DoubleSided = false: у них
         // задней стенки не видно, и второй проход был бы лишней работой.
+        // Смешение материала (Material::Blend): сложение — для света и огня.
+        auto setBlendOf = [&](const Material* mat) {
+            device.SetBlendMode(mat && mat->Render.Blend == MaterialRender::Blending::Additive
+                                    ? sage::rhi::GraphicsDevice::BlendMode::Additive
+                                    : sage::rhi::GraphicsDevice::BlendMode::Alpha);
+        };
         auto passCount = [](const Material* mat) {
             return (!mat || mat->Render.Cull == CullFaces::None) ? 2 : 1;
         };
@@ -331,6 +337,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             CustomGroup& g = kv.second;
             if (!g.Transparent || g.Instances.empty()) continue;
             const int passes = passCount(g.Mat);
+            setBlendOf(g.Mat);
             for (int pass = 0; pass < passes; ++pass) {
                 setCullForPass(g.Mat, passes == 1 ? 1 : pass);
                 drawCustom(*kv.first.Program, *kv.first.Mesh_, kv.first.Submesh, kv.first.Probe, g);
@@ -343,6 +350,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         while (i < m_transparent.size()) {
             const TransparentItem& head = m_transparent[i];
             const int passes = passCount(head.Mat);
+            setBlendOf(head.Mat);
             if (head.Textured) {
                 if (!texShader) { texShader = &TexShader(); setupCommon(*texShader); }
                 Shader& t = *texShader;
@@ -417,6 +425,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             i = j;
         }
 
+        device.SetBlendMode(sage::rhi::GraphicsDevice::BlendMode::Alpha);
         device.SetCullMode(sage::rhi::CullMode::Back);
         device.SetDepthWrite(true);
         device.SetBlend(false);

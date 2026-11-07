@@ -284,11 +284,17 @@ void BindShaderTextures(Shader& sh, const Material* mat) {
                 const Material::ShaderTexture& t = it->second;
                 // Перечитываем, только если сменился путь или вид данных:
                 // поиск в кэше по пути — не бесплатный (канонический путь).
-                if (!t.Tex || t.From != t.Path || t.FromLinear != slot.Linear) {
-                    t.Tex = ResourceManager::Instance().GetTexture(t.Path, TextureFilter::Anisotropic, true, false,
-                                                                   !slot.Linear);
+                // Фильтрация — материала («Ближайший пиксель» — чёткие
+                // квадраты): без неё пиксельные картинки своего шейдера
+                // (светила, облака) сглаживались в мыло.
+                const bool nearest = mat->Render.Filter == MaterialRender::Filtering::Nearest;
+                if (!t.Tex || t.From != t.Path || t.FromLinear != slot.Linear || t.FromNearest != nearest) {
+                    t.Tex = ResourceManager::Instance().GetTexture(
+                        t.Path, nearest ? TextureFilter::Nearest : TextureFilter::Anisotropic, !nearest, false,
+                        !slot.Linear);
                     t.From = t.Path;
                     t.FromLinear = slot.Linear;
+                    t.FromNearest = nearest;
                 }
                 tex = t.Tex.get();
             }

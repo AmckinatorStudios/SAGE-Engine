@@ -25,6 +25,7 @@ add_executable(sage_render_tests
     Checks_Display.cpp       # режим экрана: проба и откат
     Checks_Pipeline.cpp      # свой рендер: вычисления, граф, шейдеры
     Checks_CameraPasses.cpp  # проходы камеры
+    Checks_MaterialBlend.cpp # смешение материала
     Checks_Screenshot.cpp    # снимок экрана
     Checks_ImageEffects.cpp  # эффекты изображения
     Checks_Lens.cpp          # хроматическая аберрация

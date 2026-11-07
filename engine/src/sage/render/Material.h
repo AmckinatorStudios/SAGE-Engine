@@ -131,6 +131,16 @@ struct MaterialRender {
     using Filtering = sage::TextureFiltering;
     Filtering Filter = Filtering::Smooth;
 
+    // СМЕШЕНИЕ полупрозрачного материала с тем, что уже нарисовано.
+    //   Alpha    — обычное: цвет поверх с прозрачностью (src·a + dst·(1 − a)).
+    //   Additive — сложение (src + dst): свет, огонь, светила, искры — яркое
+    //              прибавляется к фону, а чёрное исчезает. Прозрачность
+    //              материала тут не множитель: шейдер, которому она нужна,
+    //              сам умножает цвет на неё.
+    // Действует на прозрачные материалы (непрозрачность < 1).
+    enum class Blending { Alpha, Additive };
+    Blending Blend = Blending::Alpha;
+
     // ПОРОГ ОТСЕЧЕНИЯ ПО АЛЬФЕ (glTF alphaMode = MASK). Ноль — режима нет.
     //
     // Третий режим прозрачности, и без него не рисуется целый класс вещей:
@@ -297,6 +307,7 @@ struct Material {
         mutable std::shared_ptr<Texture> Tex;
         mutable std::string From;
         mutable bool FromLinear = false;
+        mutable bool FromNearest = false;
     };
     std::unordered_map<std::string, ShaderTexture> TextureParams;
 
