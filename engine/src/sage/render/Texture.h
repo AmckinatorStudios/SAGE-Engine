@@ -102,7 +102,13 @@ public:
     // результат прохода в текстуру — это rhi-хендл. Без обёртки картинку,
     // нарисованную движком, нельзя было показать в интерфейсе вообще: только
     // файл с диска.
-    static std::shared_ptr<Texture> Wrap(sage::rhi::TextureHandle handle, int width, int height);
+    //
+    // linearColor — в текстуре ЛИНЕЙНЫЙ цвет (кадр сцены до кодирования для
+    // экрана): тогда Srgb() — true, и интерфейс кодирует её так же, как
+    // sRGB-картинку. Без этого съёмка в интерфейсе выходила заметно темнее и
+    // контрастнее самой сцены.
+    static std::shared_ptr<Texture> Wrap(sage::rhi::TextureHandle handle, int width, int height,
+                                         bool linearColor = false);
 
 private:
     Texture() = default;   // для Wrap: хранилище не создаётся

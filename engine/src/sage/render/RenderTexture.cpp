@@ -9,7 +9,9 @@ namespace sage::render {
 
 RenderTexture::RenderTexture(const std::string& name, int width, int height)
     : m_name(name), m_fbo(std::max(width, 1), std::max(height, 1)) {
-    m_view = Texture::Wrap(m_fbo.ColorTexture(), m_fbo.Width(), m_fbo.Height());
+    // Сцена пишет сюда линейный цвет (кодирование для экрана — в постобработке
+    // кадра, а у съёмки её нет): пометка просит интерфейс закодировать сам.
+    m_view = Texture::Wrap(m_fbo.ColorTexture(), m_fbo.Width(), m_fbo.Height(), /*linearColor=*/true);
 }
 
 void RenderTexture::Begin(const glm::vec4& clearColor) {
@@ -31,7 +33,7 @@ void RenderTexture::Resize(int width, int height) {
     m_fbo.Resize(width, height);
     // Хендл после пересоздания хранилища другой — обёртку надо обновить, иначе
     // интерфейс продолжит показывать текстуру, которой больше нет.
-    m_view = Texture::Wrap(m_fbo.ColorTexture(), m_fbo.Width(), m_fbo.Height());
+    m_view = Texture::Wrap(m_fbo.ColorTexture(), m_fbo.Width(), m_fbo.Height(), /*linearColor=*/true);
 }
 
 RenderTextureRegistry& RenderTextureRegistry::Instance() {
