@@ -422,3 +422,19 @@ TEST(Audio_bus_volume_multiplies_master) {
     CHECK_NEAR(audio.EffectiveBusVolume("block"), 0.0f, 1e-6f);
     CHECK_NEAR(audio.BusVolume("unknown"), 1.0f, 1e-6f);
 }
+
+// Позиционный звук дальше своей дальности НЕ слышно. У обратной кривой
+// miniaudio (умолчание) за maxDistance оставалось minDistance/maxDistance —
+// 2,5 % громкости на любом расстоянии: хрюканье всех свиней загруженного
+// мира игры было слышно всегда, где бы они ни были.
+TEST(Audio_spatial_sound_is_silent_beyond_range) {
+    CHECK_NEAR(AudioEngine::DistanceGain(0.5f, 1.0f, 40.0f), 1.0f, 1e-6f);
+    CHECK_NEAR(AudioEngine::DistanceGain(20.5f, 1.0f, 40.0f), 0.5f, 1e-6f);
+    CHECK_NEAR(AudioEngine::DistanceGain(40.0f, 1.0f, 40.0f), 0.0f, 1e-6f);
+    CHECK_NEAR(AudioEngine::DistanceGain(300.0f, 1.0f, 40.0f), 0.0f, 1e-6f);
+    CHECK_NEAR(AudioEngine::DistanceGain(30.0f, 1.0f, 16.0f), 0.0f, 1e-6f);
+    // Звук со своей дальностью и без устройства (CI) — вызов безопасен.
+    AudioEngine engine;
+    const std::string path = (std::filesystem::path(SAGE_TEST_DATA_DIR) / "tone.ogg").string();
+    engine.PlaySound3D(path, glm::vec3(100.0f, 0.0f, 0.0f), 0.0f, AudioEngine::Category::Sfx, 1.0f, {}, 16.0f);
+}

@@ -77,9 +77,17 @@ public:
     void PlaySound2D(const std::string& path, float volume = 1.0f, Category category = Category::Sfx,
                      float pitch = 1.0f, const std::string& bus = {});
     // 3D — позиционный, микшируется относительно слушателя (звук в точке мира).
+    // maxDistance — дальше звука не слышно совсем (0 — умолчание движка,
+    // 40 м); до него громкость спадает линейно (DistanceGain).
     void PlaySound3D(const std::string& path, const glm::vec3& position,
                      float volume = 1.0f, Category category = Category::Sfx, float pitch = 1.0f,
-                     const std::string& bus = {});
+                     const std::string& bus = {}, float maxDistance = 0.0f);
+    // Множитель громкости позиционного звука на расстоянии distance: 1 ближе
+    // minDistance, 0 дальше maxDistance, между ними — линейно (крутизна —
+    // rolloff). Ровно этой кривой микшер глушит звук (линейная модель
+    // miniaudio): у прежней обратной кривой дальше maxDistance оставался
+    // хвост minDistance/maxDistance — 2,5 % громкости на любом расстоянии.
+    static float DistanceGain(float distance, float minDistance, float maxDistance, float rolloff = 1.0f);
     // Высоты звучащих сейчас разовых эффектов — для отладки («почему шаги
     // звучат одинаково») и проверок. Пусто — звука нет или он уже доиграл.
     std::vector<float> OneShotPitches() const;
