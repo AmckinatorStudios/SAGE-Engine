@@ -23,6 +23,7 @@ public:
     void SetBlend(bool enabled) override;
     bool BlendEnabled() const override;
     void SetBlendMode(BlendMode mode) override;
+    void SetDepthBias(float factor, float units) override;
     void SetDepthTest(bool enabled) override;
     void SetDepthWrite(bool enabled) override;
     void SetDepthFunc(DepthFunc func) override;

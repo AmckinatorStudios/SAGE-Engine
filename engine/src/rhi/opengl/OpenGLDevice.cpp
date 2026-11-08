@@ -116,8 +116,18 @@ void OpenGLDevice::SetBlendMode(BlendMode mode) {
         case BlendMode::Multiply:      glBlendFunc(GL_DST_COLOR, GL_ONE_MINUS_SRC_ALPHA); break;
         case BlendMode::Screen:        glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_COLOR); break;
         case BlendMode::Invert:        glBlendFunc(GL_ONE_MINUS_DST_COLOR, GL_ONE_MINUS_SRC_COLOR); break;
+        case BlendMode::Modulate2x:    glBlendFunc(GL_DST_COLOR, GL_SRC_COLOR); break;
         default:                       glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA); break;
     }
+}
+
+void OpenGLDevice::SetDepthBias(float factor, float units) {
+    if (factor == 0.0f && units == 0.0f) {
+        glDisable(GL_POLYGON_OFFSET_FILL);
+        return;
+    }
+    glEnable(GL_POLYGON_OFFSET_FILL);
+    glPolygonOffset(factor, units);
 }
 
 void OpenGLDevice::SetDepthTest(bool enabled) {
