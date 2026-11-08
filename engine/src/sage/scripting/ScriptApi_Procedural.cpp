@@ -236,44 +236,10 @@ void SetMaterialProperty(Material& m, const std::string& key, const sol::object&
     else throw std::runtime_error("material: неизвестное свойство '" + key + "'");
 }
 
-} // namespace
-
-void ScriptEngine::RegisterProceduralApi() {
-    // --- Шумы ------------------------------------------------------------------
-    Bind("noise", "Seed", nullptr, [](int seed) { Global().Reseed((uint32_t)seed); });
-    Bind("noise", "Perlin", nullptr, [](float x, float y, sol::optional<float> z) {
-        return z ? Global().Perlin(x, y, *z) : Global().Perlin(x, y);
-    });
-    Bind("noise", "Simplex", nullptr, [](float x, float y, sol::optional<float> z) {
-        return z ? Global().Simplex(x, y, *z) : Global().Simplex(x, y);
-    });
-    Bind("noise", "Value", nullptr, [](float x, float y, sol::optional<float> z) {
-        return Global().Value(x, y, z.value_or(0.0f));
-    });
-    // f1, f2, ячейка — три значения: Lua забирает сколько нужно.
-    Bind("noise", "Worley", nullptr, [](float x, float y, sol::optional<float> z) {
-        float f1, f2, cell;
-        Global().Worley(x, y, z.value_or(0.0f), f1, f2, cell);
-        return std::make_tuple(f1, f2, cell);
-    });
-    auto fractal = [](auto fn) {
-        return [fn](float x, float y, float z, sol::optional<sol::table> opts) {
-            NoiseGen g;
-            g.Src = Global();
-            ApplyOptions(g, opts);
-            return fn(g.Src, g.Type, g.P(x, y, z), g.Frac);
-        };
-    };
-    Bind("noise", "Fbm", nullptr, fractal(sage::noise::Fbm));
-    Bind("noise", "Ridged", nullptr, fractal(sage::noise::Ridged));
-    Bind("noise", "Turbulence", nullptr, fractal(sage::noise::Turbulence));
-    Bind("noise", "Warp", nullptr, [](const glm::vec3& p, float strength, sol::optional<sol::table> opts) {
-        NoiseGen g;
-        g.Src = Global();
-        ApplyOptions(g, opts);
-        return sage::noise::Warp(g.Src, g.Type, p, strength, g.Frac);
-    });
-
+// Тип генератора шума — и в главном состоянии скриптов, и в состояниях
+// фоновых задач (sage/scripting/ScriptTasks): шум без побочных эффектов, его
+// можно считать в любом потоке, у каждого состояния — свой экземпляр.
+void BindNoiseTypes(sol::state_view m_lua) {
     m_lua.new_usertype<NoiseGen>(
         "NoiseGenerator", sol::no_constructor,
         "Sample", [](const NoiseGen& g, float x, sol::optional<float> y, sol::optional<float> z) {
@@ -332,6 +298,68 @@ void ScriptEngine::RegisterProceduralApi() {
         "gain", sol::property([](const NoiseGen& g) { return g.Frac.Gain; },
                               [](NoiseGen& g, float v) { g.Frac.Gain = v; }),
         "warp", &NoiseGen::WarpStrength);
+}
+
+} // namespace
+
+namespace sage::scripting {
+
+// Шум и хэш для состояния фоновой задачи: sage.noise.New и sage.math.Hash —
+// те же, что у главного состояния (ScriptEngine::RegisterProceduralApi).
+void RegisterTaskNoiseApi(sol::state_view L) {
+    BindNoiseTypes(L);
+    sol::table sage = L["sage"].get_or_create<sol::table>();
+    sol::table noise = sage["noise"].get_or_create<sol::table>();
+    sol::table math = sage["math"].get_or_create<sol::table>();
+    noise["New"] = [](sol::optional<sol::table> opts) {
+        NoiseGen g;
+        ApplyOptions(g, opts);
+        return g;
+    };
+    math["Hash"] = [](int x, sol::optional<int> y, sol::optional<int> z, sol::optional<int> seed) {
+        return sage::noise::Source((uint32_t)seed.value_or(0)).Hash(x, y.value_or(0), z.value_or(0));
+    };
+}
+
+} // namespace sage::scripting
+
+void ScriptEngine::RegisterProceduralApi() {
+    // --- Шумы ------------------------------------------------------------------
+    Bind("noise", "Seed", nullptr, [](int seed) { Global().Reseed((uint32_t)seed); });
+    Bind("noise", "Perlin", nullptr, [](float x, float y, sol::optional<float> z) {
+        return z ? Global().Perlin(x, y, *z) : Global().Perlin(x, y);
+    });
+    Bind("noise", "Simplex", nullptr, [](float x, float y, sol::optional<float> z) {
+        return z ? Global().Simplex(x, y, *z) : Global().Simplex(x, y);
+    });
+    Bind("noise", "Value", nullptr, [](float x, float y, sol::optional<float> z) {
+        return Global().Value(x, y, z.value_or(0.0f));
+    });
+    // f1, f2, ячейка — три значения: Lua забирает сколько нужно.
+    Bind("noise", "Worley", nullptr, [](float x, float y, sol::optional<float> z) {
+        float f1, f2, cell;
+        Global().Worley(x, y, z.value_or(0.0f), f1, f2, cell);
+        return std::make_tuple(f1, f2, cell);
+    });
+    auto fractal = [](auto fn) {
+        return [fn](float x, float y, float z, sol::optional<sol::table> opts) {
+            NoiseGen g;
+            g.Src = Global();
+            ApplyOptions(g, opts);
+            return fn(g.Src, g.Type, g.P(x, y, z), g.Frac);
+        };
+    };
+    Bind("noise", "Fbm", nullptr, fractal(sage::noise::Fbm));
+    Bind("noise", "Ridged", nullptr, fractal(sage::noise::Ridged));
+    Bind("noise", "Turbulence", nullptr, fractal(sage::noise::Turbulence));
+    Bind("noise", "Warp", nullptr, [](const glm::vec3& p, float strength, sol::optional<sol::table> opts) {
+        NoiseGen g;
+        g.Src = Global();
+        ApplyOptions(g, opts);
+        return sage::noise::Warp(g.Src, g.Type, p, strength, g.Frac);
+    });
+
+    BindNoiseTypes(m_lua);
     // Генератор со своими настройками: { type, seed, octaves, frequency,
     // lacunarity, gain, warp }.
     Bind("noise", "New", nullptr, [](sol::optional<sol::table> opts) {

@@ -1329,11 +1329,13 @@ function Script:OnAnimationEvent(name) end
 ---@field noise sage.noise
 ---@field physics sage.physics
 ---@field post sage.post
+---@field profile sage.profile
 ---@field reflect sage.reflect
 ---@field render sage.render
 ---@field rt sage.rt
 ---@field save sage.save
 ---@field scene sage.scene
+---@field tasks sage.tasks
 ---@field texture sage.texture
 ---@field time sage.time
 ---@field tween sage.tween
@@ -2312,6 +2314,33 @@ function sage.post.remove(kind) end
 ---@param params table
 function sage.post.set(kind, params) end
 
+---@class sage.profile
+sage.profile = {}
+
+---Короткое имя того же модуля: `profile.X()` — это ТОТ ЖЕ объект,
+---что `sage.profile`, а не копия. Движок ставит его, только если имя
+---свободно: игра, объявившая своё, остаётся при своём.
+---@type sage.profile
+profile = nil
+
+---@return boolean
+function sage.profile.enabled() end
+---@return number
+function sage.profile.frame_cpu_ms() end
+---@return number
+function sage.profile.frame_gpu_ms() end
+---@return number
+function sage.profile.memory_mb() end
+function sage.profile.pop() end
+---@param name string
+function sage.profile.push(name) end
+---@return table
+function sage.profile.sections() end
+---@param on boolean
+function sage.profile.set_enabled(on) end
+---@return string
+function sage.profile.summary() end
+
 ---@class sage.reflect
 sage.reflect = {}
 
@@ -2507,6 +2536,34 @@ function sage.scene.SpawnPrefab(path, at) end
 ---@param scale? number
 ---@return integer
 function sage.scene.SpawnRagdoll(pos, scale) end
+
+---@class sage.tasks
+sage.tasks = {}
+
+---Короткое имя того же модуля: `tasks.X()` — это ТОТ ЖЕ объект,
+---что `sage.tasks`, а не копия. Движок ставит его, только если имя
+---свободно: игра, объявившая своё, остаётся при своём.
+---@type sage.tasks
+tasks = nil
+
+---@return number
+function sage.tasks.busy_ms() end
+---@return integer
+function sage.tasks.pending() end
+---@param name string
+function sage.tasks.preload(name) end
+---@param id integer
+---@return any
+function sage.tasks.result(id) end
+---@param module string
+---@param fn string
+---@param ...? ...
+---@return integer
+function sage.tasks.run(module, fn, ...) end
+---@param n integer
+function sage.tasks.set_workers(n) end
+---@return integer
+function sage.tasks.workers() end
 
 ---@class sage.texture
 sage.texture = {}

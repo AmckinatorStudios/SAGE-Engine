@@ -182,6 +182,9 @@ void ScriptEngine::RegisterEngineApi() {
         mod("net", "мультиплеер", {}, true, &ScriptEngine::RegisterNetApi),
         mod("ai", "SAGE AI: задачи, экземпляры ИИ, операции", {"object"}, true,
             &ScriptEngine::RegisterAiApi),
+        mod("tasks", "фоновые задачи скриптов в своих потоках", {}, true, &ScriptEngine::RegisterTasksApi),
+        mod("profile", "профилировщик кадра: участки, время CPU/GPU, память", {}, true,
+            &ScriptEngine::RegisterProfileApi),
     };
     ScriptModuleContext ctx{m_lua, this, nullptr};
     // Не последний хозяин: модулю нового API (Requires = {"Scene"}) ещё
