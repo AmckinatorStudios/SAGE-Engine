@@ -29,8 +29,8 @@ const char* const kTilingKeys[] = {"uniform", "separate", "worldSize"};
 const char* const kTilingLabels[] = {"Общий", "По осям", "По размеру объекта"};
 const char* const kFilterKeys[] = {"smooth", "nearest"};
 const char* const kFilterLabels[] = {"Сглаживание", "Ближайший пиксель"};
-const char* const kBlendKeys[] = {"alpha", "additive"};
-const char* const kBlendLabels[] = {"Обычное", "Сложение"};
+const char* const kBlendKeys[] = {"alpha", "additive", "modulate2x"};
+const char* const kBlendLabels[] = {"Обычное", "Сложение", "Умножение ×2"};
 const char* const kCullKeys[] = {"back", "front", "none"};
 const char* const kCullLabels[] = {"Задние", "Передние", "Не отсекать"};
 } // namespace
@@ -53,10 +53,17 @@ const std::vector<MaterialRenderField>& MaterialRenderFields() {
          "Как полупрозрачная поверхность ложится на то, что за ней.\n"
          "«Обычное» — цвет поверх с прозрачностью.\n"
          "«Сложение» — цвет прибавляется к фону: свет, огонь, искры, светила.\n"
-         "Чёрное при сложении исчезает, яркое на ярком становится белым.",
+         "Чёрное при сложении исчезает, яркое на ярком становится белым.\n"
+         "«Умножение ×2» — фон умножается на удвоенный цвет: серое не меняет\n"
+         "фон, тёмное затемняет. Узор поверх поверхности: трещины, пятна.",
          [](const MaterialRender& r) { return (int)r.Blend; },
          [](MaterialRender& r, int v) { r.Blend = (MaterialRender::Blending)v; },
-         kBlendKeys, kBlendLabels, 2},
+         kBlendKeys, kBlendLabels, 3},
+        {"depthBias", "Смещение глубины", MaterialRenderField::Kind::Float,
+         MaterialRenderField::Group::Render, nullptr, &MaterialRender::DepthBias, -10.0f, 10.0f,
+         "Сдвиг глубины к камере (минус) или от неё — для слоя, лежащего\n"
+         "прямо на другой поверхности (трещины, надписи, следы): без него\n"
+         "слой мерцает. Обычно −1…−3. Действует на прозрачные материалы."},
         {"planarReflectivity", "Плоское отражение", MaterialRenderField::Kind::Float,
          MaterialRenderField::Group::Render, nullptr, &MaterialRender::PlanarReflectivity,
          0.0f, 1.0f,

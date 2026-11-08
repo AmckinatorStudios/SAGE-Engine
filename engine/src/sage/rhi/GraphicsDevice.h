@@ -137,8 +137,16 @@ public:
     // не меняет фон): умножение, «экран» и инверсия фона под рисунком
     // (src·(1−dst) + dst·(1−src): белое инвертирует, чёрное не трогает) — так
     // рисуют прицел, который виден на любом фоне.
-    enum class BlendMode { Alpha, Premultiplied, Additive, Multiply, Screen, Invert };
+    // Modulate2x — фон × удвоенный цвет (dst·src + src·dst): серое 0.5 фон не
+    // меняет, тёмное затемняет, светлое осветляет. Слой узора поверх
+    // поверхности (трещины, пятна, следы) без своей подложки.
+    enum class BlendMode { Alpha, Premultiplied, Additive, Multiply, Screen, Invert, Modulate2x };
     virtual void SetBlendMode(BlendMode mode) { (void)mode; }
+    // Смещение глубины рисуемого (polygon offset): глубина = своя + наклон ×
+    // factor + шаг глубины × units. Минус — к камере. Слою, лежащему ровно на
+    // другой поверхности, без него достаётся мерцание (z-fighting). 0 и 0 —
+    // выключено.
+    virtual void SetDepthBias(float factor, float units) { (void)factor; (void)units; }
     virtual void SetDepthTest(bool enabled) = 0;
     virtual void SetDepthWrite(bool enabled) = 0;
     virtual void SetDepthFunc(DepthFunc func) = 0;      // LessEqual нужен skybox'у

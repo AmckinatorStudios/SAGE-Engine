@@ -311,9 +311,13 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         // задней стенки не видно, и второй проход был бы лишней работой.
         // Смешение материала (Material::Blend): сложение — для света и огня.
         auto setBlendOf = [&](const Material* mat) {
-            device.SetBlendMode(mat && mat->Render.Blend == MaterialRender::Blending::Additive
-                                    ? sage::rhi::GraphicsDevice::BlendMode::Additive
-                                    : sage::rhi::GraphicsDevice::BlendMode::Alpha);
+            using BM = sage::rhi::GraphicsDevice::BlendMode;
+            const MaterialRender::Blending b = mat ? mat->Render.Blend : MaterialRender::Blending::Alpha;
+            device.SetBlendMode(b == MaterialRender::Blending::Additive     ? BM::Additive
+                                : b == MaterialRender::Blending::Modulate2x ? BM::Modulate2x
+                                                                            : BM::Alpha);
+            const float bias = mat ? mat->Render.DepthBias : 0.0f;
+            device.SetDepthBias(bias, bias);
         };
         auto passCount = [](const Material* mat) {
             return (!mat || mat->Render.Cull == CullFaces::None) ? 2 : 1;
@@ -426,6 +430,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         }
 
         device.SetBlendMode(sage::rhi::GraphicsDevice::BlendMode::Alpha);
+        device.SetDepthBias(0.0f, 0.0f);
         device.SetCullMode(sage::rhi::CullMode::Back);
         device.SetDepthWrite(true);
         device.SetBlend(false);
