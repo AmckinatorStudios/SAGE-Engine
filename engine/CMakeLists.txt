@@ -138,6 +138,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/MeshBuilder.cpp
     src/sage/scripting/ScriptApi_Procedural.cpp
     src/sage/scripting/ScriptApi_ProcGen.cpp
+    src/sage/scripting/ScriptApi_Tasks.cpp
+    src/sage/scripting/ScriptTasks.cpp
     src/sage/assets/import/FbxSkin.cpp
     src/sage/assets/Quarantine.cpp
     src/sage/assets/import/GltfAccessor.cpp

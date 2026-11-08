@@ -10,6 +10,7 @@
 #include "sage/ai/World.h"
 #include "sage/scripting/LuaHandlerStore.h"
 #include "sage/scripting/ScriptApi.h"
+#include "sage/scripting/ScriptTasks.h"
 
 namespace sage::net { class NetworkSystem; }
 class Window;
@@ -116,6 +117,9 @@ public:
     // Загрузка НАТИВНЫХ модулей (package.cpath) намеренно отключена: скрипты
     // игры не должны уметь подгружать произвольные .so/.dll.
     void AddScriptSearchPath(const std::string& dir);
+    // Фоновые задачи скриптов (tasks.*) и передача им модуля с зависимостями.
+    sage::scripting::ScriptTasks& Tasks();
+    bool PreloadTaskModule(const std::string& name, std::string& error);
 
     // Даёт скриптам доступ к камере через GetCamera() — читать и менять
     // позицию/угол обзора/FOV, например для программных камера-эффектов
@@ -474,6 +478,8 @@ private:
     void RegisterRenderTextureApi(); // sage.rt.* — съёмка сцены в картинку
     void RegisterNetApi();        // Net.* — мультиплеер (см. ScriptApi_Net.cpp)
     void RegisterAiApi();         // ai.* — задачи и экземпляры ИИ (ScriptApi_AI.cpp)
+    void RegisterTasksApi();      // tasks.* — фоновые задачи в своих потоках (ScriptApi_Tasks.cpp)
+    void RegisterProfileApi();    // profile.* — участки кадра и его время (ScriptApi_Tasks.cpp)
     void RegisterAiGraphApi();    // граф: ai.node, ai.type, узлы мира (ScriptApi_AIGraph.cpp)
     void RegisterAiWorldNodes();  // узлы мира движка и API (ScriptApi_AIWorld.cpp)
     void RegisterAiBehaviorNodes();  // задачи ИИ в мире, цель (ScriptApi_AIBehavior.cpp)
@@ -578,6 +584,8 @@ private:
     // разбор package.path обратно: строка шаблонов — формат для человека, а не
     // структура данных.
     std::vector<std::string> m_scriptSearchPaths;
+    // Фоновые задачи скриптов (tasks.*): пул поднимается при первой задаче.
+    std::unique_ptr<sage::scripting::ScriptTasks> m_tasks;
 
     // --- Ход игры: смена сцены, пауза, масштаб времени ---------------------
     //
