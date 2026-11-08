@@ -23,7 +23,7 @@ constexpr float kClamp01(float v) { return v < 0.0f ? 0.0f : (v > 1.0f ? 1.0f : 
 // Разумные значения затухания 3D-звука по умолчанию: слышен вблизи корабля,
 // плавно гаснет к горизонту. Игра может не задумываться об этих числах.
 constexpr float k3DMinDistance = 1.0f;   // ближе — громкость не растёт
-constexpr float k3DMaxDistance = 40.0f;  // дальше — практически не слышно
+constexpr float k3DMaxDistance = 40.0f;  // дальше — не слышно (линейная модель)
 constexpr float k3DRolloff = 1.0f;
 } // namespace
 
@@ -196,6 +196,8 @@ struct AudioEngine::Impl {
         ma_sound_set_looping(sound, looping ? MA_TRUE : MA_FALSE);
         if (spatial) {
             ma_sound_set_position(sound, pos.x, pos.y, pos.z);
+            // Линейная модель: дальше максимума — тишина (DistanceGain).
+            ma_sound_set_attenuation_model(sound, ma_attenuation_model_linear);
             ma_sound_set_min_distance(sound, k3DMinDistance);
             ma_sound_set_max_distance(sound, k3DMaxDistance);
             ma_sound_set_rolloff(sound, k3DRolloff);
@@ -256,12 +258,20 @@ void AudioEngine::PlaySound2D(const std::string& path, float volume, Category ca
     }
 }
 
+float AudioEngine::DistanceGain(float distance, float minDistance, float maxDistance, float rolloff) {
+    if (minDistance >= maxDistance) return 1.0f;
+    const float d = std::clamp(distance, minDistance, maxDistance);
+    return std::clamp(1.0f - rolloff * (d - minDistance) / (maxDistance - minDistance), 0.0f, 1.0f);
+}
+
 void AudioEngine::PlaySound3D(const std::string& path, const glm::vec3& position,
-                              float volume, Category category, float pitch, const std::string& bus) {
+                              float volume, Category category, float pitch, const std::string& bus,
+                              float maxDistance) {
     if (!m_impl->Available) return;
     if (ma_sound* s = m_impl->StartSound(path, category, volume, /*spatial=*/true,
                                          position, /*looping=*/false, /*streaming=*/false, bus)) {
         if (pitch != 1.0f) ma_sound_set_pitch(s, std::max(pitch, 0.01f));
+        if (maxDistance > 0.0f) ma_sound_set_max_distance(s, std::max(maxDistance, k3DMinDistance + 0.01f));
         m_impl->OneShots.push_back(s);
     }
 }
@@ -283,6 +293,7 @@ AudioEngine::SoundHandle AudioEngine::Play(const std::string& path, const SoundP
     // поведение остаётся ровно прежним, а новое получает свои значения.
     ma_sound_set_pitch(s, p.Pitch > 0.01f ? p.Pitch : 0.01f);
     if (p.Spatial) {
+        ma_sound_set_attenuation_model(s, ma_attenuation_model_linear);
         ma_sound_set_min_distance(s, std::max(p.MinDistance, 0.01f));
         ma_sound_set_max_distance(s, std::max(p.MaxDistance, p.MinDistance + 0.01f));
         ma_sound_set_rolloff(s, std::max(p.Rolloff, 0.0f));

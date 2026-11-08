@@ -1550,7 +1550,8 @@ function sage.audio.PlaySound(path, volume, pitch, bus) end
 ---@param volume? number
 ---@param pitch? number
 ---@param bus? string
-function sage.audio.PlaySound3D(path, pos, volume, pitch, bus) end
+---@param range? number
+function sage.audio.PlaySound3D(path, pos, volume, pitch, bus, range) end
 ---@param entity Entity
 ---@param clip string
 function sage.audio.SetClip(entity, clip) end

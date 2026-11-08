@@ -281,11 +281,14 @@ void ScriptEngine::RegisterAudioApi() {
         m_audio->PlaySound2D(path, volume.value_or(1.0f), AudioEngine::Category::Sfx, pitch.value_or(1.0f),
                              bus.value_or(std::string()));
     });
+    // range — дальше этого звука не слышно (по умолчанию 40 м); до него
+    // громкость спадает линейно.
     Bind("audio", "PlaySound3D", "PlaySound3D", [this](const std::string& path, glm::vec3 pos, sol::optional<float> volume,
-                                                       sol::optional<float> pitch, sol::optional<std::string> bus) {
+                                                       sol::optional<float> pitch, sol::optional<std::string> bus,
+                                                       sol::optional<float> range) {
         if (!m_audio) throw std::runtime_error("PlaySound3D: аудио не привязано (ScriptEngine::BindAudio не вызван)");
         m_audio->PlaySound3D(path, pos, volume.value_or(1.0f), AudioEngine::Category::Sfx, pitch.value_or(1.0f),
-                             bus.value_or(std::string()));
+                             bus.value_or(std::string()), range.value_or(0.0f));
     });
     // PlayMusic(путь, громкость = 1, loop = true, fade = 0): loop = false — трек
     // один раз (плейлист с паузами — скриптом через IsMusicPlaying), fade —
