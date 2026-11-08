@@ -2210,3 +2210,17 @@ TEST(Scripting_camera_passes_and_layers) {
     CHECK_EQ(passes, 3);
     CHECK_TRUE(layer == "viewmodel");
 }
+
+// display.* без окна (Play-режим редактора): не разворачивает ничего и честно
+// отвечает «не получилось», а не падает на пустом указателе.
+TEST(Scripting_display_without_window_is_harmless) {
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    se.Lua().script(R"(
+        fs = display.fullscreen()
+        set = display.set_fullscreen(true)
+    )");
+    CHECK_FALSE(se.Lua()["fs"].get<bool>());
+    CHECK_FALSE(se.Lua()["set"].get<bool>());
+}

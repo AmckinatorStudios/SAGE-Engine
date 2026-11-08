@@ -165,6 +165,7 @@ void ScriptEngine::RegisterEngineApi() {
         mod("save", "сохранение прогресса", {}, true, &ScriptEngine::RegisterSaveApi),
         mod("user_folder", "пользовательские папки игры: скины, музыка, моды", {}, true,
             &ScriptEngine::RegisterUserFolderApi),
+        mod("display", "окно игры: полный экран", {}, true, &ScriptEngine::RegisterDisplayApi),
         mod("timers", "Schedule/Repeat, корутины", {}, false, &ScriptEngine::RegisterTimerApi),
         mod("messaging", "SendMessage/Broadcast", {"object"}, true, &ScriptEngine::RegisterMessagingApi),
         mod("args", "параметры запуска", {}, true, &ScriptEngine::RegisterLaunchArgsApi),

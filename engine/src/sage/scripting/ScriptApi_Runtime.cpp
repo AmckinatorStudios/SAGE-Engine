@@ -2,6 +2,7 @@
 #include <filesystem>
 #include "sage/core/Paths.h"
 #include "sage/assets/UserContent.h"
+#include "sage/core/Window.h"
 #include "sage/render/Screenshot.h"
 #include "ScriptEngine.h"
 
@@ -218,6 +219,26 @@ void ScriptEngine::RegisterUserFolderApi() {
             out[i++] = t;
         }
         return out;
+    });
+}
+
+// Окно игры (sage/core/Window.h): полный экран и обратно. В редакторе окна
+// нет (не привязано) — вызовы ничего не делают и отвечают false.
+void ScriptEngine::RegisterDisplayApi() {
+    // display.fullscreen() — окно сейчас во весь экран?
+    Bind("display", "fullscreen", nullptr, [this]() -> bool {
+        return m_window && m_window->CurrentDisplay().Mode != sage::WindowMode::Windowed;
+    });
+    // display.set_fullscreen(вкл) — во весь экран (безрамочно, в разрешении
+    // монитора: переключение мгновенное, без смены видеорежима) или обратно в
+    // окно прежнего размера по центру монитора. true — получилось.
+    Bind("display", "set_fullscreen", nullptr, [this](bool on) -> bool {
+        if (!m_window) return false;
+        ::Window::Display d = m_window->CurrentDisplay();
+        const bool now = d.Mode != sage::WindowMode::Windowed;
+        if (now == on) return true;
+        d.Mode = on ? sage::WindowMode::Borderless : sage::WindowMode::Windowed;
+        return m_window->ApplyDisplay(d);
     });
 }
 

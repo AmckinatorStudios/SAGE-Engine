@@ -208,8 +208,10 @@ Window::Window(int width, int height, const std::string& title, Params params)
     m_refresh = params.RefreshRate;
     m_windowedW = width;
     m_windowedH = height;
-    if (params.Mode == sage::WindowMode::Windowed && params.Monitor >= 0 && vmode && !params.Maximized) {
-        // Окно — по центру ВЫБРАННОГО монитора, а не там, куда его поставит система.
+    if (params.Mode == sage::WindowMode::Windowed && vmode && !params.Maximized) {
+        // Окно — по центру выбранного монитора (не выбран — главного), а не
+        // там, куда его поставит система: на Windows это левый верхний угол
+        // со сдвигом, и окно игры открывалось сбоку экрана.
         int mx = 0, my = 0;
         glfwGetMonitorPos(monitor, &mx, &my);
         glfwSetWindowPos(m_handle, mx + std::max(0, (vmode->width - width) / 2), my + std::max(0, (vmode->height - height) / 2));

@@ -127,6 +127,7 @@ void PlayerLayer::BuildSceneRuntime() {
     // Раскладку объявляют скрипты нового уровня — старая уходит вместе с ним.
     m_input.ClearActions();
     m_scripts->BindInput(m_input);
+    m_scripts->BindWindow(&sage::Application::Get().GetWindow());
     // События действий уходят и на шину сцены: «input.Jump» слышат подписчики
     // на Lua и связи, настроенные в инспекторе, — а не только тот, кто
     // спрашивает опросом.

@@ -1314,6 +1314,7 @@ function Script:OnAnimationEvent(name) end
 ---@field audio sage.audio
 ---@field camera sage.camera
 ---@field core sage.core
+---@field display sage.display
 ---@field events sage.events
 ---@field fx sage.fx
 ---@field game sage.game
@@ -1602,6 +1603,21 @@ function sage.core.log(message) end
 function sage.core.logError(message) end
 ---@param message string
 function sage.core.logWarn(message) end
+
+---@class sage.display
+sage.display = {}
+
+---Короткое имя того же модуля: `display.X()` — это ТОТ ЖЕ объект,
+---что `sage.display`, а не копия. Движок ставит его, только если имя
+---свободно: игра, объявившая своё, остаётся при своём.
+---@type sage.display
+display = nil
+
+---@return boolean
+function sage.display.fullscreen() end
+---@param on boolean
+---@return boolean
+function sage.display.set_fullscreen(on) end
 
 ---@class sage.events
 sage.events = {}
