@@ -12,6 +12,8 @@
 #include "sage/scripting/ScriptApi.h"
 
 namespace sage::net { class NetworkSystem; }
+class Window;
+
 #include <sol/sol.hpp>
 #include <functional>
 #include <memory>
@@ -92,6 +94,9 @@ public:
     // отдельно): половина ввода, до которой скрипт не дотягивался, — это ровно
     // тот случай, когда игру целиком на скриптах написать невозможно.
     void BindInput(sage::input::InputSystem& input) { m_input = &input; }
+    // Окно собранной игры — для display.* (полный экран). В редакторе не
+    // привязывается: Play-режим не вправе разворачивать окно редактора.
+    void BindWindow(::Window* window) { m_window = window; }
 
     // Параметр запуска игры: скрипт читает его как LaunchArg("autopilot").
     // Хост наполняет их из командной строки (--autopilot=1) и переменной
@@ -455,6 +460,7 @@ private:
     void RegisterAudioApi();      // PlaySound/PlayMusic/…
     void RegisterSaveApi();       // sage.save.* — прогресс игрока
     void RegisterUserFolderApi(); // user_folder.*: открытые папки для файлов игрока
+    void RegisterDisplayApi();    // display.*: полный экран, размер окна
     void RegisterTimerApi();      // Schedule/Repeat/StartCoroutine + wait()
     void RegisterMessagingApi();  // SendMessage/Broadcast (см. DispatchMessage)
     void RegisterLaunchArgsApi(); // LaunchArg/LaunchFlag
@@ -548,6 +554,7 @@ private:
 
     Scene* m_scene = nullptr;
     sage::input::InputSystem* m_input = nullptr;
+    ::Window* m_window = nullptr;
     Camera* m_camera = nullptr;
     ParticleSystem* m_particles = nullptr;
     BillboardSystem* m_billboards = nullptr;
