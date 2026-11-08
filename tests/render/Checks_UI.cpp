@@ -674,6 +674,26 @@ void CheckRenderTextureImageSurvivesResync(UIRenderer& ui) {
     Check(rt != nullptr && after.Tex && after.Tex == expected, "картинка rt: остаётся съёмкой");
 }
 
+// Съёмка в текстуру хранит ЛИНЕЙНЫЙ цвет сцены, а интерфейс пишет в кадр
+// sRGB. Раньше она показывалась как есть: линейные 0.5 выходили 128 вместо
+// 188 — превью персонажа темнее и контрастнее самой модели.
+void CheckRenderTextureShowsSceneColour(UIRenderer& ui) {
+    sage::render::RenderTexture& rt =
+        sage::render::RenderTextureRegistry::Instance().GetOrCreate("rendertest_rt_linear", 16, 16);
+    rt.Begin(glm::vec4(0.5f, 0.5f, 0.5f, 1.0f));   // «сцена» линейного серого 0.5
+    rt.End();
+    Scene scene("rt-linear");
+    GameObject e = Screen(scene, "Pic", {60.0f, 60.0f});
+    sage::ui::Image img;
+    img.Path = "rt:rendertest_rt_linear";
+    scene.Registry().emplace<sage::ui::Image>(e.Entity(), img);
+    const Image shot = RenderUI(ui, scene);
+    const size_t i = ((size_t)30 * shot.Width + 30) * 3;
+    const int v = shot.Pixels[i];
+    std::printf("    съёмка линейного 0.5 в интерфейсе: %d (ждём 188)\n", v);
+    Check(std::abs(v - 188) <= 6, "съёмка в текстуру в интерфейсе — цвет сцены, а не сырые линейные значения");
+}
+
 } // namespace
 
 // --- Тень и обводка текста ---------------------------------------------------
@@ -848,6 +868,7 @@ void RunUIChecks() {
     CheckImageRotates(ui);
     CheckSrgbImageKeepsItsColour(ui);
     CheckRenderTextureImageSurvivesResync(ui);
+    CheckRenderTextureShowsSceneColour(ui);
     CheckLabelShadowAndOutline(ui);
     CheckPressedLookReplacesFill(ui);
     CheckNineSliceCornersKeepTheirSize(ui);

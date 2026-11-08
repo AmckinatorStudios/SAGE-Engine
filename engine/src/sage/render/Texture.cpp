@@ -134,13 +134,14 @@ private:
 };
 } // namespace
 
-std::shared_ptr<Texture> Texture::Wrap(sage::rhi::TextureHandle handle, int width, int height) {
+std::shared_ptr<Texture> Texture::Wrap(sage::rhi::TextureHandle handle, int width, int height, bool linearColor) {
     std::shared_ptr<Texture> t(new Texture());
     t->m_texture = std::make_unique<BorrowedTexture2D>(handle);
     t->m_width = width;
     t->m_height = height;
     t->m_channels = 4;
     t->m_hasMipmaps = false;
+    t->m_srgb = linearColor;
     return t;
 }
 
