@@ -70,6 +70,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/Systems.cpp
     src/sage/core/Window.cpp
     src/sage/core/Display.cpp
+    src/sage/core/BorderlessWindow.cpp
     src/sage/core/Profiler.cpp
     src/sage/assets/SaveGame.cpp
     src/sage/net/NetConnection.cpp
@@ -375,7 +376,8 @@ if (WIN32)
     # dbghelp — символы в стеке вызовов отчёта о падении (CrashHandler).
     # ws2_32 — Winsock: UDP-сокеты сетевого модуля (sage/net/UdpSocket).
     # shell32 — ShellExecuteW: открыть пользовательскую папку игры в проводнике.
-    target_link_libraries(sage_engine PUBLIC opengl32 dbghelp ws2_32 shell32)
+    # ole32, uuid — панель задач (ITaskbarList2): безрамочное окно игры.
+    target_link_libraries(sage_engine PUBLIC opengl32 dbghelp ws2_32 shell32 ole32 uuid)
 elseif (APPLE)
     # macOS: OpenGL — системный фреймворк (3.3 core есть на любом Mac с
     # 10.9); Cocoa/IOKit/CoreVideo — окно GLFW; CoreAudio/AudioToolbox —

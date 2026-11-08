@@ -1,5 +1,6 @@
 #include "Window.h"
 #include "Log.h"
+#include "sage/core/BorderlessWindow.h"
 #include "sage/core/Display.h"
 #include <algorithm>
 #include <stdexcept>
@@ -165,7 +166,8 @@ Window::Window(int width, int height, const std::string& title, Params params)
         glfwWindowHint(GLFW_BLUE_BITS, vmode->blueBits);
         glfwWindowHint(GLFW_REFRESH_RATE, vmode->refreshRate);
         glfwWindowHint(GLFW_DECORATED, GLFW_FALSE);
-        createW = vmode->width; createH = vmode->height;
+        const auto r = sage::display::BorderlessRect(0, 0, vmode->width, vmode->height);
+        createW = r.Width; createH = r.Height;
     }
 
     m_handle = glfwCreateWindow(createW, createH, title.c_str(), useMonitor, nullptr);
@@ -221,6 +223,7 @@ Window::Window(int width, int height, const std::string& title, Params params)
         int mx = 0, my = 0;
         glfwGetMonitorPos(monitor, &mx, &my);
         glfwSetWindowPos(m_handle, mx, my);
+        sage::display::MarkFullscreenWindow(m_handle, true);
     }
 
     glfwMakeContextCurrent(m_handle);
@@ -434,17 +437,21 @@ bool Window::ApplyDisplay(const Display& d, std::string* err) {
                                  d.RefreshRate > 0 ? d.RefreshRate : GLFW_DONT_CARE);
             break;
         }
-        case sage::WindowMode::Borderless:
-            // Безрамочное — полноэкранное окно В ТЕКУЩЕМ видеорежиме монитора:
-            // смены режима нет (не моргает), но это настоящее окно монитора.
-            // Раньше это было обычное окно без рамки размером с монитор — и
-            // Windows оставляла панель задач поверх игры. Свернуться при уходе
-            // фокуса ему не нужно: режим монитора не менялся.
-            glfwSetWindowAttrib(m_handle, GLFW_AUTO_ICONIFY, GLFW_FALSE);
-            glfwSetWindowMonitor(m_handle, mon->Handle, 0, 0, mon->Current.Width, mon->Current.Height,
-                                 mon->Current.RefreshHz > 0 ? mon->Current.RefreshHz : GLFW_DONT_CARE);
+        case sage::WindowMode::Borderless: {
+            // Безрамочное — ОБЫЧНОЕ окно без рамки поверх монитора, в его
+            // текущем видеорежиме (смены режима нет — не моргает). Окно
+            // монитора (glfwSetWindowMonitor с монитором) драйвер делал
+            // эксклюзивным, и запись OBS замирала, стоило дать игре фокус
+            // (sage/core/BorderlessWindow.h). Панель задач убирает пометка
+            // полноэкранного окна для неё.
+            const auto r = sage::display::BorderlessRect(mon->X, mon->Y, mon->Current.Width, mon->Current.Height);
+            glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_FALSE);
+            glfwSetWindowMonitor(m_handle, nullptr, r.X, r.Y, r.Width, r.Height, 0);
+            sage::display::MarkFullscreenWindow(m_handle, true);
             break;
+        }
         case sage::WindowMode::Windowed: {
+            sage::display::MarkFullscreenWindow(m_handle, false);
             glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_TRUE);
             // Окно не больше монитора и по его центру, если пришло с другого.
             const int w = std::min(d.Width, mon->Current.Width), h = std::min(d.Height, mon->Current.Height);

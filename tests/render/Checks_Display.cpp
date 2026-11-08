@@ -63,24 +63,33 @@ void RunDisplayChecks(Window& window) {
     Settle();
     Check(window.CurrentDisplay().Width == 320, "подтверждённый режим остался");
 
-    // Безрамочный режим — окно МОНИТОРА в его текущем видеорежиме, а не окно
-    // размером с экран: иначе Windows держит панель задач поверх игры.
+    // Безрамочный режим — ОБЫЧНОЕ окно без рамки, накрывающее монитор, а не
+    // окно монитора: окно монитора драйвер на Windows делает эксклюзивным,
+    // и запись OBS («Захват окна») замирала, стоило дать игре фокус. Размер —
+    // на строку больше монитора: ровно экранный драйвер тоже повышает.
     {
         Window::Display full = window.CurrentDisplay();
         full.Mode = sage::WindowMode::Borderless;
         const bool ok = window.ApplyDisplay(full, nullptr);
         Settle();
         GLFWmonitor* on = glfwGetWindowMonitor(window.Handle());
-        int ww = 0, wh = 0;
+        int ww = 0, wh = 0, wx = 0, wy = 0;
         glfwGetWindowSize(window.Handle(), &ww, &wh);
-        const GLFWvidmode* vm = on ? glfwGetVideoMode(on) : nullptr;
-        std::printf("    безрамочный: монитор окна %s, окно %dx%d, режим монитора %dx%d\n", on ? "есть" : "нет", ww, wh,
-                    vm ? vm->width : 0, vm ? vm->height : 0);
-        Check(ok && on != nullptr, "безрамочный режим — окно на мониторе (полноэкранное), а не обычное окно");
-        Check(vm && ww == vm->width && wh == vm->height, "безрамочный режим не меняет видеорежим монитора");
+        glfwGetWindowPos(window.Handle(), &wx, &wy);
+        GLFWmonitor* prim = glfwGetPrimaryMonitor();
+        const GLFWvidmode* vm = prim ? glfwGetVideoMode(prim) : nullptr;
+        int mx = 0, my = 0;
+        if (prim) glfwGetMonitorPos(prim, &mx, &my);
+        std::printf("    безрамочный: монитор окна %s, окно %dx%d в (%d,%d), режим монитора %dx%d\n",
+                    on ? "есть" : "нет", ww, wh, wx, wy, vm ? vm->width : 0, vm ? vm->height : 0);
+        Check(ok && on == nullptr, "безрамочный режим — обычное окно, не эксклюзивное окно монитора");
+        Check(glfwGetWindowAttrib(window.Handle(), GLFW_DECORATED) == GLFW_FALSE, "безрамочный режим — без рамки");
+        Check(vm && wx == mx && wy == my && ww == vm->width && wh == vm->height + 1,
+              "безрамочное окно накрывает монитор и не совпадает с ним размером");
         window.ApplyDisplay(before, nullptr);
         Settle();
         Check(glfwGetWindowMonitor(window.Handle()) == nullptr, "из безрамочного окно возвращается оконным");
+        Check(glfwGetWindowAttrib(window.Handle(), GLFW_DECORATED) == GLFW_TRUE, "оконный режим — снова с рамкой");
     }
 
     // Вернуть окно прогона как было: наборы после этого не должны зависеть
