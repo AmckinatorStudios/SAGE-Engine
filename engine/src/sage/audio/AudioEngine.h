@@ -72,11 +72,14 @@ public:
     // 2D — непозиционный, всегда по центру (UI, оповещения). volume 0..1
     // относительно громкости категории.
     // pitch — множитель частоты: 0.5 — октавой ниже (и вдвое дольше).
+    // bus — именованная шина громкости (см. SetBusVolume); пусто — шина
+    // категории ("sfx", "music", "ambient").
     void PlaySound2D(const std::string& path, float volume = 1.0f, Category category = Category::Sfx,
-                     float pitch = 1.0f);
+                     float pitch = 1.0f, const std::string& bus = {});
     // 3D — позиционный, микшируется относительно слушателя (звук в точке мира).
     void PlaySound3D(const std::string& path, const glm::vec3& position,
-                     float volume = 1.0f, Category category = Category::Sfx, float pitch = 1.0f);
+                     float volume = 1.0f, Category category = Category::Sfx, float pitch = 1.0f,
+                     const std::string& bus = {});
     // Высоты звучащих сейчас разовых эффектов — для отладки («почему шаги
     // звучат одинаково») и проверок. Пусто — звука нет или он уже доиграл.
     std::vector<float> OneShotPitches() const;
@@ -152,7 +155,8 @@ public:
     // Музыка — один поток за раз. fadeSeconds > 0 — нарастает из тишины.
     // loop = false — трек играет один раз: так устроены плейлисты с паузами
     // между треками (IsMusicPlaying скажет, когда пора следующий).
-    void PlayMusic(const std::string& path, float volume = 1.0f, bool loop = true, float fadeSeconds = 0.0f);
+    void PlayMusic(const std::string& path, float volume = 1.0f, bool loop = true, float fadeSeconds = 0.0f,
+                   const std::string& bus = {});
     void StopMusic();
     bool IsMusicPlaying() const;
     void SetMusicVolume(float volume);
@@ -203,9 +207,23 @@ public:
 
     int SetAllPaused(bool paused);
 
+    // ГРОМКОСТЬ — шинами. Шина — микс-группа со своим именем («block»,
+    // «player», «weather» — какие нужны игре; у категорий — "sfx", "music",
+    // "ambient"), создаётся при первом обращении. Итог звука = его громкость ×
+    // громкость шины × общая (все — 0..1, больше 1 не усиливает).
+    //
+    // Общая громкость множится на КАЖДУЮ шину, а не ставится на конечный узел
+    // графа: громкость выходной шины конечного узла miniaudio 0.11 никто не
+    // читает (ma_engine_set_volume на ней не действовал), и регулятор общей
+    // громкости в игре ничего не менял.
     void SetMasterVolume(float volume);
     void SetCategoryVolume(Category category, float volume);
     float MasterVolume() const;
+    void SetBusVolume(const std::string& bus, float volume);
+    float BusVolume(const std::string& bus) const;
+    // То, что реально стоит на шине: громкость шины × общая.
+    float EffectiveBusVolume(const std::string& bus) const;
+    static const char* CategoryBus(Category category);
 
     // Раз в кадр: освобождает доигравшие одноразовые 3D/2D-звуки. Без вызова
     // они не текут (реапятся и в деструкторе), но копятся до конца партии.

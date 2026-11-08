@@ -1536,16 +1536,19 @@ function sage.audio.Play(entity) end
 ---@param volume? number
 ---@param loop? boolean
 ---@param fade? number
-function sage.audio.PlayMusic(path, volume, loop, fade) end
+---@param bus? string
+function sage.audio.PlayMusic(path, volume, loop, fade, bus) end
 ---@param path string
 ---@param volume? number
 ---@param pitch? number
-function sage.audio.PlaySound(path, volume, pitch) end
+---@param bus? string
+function sage.audio.PlaySound(path, volume, pitch, bus) end
 ---@param path string
 ---@param pos Vec3
 ---@param volume? number
 ---@param pitch? number
-function sage.audio.PlaySound3D(path, pos, volume, pitch) end
+---@param bus? string
+function sage.audio.PlaySound3D(path, pos, volume, pitch, bus) end
 ---@param entity Entity
 ---@param clip string
 function sage.audio.SetClip(entity, clip) end
@@ -1562,6 +1565,12 @@ function sage.audio.SetVolume(entity, volume) end
 ---@param entity Entity
 function sage.audio.Stop(entity) end
 function sage.audio.StopMusic() end
+---@param bus string
+---@return number
+function sage.audio.bus_volume(bus) end
+---@param bus string
+---@param volume number
+function sage.audio.set_bus_volume(bus, volume) end
 
 ---@class sage.camera
 sage.camera = {}

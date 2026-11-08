@@ -435,10 +435,14 @@ bool Window::ApplyDisplay(const Display& d, std::string* err) {
             break;
         }
         case sage::WindowMode::Borderless:
-            // Безрамочное — окно ровно по монитору, без смены видеорежима:
-            // переключение мгновенное и не моргает экраном.
-            glfwSetWindowMonitor(m_handle, nullptr, mon->X, mon->Y, mon->Current.Width, mon->Current.Height, 0);
-            glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_FALSE);
+            // Безрамочное — полноэкранное окно В ТЕКУЩЕМ видеорежиме монитора:
+            // смены режима нет (не моргает), но это настоящее окно монитора.
+            // Раньше это было обычное окно без рамки размером с монитор — и
+            // Windows оставляла панель задач поверх игры. Свернуться при уходе
+            // фокуса ему не нужно: режим монитора не менялся.
+            glfwSetWindowAttrib(m_handle, GLFW_AUTO_ICONIFY, GLFW_FALSE);
+            glfwSetWindowMonitor(m_handle, mon->Handle, 0, 0, mon->Current.Width, mon->Current.Height,
+                                 mon->Current.RefreshHz > 0 ? mon->Current.RefreshHz : GLFW_DONT_CARE);
             break;
         case sage::WindowMode::Windowed: {
             glfwSetWindowAttrib(m_handle, GLFW_DECORATED, GLFW_TRUE);

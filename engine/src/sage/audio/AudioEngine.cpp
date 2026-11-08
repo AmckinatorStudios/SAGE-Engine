@@ -11,6 +11,8 @@
 #include "miniaudio.h"
 
 #include <algorithm>
+#include <map>
+#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -89,13 +91,31 @@ struct AudioEngine::Impl {
     bool Available = false;
     ma_engine Engine{};
 
-    // Микс-группы категорий — дети конечного узла движка. Громкость категории
-    // множится на громкость каждого звука в ней, а сверху — мастер-громкость
-    // (ma_engine_set_volume). Так регуляторы SFX/Music/Ambient независимы.
-    ma_sound_group Groups[3]{}; // индексируется (int)Category
-    bool GroupsInited[3] = {false, false, false};
+    // Шины — микс-группы по имени, дети конечного узла движка. На группе
+    // стоит громкость шины × общая (см. AudioEngine::SetBusVolume). Адрес
+    // группы не должен меняться (на неё ссылается граф) — поэтому unique_ptr.
+    struct Bus {
+        ma_sound_group Group{};
+        bool Inited = false;
+        float Volume = 1.0f;
+    };
+    std::map<std::string, std::unique_ptr<Bus>> Buses;
 
     float MasterVolume = 1.0f;
+
+    Bus& BusNamed(const std::string& name) {
+        auto it = Buses.find(name);
+        if (it != Buses.end()) return *it->second;
+        auto b = std::make_unique<Bus>();
+        if (Available && ma_sound_group_init(&Engine, 0, nullptr, &b->Group) == MA_SUCCESS) b->Inited = true;
+        Bus& ref = *b;
+        Buses.emplace(name, std::move(b));
+        Apply(ref);
+        return ref;
+    }
+    void Apply(Bus& b) {
+        if (b.Inited) ma_sound_group_set_volume(&b.Group, kClamp01(b.Volume) * MasterVolume);
+    }
 
     // Управляемые звуки (лупы/музыка) по дескриптору — их uninit'им явно
     // (StopSound/StopMusic/деструктор).
@@ -116,9 +136,9 @@ struct AudioEngine::Impl {
     // проигрываемый каждый кадр, не залил лог одинаковыми ошибками.
     std::unordered_set<std::string> WarnedPaths;
 
-    ma_sound_group* GroupFor(Category cat) {
-        int idx = (int)cat;
-        return GroupsInited[idx] ? &Groups[idx] : nullptr;
+    ma_sound_group* GroupFor(Category cat, const std::string& bus = {}) {
+        Bus& b = BusNamed(bus.empty() ? AudioEngine::CategoryBus(cat) : bus);
+        return b.Inited ? &b.Group : nullptr;
     }
 
     // ПОЧЕМУ НЕ ЗАИГРАЛО — одной строкой и с указанием, что именно проверять.
@@ -145,7 +165,8 @@ struct AudioEngine::Impl {
     // Создаёт и запускает ma_sound из файла. streaming=true для музыки
     // (не грузить в память целиком). Возвращает nullptr при ошибке.
     ma_sound* StartSound(const std::string& path, Category cat, float volume,
-                         bool spatial, const glm::vec3& pos, bool looping, bool streaming) {
+                         bool spatial, const glm::vec3& pos, bool looping, bool streaming,
+                         const std::string& bus = {}) {
         ma_uint32 flags = streaming ? MA_SOUND_FLAG_STREAM : MA_SOUND_FLAG_DECODE;
         if (!spatial) flags |= MA_SOUND_FLAG_NO_SPATIALIZATION;
 
@@ -159,7 +180,7 @@ struct AudioEngine::Impl {
 
         auto* sound = new ma_sound{};
         ma_result r = ma_sound_init_from_file(&Engine, resolved.c_str(), flags,
-                                              GroupFor(cat), nullptr, sound);
+                                              GroupFor(cat, bus), nullptr, sound);
         if (r != MA_SUCCESS) {
             delete sound;
             WarnOnce(path, resolved, r);
@@ -201,12 +222,15 @@ AudioEngine::AudioEngine() : m_impl(std::make_unique<Impl>()) {
         return;
     }
 
-    for (int i = 0; i < 3; ++i) {
-        if (ma_sound_group_init(&m_impl->Engine, 0, nullptr, &m_impl->Groups[i]) == MA_SUCCESS) {
-            m_impl->GroupsInited[i] = true;
-        }
-    }
     m_impl->Available = true;
+    // Шины категорий — сразу (у остальных — при первом звуке или регуляторе).
+    // Заданные до открытия устройства громкости остаются.
+    for (auto& [name, b] : m_impl->Buses)
+        if (!b->Inited && ma_sound_group_init(&m_impl->Engine, 0, nullptr, &b->Group) == MA_SUCCESS) {
+            b->Inited = true;
+            m_impl->Apply(*b);
+        }
+    for (Category c : {Category::Sfx, Category::Music, Category::Ambient}) m_impl->BusNamed(CategoryBus(c));
     LOG_INFO("Audio") << "Аудио инициализировано (" << ma_engine_get_channels(&m_impl->Engine)
                       << " канала, " << ma_engine_get_sample_rate(&m_impl->Engine) << " Гц)";
 }
@@ -215,28 +239,28 @@ AudioEngine::~AudioEngine() {
     if (!m_impl->Available) return;
     for (auto* s : m_impl->OneShots) m_impl->Destroy(s);
     for (auto& [id, s] : m_impl->Managed) m_impl->Destroy(s);
-    for (int i = 0; i < 3; ++i) {
-        if (m_impl->GroupsInited[i]) ma_sound_group_uninit(&m_impl->Groups[i]);
-    }
+    for (auto& [name, b] : m_impl->Buses)
+        if (b->Inited) ma_sound_group_uninit(&b->Group);
     ma_engine_uninit(&m_impl->Engine);
 }
 
 bool AudioEngine::IsAvailable() const { return m_impl->Available; }
 
-void AudioEngine::PlaySound2D(const std::string& path, float volume, Category category, float pitch) {
+void AudioEngine::PlaySound2D(const std::string& path, float volume, Category category, float pitch,
+                              const std::string& bus) {
     if (!m_impl->Available) return;
     if (ma_sound* s = m_impl->StartSound(path, category, volume, /*spatial=*/false,
-                                         glm::vec3(0.0f), /*looping=*/false, /*streaming=*/false)) {
+                                         glm::vec3(0.0f), /*looping=*/false, /*streaming=*/false, bus)) {
         if (pitch != 1.0f) ma_sound_set_pitch(s, std::max(pitch, 0.01f));
         m_impl->OneShots.push_back(s);
     }
 }
 
 void AudioEngine::PlaySound3D(const std::string& path, const glm::vec3& position,
-                              float volume, Category category, float pitch) {
+                              float volume, Category category, float pitch, const std::string& bus) {
     if (!m_impl->Available) return;
     if (ma_sound* s = m_impl->StartSound(path, category, volume, /*spatial=*/true,
-                                         position, /*looping=*/false, /*streaming=*/false)) {
+                                         position, /*looping=*/false, /*streaming=*/false, bus)) {
         if (pitch != 1.0f) ma_sound_set_pitch(s, std::max(pitch, 0.01f));
         m_impl->OneShots.push_back(s);
     }
@@ -280,11 +304,12 @@ AudioEngine::SoundHandle AudioEngine::PlayLoop(const std::string& path, float vo
     return h;
 }
 
-void AudioEngine::PlayMusic(const std::string& path, float volume, bool loop, float fadeSeconds) {
+void AudioEngine::PlayMusic(const std::string& path, float volume, bool loop, float fadeSeconds,
+                           const std::string& bus) {
     if (!m_impl->Available) return;
     StopMusic();
     ma_sound* s = m_impl->StartSound(path, Category::Music, volume, /*spatial=*/false,
-                                     glm::vec3(0.0f), loop, /*streaming=*/true);
+                                     glm::vec3(0.0f), loop, /*streaming=*/true, bus);
     if (!s) return;
     if (fadeSeconds > 0.0f)
         ma_sound_set_fade_in_milliseconds(s, 0.0f, kClamp01(volume), (ma_uint64)(fadeSeconds * 1000.0f));
@@ -451,11 +476,34 @@ int AudioEngine::SetAllPaused(bool paused) {
 
 void AudioEngine::SetMasterVolume(float volume) {
     m_impl->MasterVolume = kClamp01(volume);
-    if (m_impl->Available) ma_engine_set_volume(&m_impl->Engine, m_impl->MasterVolume);
+    for (auto& [name, b] : m_impl->Buses) m_impl->Apply(*b);
 }
 
 void AudioEngine::SetCategoryVolume(Category category, float volume) {
-    if (ma_sound_group* g = m_impl->GroupFor(category)) ma_sound_group_set_volume(g, kClamp01(volume));
+    SetBusVolume(CategoryBus(category), volume);
+}
+
+void AudioEngine::SetBusVolume(const std::string& bus, float volume) {
+    Impl::Bus& b = m_impl->BusNamed(bus);
+    b.Volume = kClamp01(volume);
+    m_impl->Apply(b);
+}
+
+float AudioEngine::BusVolume(const std::string& bus) const {
+    auto it = m_impl->Buses.find(bus);
+    return it == m_impl->Buses.end() ? 1.0f : it->second->Volume;
+}
+
+float AudioEngine::EffectiveBusVolume(const std::string& bus) const {
+    return BusVolume(bus) * m_impl->MasterVolume;
+}
+
+const char* AudioEngine::CategoryBus(Category category) {
+    switch (category) {
+        case Category::Music: return "music";
+        case Category::Ambient: return "ambient";
+        default: return "sfx";
+    }
 }
 
 float AudioEngine::MasterVolume() const { return m_impl->MasterVolume; }
