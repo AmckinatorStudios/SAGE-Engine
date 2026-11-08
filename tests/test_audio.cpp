@@ -402,3 +402,23 @@ TEST(Audio_one_shot_pitch_is_applied) {
     CHECK_NEAR(pitches[0], 1.5f, 1e-4f);
     CHECK_NEAR(pitches[1], 0.5f, 1e-4f);
 }
+
+// Громкость шинами: общая множится на каждую шину (а не ставится на конечный
+// узел графа, который miniaudio 0.11 не читает — регулятор общей громкости в
+// игре ничего не делал), громкость больше 1 не усиливает, категория — та же
+// шина по имени.
+TEST(Audio_bus_volume_multiplies_master) {
+    AudioEngine audio;
+    audio.SetMasterVolume(0.1f);
+    audio.SetBusVolume("block", 0.5f);
+    CHECK_NEAR(audio.EffectiveBusVolume("block"), 0.05f, 1e-6f);
+    audio.SetBusVolume("weather", 3.0f);
+    CHECK_NEAR(audio.BusVolume("weather"), 1.0f, 1e-6f);
+    CHECK_NEAR(audio.EffectiveBusVolume("weather"), 0.1f, 1e-6f);
+    audio.SetCategoryVolume(AudioEngine::Category::Music, 0.25f);
+    CHECK_NEAR(audio.BusVolume("music"), 0.25f, 1e-6f);
+    CHECK_NEAR(audio.EffectiveBusVolume("music"), 0.025f, 1e-6f);
+    audio.SetMasterVolume(0.0f);
+    CHECK_NEAR(audio.EffectiveBusVolume("block"), 0.0f, 1e-6f);
+    CHECK_NEAR(audio.BusVolume("unknown"), 1.0f, 1e-6f);
+}

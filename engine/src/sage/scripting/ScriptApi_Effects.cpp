@@ -273,23 +273,37 @@ void ScriptEngine::RegisterAudioApi() {
     // устройство недоступно (headless), вызовы безопасно ничего не делают. ---
     // pitch — множитель частоты (необязательный): 0.5 — октавой ниже. Звуки
     // шагов и ударов в играх берут его, чтобы один файл звучал по-разному.
+    // bus (необязательный, последним) — шина громкости звука: «block»,
+    // «player», «weather» — любое имя игры (audio.set_bus_volume).
     Bind("audio", "PlaySound", "PlaySound", [this](const std::string& path, sol::optional<float> volume,
-                                                   sol::optional<float> pitch) {
+                                                   sol::optional<float> pitch, sol::optional<std::string> bus) {
         if (!m_audio) throw std::runtime_error("PlaySound: аудио не привязано (ScriptEngine::BindAudio не вызван)");
-        m_audio->PlaySound2D(path, volume.value_or(1.0f), AudioEngine::Category::Sfx, pitch.value_or(1.0f));
+        m_audio->PlaySound2D(path, volume.value_or(1.0f), AudioEngine::Category::Sfx, pitch.value_or(1.0f),
+                             bus.value_or(std::string()));
     });
     Bind("audio", "PlaySound3D", "PlaySound3D", [this](const std::string& path, glm::vec3 pos, sol::optional<float> volume,
-                                                       sol::optional<float> pitch) {
+                                                       sol::optional<float> pitch, sol::optional<std::string> bus) {
         if (!m_audio) throw std::runtime_error("PlaySound3D: аудио не привязано (ScriptEngine::BindAudio не вызван)");
-        m_audio->PlaySound3D(path, pos, volume.value_or(1.0f), AudioEngine::Category::Sfx, pitch.value_or(1.0f));
+        m_audio->PlaySound3D(path, pos, volume.value_or(1.0f), AudioEngine::Category::Sfx, pitch.value_or(1.0f),
+                             bus.value_or(std::string()));
     });
     // PlayMusic(путь, громкость = 1, loop = true, fade = 0): loop = false — трек
     // один раз (плейлист с паузами — скриптом через IsMusicPlaying), fade —
     // секунды нарастания из тишины.
     Bind("audio", "PlayMusic", "PlayMusic", [this](const std::string& path, sol::optional<float> volume,
-                                                   sol::optional<bool> loop, sol::optional<float> fade) {
+                                                   sol::optional<bool> loop, sol::optional<float> fade,
+                                                   sol::optional<std::string> bus) {
         if (!m_audio) throw std::runtime_error("PlayMusic: аудио не привязано (ScriptEngine::BindAudio не вызван)");
-        m_audio->PlayMusic(path, volume.value_or(1.0f), loop.value_or(true), fade.value_or(0.0f));
+        m_audio->PlayMusic(path, volume.value_or(1.0f), loop.value_or(true), fade.value_or(0.0f),
+                           bus.value_or(std::string()));
+    });
+    // Громкость шины 0..1 (стандарт SAGE: строчные имена). Шина заводится
+    // при первом обращении; итог звука — его громкость × шина × общая.
+    Bind("audio", "set_bus_volume", nullptr, [this](const std::string& bus, float volume) {
+        if (m_audio) m_audio->SetBusVolume(bus, volume);
+    });
+    Bind("audio", "bus_volume", nullptr, [this](const std::string& bus) -> float {
+        return m_audio ? m_audio->BusVolume(bus) : 1.0f;
     });
     Bind("audio", "IsMusicPlaying", "IsMusicPlaying", [this]() -> bool {
         return m_audio && m_audio->IsMusicPlaying();

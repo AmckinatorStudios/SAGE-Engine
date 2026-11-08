@@ -63,6 +63,26 @@ void RunDisplayChecks(Window& window) {
     Settle();
     Check(window.CurrentDisplay().Width == 320, "подтверждённый режим остался");
 
+    // Безрамочный режим — окно МОНИТОРА в его текущем видеорежиме, а не окно
+    // размером с экран: иначе Windows держит панель задач поверх игры.
+    {
+        Window::Display full = window.CurrentDisplay();
+        full.Mode = sage::WindowMode::Borderless;
+        const bool ok = window.ApplyDisplay(full, nullptr);
+        Settle();
+        GLFWmonitor* on = glfwGetWindowMonitor(window.Handle());
+        int ww = 0, wh = 0;
+        glfwGetWindowSize(window.Handle(), &ww, &wh);
+        const GLFWvidmode* vm = on ? glfwGetVideoMode(on) : nullptr;
+        std::printf("    безрамочный: монитор окна %s, окно %dx%d, режим монитора %dx%d\n", on ? "есть" : "нет", ww, wh,
+                    vm ? vm->width : 0, vm ? vm->height : 0);
+        Check(ok && on != nullptr, "безрамочный режим — окно на мониторе (полноэкранное), а не обычное окно");
+        Check(vm && ww == vm->width && wh == vm->height, "безрамочный режим не меняет видеорежим монитора");
+        window.ApplyDisplay(before, nullptr);
+        Settle();
+        Check(glfwGetWindowMonitor(window.Handle()) == nullptr, "из безрамочного окно возвращается оконным");
+    }
+
     // Вернуть окно прогона как было: наборы после этого не должны зависеть
     // от того, что здесь проверялось.
     window.ApplyDisplay(before, nullptr);
