@@ -350,6 +350,8 @@ function cylinder(r, h, segments, caps) return wrap_mesh(MESH.Cylinder(r, h, seg
 ---@field fill fun(fn:fun(u:number, v:number, x:integer, y:integer): Vec3|number)
 ---@field set fun(x:integer, y:integer, color:Vec3|number)
 ---@field get fun(x:integer, y:integer): Vec4
+---@field read fun(x:integer, y:integer, w:integer, h:integer): integer[]
+---@field write fun(x:integer, y:integer, w:integer, h:integer, pixels:integer[])
 ---@field apply fun()
 
 local function color_of(c)
@@ -369,6 +371,9 @@ local function wrap_texture(c, name)
     end
     t.set = function(x, y, color) c:SetPixel(x, y, color_of(color)); dirty = true end
     t.get = function(x, y) return c:GetPixel(x, y) end
+    -- Прямоугольник целиком: массив 0xRRGGBBAA по строкам снизу вверх.
+    t.read = function(x, y, w, h) return c:Read(x, y, w, h) end
+    t.write = function(x, y, w, h, pixels) c:Write(x, y, w, h, pixels); dirty = true end
     t.apply = function() c:Apply(); dirty = false end
     rawset(t, "_flush", function() if dirty then c:Apply(); dirty = false end end)
     rawset(t, "_canvas", c)

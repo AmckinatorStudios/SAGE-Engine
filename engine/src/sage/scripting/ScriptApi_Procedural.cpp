@@ -624,6 +624,47 @@ void ScriptEngine::RegisterProceduralApi() {
         // Пиксели — с нуля: это координаты картинки, а не номера в списке.
         "SetPixel", [](TextureCanvas& c, int x, int y, sol::object color) { c.Set(x, y, ToColor(color)); },
         "GetPixel", [](const TextureCanvas& c, int x, int y) { return c.Get(x, y); },
+        // Прямоугольник пикселей одним вызовом — массив целых 0xRRGGBBAA по
+        // строкам снизу вверх, w·h штук. Попиксельно (GetPixel/SetPixel) каждый
+        // пиксель — вызов и цвет-объект: иконка 128×128 стоила сотни
+        // миллисекунд. Массив ещё и уходит копией в фоновую задачу (tasks).
+        "Read", [](const TextureCanvas& c, int x0, int y0, int w, int h, sol::this_state ts) {
+            lua_State* L = ts;
+            w = std::max(w, 0);
+            h = std::max(h, 0);
+            lua_createtable(L, w * h, 0);
+            lua_Integer i = 1;
+            for (int y = y0; y < y0 + h; ++y)
+                for (int x = x0; x < x0 + w; ++x) {
+                    lua_Integer v = 0;
+                    if (x >= 0 && y >= 0 && x < c.W && y < c.H) {
+                        const unsigned char* p = &c.Px[((size_t)y * c.W + x) * 4];
+                        v = ((lua_Integer)p[0] << 24) | ((lua_Integer)p[1] << 16) | ((lua_Integer)p[2] << 8) | p[3];
+                    }
+                    lua_pushinteger(L, v);
+                    lua_rawseti(L, -2, i++);
+                }
+            return sol::stack_table(L, -1);
+        },
+        "Write", [](TextureCanvas& c, int x0, int y0, int w, int h, sol::table data) {
+            lua_State* L = data.lua_state();
+            data.push();
+            const int t = lua_gettop(L);
+            lua_Integer i = 1;
+            for (int y = y0; y < y0 + h; ++y)
+                for (int x = x0; x < x0 + w; ++x, ++i) {
+                    lua_rawgeti(L, t, i);
+                    const lua_Integer v = lua_tointeger(L, -1);
+                    lua_pop(L, 1);
+                    if (x < 0 || y < 0 || x >= c.W || y >= c.H) continue;
+                    unsigned char* p = &c.Px[((size_t)y * c.W + x) * 4];
+                    p[0] = (unsigned char)((v >> 24) & 0xFF);
+                    p[1] = (unsigned char)((v >> 16) & 0xFF);
+                    p[2] = (unsigned char)((v >> 8) & 0xFF);
+                    p[3] = (unsigned char)(v & 0xFF);
+                }
+            lua_settop(L, t - 1);
+        },
         // fn(u, v, x, y) -> цвет; u, v — в долях 0..1 по центрам пикселей.
         "Fill", [](TextureCanvas& c, sol::protected_function fn) {
             for (int y = 0; y < c.H; ++y)

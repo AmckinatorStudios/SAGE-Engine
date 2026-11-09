@@ -1148,6 +1148,8 @@ tex = texture("noise_tex", 256, 256)
 tex.fill(function(u, v) return fbm(u * 8, v * 8) * 0.5 + 0.5 end)   -- число — серый
 img = texture.load("assets/textures/stone.png")  -- картинка с диска: get/set, apply
 c = img.get(0, 0)                     -- строки снизу вверх, как у texture(...)
+px = img.read(0, 0, 16, 16)           -- прямоугольник: целые 0xRRGGBBAA, строки снизу вверх
+tex.write(0, 0, 16, 16, px)           -- так же назад; за краем — пропуск
 stone = material("stone", {color = rgb(0.5, 0.45, 0.4), roughness = 0.9})
 stone.texture = tex                   -- текстура грузится на видеокарту здесь
 tex.apply()                           -- повторно — пиксели в ТОЙ ЖЕ текстуре: материал видит новое
@@ -1155,6 +1157,11 @@ stone.normal_map = "Assets/Textures/rock_n.png"
 stone.tiling = 4
 stone.save("Assets/Materials/stone.sagemat")
 ```
+
+`read`/`write` — пиксели прямоугольником одним вызовом: попиксельно
+(`get`/`set`) каждый пиксель — вызов и цвет-объект, и картинка 128×128 стоила
+сотни миллисекунд. Массив целых к тому же уходит копией в фоновую задачу
+(`tasks.run`): картинку можно считать в потоке воркера и положить готовой.
 
 Свойства материала: `color`, `emissive`, `emissive_strength`, `metallic`,
 `roughness`, `opacity`, `texture`, `normal_map`, `metallic_map`,

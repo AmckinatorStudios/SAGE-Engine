@@ -468,3 +468,33 @@ TEST(script_images_resolve_project_paths) {
     sage::AssetDatabase::Instance().ScanProject("");
     fs::remove_all(project);
 }
+
+// Пиксели прямоугольником: read отдаёт 0xRRGGBBAA по строкам снизу вверх,
+// write кладёт так же; за краем — 0 при чтении и пропуск при записи. Иконка
+// 128×128 попиксельно (get/set) — 16 тысяч вызовов и цветов-объектов.
+TEST(texture_reads_and_writes_pixel_rectangles) {
+    ScriptEngine se;
+    se.Lua().script(R"LUA(
+        t = texture("rect_px", 4, 3)
+        t.fill(function() return rgb(0, 0, 0) end)
+        t.set(1, 2, rgb(1, 0.5, 0))
+        r = t.read(0, 1, 3, 2)              -- строки 1..2, столбцы 0..2
+        t.write(2, 0, 2, 2, {0xFF0000FF, 0x00FF00FF, 0x0000FFFF, 0x80808080})
+        g = t.get(3, 0)
+        b = t.get(2, 1)
+        a = t.get(3, 1)
+        edge = t.read(3, 2, 2, 1)           -- второй пиксель — за краем
+        t.write(-1, -1, 2, 2, {1, 2, 3, 0xFFFFFFFF})   -- три за краем, один в (0, 0)
+        w00 = t.get(0, 0)
+    )LUA");
+    auto L = [&](const char* k) { return se.Lua()[k]; };
+    CHECK_EQ((int)se.Lua().script("return #r").get<int>(), 6);
+    // r[5] — пиксель (1, 2): 255, 128, 0, 255.
+    CHECK_EQ(se.Lua().script("return r[5]").get<long long>(), 0xFF8000FFLL);
+    CHECK_EQ(se.Lua().script("return r[1]").get<long long>(), 0x000000FFLL);
+    CHECK_NEAR(L("g").get<glm::vec4>().y, 1.0f, 1e-3);
+    CHECK_NEAR(L("b").get<glm::vec4>().z, 1.0f, 1e-3);
+    CHECK_NEAR(L("a").get<glm::vec4>().w, 128.0f / 255.0f, 1e-3);
+    CHECK_EQ(se.Lua().script("return edge[2]").get<long long>(), 0LL);
+    CHECK_NEAR(L("w00").get<glm::vec4>().x, 1.0f, 1e-3);
+}
