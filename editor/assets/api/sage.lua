@@ -3321,6 +3321,8 @@ function cylinder(r, h, segments, caps) end
 ---@field fill fun(fn:fun(u:number, v:number, x:integer, y:integer): Vec3|number)
 ---@field set fun(x:integer, y:integer, color:Vec3|number)
 ---@field get fun(x:integer, y:integer): Vec4
+---@field read fun(x:integer, y:integer, w:integer, h:integer): integer[]
+---@field write fun(x:integer, y:integer, w:integer, h:integer, pixels:integer[])
 ---@field apply fun()
 ---Текстура, нарисованная кодом: texture("noise", 256, 256).
 ---@class sage.texture
