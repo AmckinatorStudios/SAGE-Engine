@@ -57,6 +57,13 @@ public:
     void SetStreamActive(const std::string& id, bool active);
     void SetStreamPosition(const std::string& id, glm::vec3 position);
     void RemoveStream(const std::string& id);
+    // Частицы с заданными начальными данными — в струю id (её эффект решает,
+    // как они живут и выглядят). Струя при этом может быть выключена: сама
+    // она тогда ничего не рождает. Все частицы струи — один вызов отрисовки.
+    // Возвращает, сколько родилось (нет струи — 0).
+    int Spawn(const std::string& id, const sage::fx::ParticleInit* particles, size_t count);
+    // Сколько частиц сейчас живёт в струе id (нет струи — 0).
+    size_t StreamAlive(const std::string& id) const;
 
     // Шаг всех эмиттеров: рождение, силы, столкновения, дочерние эффекты.
     void Update(float dt);

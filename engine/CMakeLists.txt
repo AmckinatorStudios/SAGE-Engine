@@ -70,6 +70,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/Systems.cpp
     src/sage/core/Window.cpp
     src/sage/core/Display.cpp
+    src/sage/core/Cpu.cpp
     src/sage/core/BorderlessWindow.cpp
     src/sage/core/Profiler.cpp
     src/sage/assets/SaveGame.cpp

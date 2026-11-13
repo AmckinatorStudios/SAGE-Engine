@@ -119,7 +119,7 @@ void RegisterCoreSystems(SystemScheduler& scheduler, const CoreSystems& systems)
                 const glm::vec3 d = to - from;
                 const float len = glm::length(d);
                 if (len < 1e-6f) return false;
-                const PhysicsScene::EntityHit h = physics->Raycast(from, d / len, len);
+                const PhysicsScene::EntityHit h = physics->Raycast(from, d / len, len, hit.Mask);
                 if (!h.Hit) return false;
                 hit.Point = h.Point;
                 hit.Normal = h.Normal;

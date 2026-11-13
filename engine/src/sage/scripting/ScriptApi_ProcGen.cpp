@@ -253,6 +253,7 @@ function formula(expr, args) return M.Formula(expr, args) end
 ---@field clear fun()
 ---@field bounds fun(): Vec3, Vec3
 ---@field apply fun(object:any)
+---@field collider fun(object:any, layer?:integer): boolean
 ---@field save fun(path:string)
 
 local function wrap_mesh(b)
@@ -280,6 +281,8 @@ local function wrap_mesh(b)
     m.clear = function() b:Clear() end
     m.bounds = function() return b:Bounds() end
     m.apply = function(object) b:Apply(object) end
+    -- Меш — коллайдером объекта (для Raycast, частиц, тел); пустой — снять.
+    m.collider = function(object, layer) return b:Collider(object, layer) end
     m.save = function(path) b:Save(path) end
     rawset(m, "_builder", b)
     return setmetatable(m, {

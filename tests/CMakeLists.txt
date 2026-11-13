@@ -107,6 +107,7 @@ add_executable(sage_tests
     test_spritesheet.cpp
     test_script_api.cpp
     test_script_tasks.cpp
+    test_cpu.cpp
     test_destroy_hierarchy.cpp
     test_propertyclip.cpp
     test_interface.cpp

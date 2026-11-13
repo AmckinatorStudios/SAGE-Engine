@@ -331,6 +331,9 @@ void RegisterObject(Backend& backend) {
             rb.GravityScale = num("gravityScale", rb.GravityScale);
             if (opts) {
                 rb.Sensor = opts->get_or("sensor", rb.Sensor);
+                // Слой тела (бит маски Raycast/OverlapSphere): «луч только по
+                // земле», «только по существам».
+                rb.Layer = (sage::physics::LayerMask)opts->get_or("layer", (unsigned)rb.Layer);
                 rb.Continuous = opts->get_or("continuous", rb.Continuous);
                 // «Не опрокидывается» — самое частое, поэтому отдельным флагом.
                 if (opts->get_or("freezeRotation", false)) rb.Locks |= sage::physics::kLockRotAll;

@@ -185,6 +185,7 @@ json ToJson(const ParticleEffect& f) {
     j["friction"] = f.Friction;
     j["lifetimeLoss"] = f.LifetimeLoss;
     j["collisionRadius"] = f.CollisionRadius;
+    if (f.CollisionMask != 0xFFFFFFFFu) j["collisionMask"] = f.CollisionMask;
 
     j["texture"] = f.Texture;
     j["frames"] = f.Frames;
@@ -308,6 +309,7 @@ ParticleEffect FromJson(const json& j) {
     Get(j, "friction", f.Friction);
     Get(j, "lifetimeLoss", f.LifetimeLoss);
     Get(j, "collisionRadius", f.CollisionRadius);
+    Get(j, "collisionMask", f.CollisionMask);
 
     Get(j, "texture", f.Texture);
     Get(j, "frames", f.Frames);

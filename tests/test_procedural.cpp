@@ -6,6 +6,7 @@
 #include "sage/core/Noise.h"
 #include "sage/render/MeshBuilder.h"
 #include "sage/render/ResourceManager.h"
+#include "sage/physics/PhysicsComponents.h"
 #include "sage/scene/Scene.h"
 #include "sage/scripting/ScriptEngine.h"
 
@@ -497,4 +498,70 @@ TEST(texture_reads_and_writes_pixel_rectangles) {
     CHECK_NEAR(L("a").get<glm::vec4>().w, 128.0f / 255.0f, 1e-3);
     CHECK_EQ(se.Lua().script("return edge[2]").get<long long>(), 0LL);
     CHECK_NEAR(L("w00").get<glm::vec4>().x, 1.0f, 1e-3);
+}
+
+// Меш, собранный скриптом, ставится коллайдером объекта (m.collider): форма
+// Mesh с геометрией от кода; пустой меш коллайдер снимает.
+TEST(script_mesh_becomes_collider_of_object) {
+    ScriptEngine se;
+    Scene scene("C");
+    se.BindScene(scene);
+    se.Lua().script(R"LUA(
+        o = SpawnObject("Ground")
+        m = mesh()
+        a = m.vertex(0, 0, 0, Vec3(0, 1, 0)); b = m.vertex(0, 0, 4, Vec3(0, 1, 0))
+        c = m.vertex(4, 0, 4, Vec3(0, 1, 0)); d = m.vertex(4, 0, 0, Vec3(0, 1, 0))
+        m.triangle(a, b, c); m.triangle(a, c, d)
+        ok = m.collider(o)
+    )LUA");
+    CHECK_TRUE(se.Lua()["ok"].get<bool>());
+    int found = 0;
+    for (auto e : scene.Registry().view<ColliderComponent>()) {
+        const ColliderComponent& col = scene.Registry().get<ColliderComponent>(e);
+        CHECK_TRUE(col.Shape == sage::physics::ShapeType::Mesh);
+        CHECK_TRUE(col.Geometry != nullptr);
+        if (col.Geometry) CHECK_EQ((int)col.Geometry->Indices.size(), 6);
+        ++found;
+    }
+    CHECK_EQ(found, 1);
+    se.Lua().script("gone = mesh().collider(o)");
+    CHECK_FALSE(se.Lua()["gone"].get<bool>());
+    CHECK_EQ((int)scene.Registry().view<ColliderComponent>().size(), 0);
+}
+
+// Тело с коллайдером объекту из скрипта (physics.add_body): тип, форма,
+// размер, центр и слой попадают в компоненты; слой меша-коллайдера — тоже.
+TEST(script_adds_body_with_collider_and_layer) {
+    ScriptEngine se;
+    Scene scene("B");
+    se.BindScene(scene);
+    se.Lua().script(R"LUA(
+        o = SpawnObject("Target")
+        physics.add_body(o, {type = "kinematic", shape = "box", size = Vec3(1, 2, 1), center = Vec3(0, 1, 0), layer = 4})
+        g = SpawnObject("Ground")
+        m = mesh()
+        a = m.vertex(0, 0, 0, Vec3(0, 1, 0)); b = m.vertex(0, 0, 4, Vec3(0, 1, 0)); c = m.vertex(4, 0, 4, Vec3(0, 1, 0))
+        m.triangle(a, b, c)
+        m.collider(g, 2)
+        bad = not pcall(function() physics.add_body(o, {shape = "blob"}) end)
+    )LUA");
+    int boxes = 0, meshes = 0;
+    for (auto e : scene.Registry().view<RigidBodyComponent, ColliderComponent>()) {
+        const RigidBodyComponent& rb = scene.Registry().get<RigidBodyComponent>(e);
+        const ColliderComponent& col = scene.Registry().get<ColliderComponent>(e);
+        if (col.Shape == sage::physics::ShapeType::Box) {
+            ++boxes;
+            CHECK_TRUE(rb.Type == sage::physics::BodyType::Kinematic);
+            CHECK_EQ((int)rb.Layer, 4);
+            CHECK_NEAR(col.HalfExtents.y, 1.0f, 1e-6f);
+            CHECK_NEAR(col.Center.y, 1.0f, 1e-6f);
+        } else if (col.Shape == sage::physics::ShapeType::Mesh) {
+            ++meshes;
+            CHECK_TRUE(rb.Type == sage::physics::BodyType::Static);
+            CHECK_EQ((int)rb.Layer, 2);
+        }
+    }
+    CHECK_EQ(boxes, 1);
+    CHECK_EQ(meshes, 1);
+    CHECK_TRUE(se.Lua()["bad"].get<bool>());
 }
