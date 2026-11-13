@@ -264,9 +264,11 @@ const std::vector<int>& ShaderTextureUnits() {
 
 void BindShaderTextures(Shader& sh, const Material* mat) {
     const std::vector<int>& units = ShaderTextureUnits();
+    // Шейдеру, читающему кадр за собой, два последних юнита отданы под него.
+    const size_t usable = units.size() - (sh.WantsScene && units.size() >= 2 ? 2 : 0);
     for (size_t i = 0; i < sh.Textures.size(); ++i) {
         const Shader::TextureSlot& slot = sh.Textures[i];
-        if (i >= units.size()) {
+        if (i >= usable) {
             static bool warned = false;
             if (!warned) {
                 LOG_WARN("Render") << "Своему шейдеру не хватило юнитов текстур: видеокарта даёт "

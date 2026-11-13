@@ -1709,6 +1709,13 @@ function sage.fx.SetStreamPosition(id, pos) end
 ---@param entity Entity
 ---@param clear? boolean
 function sage.fx.Stop(entity, clear) end
+---@param id string
+---@return integer
+function sage.fx.count(id) end
+---@param id string
+---@param list table
+---@return integer
+function sage.fx.spawn(id, list) end
 
 ---@class sage.game
 sage.game = {}
@@ -2260,6 +2267,9 @@ function sage.physics.SetVelocity(entity, v) end
 ---@param entity Entity
 ---@return table
 function sage.physics.TriggersOf(entity) end
+---@param entity Entity
+---@param opts? table
+function sage.physics.add_body(entity, opts) end
 
 ---@class sage.post
 sage.post = {}
@@ -3269,6 +3279,7 @@ function formula(expr, args) end
 ---@field clear fun()
 ---@field bounds fun(): Vec3, Vec3
 ---@field apply fun(object:any)
+---@field collider fun(object:any, layer?:integer): boolean
 ---@field save fun(path:string)
 ---Пустой меш: вершины, треугольники, материалы — кодом.
 ---@class sage.mesh

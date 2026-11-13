@@ -351,6 +351,15 @@ private:
     float m_time = 0.0f;       // время сцены — юниформа uTime собственных шейдеров
     std::vector<MeshInstance> m_transparentBatch; // буфер пачки прозрачных (переиспользуется)
     std::vector<unsigned int> m_customOrder;      // перестановка инстансов при сортировке группы
+    // КАДР ЗА МАТЕРИАЛОМ: копия цвета и глубины непрозрачного, снятая перед
+    // прозрачными группами, шейдер которых читает uSceneColor/uSceneDepth
+    // (вода с преломлением, стекло с искажением). Таргет живёт между кадрами
+    // и растёт по области вывода; копия — одна на цветной проход.
+    std::unique_ptr<sage::rhi::RenderTarget> m_sceneCopy;
+    glm::ivec4 m_sceneRect{0};   // область вывода, с которой снята копия
+    bool m_sceneCopied = false;  // в этом проходе копия уже есть
+    void CopySceneBehind();
+    void BindSceneBehind(Shader& sh) const;
     std::vector<CullItem> m_cull;                                  // кандидаты кадра (переиспользуется)
     // Мировые матрицы кадра (Scene::ComputeWorldMatrices) — один O(n)-проход
     // на сбор вместо рекурсивного WorldMatrix на каждую сущность (см. Scene.h).
