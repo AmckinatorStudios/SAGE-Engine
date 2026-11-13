@@ -221,6 +221,9 @@ std::string SettingsKey(const RigidBodyComponent& rb, const ColliderComponent* c
         PutRaw(k, p.Offset); PutRaw(k, p.EulerDeg);
     }
     if (IsMeshShape(col->Shape)) {
+        // Геометрия от кода: другой указатель — другая форма.
+        const void* geometry = col->Geometry.get();
+        PutRaw(k, geometry);
         k += col->MeshPath;
         k += '|';
         // Меш самого объекта сменили (другая модель) — форма тоже другая.
@@ -238,23 +241,25 @@ std::string SettingsKey(const RigidBodyComponent& rb, const ColliderComponent* c
 // Jolt узнаёт внутреннее ребро (между двумя треугольниками одной поверхности)
 // по ОБЩИМ индексам вершин, и несваренная сетка вся состоит из «краёв»: ящик,
 // едущий по полу из такой модели, подпрыгивает на каждом стыке треугольников.
-std::shared_ptr<MeshGeometry> Weld(const std::vector<Vertex>& verts, const std::vector<unsigned int>& indices) {
+std::shared_ptr<MeshGeometry> WeldPoints(const std::vector<glm::vec3>& points, const std::vector<glm::vec3>& normals,
+                                         const std::vector<uint32_t>& indices) {
     auto g = std::make_shared<MeshGeometry>();
     std::unordered_map<std::string, uint32_t> seen;
-    std::vector<uint32_t> remap(verts.size());
-    for (size_t i = 0; i < verts.size(); ++i) {
+    std::vector<uint32_t> remap(points.size());
+    for (size_t i = 0; i < points.size(); ++i) {
         // Ключ — позиция, округлённая до десятой миллиметра: вершины шва
         // совпадают бит в бит не всегда (экспорт пишет их с разной ошибкой).
-        const glm::ivec3 q = glm::ivec3(glm::round(verts[i].Position * 10000.0f));
+        const glm::ivec3 q = glm::ivec3(glm::round(points[i] * 10000.0f));
         std::string key(reinterpret_cast<const char*>(&q), sizeof(q));
         auto [it, fresh] = seen.emplace(std::move(key), (uint32_t)g->Points.size());
-        if (fresh) g->Points.push_back(verts[i].Position);
+        if (fresh) g->Points.push_back(points[i]);
         remap[i] = it->second;
     }
+    const bool haveNormals = normals.size() == points.size();
     g->Indices.reserve(indices.size());
     for (size_t i = 0; i + 2 < indices.size(); i += 3) {
-        const unsigned a = indices[i], b = indices[i + 1], c = indices[i + 2];
-        if (a >= verts.size() || b >= verts.size() || c >= verts.size()) continue;
+        const uint32_t a = indices[i], b = indices[i + 1], c = indices[i + 2];
+        if (a >= points.size() || b >= points.size() || c >= points.size()) continue;
         // Треугольник, схлопнувшийся при сварке в линию, — не поверхность.
         if (remap[a] == remap[b] || remap[b] == remap[c] || remap[a] == remap[c]) continue;
         // Лицевая сторона — туда, куда смотрят нормали вершин. Jolt сталкивает
@@ -262,9 +267,11 @@ std::shared_ptr<MeshGeometry> Weld(const std::vector<Vertex>& verts, const std::
         // даже в примитиве «плоскость») бывает любым — рендеру он безразличен,
         // освещение идёт по нормалям. Пол с обходом «вниз» пропускал сквозь
         // себя всё, что на него падало.
-        const glm::vec3 face = glm::cross(verts[b].Position - verts[a].Position,
-                                          verts[c].Position - verts[a].Position);
-        const bool flip = glm::dot(face, verts[a].Normal + verts[b].Normal + verts[c].Normal) < 0.0f;
+        bool flip = false;
+        if (haveNormals) {
+            const glm::vec3 face = glm::cross(points[b] - points[a], points[c] - points[a]);
+            flip = glm::dot(face, normals[a] + normals[b] + normals[c]) < 0.0f;
+        }
         g->Indices.push_back(remap[a]);
         g->Indices.push_back(remap[flip ? c : b]);
         g->Indices.push_back(remap[flip ? b : c]);
@@ -272,12 +279,40 @@ std::shared_ptr<MeshGeometry> Weld(const std::vector<Vertex>& verts, const std::
     return g;
 }
 
+std::shared_ptr<MeshGeometry> Weld(const std::vector<Vertex>& verts, const std::vector<unsigned int>& indices) {
+    std::vector<glm::vec3> points(verts.size()), normals(verts.size());
+    for (size_t i = 0; i < verts.size(); ++i) {
+        points[i] = verts[i].Position;
+        normals[i] = verts[i].Normal;
+    }
+    return WeldPoints(points, normals, std::vector<uint32_t>(indices.begin(), indices.end()));
+}
+
 } // namespace
+
+sage::physics::MeshGeometryPtr sage::physics::MakeMeshGeometry(const std::vector<glm::vec3>& points,
+                                                               const std::vector<glm::vec3>& normals,
+                                                               const std::vector<uint32_t>& indices) {
+    std::shared_ptr<MeshGeometry> g = WeldPoints(points, normals, indices);
+    if (!g || g->Empty() || g->Indices.empty()) return nullptr;
+    return g;
+}
 
 sage::physics::MeshGeometryPtr PhysicsScene::ColliderGeometry(Scene& scene, entt::entity e, const glm::vec3& scale) {
     const ColliderComponent* col = scene.Registry().try_get<ColliderComponent>(e);
     if (!col) return nullptr;
     const MeshRendererComponent* mr = scene.Registry().try_get<MeshRendererComponent>(e);
+
+    // Геометрия от кода — как есть: её не кэшируют по пути (пути нет, а мир,
+    // собранный на лету, меняет её постоянно — кэш рос бы без конца).
+    if (col->Geometry) {
+        if (glm::length(scale - glm::vec3(1.0f)) < 1e-5f) return col->Geometry;
+        auto g = std::make_shared<MeshGeometry>(*col->Geometry);
+        for (glm::vec3& p : g->Points) p *= scale;
+        if (scale.x * scale.y * scale.z < 0.0f)
+            for (size_t i = 0; i + 2 < g->Indices.size(); i += 3) std::swap(g->Indices[i + 1], g->Indices[i + 2]);
+        return g;
+    }
 
     // Откуда геометрия: своя модель коллайдера или меш объекта.
     MeshRef::Type type = MeshRef::Type::Model;

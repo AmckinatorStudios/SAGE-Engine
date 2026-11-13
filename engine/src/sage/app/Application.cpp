@@ -1,3 +1,4 @@
+#include "sage/core/Cpu.h"
 #include "sage/app/Application.h"
 
 #include <cctype>
@@ -113,6 +114,7 @@ Application::Application(const AppConfig& config) : m_config(config) {
     // что искать его бессмысленно.
     LOG_INFO("Engine") << "Обработчик падений: "
                        << (CrashHandler::Installed() ? "установлен" : "НЕ УСТАНОВЛЕН");
+    LOG_INFO("Engine") << "Процессор: " << sage::cpu::Describe(sage::cpu::Detect());
     LOG_INFO("Engine") << "Запуск: окно готово, поднимаю графическое устройство";
     m_device->Init(reinterpret_cast<rhi::ProcLoader>(glfwGetProcAddress));
     // Реальный размер окна может отличаться от запрошенного (fullscreen/borderless

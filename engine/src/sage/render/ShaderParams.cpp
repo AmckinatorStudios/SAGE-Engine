@@ -66,7 +66,7 @@ bool IsEngineUniform(const std::string& name) {
     static const std::set<std::string> contract = {
         "uView", "uProjection", "uModel", "uViewPos", "uTime", "uShadingMode", "uAlbedoFactor", "uMetallic",
         "uRoughness", "uOpacity", "uAlphaCutoff", "uTranslucency", "uLightmapEnabled", "uLightmap", "uUnlit",
-        "uEmissive", "uUVOffset"};
+        "uEmissive", "uUVOffset", "uSceneColor", "uSceneDepth", "uViewportPos", "uViewportSize"};
     return contract.count(name) > 0 || PbrBlockUniforms().count(name) > 0;
 }
 

@@ -444,6 +444,14 @@ if (SAGE_PHYSICS_JOLT)
     set(USE_AVX OFF CACHE BOOL "" FORCE)
     set(USE_F16C OFF CACHE BOOL "" FORCE)
     set(USE_FMADD OFF CACHE BOOL "" FORCE)
+    # LZCNT и TZCNT (BMI1) — ТОЖЕ ВЫКЛЮЧЕНЫ. У Jolt они включены по
+    # умолчанию, и его флаги (-mlzcnt -mbmi) расходятся по всему движку: на
+    # процессорах с AVX, но без BMI1 (Sandy Bridge, Ivy Bridge, ранние AMD FX)
+    # игра падала с «недопустимой инструкцией», а LZCNT исполнялся как BSR —
+    # молча и с другим ответом. Базовый набор сборки — SSE4.2 + POPCNT
+    # (sage/core/Cpu.h); сторожит тест Cpu_build_targets_old_processors.
+    set(USE_LZCNT OFF CACHE BOOL "" FORCE)
+    set(USE_TZCNT OFF CACHE BOOL "" FORCE)
     # Предупреждения Jolt НЕ должны быть ошибками.
     #
     # Jolt собирается с /W4 /WX (или -Wall -Werror), и это его право — но

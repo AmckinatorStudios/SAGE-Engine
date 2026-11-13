@@ -185,3 +185,41 @@ TEST(MeshColliders_parts_of_one_model_get_their_own_geometry) {
     CHECK_TRUE(physics.ColliderGeometry(scene, obj[0].Entity(), glm::vec3(1.0f)) !=
                physics.ColliderGeometry(scene, obj[1].Entity(), glm::vec3(1.0f)));
 }
+
+// Коллайдер из геометрии, собранной КОДОМ (мир, построенный скриптом): луч
+// попадает в неё, а после замены геометрии — в новую. Прежде форма Mesh
+// бралась только из файла модели или из примитива объекта.
+TEST(MeshColliders_geometry_from_code_catches_rays_and_updates) {
+    if (!PhysicsWorld::HasJolt()) return;
+    Scene scene("CodeGeometry");
+    GameObject ground = scene.CreateObject("Ground");
+    auto quad = [](float y) {
+        const std::vector<glm::vec3> pts = {{-2, y, -2}, {2, y, -2}, {2, y, 2}, {-2, y, 2}};
+        const std::vector<glm::vec3> nrm(4, glm::vec3(0, 1, 0));
+        return MakeMeshGeometry(pts, nrm, {0, 1, 2, 0, 2, 3});
+    };
+    ColliderComponent c;
+    c.Shape = ShapeType::Mesh;
+    c.Geometry = quad(0.0f);
+    CHECK_TRUE(c.Geometry != nullptr);
+    CHECK_EQ((int)c.Geometry->Indices.size(), 6);
+    scene.Registry().emplace<ColliderComponent>(ground.Entity(), c);
+    PhysicsScene physics(Backend::Jolt, scene);
+    Run(physics, scene, 2);
+    PhysicsScene::EntityHit hit = physics.Raycast({0.5f, 5.0f, 0.5f}, {0, -1, 0}, 20.0f);
+    CHECK_TRUE(hit.Hit);
+    CHECK_NEAR(hit.Point.y, 0.0f, 1e-3f);
+    CHECK_NEAR(hit.Normal.y, 1.0f, 1e-3f);
+    CHECK_TRUE(hit.Entity == ground.Entity());
+
+    // Новая геометрия — тело пересобирается само.
+    scene.Registry().get<ColliderComponent>(ground.Entity()).Geometry = quad(2.0f);
+    Run(physics, scene, 2);
+    hit = physics.Raycast({0.5f, 5.0f, 0.5f}, {0, -1, 0}, 20.0f);
+    CHECK_TRUE(hit.Hit);
+    CHECK_NEAR(hit.Point.y, 2.0f, 1e-3f);
+    // Мимо сетки — промах.
+    CHECK_FALSE(physics.Raycast({9.0f, 5.0f, 0.5f}, {0, -1, 0}, 20.0f).Hit);
+    // Пустая сетка — не геометрия.
+    CHECK_TRUE(MakeMeshGeometry({}, {}, {}) == nullptr);
+}

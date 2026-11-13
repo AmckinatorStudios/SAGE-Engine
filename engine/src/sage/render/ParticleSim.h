@@ -40,10 +40,31 @@ struct Particle {
     float T() const { return Lifetime > 0.0f ? glm::clamp(Age / Lifetime, 0.0f, 1.0f) : 1.0f; }
 };
 
+// Частица с ЗАДАННЫМИ начальными данными (ParticleEmitter::EmitExplicit).
+// Эффект описывает, как частицы живут (силы, столкновения, кривые, вид), а
+// откуда и какими рождаются — иногда решает игра: осколок летит от места
+// удара, несёт кусок текстуры того, что разбили, и освещён как то место.
+// Чего нет (Has* = false, отрицательное) — берётся у эффекта, как обычно.
+struct ParticleInit {
+    glm::vec3 Position{0.0f};   // в мире
+    bool HasVelocity = false;
+    glm::vec3 Velocity{0.0f};
+    float Lifetime = -1.0f;
+    float Size = -1.0f;
+    bool HasColor = false;
+    glm::vec4 Color{1.0f};
+    int Frame = -1;             // кадр листа (FlipbookMode::Random держит его всю жизнь)
+    bool HasRotation = false;
+    float Rotation = 0.0f;      // градусы
+};
+
 // Что увидели при столкновении с миром.
 struct CollisionHit {
     glm::vec3 Point{0.0f};
     glm::vec3 Normal{0.0f, 1.0f, 0.0f};
+    // ВХОД запроса: слои физики, с которыми сталкивается эффект
+    // (ParticleEffect::CollisionMask). Симуляция ставит его перед вызовом.
+    uint32_t Mask = 0xFFFFFFFFu;
 };
 // Луч в мировых координатах from → to; true — попал.
 using CollisionQuery = std::function<bool(const glm::vec3& from, const glm::vec3& to, CollisionHit& hit)>;
@@ -71,6 +92,9 @@ public:
     // погибшей частицы: осколки летят туда же, куда летел снаряд).
     void Emit(const ParticleEffect& fx, const glm::mat4& emitterWorld, int count,
               const glm::vec4& tint = glm::vec4(1.0f), const glm::vec3& addVelocity = glm::vec3(0.0f));
+
+    // Родить частицу с заданными начальными данными (положение — в мире).
+    void EmitExplicit(const ParticleEffect& fx, const glm::mat4& emitterWorld, const ParticleInit& init);
 
     void Play();                    // с начала цикла
     void Stop(bool clear = false);  // перестать рождать; clear — убрать живые

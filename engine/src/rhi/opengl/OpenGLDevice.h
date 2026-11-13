@@ -45,6 +45,8 @@ public:
     void BindTexture2D(int unit, sage::rhi::TextureHandle texture) override;
     void ReadPixelsRGB(int x, int y, int width, int height, unsigned char* out) override;
     void ReadPixelsRGBA(int x, int y, int width, int height, unsigned char* out) override;
+    bool CurrentViewport(int& x, int& y, int& width, int& height) const override;
+    bool CopyToTarget(RenderTarget& dst, int x, int y, int width, int height) override;
     float MaxAnisotropy() override;
 
     // Метки времени GPU (ARB_timer_query, ядро с OpenGL 3.3).

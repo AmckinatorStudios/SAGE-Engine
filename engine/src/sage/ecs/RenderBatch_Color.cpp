@@ -134,6 +134,7 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
             UploadParams(sh, g.Mat->Params);
         }
         BindShaderTextures(sh, g.Mat);
+        if (sh.WantsScene) BindSceneBehind(sh);
         if (!g.AnyOverrides) {
             if (g.Transparent) {
                 // Порядок смешивания решается ВНУТРИ пачки: сортируем инстансы
@@ -337,6 +338,15 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
         // листва), на фоне которой и стоит всё остальное прозрачное. Правильнее
         // было бы слить их в общий порядок, но группа, растянутая на всю сцену,
         // не имеет одной глубины, по которой её можно было бы вставить.
+        // Кадр за материалом — ДО первой прозрачной группы, которой он нужен:
+        // в копии только непрозрачное (прозрачное за водой ещё не нарисовано,
+        // и это честно — его смешение и так ляжет поверх).
+        m_sceneCopied = false;
+        for (auto& kv : m_custom)
+            if (kv.second.Transparent && !kv.second.Instances.empty() && kv.first.Program->WantsScene) {
+                CopySceneBehind();
+                break;
+            }
         for (auto& kv : m_custom) {
             CustomGroup& g = kv.second;
             if (!g.Transparent || g.Instances.empty()) continue;
@@ -439,6 +449,42 @@ RenderStats RenderBatch::RenderColor(Scene& scene, const glm::mat4& view, const 
     for (const auto& kv : m_custom)
         if (kv.second.Transparent) m_stats.Transparent += (int)kv.second.Instances.size();
     return m_stats;
+}
+
+void RenderBatch::CopySceneBehind() {
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    int x = 0, y = 0, w = 0, h = 0;
+    if (!device.CurrentViewport(x, y, w, h)) return;
+    if (!m_sceneCopy || m_sceneCopy->Width() != w || m_sceneCopy->Height() != h) {
+        if (m_sceneCopy) {
+            m_sceneCopy->Resize(w, h);
+        } else {
+            sage::rhi::RenderTargetDesc d;
+            d.Width = w;
+            d.Height = h;
+            d.Kind = sage::rhi::RenderTargetKind::ColorHDRWithDepth;
+            m_sceneCopy = device.CreateRenderTarget(d);
+        }
+    }
+    if (!m_sceneCopy) return;
+    m_sceneCopied = device.CopyToTarget(*m_sceneCopy, x, y, w, h);
+    m_sceneRect = glm::ivec4(x, y, w, h);
+}
+
+void RenderBatch::BindSceneBehind(Shader& sh) const {
+    // Два последних свободных юнита своих шейдеров: картинки материала берут
+    // юниты с начала списка (BindShaderTextures).
+    const std::vector<int>& units = ShaderTextureUnits();
+    if (units.size() < 2) return;
+    const int colorUnit = units[units.size() - 1], depthUnit = units[units.size() - 2];
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    sh.SetInt("uSceneColor", colorUnit);
+    sh.SetInt("uSceneDepth", depthUnit);
+    device.BindTexture2D(colorUnit, m_sceneCopied ? m_sceneCopy->ColorTextureHandle() : sage::rhi::TextureHandle{});
+    device.BindTexture2D(depthUnit, m_sceneCopied ? m_sceneCopy->DepthTextureHandle() : sage::rhi::TextureHandle{});
+    // uv кадра = (gl_FragCoord.xy − uViewportPos) / uViewportSize.
+    sh.SetVec2("uViewportPos", glm::vec2(m_sceneRect.x, m_sceneRect.y));
+    sh.SetVec2("uViewportSize", glm::vec2(std::max(m_sceneRect.z, 1), std::max(m_sceneRect.w, 1)));
 }
 
 } // namespace sage::ecs

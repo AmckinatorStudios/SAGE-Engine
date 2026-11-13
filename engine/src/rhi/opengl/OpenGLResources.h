@@ -168,6 +168,8 @@ public:
     void ClearGBuffer() const;
     void Resolve() override;
     int Samples() const override { return m_samples; }
+    // Буфер, в который читают (обычный, не многосэмпловый): копии кадра.
+    unsigned int Fbo() const { return m_fbo; }
 
 private:
     void CreateStorage();

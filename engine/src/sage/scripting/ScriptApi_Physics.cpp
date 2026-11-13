@@ -59,6 +59,50 @@ void ScriptEngine::RegisterPhysicsApi() {
         return t;
     });
 
+    // Тело с простым коллайдером объекту — из скрипта:
+    //   physics.add_body(obj, {type = "kinematic", shape = "box",
+    //                          size = Vec3(1, 2, 1), center = Vec3(0, 1, 0), layer = 4})
+    // type — static (по умолчанию), kinematic, dynamic; shape — box, sphere,
+    // capsule; layer — бит маски Raycast. Повторный вызов меняет настройки
+    // (тело пересоберётся само). Нужно, когда объект создан кодом, а не в
+    // редакторе: мишень луча, зона, препятствие.
+    Bind("physics", "add_body", nullptr, [](GameObject& obj, sol::optional<sol::table> opts) {
+        if (!obj.Valid()) throw std::runtime_error("physics.add_body: объект недействителен");
+        entt::registry& reg = *obj.Registry();
+        // Сначала разбор, потом запись: ошибка в настройках не должна
+        // оставить объект с наполовину изменённым телом.
+        const bool fresh = !reg.all_of<RigidBodyComponent>(obj.Entity());
+        RigidBodyComponent rb = fresh ? RigidBodyComponent{} : reg.get<RigidBodyComponent>(obj.Entity());
+        ColliderComponent c = reg.all_of<ColliderComponent>(obj.Entity()) ? reg.get<ColliderComponent>(obj.Entity())
+                                                                          : ColliderComponent{};
+        if (fresh) rb.Type = sage::physics::BodyType::Static;
+        if (opts) {
+            if (sol::optional<std::string> type = (*opts)["type"]) {
+                if (*type == "static") rb.Type = sage::physics::BodyType::Static;
+                else if (*type == "kinematic") rb.Type = sage::physics::BodyType::Kinematic;
+                else if (*type == "dynamic") rb.Type = sage::physics::BodyType::Dynamic;
+                else throw std::runtime_error("physics.add_body: тип '" + *type +
+                                              "' — нужен static, kinematic или dynamic");
+            }
+            if (sol::optional<std::string> shape = (*opts)["shape"]) {
+                if (*shape == "box") c.Shape = sage::physics::ShapeType::Box;
+                else if (*shape == "sphere") c.Shape = sage::physics::ShapeType::Sphere;
+                else if (*shape == "capsule") c.Shape = sage::physics::ShapeType::Capsule;
+                else throw std::runtime_error("physics.add_body: форма '" + *shape +
+                                              "' — нужна box, sphere или capsule");
+            }
+            if (sol::optional<glm::vec3> size = (*opts)["size"]) c.HalfExtents = *size * 0.5f;
+            if (sol::optional<glm::vec3> center = (*opts)["center"]) c.Center = *center;
+            c.Radius = opts->get_or("radius", c.Radius);
+            c.HalfHeight = opts->get_or("half_height", c.HalfHeight);
+            rb.Mass = opts->get_or("mass", rb.Mass);
+            rb.Sensor = opts->get_or("sensor", rb.Sensor);
+            rb.Layer = (sage::physics::LayerMask)opts->get_or("layer", (unsigned)rb.Layer);
+        }
+        reg.emplace_or_replace<RigidBodyComponent>(obj.Entity(), rb);
+        reg.emplace_or_replace<ColliderComponent>(obj.Entity(), c);
+    });
+
     // Все объекты в шаре: взрыв, зона подбора, «кто рядом».
     Bind("physics", "OverlapSphere", "OverlapSphere", [this](const glm::vec3& center, float radius,
                                                sol::optional<unsigned> mask) -> sol::table {

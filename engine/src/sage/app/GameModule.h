@@ -1,4 +1,5 @@
 #pragma once
+#include "sage/core/Cpu.h"
 #include <cstdio>
 #include <exception>
 #include "sage/app/Application.h"
@@ -72,6 +73,9 @@ void NormalizeArgs(int& argc, char**& argv);
         sage::detail::NormalizeArgs(argc, argv);                            \
         sage::detail::InstallEarlyCrashHandler(argv && argv[0] ? argv[0] : "SAGE"); \
         try {                                                              \
+            /* Процессор слабее сборки — понятное сообщение, а не падение   \
+               на первой же неизвестной ему инструкции (sage/core/Cpu.h). */ \
+            sage::cpu::RequireBaseline();                                  \
             /* Подсистемы движка живут ровно столько, сколько main: игра    \
                настраивает EngineConfig ДО создания окна, а закрываются они \
                после того, как Application снёс окно и устройство. */       \

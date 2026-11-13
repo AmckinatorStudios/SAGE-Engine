@@ -7,6 +7,8 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <memory>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -112,6 +114,107 @@ void RunMaterialBlendChecks() {
     const unsigned char* wb = px(withBias);
     std::printf("    чёрный слой чуть за стеной со смещением −3: %d\n", wb[2]);
     Check(wb[2] < 10, "смещение глубины выводит слой, лежащий на поверхности, вперёд");
+}
+
+} // namespace sage::rendertest
+
+// ---------------------------------------------------------------------------
+// Кадр за материалом: прозрачный материал со своим шейдером, который читает
+// uSceneColor / uSceneDepth, видит то, что нарисовано ЗА ним. Стена: левая
+// половина красная, правая синяя; перед ней — квадрат, шейдер которого берёт
+// цвет кадра на четверть экрана правее (преломление «на максимум»). Слева он
+// обязан показать СИНИЙ — цвет из-за себя, со сдвигом; а зелёный — признак,
+// что глубина за ним есть (стена ближе дальней плоскости).
+// ---------------------------------------------------------------------------
+namespace sage::rendertest {
+namespace {
+
+const char* kBehindVert = R"(#version 330 core
+layout (location = 0) in vec3 aPos;
+layout (location = 4) in vec4 iM0;
+layout (location = 5) in vec4 iM1;
+layout (location = 6) in vec4 iM2;
+layout (location = 7) in vec4 iM3;
+uniform mat4 uView;
+uniform mat4 uProjection;
+void main() { gl_Position = uProjection * uView * mat4(iM0, iM1, iM2, iM3) * vec4(aPos, 1.0); }
+)";
+
+const char* kBehindFrag = R"(#version 330 core
+out vec4 FragColor;
+uniform sampler2D uSceneColor;
+uniform sampler2D uSceneDepth;
+uniform vec2 uViewportPos;
+uniform vec2 uViewportSize;
+void main() {
+    vec2 uv = (gl_FragCoord.xy - uViewportPos) / uViewportSize;
+    vec3 c = texture(uSceneColor, uv + vec2(0.25, 0.0)).rgb;
+    float behind = texture(uSceneDepth, uv).r < 0.9999 ? 1.0 : 0.0;
+    FragColor = vec4(c.r, behind, c.b, 1.0);
+}
+)";
+
+} // namespace
+
+void RunSceneBehindChecks() {
+    std::printf("=== Кадр за материалом (uSceneColor / uSceneDepth) ===\n");
+    const std::filesystem::path dir = std::filesystem::temp_directory_path() / "sage_scene_behind";
+    std::filesystem::create_directories(dir);
+    const std::string vert = (dir / "behind.vert").string(), frag = (dir / "behind.frag").string();
+    std::ofstream(vert, std::ios::trunc) << kBehindVert;
+    std::ofstream(frag, std::ios::trunc) << kBehindFrag;
+
+    auto scene = std::make_unique<Scene>("SceneBehind");
+    scene->Lighting.AmbientStrength = 1.0f;
+    scene->Lighting.AmbientMode = LightingEnvironment::AmbientSource::Custom;
+    scene->Lighting.Skybox.Enabled = false;
+    auto cube = [&](const char* name, glm::vec3 pos, glm::vec3 scale, std::shared_ptr<Material> m) {
+        GameObject obj = scene->CreateObject(name);
+        obj.GetTransform().Position = pos;
+        obj.GetTransform().Scale = scale;
+        obj.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
+        obj.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);
+        obj.Renderer().MaterialPtr = std::move(m);
+    };
+    auto unlit = [](glm::vec3 c) {
+        auto m = std::make_shared<Material>();
+        m->Albedo = c;
+        m->Render.Unlit = true;
+        return m;
+    };
+    cube("Left", {-3, 0, -3}, {6, 8, 0.2f}, unlit({0.8f, 0, 0}));
+    cube("Right", {3, 0, -3}, {6, 8, 0.2f}, unlit({0, 0, 0.8f}));
+    auto water = std::make_shared<Material>();
+    water->Opacity = 0.9f;
+    water->VertexShaderPath = vert;
+    water->FragmentShaderPath = frag;
+    water->ShaderPtr = ResourceManager::Instance().GetShader(vert, frag);
+    cube("Water", {0, 0, -1}, {4, 4, 0.05f}, water);
+
+    sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
+    const LightingEnvironment env = sage::ecs::CollectLighting(*scene);
+    sage::ecs::RenderBatch batch;
+    Framebuffer fbo(kW, kH);
+    fbo.Bind();
+    device.SetViewport(0, 0, kW, kH);
+    device.SetClearColor(0, 0, 0, 1);
+    device.Clear(true, true);
+    sage::render::SceneColorInput input;
+    input.View = glm::lookAt(glm::vec3(0, 0, 2), glm::vec3(0, 0, -10), glm::vec3(0, 1, 0));
+    input.Proj = glm::perspective(glm::radians(60.0f), (float)kW / (float)kH, 0.1f, 100.0f);
+    input.ViewPos = glm::vec3(0, 0, 2);
+    input.Env = &env;
+    sage::render::RenderSceneColor(*scene, batch, input);
+    fbo.Resolve();
+    fbo.Bind();
+    Image img = Capture(kW, kH);
+    device.BindDefaultFramebuffer();
+    // Чуть левее центра: за квадратом — красная стена, но шейдер смотрит на
+    // четверть экрана правее — туда, где синяя.
+    const unsigned char* p = &img.Pixels[((size_t)(kH / 2) * kW + kW / 2 - kW / 10) * 3];
+    std::printf("    левее центра сквозь квадрат: %d %d %d\n", p[0], p[1], p[2]);
+    Check(p[2] > 60 && p[0] < 40, "прозрачный материал читает цвет кадра ЗА собой (со сдвигом)");
+    Check(p[1] > 200, "и глубину кадра за собой: стена ближе дальней плоскости");
 }
 
 } // namespace sage::rendertest

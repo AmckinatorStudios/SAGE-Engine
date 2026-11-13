@@ -532,6 +532,22 @@ void ParticleSystem::SetStreamPosition(const std::string& id, glm::vec3 position
 
 void ParticleSystem::RemoveStream(const std::string& id) { m->Streams.erase(id); }
 
+int ParticleSystem::Spawn(const std::string& id, const sage::fx::ParticleInit* particles, size_t count) {
+    auto it = m->Streams.find(id);
+    if (it == m->Streams.end() || !particles) return 0;
+    ParticleSystemInstance& inst = *it->second;
+    size_t alive = AliveCount();
+    const size_t before = inst.Sim.Particles().size();
+    for (size_t i = 0; i < count && alive < kMaxParticles; ++i, ++alive)
+        inst.Sim.EmitExplicit(inst.Fx, inst.World, particles[i]);
+    return (int)(inst.Sim.Particles().size() - before);
+}
+
+size_t ParticleSystem::StreamAlive(const std::string& id) const {
+    auto it = m->Streams.find(id);
+    return it == m->Streams.end() ? 0 : it->second->CountTree();
+}
+
 void ParticleSystem::Update(float dt) {
     for (auto it = m->Entities.begin(); it != m->Entities.end();) {
         ParticleSystemInstance& inst = *it->second;

@@ -1,3 +1,4 @@
+#include "sage/physics/PhysicsComponents.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/scripting/ScriptApiCommon.h"
 
@@ -523,6 +524,48 @@ void ScriptEngine::RegisterProceduralApi() {
             MeshRendererComponent& mr = obj.EnsureRenderer();
             mr.Ref = MeshRef{MeshRef::Type::None, ""};
             mr.MeshPtr = std::make_shared<Mesh>(d.Vertices, d.Indices, d.Submeshes, true);
+        },
+        // Поставить меш КОЛЛАЙДЕРОМ объекта (форма Mesh): мир, собранный
+        // кодом, сталкивается и ловит лучи (Raycast), частицы и тела. Меш
+        // для этого рисовать не нужно — у объекта может не быть рендера
+        // вовсе. Без тела (RigidBody) коллайдер — неподвижная стена мира;
+        // layer — слой неподвижного тела. Пустой меш — коллайдер снимается.
+        "Collider", [](const MeshBuilder& b, const sol::object& target, sol::optional<unsigned> layer) {
+            GameObject obj;
+            if (target.is<sage::scripting::lua::ObjectRef>()) obj = target.as<sage::scripting::lua::ObjectRef>().Obj;
+            else if (target.is<GameObject>()) obj = target.as<GameObject>();
+            else if (target.get_type() == sol::type::table) {
+                sol::object go = target.as<sol::table>()["gameObject"];
+                if (go.is<sage::scripting::lua::ObjectRef>()) obj = go.as<sage::scripting::lua::ObjectRef>().Obj;
+            }
+            if (!obj.Valid()) throw std::runtime_error("mesh:Collider: нужен объект сцены");
+            const sage::render::MeshData d = b.ToMeshData();
+            std::vector<glm::vec3> points(d.Vertices.size()), normals(d.Vertices.size());
+            for (size_t i = 0; i < d.Vertices.size(); ++i) {
+                points[i] = d.Vertices[i].Position;
+                normals[i] = d.Vertices[i].Normal;
+            }
+            sage::physics::MeshGeometryPtr g = sage::physics::MakeMeshGeometry(
+                points, normals, std::vector<uint32_t>(d.Indices.begin(), d.Indices.end()));
+            entt::registry& reg = *obj.Registry();
+            if (!g) {
+                reg.remove<ColliderComponent>(obj.Entity());
+                return false;
+            }
+            // Слой (бит маски Raycast) живёт на теле: неподвижное тело
+            // заводится само. Без слоя и без тела коллайдер — стена мира
+            // в слое по умолчанию.
+            if (layer) {
+                RigidBodyComponent& rb = reg.get_or_emplace<RigidBodyComponent>(obj.Entity());
+                rb.Type = sage::physics::BodyType::Static;
+                rb.Layer = (sage::physics::LayerMask)*layer;
+            }
+            ColliderComponent& c = reg.get_or_emplace<ColliderComponent>(obj.Entity());
+            c.Shape = sage::physics::ShapeType::Mesh;
+            c.Parts.clear();
+            c.MeshPath.clear();
+            c.Geometry = std::move(g);
+            return true;
         },
         // В .sagemesh — дальше это обычная модель проекта.
         "Save", [](const MeshBuilder& b, const std::string& path) {

@@ -1195,6 +1195,13 @@ C++), построитель меша — `engine/src/sage/render/MeshBuilder.h`
 `procgen`). Проверяют `tests/test_procedural.cpp` и
 `editor/assets/tests/lua/procedural.test.lua` (в настоящем Play).
 
+**Меш — коллайдером.** `m.collider(obj, layer)` ставит собранный меш формой
+столкновений объекта (Mesh): по нему бьют лучи `Raycast`, частицы со
+столкновением «world», тела. Рисовать меш для этого не нужно. `layer` — бит
+слоя (неподвижное тело заводится само); пустой меш коллайдер снимает. Тело с
+простой формой — `physics.add_body(obj, {type = "kinematic", shape = "box",
+size = Vec3(…), center = Vec3(…), layer = 8})`.
+
 ## Фоновые задачи: тяжёлая работа на других ядрах (`tasks`)
 
 Скрипты игры живут в одном состоянии Lua на главном потоке: всё, что они

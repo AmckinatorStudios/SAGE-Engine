@@ -557,3 +557,95 @@ TEST(Particles_inspector_has_no_duplicate_widget_ids) {
     ImGui::DestroyContext(ctx);
     CHECK_TRUE(worst <= 1);
 }
+
+// --- Частицы с заданными начальными данными ------------------------------------------------
+// Эффект решает, как частица живёт; игра — где и какой она рождается: место,
+// скорость, срок, размер, цвет и кадр листа приходят снаружи и не затираются
+// случайными значениями эффекта. Чего не задали — берётся у эффекта.
+TEST(Particles_explicit_spawn_keeps_given_state) {
+    ParticleEffect fx = Quiet();
+    fx.StartLifetime = {9.0f, 9.0f};
+    fx.StartSize = {0.5f, 0.5f};
+    fx.StartSpeed = {3.0f, 3.0f};
+    fx.Texture = "sheet.png";   // без картинки кадр один
+    fx.TilesX = 8;
+    fx.TilesY = 8;
+    fx.Flipbook = FlipbookMode::Random;
+    ParticleEmitter e;
+    e.Stop();
+    ParticleInit init;
+    init.Position = {4.0f, 5.0f, 6.0f};
+    init.HasVelocity = true;
+    init.Velocity = {0.0f, -2.0f, 0.0f};
+    init.Lifetime = 1.5f;
+    init.Size = 0.125f;
+    init.HasColor = true;
+    init.Color = {0.25f, 0.5f, 0.75f, 1.0f};
+    init.Frame = 37;
+    e.EmitExplicit(fx, kIdentity, init);
+    CHECK_EQ((int)e.Particles().size(), 1);
+    const Particle& p = e.Particles()[0];
+    CHECK_NEAR(p.Position.x, 4.0f, 1e-5f);
+    CHECK_NEAR(p.Position.y, 5.0f, 1e-5f);
+    CHECK_NEAR(p.Velocity.y, -2.0f, 1e-5f);
+    CHECK_NEAR(p.Velocity.x, 0.0f, 1e-5f);
+    CHECK_NEAR(p.Lifetime, 1.5f, 1e-5f);
+    CHECK_NEAR(p.Size, 0.125f, 1e-5f);
+    CHECK_NEAR(p.Color.g, 0.5f, 1e-5f);
+    CHECK_EQ(ParticleEmitter::FrameOf(fx, p, 64), 37);
+
+    // Только место: остальное — как у эффекта.
+    ParticleInit bare;
+    bare.Position = {1.0f, 0.0f, 0.0f};
+    e.EmitExplicit(fx, kIdentity, bare);
+    const Particle& q = e.Particles()[1];
+    CHECK_NEAR(q.Lifetime, 9.0f, 1e-5f);
+    CHECK_NEAR(q.Size, 0.5f, 1e-5f);
+    CHECK_NEAR(glm::length(q.Velocity), 3.0f, 1e-3f);
+    // Остановленный эмиттер сам ничего не рождает: только то, что дали.
+    e.Step(fx, kIdentity, kDt);
+    CHECK_EQ((int)e.Particles().size(), 2);
+    CHECK_NEAR(e.Particles()[0].Position.y, 5.0f - 2.0f * kDt, 1e-4f);
+}
+
+// Струя системы принимает заданные частицы; столкновение с миром (запрос в
+// физику) останавливает падающую на полу.
+TEST(Particles_stream_spawn_and_world_collision) {
+    ParticleSystem sys;
+    ParticleEffect fx = Quiet();
+    fx.StartLifetime = {5.0f, 5.0f};
+    fx.GravityScale = 1.0f;
+    fx.UseCollision = true;
+    fx.Collision = CollisionMode::World;
+    fx.Bounce = 0.0f;
+    fx.Friction = 1.0f;
+    fx.CollisionMask = 4u;   // сталкиваться только со слоем 4
+    int queries = 0;
+    uint32_t askedMask = 0;
+    sys.SetCollisionQuery([&](const glm::vec3& from, const glm::vec3& to, CollisionHit& hit) {
+        ++queries;
+        askedMask = hit.Mask;
+        if (from.y >= 1.0f && to.y < 1.0f) {   // пол на высоте 1
+            hit.Point = glm::vec3(from.x, 1.0f, from.z);
+            hit.Normal = glm::vec3(0.0f, 1.0f, 0.0f);
+            return true;
+        }
+        return false;
+    });
+    ParticleInit list[3];
+    for (int i = 0; i < 3; ++i) {
+        list[i].Position = {(float)i, 2.0f, 0.0f};
+        list[i].HasVelocity = true;
+        list[i].Velocity = {0.0f, 0.0f, 0.0f};
+    }
+    CHECK_EQ(sys.Spawn("нет такой", list, 3), 0);
+    sys.CreateStream("debris", fx, glm::vec3(0.0f));
+    CHECK_EQ(sys.Spawn("debris", list, 3), 3);
+    CHECK_EQ((int)sys.AliveCount(), 3);
+    CHECK_EQ((int)sys.StreamAlive("debris"), 3);
+    CHECK_EQ((int)sys.StreamAlive("нет такой"), 0);
+    for (int i = 0; i < 120; ++i) sys.Update(kDt);
+    CHECK_EQ((int)sys.AliveCount(), 3);   // струя выключена: новых нет, эти живы
+    CHECK_TRUE(queries > 0);
+    CHECK_EQ((int)askedMask, 4);   // запрос идёт по слоям эффекта
+}

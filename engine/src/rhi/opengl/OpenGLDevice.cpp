@@ -70,6 +70,49 @@ void OpenGLDevice::SetViewport(int x, int y, int width, int height) {
     glViewport(x, y, width, height);
 }
 
+bool OpenGLDevice::CurrentViewport(int& x, int& y, int& width, int& height) const {
+    GLint v[4] = {0, 0, 0, 0};
+    glGetIntegerv(GL_VIEWPORT, v);
+    x = v[0];
+    y = v[1];
+    width = v[2];
+    height = v[3];
+    return width > 0 && height > 0;
+}
+
+bool OpenGLDevice::CopyToTarget(RenderTarget& dst, int x, int y, int width, int height) {
+    auto* gl = dynamic_cast<GLRenderTarget*>(&dst);
+    if (!gl || width <= 0 || height <= 0) return false;
+    GLint draw = 0, read = 0, readBuf = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)draw);
+    glGetIntegerv(GL_READ_BUFFER, &readBuf);
+    // У буфера с G-буфером вложений три; копируем цвет кадра — первое.
+    if (draw != 0) glReadBuffer(GL_COLOR_ATTACHMENT0);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, gl->Fbo());
+    // Цвет — линейно не нужно (размер тот же), глубина — только NEAREST.
+    // Цвет и глубина — РАЗНЫМИ переносами: разойдись форматы глубины
+    // (24 бита против 24+8), не скопировался бы и цвет — перенос отвергается
+    // целиком.
+    while (glGetError() != GL_NO_ERROR) {}
+    glBlitFramebuffer(x, y, x + width, y + height, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    const GLenum colorErr = glGetError();
+    glBlitFramebuffer(x, y, x + width, y + height, 0, 0, width, height, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    const GLenum depthErr = glGetError();
+    if (colorErr != GL_NO_ERROR || depthErr != GL_NO_ERROR) {
+        static bool warned = false;
+        if (!warned) {
+            LOG_WARN("RHI") << "Копия кадра за материалом: цвет — ошибка GL " << colorErr << ", глубина — " << depthErr;
+            warned = true;
+        }
+    }
+    glReadBuffer((GLenum)readBuf);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read);
+    return true;
+}
+
 void OpenGLDevice::SetClearColor(float r, float g, float b, float a) {
     glClearColor(r, g, b, a);
 }
@@ -228,7 +271,17 @@ std::unique_ptr<TextureCube> OpenGLDevice::CreateTextureCube(const CubeFacePixel
 }
 
 std::unique_ptr<RenderTarget> OpenGLDevice::CreateRenderTarget(const RenderTargetDesc& desc) {
-    return std::make_unique<GLRenderTarget>(desc);
+    // Создание таргета не должно менять, КУДА сейчас рисуют: сборка вложений
+    // привязывает новый буфер и в конце отвязывает его в «экран». Таргет,
+    // заведённый посреди прохода (копия кадра за материалом), иначе уводил
+    // остаток прохода на экран — вода не рисовалась вовсе.
+    GLint draw = 0, read = 0;
+    glGetIntegerv(GL_DRAW_FRAMEBUFFER_BINDING, &draw);
+    glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING, &read);
+    auto target = std::make_unique<GLRenderTarget>(desc);
+    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, (GLuint)draw);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, (GLuint)read);
+    return target;
 }
 
 std::unique_ptr<CubeRenderTarget> OpenGLDevice::CreateCubeRenderTarget(

@@ -45,6 +45,7 @@ const char* const kLuaBlends[] = {"alpha", "additive", "premultiplied"};
 const char* const kLuaSpaces[] = {"world", "local"};
 const char* const kLuaSprites[] = {"softCircle", "circle", "square"};
 const char* const kLuaFlipbooks[] = {"overLifetime", "speed", "random", "fixed"};
+const char* const kLuaCollisions[] = {"plane", "world"};
 
 // Кривая из таблицы {{t, v}, {t, v}, ...}.
 sage::fx::Curve CurveFrom(const sol::table& t) {
@@ -156,6 +157,16 @@ void ScriptEngine::RegisterParticleApi() {
         "Space", EnumProperty(&ParticleEffect::Space, kLuaSpaces),
         "Sprite", EnumProperty(&ParticleEffect::Sprite, kLuaSprites),
         "Flipbook", EnumProperty(&ParticleEffect::Flipbook, kLuaFlipbooks),
+        // Столкновение: «plane» — плоскость PlaneHeight, «world» — всё, что
+        // есть в физике сцены (в том числе коллайдеры, собранные кодом).
+        "Collision", EnumProperty(&ParticleEffect::Collision, kLuaCollisions),
+        "CollisionRadius", &ParticleEffect::CollisionRadius,
+        "CollisionMask", &ParticleEffect::CollisionMask,
+        "Cycles", &ParticleEffect::Cycles,
+        "StartFrame", &ParticleEffect::StartFrame,
+        "RandomStartFrame", &ParticleEffect::RandomStartFrame,
+        "UseRotation", &ParticleEffect::UseRotation,
+        "AngularVelocity", &ParticleEffect::AngularVelocity,
         // Кривые и градиенты — таблицами; вызов заодно включает свой модуль:
         // задать кривую и забыть галку — самая частая «почему не работает».
         "SetSizeOverLifetime", [](ParticleEffect& f, sol::table keys) {
@@ -211,6 +222,52 @@ void ScriptEngine::RegisterParticleApi() {
     Bind("fx", "RemoveStream", "RemoveParticleStream", [this](const std::string& id) {
         if (!m_particles) throw std::runtime_error("RemoveParticleStream: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
         m_particles->RemoveStream(id);
+    });
+
+    // Частицы с заданными начальными данными — в струю id: fx.spawn(id, {
+    //   {pos = Vec3, velocity = Vec3, lifetime = с, size = м, color = Vec4,
+    //    frame = кадр листа, rotation = градусы}, ... }).
+    // Обязательно только pos; остальное берётся у эффекта струи. Возвращает
+    // число родившихся. Эффект решает, как частицы живут; игра — откуда и
+    // какими рождаются (осколок с куском текстуры разбитого, свет места).
+    Bind("fx", "spawn", nullptr, [this](const std::string& id, sol::table list) -> int {
+        if (!m_particles) throw std::runtime_error("fx.spawn: система частиц не привязана (ScriptEngine::BindParticles не вызван)");
+        std::vector<sage::fx::ParticleInit> inits;
+        inits.reserve(list.size());
+        for (size_t i = 1; i <= list.size(); ++i) {
+            sol::optional<sol::table> t = list[i];
+            if (!t) throw std::runtime_error("fx.spawn: элемент " + std::to_string(i) + " — не таблица");
+            sage::fx::ParticleInit p;
+            sol::optional<glm::vec3> pos = (*t)["pos"];
+            if (!pos) throw std::runtime_error("fx.spawn: у элемента " + std::to_string(i) + " нет pos (Vec3)");
+            p.Position = *pos;
+            if (sol::optional<glm::vec3> v = (*t)["velocity"]) {
+                p.HasVelocity = true;
+                p.Velocity = *v;
+            }
+            p.Lifetime = t->get_or("lifetime", -1.0f);
+            p.Size = t->get_or("size", -1.0f);
+            sol::object color = (*t)["color"];
+            if (color.is<glm::vec4>()) {
+                p.HasColor = true;
+                p.Color = color.as<glm::vec4>();
+            } else if (color.is<glm::vec3>()) {
+                p.HasColor = true;
+                p.Color = glm::vec4(color.as<glm::vec3>(), 1.0f);
+            }
+            p.Frame = t->get_or("frame", -1);
+            if (sol::optional<float> r = (*t)["rotation"]) {
+                p.HasRotation = true;
+                p.Rotation = *r;
+            }
+            inits.push_back(p);
+        }
+        return m_particles->Spawn(id, inits.data(), inits.size());
+    });
+
+    // Сколько частиц живёт в струе id.
+    Bind("fx", "count", nullptr, [this](const std::string& id) -> int {
+        return m_particles ? (int)m_particles->StreamAlive(id) : 0;
     });
 
     // --- Эмиттер ОБЪЕКТА --------------------------------------------------

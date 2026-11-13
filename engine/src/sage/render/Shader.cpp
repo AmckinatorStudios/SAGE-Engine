@@ -72,6 +72,7 @@ std::string ExpandEngineIncludes(std::string src) {
 namespace {
 // Умолчания из подсказок обоих исходников; первое объявление главное.
 void CollectDefaults(Shader& sh, const std::string& v, const std::string& f) {
+    sh.WantsScene = f.find("uSceneColor") != std::string::npos || f.find("uSceneDepth") != std::string::npos;
     for (const std::string* src : {&v, &f})
         for (const sage::render::ShaderUniformInfo& u : sage::render::ParseShaderUniforms(*src)) {
             if (u.Texture) {

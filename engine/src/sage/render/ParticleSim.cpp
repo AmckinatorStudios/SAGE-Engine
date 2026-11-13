@@ -209,6 +209,28 @@ void ParticleEmitter::Emit(const ParticleEffect& fx, const glm::mat4& emitterWor
     for (int i = 0; i < count; ++i) SpawnOne(fx, emitterWorld, 0.0f, tint, addVelocity);
 }
 
+void ParticleEmitter::EmitExplicit(const ParticleEffect& fx, const glm::mat4& emitterWorld, const ParticleInit& init) {
+    if (!m_hasLast) {
+        m_world = emitterWorld;
+        m_lastPos = glm::vec3(emitterWorld[3]);
+        m_hasLast = true;
+    }
+    const size_t before = m_particles.size();
+    SpawnOne(fx, emitterWorld, 0.0f);
+    if (m_particles.size() == before) return;   // потолок эффекта
+    Particle& p = m_particles.back();
+    const bool local = fx.Space == SimulationSpace::Local;
+    const glm::mat4 inv = local ? glm::inverse(emitterWorld) : glm::mat4(1.0f);
+    p.Position = local ? glm::vec3(inv * glm::vec4(init.Position, 1.0f)) : init.Position;
+    if (init.HasVelocity) p.Velocity = local ? glm::mat3(inv) * init.Velocity : init.Velocity;
+    p.Moved = p.Velocity;
+    if (init.Lifetime > 0.0f) p.Lifetime = init.Lifetime;
+    if (init.Size >= 0.0f) p.Size = init.Size;
+    if (init.HasColor) p.Color = init.Color;
+    if (init.Frame >= 0) p.Frame = std::min(init.Frame, FrameCount(fx) - 1);
+    if (init.HasRotation) p.Rotation = glm::radians(init.Rotation);
+}
+
 void ParticleEmitter::Play() {
     m_playing = true;
     m_finished = false;
@@ -408,6 +430,7 @@ void ParticleEmitter::Simulate(const ParticleEffect& fx, float dt, const Collisi
                 }
             } else if (worldQuery && *worldQuery && glm::length(wTo - wFrom) > 1e-6f) {
                 const glm::vec3 dir = glm::normalize(wTo - wFrom);
+                h.Mask = fx.CollisionMask;
                 hit = (*worldQuery)(wFrom, wTo + dir * r, h);
             }
             if (hit) {

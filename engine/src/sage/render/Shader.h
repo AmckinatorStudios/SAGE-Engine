@@ -72,6 +72,11 @@ public:
     // отрисовка из свободных.
     struct TextureSlot { std::string Name; bool Linear = false; };
     std::vector<TextureSlot> Textures;
+    // Шейдер читает КАДР ЗА СОБОЙ (uSceneColor / uSceneDepth): прозрачному
+    // материалу с таким шейдером движок перед отрисовкой копирует цвет и
+    // глубину уже нарисованного (см. docs/custom_shaders.md, «Кадр за
+    // материалом»).
+    bool WantsScene = false;
     // Подставленные «#include "…"» файлы (для пересборки при их правке).
     std::vector<std::string> Included;
 
