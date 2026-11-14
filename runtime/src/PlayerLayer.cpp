@@ -466,7 +466,26 @@ void PlayerLayer::UpdateUiInput(float dt) {
             case sage::input::Key::Enter:
             case sage::input::Key::KpEnter:   m_uiInput.Enter = true; break;
             case sage::input::Key::Escape:    m_uiInput.Escape = true; break;
-            case sage::input::Key::Tab:       m_uiInput.Tab = true; break;
+            case sage::input::Key::Tab:
+                m_uiInput.Tab = true;
+                m_uiInput.Shift = (e.Modifiers & sage::input::ModShift) != 0;
+                break;
+            case sage::input::Key::Up:        m_uiInput.Up = true; break;
+            case sage::input::Key::Down:      m_uiInput.Down = true; break;
+            default: break;
+        }
+    }
+    // КОНТРОЛЛЕР ведёт фокус так же, как клавиатура: крестовина — стрелки,
+    // A — Enter, B — Escape. Интерфейсу не важно, чем нажали.
+    for (const sage::input::InputEvent& e : m_input.FrameEvents()) {
+        if (e.Type != sage::input::InputEventType::GamepadButtonPressed) continue;
+        switch (e.PadButton) {
+            case sage::input::GamepadButton::DPadUp:    m_uiInput.Up = true; break;
+            case sage::input::GamepadButton::DPadDown:  m_uiInput.Down = true; break;
+            case sage::input::GamepadButton::DPadLeft:  m_uiInput.Left = true; break;
+            case sage::input::GamepadButton::DPadRight: m_uiInput.Right = true; break;
+            case sage::input::GamepadButton::A:         m_uiInput.Enter = true; break;
+            case sage::input::GamepadButton::B:         m_uiInput.Escape = true; break;
             default: break;
         }
     }
@@ -487,6 +506,9 @@ void PlayerLayer::UpdateUiInput(float dt) {
     m_uiInput.Wheel = captured ? 0.0f : mouse.Wheel();
 
     m_uiResult = sage::ui::UpdateSceneUI(*m_scene, m_uiInput, m_uiWidth, m_uiHeight);
+    // Звуки элементов (наведение, щелчок) — звуку игры.
+    if (m_audio)
+        for (const std::string& sound : m_uiResult.Sounds) m_audio->PlaySound2D(sound);
     ResetUiEdits();
 }
 
@@ -497,4 +519,5 @@ void PlayerLayer::ResetUiEdits() {
     m_uiInput.Left = m_uiInput.Right = false;
     m_uiInput.Home = m_uiInput.End = false;
     m_uiInput.Enter = m_uiInput.Escape = m_uiInput.Tab = false;
+    m_uiInput.Up = m_uiInput.Down = m_uiInput.Shift = false;
 }

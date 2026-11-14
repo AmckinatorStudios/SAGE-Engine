@@ -97,6 +97,12 @@ void RegisterBuiltins() {
     input.Hint = SAGE_UI_TEXT("Edited from the keyboard; the value lives in the Text part");
     RegisterPart(input);
 
+    PartType dropdown = MakePart<Dropdown>("dropdown", SAGE_UI_TEXT("Dropdown"), 60, &DropdownFields(),
+                                           DrawDropdownPart);
+    dropdown.Icon = "list";
+    dropdown.Hint = SAGE_UI_TEXT("One value from a list that opens over everything");
+    RegisterPart(dropdown);
+
     // Реакция на мышь — УСТРОЙСТВО ТИПА (кнопка, галка, ползунок, поле
     // ввода), а не добавка: её не включают галкой на картинке. Рисовать ей
     // нечего — виды состояний рисует подложка.

@@ -5,6 +5,10 @@ namespace sage::ui::parts {
 
 // --- Диапазон: галка и ползунок ---------------------------------------------
 
+const char* const kToggleVariants[] = {SAGE_UI_TEXT("Checkbox"), SAGE_UI_TEXT("Switch")};
+const char* const kInputRules[] = {SAGE_UI_TEXT("Any text"), SAGE_UI_TEXT("Whole number"),
+                                   SAGE_UI_TEXT("Number"), SAGE_UI_TEXT("Letters and digits")};
+
 const std::vector<PartField>& RangeFields() {
     // Поля ползунка и поля галки разведены условием «галка»: у галки нет ни
     // дорожки с ручкой, ни шага, у ползунка — отметки. Показанные всегда, они
@@ -41,13 +45,22 @@ const std::vector<PartField>& RangeFields() {
             {"check", SAGE_UI_TEXT("Check mark"), PartField::Kind::Look, offsetof(Range, Check), 0.0f, 0.0f,
              "Without a picture — the engine's check mark in this colour.", nullptr, 0,
              PartField::Widget::Auto, "toggle", 1},
+            {"variant", SAGE_UI_TEXT("Style"), PartField::Kind::Enum, offsetof(Range, ToggleVariant), 0.0f, 1.0f,
+             "Checkbox — a box with a check mark; Switch — a pill with a sliding knob.", kToggleVariants, 2,
+             PartField::Widget::Auto, "toggle", 1},
+            {"animation", SAGE_UI_TEXT("Animation time"), PartField::Kind::Float,
+             offsetof(Range, AnimationTime), 0.0f, 2.0f, "Seconds the switch knob takes to slide. 0 — instantly.",
+             nullptr, 0, PartField::Widget::Auto, "toggle", 1},
+            {"vertical", SAGE_UI_TEXT("Vertical"), PartField::Kind::Bool, offsetof(Range, Vertical), 0.0f, 1.0f,
+             "The value runs from the bottom to the top.", nullptr, 0, PartField::Widget::Auto, "toggle", 0},
         };
         v[0].Content = v[1].Content = v[2].Content = v[3].Content = v[4].Content = true;
         v[4].Hidden = true;
         // «Квадратик» галки — это та же дорожка (Track), показанная под своим
         // именем. В файл второй раз не пишется: один вид, одно место.
         v[10].EditorOnly = true;
-        MarkAdvanced(v, {"trackThickness", "knobSize"});
+        v[12].Content = v[14].Content = true;
+        MarkAdvanced(v, {"trackThickness", "knobSize", "animation"});
         MarkCustomOnly(v, {"trackThickness", "knobSize"});
         return v;
     }();
@@ -82,6 +95,21 @@ void DrawRangePart(const PartDrawContext& c) {
     }
     const Range& range = c.EngineSkin ? engine : source;
 
+    const bool on = range.Value >= (range.Min + range.Max) * 0.5f;
+    if (range.Toggle && range.ToggleVariant == Range::Variant::Switch) {
+        // ВЫКЛЮЧАТЕЛЬ: таблетка, бегунок едет из конца в конец; цвет дорожки
+        // переходит от «выкл» (Track) к «вкл» (Filled) вместе с бегунком.
+        const float h = std::min(r.h, r.w / 1.8f);
+        const UIRect pill{r.x, r.y + (r.h - h) * 0.5f, h * 1.8f, h};
+        const float t = std::clamp(range.Shown >= 0.0f ? range.Shown : (on ? 1.0f : 0.0f), 0.0f, 1.0f);
+        const glm::vec4 col = glm::mix(range.Track.Color, range.Filled.Color, t);
+        ui.RoundedRect(pill.x, pill.y, pill.w, pill.h, StateTint(c, glm::vec3(col)), AlphaOf(c, col.a), h * 0.5f);
+        const float pad = h * 0.12f, knob = h - pad * 2.0f;
+        const float kx = pill.x + pad + (pill.w - pad * 2.0f - knob) * t;
+        const glm::vec4 kc = c.EngineSkin ? glm::vec4(0.97f, 0.98f, 1.0f, 1.0f) : range.Knob.Color;
+        ui.RoundedRect(kx, pill.y + pad, knob, knob, StateTint(c, glm::vec3(kc)), AlphaOf(c, kc.a), knob * 0.5f);
+        return;
+    }
     if (range.Toggle) {
         // Галка: квадратик у левого края СВОЕГО элемента. Подпись к нему —
         // отдельный объект рядом, а не сдвинутый текст внутри: так галку можно
@@ -89,7 +117,7 @@ void DrawRangePart(const PartDrawContext& c) {
         const UIRect box = ToggleBox(r);
         DrawLook(c, range.Track, box);
         // Включена — если значение ближе к верхнему концу диапазона.
-        if (range.Value < (range.Min + range.Max) * 0.5f) return;
+        if (!on) return;
         if (range.Check.HasTexture()) {
             DrawLook(c, range.Check, box, /*tint=*/false);
             return;
@@ -98,6 +126,24 @@ void DrawRangePart(const PartDrawContext& c) {
         const glm::vec3 rgb = StateTint(c, glm::vec3(range.Check.Color));
         DrawIcon(ui, "check", box.x + pad, box.y + pad, box.h - pad * 2.0f, rgb,
                  AlphaOf(c, range.Check.Color.a));
+        return;
+    }
+
+    if (range.Vertical) {
+        // Вертикальный: то же, повёрнутое — минимум внизу, максимум вверху.
+        const float thick = std::max(r.w * std::clamp(range.TrackThickness, 0.0f, 1.0f), 2.0f);
+        const UIRect track{r.x + (r.w - thick) * 0.5f, r.y, thick, r.h};
+        DrawLook(c, range.Track, track);
+        const float t = RangeFraction(range);
+        const float knob = r.w * std::max(range.KnobSize, 0.0f);
+        const float ky = r.y + r.h - knob * 0.5f - (r.h - knob) * t;
+        if (t > 0.0f) {
+            UIRect filled = track;
+            filled.y = knob > 0.0f ? ky : r.y + r.h * (1.0f - t);
+            filled.h = r.y + r.h - filled.y;
+            DrawLook(c, range.Filled, filled);
+        }
+        if (knob > 0.0f) DrawLook(c, range.Knob, {r.x + (r.w - knob) * 0.5f, ky - knob * 0.5f, knob, knob});
         return;
     }
 
@@ -135,6 +181,10 @@ const std::vector<PartField>& TextInputFields() {
             {"password", SAGE_UI_TEXT("Password"), PartField::Kind::Bool, offsetof(TextInput, Password), 0.0f,
              1.0f, "Hide the content behind dots."},
             {"readOnly", SAGE_UI_TEXT("Read only"), PartField::Kind::Bool, offsetof(TextInput, ReadOnly)},
+            {"multiline", SAGE_UI_TEXT("Multiline"), PartField::Kind::Bool, offsetof(TextInput, Multiline), 0.0f,
+             1.0f, "Enter starts a new line instead of submitting."},
+            {"validation", SAGE_UI_TEXT("Allowed input"), PartField::Kind::Enum, offsetof(TextInput, Validation),
+             0.0f, 3.0f, "Characters that do not fit are not typed at all.", kInputRules, 4},
             {"placeholderColor", SAGE_UI_TEXT("Placeholder colour"), PartField::Kind::Color,
              offsetof(TextInput, PlaceholderColor), 0.0f, 1.0f,
              "Alpha 0 — the text colour, half as bright."},
@@ -143,7 +193,7 @@ const std::vector<PartField>& TextInputFields() {
             {"caretWidth", SAGE_UI_TEXT("Caret width"), PartField::Kind::Float,
              offsetof(TextInput, CaretWidth), 0.5f, 8.0f},
         };
-        for (int i = 0; i < 4; ++i) v[(size_t)i].Content = true;
+        for (int i = 0; i < 6; ++i) v[(size_t)i].Content = true;
         MarkAdvanced(v, {"readOnly", "placeholderColor", "caretColor", "caretWidth"});
         MarkCustomOnly(v, {"placeholderColor", "caretColor", "caretWidth"});
         return v;
@@ -159,6 +209,46 @@ std::string MaskText(const std::string& text) {
     return out;
 }
 
+// Многострочное поле: строки сверху вниз от поля сверху; каретка — в своей
+// строке. Без переноса по ширине: строки делит сам человек (Enter).
+void DrawMultilineInput(const PartDrawContext& c, const TextInput& input, const Label& label) {
+    const UIRect& r = c.Rect;
+    UIRenderer& ui = *c.Ui;
+    const float textScale = label.Scale * c.Scale;
+    const float pad = label.PadX * c.Scale;
+    const UITextStyle style = StyleOf(label, ui);
+    const float lh = ui.LineHeight(textScale, style) * std::max(label.LineSpacing, 0.5f);
+    const glm::vec3 rgb{label.Color.r, label.Color.g, label.Color.b};
+    if (label.Text.empty() && !input.Placeholder.empty()) {
+        ui.Text(r.x + pad, r.y + pad * 0.5f, textScale, rgb, input.Placeholder, AlphaOf(c, label.Color.a * 0.45f),
+                style);
+    }
+    ui.PushClipRect(r.x, r.y, r.w, r.h);
+    const Interactable* act = c.Sibling<Interactable>();
+    const int caret = act ? std::clamp(act->Runtime.Caret, 0, (int)label.Text.size()) : -1;
+    size_t start = 0;
+    int line = 0;
+    while (start <= label.Text.size()) {
+        size_t end = label.Text.find('\n', start);
+        if (end == std::string::npos) end = label.Text.size();
+        const std::string text = label.Text.substr(start, end - start);
+        const float y = r.y + pad * 0.5f + lh * (float)line;
+        if (!text.empty())
+            ui.Text(r.x + pad, y, textScale, rgb, input.Password ? MaskText(text) : text,
+                    AlphaOf(c, label.Color.a), style);
+        if (c.Focused && c.Enabled && act && caret >= (int)start && caret <= (int)end &&
+            std::fmod(act->Runtime.CaretBlink, 1.0f) < 0.5f) {
+            const std::string head = label.Text.substr(start, (size_t)caret - start);
+            const float cx = r.x + pad + ui.MeasureText(input.Password ? MaskText(head) : head, textScale, style);
+            ui.Rect(cx, y, std::max(2.0f * c.Scale, 1.0f), lh * 0.92f, rgb, AlphaOf(c, label.Color.a));
+        }
+        if (end == label.Text.size()) break;
+        start = end + 1;
+        ++line;
+    }
+    ui.PopClipRect();
+}
+
 void DrawTextInputPart(const PartDrawContext& c) {
     const TextInput& input = *static_cast<const TextInput*>(c.Data);
     const Label* label = c.Sibling<Label>();
@@ -172,6 +262,10 @@ void DrawTextInputPart(const PartDrawContext& c) {
     const UITextStyle style = StyleOf(*label, ui);
     // По реальной высоте строки, а не по номиналу: иначе содержимое поля
     // стоит не по центру, и тем заметнее, чем крупнее кегль.
+    if (input.Multiline) {
+        DrawMultilineInput(c, input, *label);
+        return;
+    }
     const float y = r.y + (r.h - ui.LineHeight(textScale, style)) * 0.5f;
     const bool empty = label->Text.empty();
     if (empty && !input.Placeholder.empty()) {
@@ -218,6 +312,12 @@ const std::vector<PartField>& InteractableFields() {
              "A name for the game: a script asks whether Continue was pressed, not\n"
              "whether entity 37 was."},
             {"cursor", SAGE_UI_TEXT("Cursor"), PartField::Kind::String, offsetof(Interactable, Cursor)},
+            {"navigable", SAGE_UI_TEXT("Keyboard focus"), PartField::Kind::Bool, offsetof(Interactable, Navigable),
+             0.0f, 1.0f, "Arrows, Tab and the gamepad d-pad can move focus here; Enter presses."},
+            {"hoverSound", SAGE_UI_TEXT("Hover sound"), PartField::Kind::String,
+             offsetof(Interactable, HoverSound), 0.0f, 0.0f, nullptr, nullptr, 0, PartField::Widget::Sound},
+            {"clickSound", SAGE_UI_TEXT("Click sound"), PartField::Kind::String,
+             offsetof(Interactable, ClickSound), 0.0f, 0.0f, nullptr, nullptr, 0, PartField::Widget::Sound},
             {"hoverBrightness", SAGE_UI_TEXT("Brighter on hover"), PartField::Kind::Float,
              offsetof(Interactable, HoverBrightness), 0.5f, 2.0f, nullptr, nullptr, 0,
              PartField::Widget::Auto, "useHoverLook", 0},
@@ -261,7 +361,7 @@ const std::vector<PartField>& InteractableFields() {
         MarkTab(v, SAGE_UI_TEXT("When focused"), "textInput", {"useFocusedLook", "focusedLook"});
         MarkTab(v, SAGE_UI_TEXT("When disabled"), nullptr, {"disabledAlpha"});
         MarkTab(v, SAGE_UI_TEXT("When disabled"), "fill", {"useDisabledLook", "disabledLook"});
-        MarkAdvanced(v, {"cursor"});
+        MarkAdvanced(v, {"cursor", "navigable"});
         // Виды и подкраска состояний — своё оформление; у движка они свои.
         MarkCustomOnly(v, {"hoverBrightness", "pressedBrightness", "disabledAlpha", "pressedOffset",
                            "useHoverLook", "hoverLook", "usePressedLook", "pressedLook",

@@ -424,7 +424,7 @@ TEST(Signals_a_click_is_heard_only_by_subscribers_of_that_button) {
 TEST(Signals_a_checkbox_reports_value_changed_with_the_new_value) {
     Scene scene("ui");
     GameObject box = scene.CreateObject("Sound");
-    CHECK_TRUE(sage::ui::ApplyPreset(scene, box.Entity(), "Checkbox"));
+    CHECK_TRUE(sage::ui::ApplyPreset(scene, box.Entity(), "Toggle"));
     sage::ui::Element& t = scene.Registry().get<sage::ui::Element>(box.Entity());
     t.Anchor = UIAnchor::TopLeft;
     t.Position = {0.0f, 0.0f};

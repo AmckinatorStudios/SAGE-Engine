@@ -222,6 +222,24 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                     ctx.Browser->Open(c);
                     if (ctx.BrowseTarget) *ctx.BrowseTarget = &v;
                 }
+            } else if (f.Editor == W::Sound) {
+                const assetslot::Result r =
+                    assetslot::Draw(host, f.Key, assetslot::Kind::Audio, v, ctx.Preview,
+                                    f.Tooltip ? T(f.Tooltip) : label);
+                if (r.Changed) {
+                    host.PushUndoSnapshot();
+                    v = r.Path;
+                    changed = true;
+                }
+                if (r.BrowseRequested && ctx.Browser) {
+                    FileBrowser::Config c;
+                    c.Title = T("Choose a sound");
+                    c.Filters = assetslot::Extensions(assetslot::Kind::Audio);
+                    c.FilterLabel = T("Sounds");
+                    c.StartDir = c.Root = assetslot::ProjectRoot(host);
+                    ctx.Browser->Open(c);
+                    if (ctx.BrowseTarget) *ctx.BrowseTarget = &v;
+                }
             } else if (f.Editor == W::IconName) {
                 // Значки выбираются ГЛАЗАМИ: список имён без картинок — это
                 // угадывание, как выглядит «drop» и чем он отличается от «wire».
@@ -556,6 +574,11 @@ std::vector<const char*> StateTabs(EditorHost& host, GameObject obj, const UIPro
     return tabs;
 }
 
+// У кого выбирается оформление None / Image / Shape: у Panel и у кнопки.
+bool AppearanceSwitchable(const ui::Preset& t) {
+    return (t.HasShape || t.HasFill) && (t.Container || t.Name == "Button");
+}
+
 // Входит ли часть в устройство типа. По флагам заготовки — тем же, по которым
 // тип и собирается (ApplyPreset), а не своим списком.
 bool TypeHasPart(const ui::Preset& t, const char* id) {
@@ -564,12 +587,13 @@ bool TypeHasPart(const ui::Preset& t, const char* id) {
            (s == "image" && t.HasImage) || (s == "bar" && t.HasBar) ||
            (s == "interactable" && t.HasInteractable) || (s == "textInput" && t.HasInput) ||
            (s == "range" && t.HasRange) || (s == "arrangement" && t.HasArrangement) ||
+           (s == "dropdown" && t.HasDropdown) ||
            // Обрезка и прокрутка — настройки контейнера («Clip Children»,
            // «Scroll»), а не добавка сверх типа.
            ((s == "mask" || s == "scroll") && t.Container) || (s == "icon" && t.HasIcon) ||
            (s == "shape" && t.HasShape) ||
            // Оформление Panel — форма ИЛИ картинка (Appearance): обе части её.
-           ((s == "fill" || s == "shape") && t.Container && (t.HasShape || t.HasFill));
+           ((s == "fill" || s == "shape") && AppearanceSwitchable(t));
 }
 
 // APPEARANCE панели: None | Image | Shape. Режим — это набор частей, а не
@@ -802,7 +826,8 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     // нечего: это устройство типа, а не набор галок.
     auto belongs = [&](const ui::PartType& p) { return !type || TypeHasPart(*type, p.Id); };
     // Панель выбирает оформление первым: от него зависит, какой вид ниже.
-    if (type && type->Container && (type->HasShape || type->HasFill)) DrawAppearanceSwitch(host, e);
+    if (xf->Type == "Button") DrawButtonContent(host, obj);
+    if (type && AppearanceSwitchable(*type)) DrawAppearanceSwitch(host, e);
     // Вид есть у всего, кроме невидимого Container: у Panel — её оформление.
     bool hasLook = false;
     for (const ui::PartType& p : ui::Parts())

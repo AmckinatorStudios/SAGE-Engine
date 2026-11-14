@@ -34,6 +34,7 @@ void ApplyNode(entt::registry& reg, entt::entity e, const Preset& p) {
     part(p.HasInteractable, p.Interact);
     part(p.HasInput, p.Input);
     part(p.HasRange, p.RangeValue);
+    part(p.HasDropdown, p.DropdownStyle);
     part(p.HasArrangement, p.Arrange);
     part(p.HasShape, p.ShapeStyle);
     part(p.HasMask, p.MaskRule);
@@ -107,8 +108,9 @@ std::string InferType(const entt::registry& reg, entt::entity e) {
     // Порядок проверок — от САМОГО ОПРЕДЕЛЁННОГО набора к менее: у поля ввода
     // есть и подложка, и надпись, и реакция, и оно же единственное с
     // TextInput. Начни с подложки — и каждое поле ввода стало бы панелью.
-    if (reg.all_of<TextInput>(e)) return "Input Field";
-    if (const Range* r = reg.try_get<Range>(e)) return r->Toggle ? "Checkbox" : "Slider";
+    if (reg.all_of<TextInput>(e)) return "Text Input";
+    if (reg.all_of<Dropdown>(e)) return "Dropdown";
+    if (const Range* r = reg.try_get<Range>(e)) return r->Toggle ? "Toggle" : "Slider";
     if (reg.all_of<Bar>(e)) return "Progress Bar";
     if (fill && act) return "Button";
     // Контейнер с оформлением — Panel, будь оно формой или картинкой.

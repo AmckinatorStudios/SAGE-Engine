@@ -45,6 +45,9 @@ bool DrawAnchorPicker(UIAnchor& anchor);
 // Интерфейс старого вида (элементы прямо в сцене) сначала выносится в файл.
 void OpenInInterfaceMode(EditorHost& host, GameObject obj);
 
+// Content кнопки: подпись, значок, выравнивание, отступ (UIButtonContent.cpp).
+void DrawButtonContent(EditorHost& host, GameObject obj);
+
 // Все поля выбранного элемента: части, положение, вид, текст, поведение.
 void DrawUIElementProperties(EditorHost& host, GameObject obj, const UIPropsContext& ctx);
 

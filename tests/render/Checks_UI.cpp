@@ -127,7 +127,7 @@ void PlaceTopLeft(Scene& scene, GameObject e, glm::vec2 size) {
 void CheckToggleDoesNotPaintTheRow(UIRenderer& ui) {
     Scene scene("toggle");
     GameObject e = Screen(scene, "Check", {(float)kUiW, 36.0f});
-    Check(sage::ui::ApplyPreset(scene, e.Entity(), "Checkbox"), "заготовка применилась");
+    Check(sage::ui::ApplyPreset(scene, e.Entity(), "Toggle"), "заготовка применилась");
     PlaceTopLeft(scene, e, {(float)kUiW, 36.0f});
     sage::ui::Range& r = scene.Registry().get<sage::ui::Range>(e.Entity());
     r.Value = 1.0f;   // включена: галочка внутри квадратика

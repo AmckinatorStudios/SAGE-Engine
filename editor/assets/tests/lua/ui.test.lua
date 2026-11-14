@@ -60,7 +60,7 @@ function U:test_text_property_changes_the_label()
 end
 
 function U:test_checkbox_reports_value_changed()
-    local box = UI.create("Checkbox", "LT_Box")
+    local box = UI.create("Toggle", "LT_Box")
     local values = {}
     box.value_changed:connect(function(event, v) values[#values + 1] = v end)
     local before = box.value
@@ -82,7 +82,7 @@ function U:test_slider_follows_the_mouse()
 end
 
 function U:test_text_field_reports_typing()
-    local f = UI.create("Input Field", "LT_Field")
+    local f = UI.create("Text Input", "LT_Field")
     local got
     f.text_changed:connect(function(event, t) got = t end)
     Test.expect(Test.type(f, "abc"), "поля нет на экране")

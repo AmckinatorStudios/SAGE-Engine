@@ -79,6 +79,7 @@ struct PlayUiInput {
     // обработчик на те же клавиши спорил бы с ним за автоповтор.
     bool Backspace = false, Delete = false, Left = false, Right = false;
     bool Home = false, End = false, Enter = false, Escape = false, Tab = false;
+    bool Up = false, Down = false, Shift = false;
 };
 
 class EditorPlaySession {

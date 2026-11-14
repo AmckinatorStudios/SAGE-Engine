@@ -119,7 +119,10 @@ void DrawShape(const PartDrawContext& c, const Shape& src, const UIRect& r) {
     Shape s = src;
     s.CornerRadius *= c.Scale;
     const float stroke = std::max(src.StrokeWidth, 0.0f) * c.Scale;
+    // Форма кнопки светлеет при наведении и темнеет при нажатии так же, как
+    // подложка: состояние — у элемента, а не у вида оформления.
     auto withAlpha = [&](glm::vec4 col) {
+        col = glm::vec4(StateTint(c, glm::vec3(col)), col.a);
         col.a = AlphaOf(c, col.a);
         return col;
     };
