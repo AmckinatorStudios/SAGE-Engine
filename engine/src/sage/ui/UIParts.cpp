@@ -107,25 +107,18 @@ void RegisterBuiltins() {
     mask.Container = true;
     RegisterPart(mask);
 
-    PartType layout = MakePart<Stack>("layout", SAGE_UI_TEXT("Layout"), 100, &LayoutFields());
-    layout.Icon = "layout";
-    layout.Hint = SAGE_UI_TEXT("Children stand in a row, a column or a grid");
-    layout.Container = true;
-    RegisterPart(layout);
+    PartType arrangement =
+        MakePart<Arrangement>("arrangement", SAGE_UI_TEXT("Arrangement"), 100, &ArrangementFields());
+    arrangement.Icon = "layout";
+    arrangement.Hint = SAGE_UI_TEXT("How the container places its children: by hand, row, column, grid, wrap");
+    arrangement.Container = true;
+    RegisterPart(arrangement);
 
     PartType scroll = MakePart<Scroll>("scroll", SAGE_UI_TEXT("Scrolling"), 100, &ScrollFields());
     scroll.Icon = "list";
     scroll.Hint = SAGE_UI_TEXT("The content moves inside the container and is clipped by it");
     scroll.Container = true;
     RegisterPart(scroll);
-
-    // Холст корня — из тех времён, когда корнем интерфейса был элемент. Теперь
-    // масштаб задаёт сам интерфейс; часть читается ради старых сцен.
-    PartType canvas = MakePart<Canvas>("canvas", SAGE_UI_TEXT("Canvas"), 100, &CanvasFields());
-    canvas.Icon = "grid";
-    canvas.Hint = SAGE_UI_TEXT("A UI root: reference resolution and order between roots");
-    canvas.Hidden = true;
-    RegisterPart(canvas);
 
     // Прозрачность и приём ввода всего поддерева — общая настройка ЛЮБОГО
     // элемента (инспектор показывает её в разделе «Элемент»), а не добавка.

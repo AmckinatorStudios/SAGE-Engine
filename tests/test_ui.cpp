@@ -20,7 +20,6 @@
 #include "sage/ui/UISerialize.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UILayoutTools.h"
-#include "sage/scene/SceneLegacyUI.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/SceneSerializer.h"
@@ -30,30 +29,54 @@
 using sage::ui::UIRect;
 
 namespace {
-// Элемент кладётся в сцену разбором ОПИСАНИЯ СТАРОГО ФОРМАТА на компоненты
-// (sage::scene::Decompose) — тем самым путём, которым в сцену приезжают файлы,
-// записанные до перехода. Тесты ввода ниже проверяют ПОВЕДЕНИЕ, и способ сборки
-// им безразличен; заодно этот путь оказывается прогнан на каждом из них.
-void PutElement(Scene& scene, GameObject obj, const sage::scene::LegacyElement& flat) {
-    sage::scene::Decompose(flat, scene.Registry(), obj.Entity());
+// Плоское описание элемента для тестов ввода: вид, место и пара настроек.
+// Тестам ниже важно ПОВЕДЕНИЕ, а не способ сборки, поэтому элемент собирается
+// из компонентов здесь одной функцией.
+struct Flat {
+    enum class Kind { Panel, Input, Checkbox, Slider };
+    Kind Type = Kind::Panel;
+    UIAnchor Anchor = UIAnchor::TopLeft;
+    glm::vec2 Offset{0.0f, 0.0f};
+    glm::vec2 Size{100.0f, 40.0f};
+    int Layer = 0;
+    bool ClipChildren = false;
+    bool Interactive = false;
+    bool Enabled = true;
+    float Value = 1.0f;
+    float MinValue = 0.0f;
+    float MaxValue = 1.0f;
+};
+
+void PutElement(Scene& scene, GameObject obj, const Flat& f) {
+    entt::registry& reg = scene.Registry();
+    const entt::entity e = obj.Entity();
+    sage::ui::Element el;
+    el.Anchor = f.Anchor;
+    el.Position = f.Offset;
+    el.Size = f.Size;
+    el.Order = f.Layer;
+    reg.emplace_or_replace<sage::ui::Element>(e, el);
+    if (f.ClipChildren) reg.emplace_or_replace<sage::ui::Mask>(e);
+    if (f.Type == Flat::Kind::Panel || f.Type == Flat::Kind::Input) reg.emplace_or_replace<sage::ui::Fill>(e);
+    if (f.Interactive) reg.emplace_or_replace<sage::ui::Interactable>(e).Enabled = f.Enabled;
+    if (f.Type == Flat::Kind::Input) {
+        reg.emplace_or_replace<sage::ui::Label>(e).Text.clear();
+        reg.emplace_or_replace<sage::ui::TextInput>(e);
+    }
+    if (f.Type == Flat::Kind::Checkbox || f.Type == Flat::Kind::Slider) {
+        sage::ui::Range& r = reg.emplace_or_replace<sage::ui::Range>(e);
+        r.Toggle = f.Type == Flat::Kind::Checkbox;
+        r.Min = f.MinValue;
+        r.Max = f.MaxValue;
+        r.Step = r.Toggle ? 1.0f : 0.0f;
+        r.Value = r.Toggle ? f.Value : f.MinValue + f.Value * (f.MaxValue - f.MinValue);
+    }
 }
 
-// Часть раскладки (маска, раскладка детей, прокрутка) видимого элемента из
-// старой сцены теперь живёт в КОНТЕЙНЕРЕ внутри него (NormalizeElements).
-// Проверка «пережила ли она запись» спрашивает и сам элемент, и такой
-// контейнер.
+// Пережила ли часть элемента запись и чтение.
 template <class T>
 bool HasLayoutPart(const entt::registry& reg, entt::entity e) {
-    if (reg.all_of<T>(e)) return true;
-    if (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e))
-        for (entt::entity c : h->Children)
-            if (reg.all_of<T>(c)) {
-                const sage::ui::Preset* type =
-                    reg.all_of<sage::ui::Element>(c) ? sage::ui::FindPreset(reg.get<sage::ui::Element>(c).Type)
-                                                     : nullptr;
-                if (type && type->Container) return true;
-            }
-    return false;
+    return reg.all_of<T>(e);
 }
 sage::ui::State& StateOf(Scene& scene, GameObject obj) {
     return scene.Registry().get<sage::ui::Interactable>(obj.Entity()).Runtime;
@@ -211,82 +234,16 @@ TEST(UI_component_serialization_roundtrip) {
     CHECK_FALSE(r2.all_of<sage::ui::Interactable>(back.Entity()));
 }
 
-// Сцена, записанная ДО перехода на компоненты, читается и раскладывается по
-// частям. Без этого обновление движка означало бы «интерфейс исчез», причём
-// без единого сообщения: элемент в файле есть, а рисовать его некому.
-TEST(UI_old_flat_scene_migrates_to_components) {
-    const std::string old = R"({
-      "sage_scene_version": 1,
-      "name": "Legacy",
-      "objects": [{
-        "id": 1, "name": "Button",
-        "position": {"x":0,"y":0,"z":0}, "rotation": {"x":0,"y":0,"z":0},
-        "scale": {"x":1,"y":1,"z":1},
-        "mesh": {"type": "none"},
-        "ui": {
-          "kind": "slider", "anchor": 4, "offset": {"x": 30, "y": 40},
-          "size": {"x": 180, "y": 32}, "layer": 2, "visible": true,
-          "text": "Громкость", "value": 0.25, "minValue": 0, "maxValue": 100,
-          "barFillColor": {"x": 0.2, "y": 0.7, "z": 0.9, "w": 1.0},
-          "interactive": true, "enabled": true, "rounding": 6,
-          "clipChildren": true
-        }
-      }]
-    })";
-
-    std::unique_ptr<Scene> scene = SceneSerializer::LoadFromString(old);
-    CHECK_TRUE(scene != nullptr);
-    GameObject obj = scene->FindByName("Button");
-    CHECK_TRUE(obj.Valid());
-    entt::registry& reg = scene->Registry();
-
-    const auto* t = reg.try_get<sage::ui::Element>(obj.Entity());
-    CHECK_TRUE(t != nullptr);
-    if (t) {
-        CHECK_NEAR(t->Position.x, 30.0f, 1e-4);
-        CHECK_NEAR(t->Size.x, 180.0f, 1e-4);
-        CHECK_EQ(t->Order, 2);
-    }
-    // Ползунок стал диапазоном, и доля 0..1 развернулась в игровые единицы.
-    const auto* range = reg.try_get<sage::ui::Range>(obj.Entity());
-    CHECK_TRUE(range != nullptr);
-    if (range) {
-        CHECK_NEAR(range->Min, 0.0f, 1e-4);
-        CHECK_NEAR(range->Max, 100.0f, 1e-4);
-        CHECK_NEAR(range->Value, 25.0f, 1e-3);
-        CHECK_FALSE(range->Toggle);
-    }
-    CHECK_TRUE(reg.all_of<sage::ui::Interactable>(obj.Entity()));
-    CHECK_TRUE(HasLayoutPart<sage::ui::Mask>(reg, obj.Entity()));   // был флаг clipChildren
-    // Цвет заполнения ползунка жил в том же поле, что у полосы, и должен был
-    // куда-то приехать: теперь акцентный цвет — поле САМОГО диапазона. Без
-    // этого перенесённый ползунок молча позеленел бы в умолчание.
-    if (range) CHECK_NEAR(range->Knob.Color.g, 0.7f, 1e-3f);
-    // И пустой полосы рядом с ним больше НЕ ЗАВОДИТСЯ: она существовала только
-    // как место для этого цвета, а рисовалась бы теперь поверх дорожки.
-    CHECK_FALSE(reg.all_of<sage::ui::Bar>(obj.Entity()));
-    // Подложки у диапазона тоже нет — её цвет стал цветом дорожки.
-    CHECK_FALSE(reg.all_of<sage::ui::Fill>(obj.Entity()));
-    const auto* label = reg.try_get<sage::ui::Label>(obj.Entity());
-    CHECK_TRUE(label != nullptr);
-    if (label) CHECK_EQ(label->Text, std::string("Громкость"));
-
-    // И записывается такая сцена уже в новом виде: старый ключ не возвращается.
-    const std::string again = SceneSerializer::SaveToString(*scene);
-    CHECK_TRUE(again.find("\"kind\"") == std::string::npos);
-    CHECK_TRUE(again.find("\"range\"") != std::string::npos);
-}
-
 TEST(UI_hit_test_layers_and_visibility) {
     Scene scene("U");
     // Две перекрывающиеся панели: Layer решает, кто сверху.
     GameObject below = scene.CreateObject("Below");
-    sage::scene::LegacyElement b;
+    Flat b;
     b.Anchor = UIAnchor::TopLeft; b.Offset = {0, 0}; b.Size = {100, 100}; b.Layer = 0;
     PutElement(scene, below, b);
 
     GameObject above = scene.CreateObject("Above");
-    sage::scene::LegacyElement a;
+    Flat a;
     a.Anchor = UIAnchor::TopLeft; a.Offset = {50, 50}; a.Size = {100, 100}; a.Layer = 5;
     PutElement(scene, above, a);
 
@@ -305,13 +262,13 @@ TEST(UI_hit_test_layers_and_visibility) {
 TEST(UI_hit_test_child_and_clip_mask) {
     Scene scene("U");
     GameObject parent = scene.CreateObject("Panel");
-    sage::scene::LegacyElement p;
+    Flat p;
     p.Anchor = UIAnchor::TopLeft; p.Offset = {100, 100}; p.Size = {200, 100};
     p.ClipChildren = true; // маска
     PutElement(scene, parent, p);
 
     GameObject child = scene.CreateObject("Button");
-    sage::scene::LegacyElement c;
+    Flat c;
     // Ребёнок наполовину ВЫСОВЫВАЕТСЯ за родителя вправо: якорь TopLeft
     // родителя + offset за его край.
     c.Anchor = UIAnchor::TopLeft; c.Offset = {150, 20}; c.Size = {100, 40};
@@ -437,9 +394,9 @@ TEST(Shadow_fade_band_from_distance) {
 // окна и без GL. Ровно ради этого ввод и приходит структурой, а не опросом
 // устройств внутри системы UI.
 namespace {
-sage::scene::LegacyElement MakeInteractive(sage::scene::LegacyElement::Kind kind, glm::vec2 pos,
+Flat MakeInteractive(Flat::Kind kind, glm::vec2 pos,
                                        glm::vec2 size) {
-    sage::scene::LegacyElement e;
+    Flat e;
     e.Type = kind;
     e.Anchor = UIAnchor::TopLeft;
     e.Offset = pos;
@@ -447,7 +404,7 @@ sage::scene::LegacyElement MakeInteractive(sage::scene::LegacyElement::Kind kind
     e.Interactive = true;
     // Value по умолчанию 1 (это удобный дефолт для шкалы). Галке нужен явный
     // ноль, иначе тест проверял бы не то, что думает.
-    if (kind == sage::scene::LegacyElement::Kind::Checkbox) e.Value = 0.0f;
+    if (kind == Flat::Kind::Checkbox) e.Value = 0.0f;
     return e;
 }
 sage::ui::UIInputState ClickAt(glm::vec2 p) {
@@ -462,7 +419,7 @@ sage::ui::UIInputState ClickAt(glm::vec2 p) {
 TEST(UI_input_field_typing_and_editing) {
     Scene scene("U");
     GameObject field = scene.CreateObject("Name");
-    PutElement(scene, field, MakeInteractive(sage::scene::LegacyElement::Kind::Input, {10, 10}, {200, 40}));
+    PutElement(scene, field, MakeInteractive(Flat::Kind::Input, {10, 10}, {200, 40}));
     sage::ui::State& st = StateOf(scene, field);
     std::string& text = TextOf(scene, field);
 
@@ -510,7 +467,7 @@ TEST(UI_input_field_typing_and_editing) {
 TEST(UI_checkbox_and_click_need_press_and_release) {
     Scene scene("U");
     GameObject box = scene.CreateObject("Chk");
-    PutElement(scene, box, MakeInteractive(sage::scene::LegacyElement::Kind::Checkbox, {10, 10}, {30, 30}));
+    PutElement(scene, box, MakeInteractive(Flat::Kind::Checkbox, {10, 10}, {30, 30}));
     sage::ui::State& st = StateOf(scene, box);
     sage::ui::Range& value = RangeOf(scene, box);
     CHECK_NEAR(value.Value, 0.0f, 1e-4);
@@ -547,7 +504,7 @@ TEST(UI_checkbox_and_click_need_press_and_release) {
 TEST(UI_slider_drags_and_converts_to_game_units) {
     Scene scene("U");
     GameObject sld = scene.CreateObject("Vol");
-    sage::scene::LegacyElement s = MakeInteractive(sage::scene::LegacyElement::Kind::Slider, {100, 10}, {200, 30});
+    Flat s = MakeInteractive(Flat::Kind::Slider, {100, 10}, {200, 30});
     s.MinValue = 0.0f;
     s.MaxValue = 100.0f;
     PutElement(scene, sld, s);
@@ -575,7 +532,7 @@ TEST(UI_slider_drags_and_converts_to_game_units) {
 TEST(UI_disabled_element_ignores_mouse) {
     Scene scene("U");
     GameObject btn = scene.CreateObject("Quit");
-    sage::scene::LegacyElement b = MakeInteractive(sage::scene::LegacyElement::Kind::Panel, {10, 10}, {100, 40});
+    Flat b = MakeInteractive(Flat::Kind::Panel, {10, 10}, {100, 40});
     b.Enabled = false;
     PutElement(scene, btn, b);
     sage::ui::State& st = StateOf(scene, btn);
@@ -796,7 +753,7 @@ TEST(UI_presets_are_the_same_everywhere) {
 
     // Поле ввода: текст влево (по центру набирать непривычно) и подсказка.
     GameObject input = scene.CreateObject("Input");
-    CHECK_TRUE(sage::ui::ApplyPreset(reg, input.Entity(), "Input"));
+    CHECK_TRUE(sage::ui::ApplyPreset(reg, input.Entity(), "Input Field"));
     const auto* field = reg.try_get<sage::ui::TextInput>(input.Entity());
     const auto* inputLabel = reg.try_get<sage::ui::Label>(input.Entity());
     CHECK_TRUE(field != nullptr);
@@ -806,7 +763,7 @@ TEST(UI_presets_are_the_same_everywhere) {
 
     // Заготовка СНИМАЕТ чужие части: «сделать из кнопки надпись» не должно
     // оставить надпись нажимаемой и с подложкой.
-    CHECK_TRUE(sage::ui::ApplyPreset(reg, button.Entity(), "Label"));
+    CHECK_TRUE(sage::ui::ApplyPreset(reg, button.Entity(), "Text"));
     CHECK_FALSE(reg.all_of<sage::ui::Interactable>(button.Entity()));
     CHECK_FALSE(reg.all_of<sage::ui::Fill>(button.Entity()));
 
@@ -880,8 +837,9 @@ TEST(UI2_layout_lays_children_out_by_itself) {
     // Меню из пяти кнопок раскладывалось вручную: каждому ребёнку свой Offset,
     // посчитанный на бумаге. Шестая кнопка означала пересчитать пять чужих
     // отступов.
-    sage::ui::Stack column;
-    column.Direction = sage::ui::Stack::Flow::Vertical;
+    sage::ui::Arrangement column;
+    column.Mode = sage::ui::Arrangement::Kind::Vertical;
+    column.ChildWidth = sage::ui::Arrangement::ChildSize::Fill;
     column.Spacing = 10.0f;
     column.Padding = {8.0f, 8.0f, 8.0f, 8.0f};
 
@@ -895,16 +853,15 @@ TEST(UI2_layout_lays_children_out_by_itself) {
     CHECK_NEAR(slots[1].Pos.y, 58.0f, 1e-4f);  // 8 + 40 + 10
     CHECK_NEAR(slots[2].Pos.y, 108.0f, 1e-4f);
     CHECK_NEAR(used.y, 140.0f, 1e-4f);         // 3*40 + 2*10
-    // StretchCross по умолчанию: ширина детей = ширине контейнера без полей.
+    // Ширина детей «во всё место»: ширина контейнера без полей.
     CHECK_NEAR(slots[0].Size.x, 184.0f, 1e-4f);
 
     // Ряд с «раздать свободное место между детьми»: первый прижат влево,
     // последний — вправо. Именно так выглядит строка «Назад ... Далее».
-    sage::ui::Stack row;
-    row.Direction = sage::ui::Stack::Flow::Horizontal;
-    row.Justify = sage::ui::Stack::Align::SpaceBetween;
+    sage::ui::Arrangement row;
+    row.Mode = sage::ui::Arrangement::Kind::Horizontal;
+    row.Distribution = sage::ui::Arrangement::Spread::SpaceBetween;
     row.Padding = {0.0f, 0.0f, 0.0f, 0.0f};
-    row.Cross = sage::ui::Stack::CrossAlign::Start;
     std::vector<sage::ui::LayoutSlot> two(2);
     two[0].Size = {100.0f, 30.0f};
     two[1].Size = {100.0f, 30.0f};
@@ -913,8 +870,8 @@ TEST(UI2_layout_lays_children_out_by_itself) {
     CHECK_NEAR(two[1].Pos.x, 400.0f, 1e-4f);
 
     // Сетка: перенос по столбцам.
-    sage::ui::Stack grid;
-    grid.Direction = sage::ui::Stack::Flow::Grid;
+    sage::ui::Arrangement grid;
+    grid.Mode = sage::ui::Arrangement::Kind::Grid;
     grid.Columns = 2;
     grid.Spacing = 4.0f;
     grid.Padding = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -1027,20 +984,9 @@ TEST(UI2_presets_build_real_elements) {
         }
     }
 
-    // Прокручиваемый список — КОНТЕЙНЕР: маска, прокрутка и раскладка, и
-    // ничего видимого. Подложку ему даёт панель-родитель.
-    const sage::ui::Preset* list = sage::ui::FindPreset("Scroll View");
-    CHECK_TRUE(list != nullptr);
-    if (list) {
-        CHECK_TRUE(list->Container);
-        CHECK_TRUE(list->HasMask && list->HasStack && list->HasScroll);
-        CHECK_FALSE(list->HasFill);
-    }
-
-    // «Экрана» как типа больше нет: старое имя ведёт к панели.
-    const sage::ui::Preset* screen = sage::ui::FindPreset("Screen");
-    CHECK_TRUE(screen != nullptr);
-    if (screen) CHECK_TRUE(screen->Name == "Panel");
+    // Прокрутка и обрезка — настройки контейнера, а не типы.
+    CHECK_TRUE(sage::ui::FindPreset("Scroll View") == nullptr);
+    CHECK_TRUE(sage::ui::FindPreset("Screen") == nullptr);
     for (const sage::ui::Preset& p : sage::ui::Presets()) CHECK_TRUE(p.Name != "Screen");
 
     CHECK_TRUE(sage::ui::FindPreset("нет такой") == nullptr);
@@ -1268,7 +1214,7 @@ TEST(UI_demo_survives_a_scene_round_trip) {
     CHECK_TRUE(apply != nullptr);
     if (apply) CHECK_EQ(apply->Action, std::string("apply_settings"));
     // Раскладка панели тоже пережила файл — иначе строки разъехались бы.
-    CHECK_TRUE(HasLayoutPart<sage::ui::Stack>(back->Registry(), back->FindByName("SettingsPanel").Entity()));
+    CHECK_TRUE(HasLayoutPart<sage::ui::Arrangement>(back->Registry(), back->FindByName("SettingsPanel").Entity()));
 }
 
 // Холст пересчитывает вёрстку под размер экрана — и попадание курсором обязано
@@ -1345,12 +1291,13 @@ TEST(UI_fit_content_keeps_children_inside) {
     reg.emplace<sage::ui::Element>(panel.Entity(), panelXf);
     reg.emplace<sage::ui::Fill>(panel.Entity());
     reg.emplace<sage::ui::Interactable>(panel.Entity());
-    sage::ui::Stack layout;
-    layout.Direction = sage::ui::Stack::Flow::Vertical;
+    sage::ui::Arrangement layout;
+    layout.Mode = sage::ui::Arrangement::Kind::Vertical;
+    layout.ChildWidth = sage::ui::Arrangement::ChildSize::Fill;
     layout.Spacing = 10.0f;
     layout.Padding = {20.0f, 20.0f, 20.0f, 20.0f};
     layout.FitContent = true;
-    reg.emplace<sage::ui::Stack>(panel.Entity(), layout);
+    reg.emplace<sage::ui::Arrangement>(panel.Entity(), layout);
 
     int lastId = 0;
     for (int i = 0; i < 2; ++i) {
@@ -1565,14 +1512,14 @@ TEST(UITools_union_covers_everything) {
 TEST(UI_press_and_release_name_both_ends_of_a_drag) {
     Scene scene("U");
     GameObject from = scene.CreateObject("SlotA");
-    sage::scene::LegacyElement a =
-        MakeInteractive(sage::scene::LegacyElement::Kind::Panel, {10, 10}, {60, 60});
+    Flat a =
+        MakeInteractive(Flat::Kind::Panel, {10, 10}, {60, 60});
     PutElement(scene, from, a);
     scene.Registry().get<sage::ui::Interactable>(from.Entity()).Action = "slot:1";
 
     GameObject to = scene.CreateObject("SlotB");
-    sage::scene::LegacyElement b =
-        MakeInteractive(sage::scene::LegacyElement::Kind::Panel, {200, 10}, {60, 60});
+    Flat b =
+        MakeInteractive(Flat::Kind::Panel, {200, 10}, {60, 60});
     PutElement(scene, to, b);
     scene.Registry().get<sage::ui::Interactable>(to.Entity()).Action = "slot:7";
 
@@ -1718,12 +1665,11 @@ TEST(Element_hidden_keeps_its_place_but_disabled_falls_out) {
     box.Position = {0.0f, 0.0f};
     box.Size = {200.0f, 300.0f};
     scene.Registry().emplace<sage::ui::Element>(panel.Entity(), box);
-    sage::ui::Stack stack;
-    stack.Direction = sage::ui::Stack::Flow::Vertical;
+    sage::ui::Arrangement stack;
+    stack.Mode = sage::ui::Arrangement::Kind::Vertical;
     stack.Spacing = 10.0f;
     stack.Padding = {0.0f, 0.0f, 0.0f, 0.0f};
-    stack.Cross = sage::ui::Stack::CrossAlign::Start;
-    scene.Registry().emplace<sage::ui::Stack>(panel.Entity(), stack);
+    scene.Registry().emplace<sage::ui::Arrangement>(panel.Entity(), stack);
 
     int order = 0;
     auto addChild = [&](const char* name) {
@@ -1939,7 +1885,7 @@ TEST(ui_infer_type_reads_a_hand_built_element) {
 
     GameObject empty = scene.CreateEmptyObject("Пусто");
     reg.emplace<sage::ui::Element>(empty.Entity());
-    CHECK_TRUE(sage::ui::InferType(reg, empty.Entity()) == "Group");
+    CHECK_TRUE(sage::ui::InferType(reg, empty.Entity()) == "Container");
 }
 
 TEST(ui_infer_type_prefers_the_most_specific_set) {
@@ -1965,7 +1911,7 @@ TEST(ui_parts_split_into_elements_and_containers) {
         return p && p->Container;
     };
     CHECK_TRUE(isContainer("mask"));
-    CHECK_TRUE(isContainer("layout"));
+    CHECK_TRUE(isContainer("arrangement"));
     CHECK_TRUE(isContainer("scroll"));
     CHECK_FALSE(isContainer("interactable"));
     CHECK_FALSE(isContainer("fill"));
@@ -1973,14 +1919,16 @@ TEST(ui_parts_split_into_elements_and_containers) {
     CHECK_FALSE(isContainer("image"));
     CHECK_FALSE(isContainer("bar"));
 
-    // У каждого типа — ровно один род: у контейнера нет ничего видимого, у
-    // элемента нет раскладки детей. Смешанный тип и был «мешком галок».
+    // Детей держат только контейнеры (Container, Panel) — и у каждого свой
+    // Arrangement; у Panel ещё и подложка. У элемента раскладки детей нет.
     for (const sage::ui::Preset& p : sage::ui::Presets()) {
         const bool visual = p.HasFill || p.HasLabel || p.HasImage || p.HasBar || p.HasRange ||
                             p.HasInput || p.HasIcon || p.HasInteractable;
-        const bool layout = p.HasStack || p.HasMask || p.HasScroll;
+        const bool layout = p.HasArrangement || p.HasMask || p.HasScroll;
         if (p.Container) {
-            if (visual) sagetest::ReportFail(__FILE__, __LINE__, "контейнер с видимой частью: " + p.Name);
+            if (!p.HasArrangement) sagetest::ReportFail(__FILE__, __LINE__, "контейнер без Arrangement: " + p.Name);
+            if (p.HasLabel || p.HasInteractable)
+                sagetest::ReportFail(__FILE__, __LINE__, "контейнер с надписью или реакцией: " + p.Name);
         } else {
             if (layout) sagetest::ReportFail(__FILE__, __LINE__, "элемент с раскладкой детей: " + p.Name);
             if (!visual) sagetest::ReportFail(__FILE__, __LINE__, "элемент без видимой части: " + p.Name);
@@ -2063,10 +2011,12 @@ TEST(ui_scroll_clamp_stops_at_the_content_edge) {
     sage::ui::Scroll sc;
     sc.Clamp = true;
     reg.emplace<sage::ui::Scroll>(list.Entity(), sc);
-    sage::ui::Stack stack;
-    stack.Direction = sage::ui::Stack::Flow::Vertical;
+    sage::ui::Arrangement stack;
+    stack.Mode = sage::ui::Arrangement::Kind::Vertical;
+    stack.ChildWidth = sage::ui::Arrangement::ChildSize::Fill;
+    stack.Padding = {8.0f, 8.0f, 8.0f, 8.0f};
     stack.Spacing = 0.0f;
-    reg.emplace<sage::ui::Stack>(list.Entity(), stack);
+    reg.emplace<sage::ui::Arrangement>(list.Entity(), stack);
 
     // Четыре строки по 40 — содержимое 160 при окне 100: докрутить можно на 60.
     for (int i = 0; i < 4; ++i) {

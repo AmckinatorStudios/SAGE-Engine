@@ -97,27 +97,28 @@ UIRect Intersect(const UIRect& a, const UIRect& b) {
 
 namespace {
 
-// Где ребёнок встаёт поперёк основной оси внутри строки высотой lineCross.
-// Возвращает сдвиг от начала строки; при растяжении меняет сам размер.
-float PlaceAcross(Stack::CrossAlign a, float lineCross, float& size) {
+// Где ребёнок встаёт поперёк оси внутри строки высотой lineCross. Возвращает
+// сдвиг от начала строки; у ребёнка «во всё место» (fill) меняет сам размер.
+float PlaceAcross(Arrangement::Align a, bool fill, float lineCross, float& size) {
+    if (fill) {
+        size = lineCross;
+        return 0.0f;
+    }
     switch (a) {
-        case Stack::CrossAlign::Stretch: size = lineCross; return 0.0f;
-        case Stack::CrossAlign::Center: return (lineCross - size) * 0.5f;
-        case Stack::CrossAlign::End: return lineCross - size;
+        case Arrangement::Align::Center: return (lineCross - size) * 0.5f;
+        case Arrangement::Align::End: return lineCross - size;
         default: return 0.0f;
     }
 }
 
 } // namespace
 
-glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
+glm::vec2 ApplyLayout(const Arrangement& arr, const UIRect& container,
                       std::vector<LayoutSlot>& slots) {
-    if (slots.empty()) return glm::vec2(0.0f);
-    // ПОЛЯ РЕБЁНКА. Раньше их не было вовсе: отступ между двумя кнопками
-    // списка задавался только общим зазором контейнера, и «эту карточку чуть
-    // отодвинуть» значило вставлять пустой элемент-распорку. Раскладка
-    // считает место под ребёнка вместе с его полями, а сам он встаёт внутри —
-    // так поля работают одинаково в ряду, столбце, сетке и при растяжении.
+    if (slots.empty() || !arr.Arranges()) return glm::vec2(0.0f);
+    // ПОЛЯ РЕБЁНКА. Раскладка считает место под ребёнка вместе с его полями, а
+    // сам он встаёт внутри — так поля работают одинаково в ряду, столбце,
+    // сетке и при растяжении.
     for (LayoutSlot& s : slots) s.Size += glm::vec2(s.Margin.x + s.Margin.z, s.Margin.y + s.Margin.w);
     struct Unpad {
         std::vector<LayoutSlot>& Slots;
@@ -130,13 +131,15 @@ glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
         }
     } unpad{slots};
 
-    const float left = container.x + stack.Padding.x;
-    const float top = container.y + stack.Padding.y;
-    const float innerW = std::max(0.0f, container.w - stack.Padding.x - stack.Padding.z);
-    const float innerH = std::max(0.0f, container.h - stack.Padding.y - stack.Padding.w);
-    const float sp = stack.Spacing;
+    const float left = container.x + arr.Padding.x;
+    const float top = container.y + arr.Padding.y;
+    const float innerW = std::max(0.0f, container.w - arr.Padding.x - arr.Padding.z);
+    const float innerH = std::max(0.0f, container.h - arr.Padding.y - arr.Padding.w);
+    const float sp = arr.Spacing;
+    const bool fillW = arr.ChildWidth == Arrangement::ChildSize::Fill;
+    const bool fillH = arr.ChildHeight == Arrangement::ChildSize::Fill;
 
-    if (stack.Direction == Stack::Flow::Grid) {
+    if (arr.Mode == Arrangement::Kind::Grid) {
         // Ячейка сетки одна на всех: инвентарь с ячейками разной ширины — это
         // не сетка, а список, и притворяться сеткой ему незачем.
         float widest = 0.0f, tallest = 0.0f;
@@ -144,8 +147,11 @@ glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
             widest = std::max(widest, s.Size.x);
             tallest = std::max(tallest, s.Size.y);
         }
-        float cellW = stack.CellSize.x;
-        int columns = stack.Columns;
+        const int n = (int)slots.size();
+        float cellW = arr.CellSize.x;
+        int columns = arr.Columns;
+        // Задано только число строк — столбцов столько, чтобы все поместились.
+        if (columns <= 0 && arr.Rows > 0) columns = (n + arr.Rows - 1) / arr.Rows;
         if (columns <= 0) {
             // Столбцов «сколько влезет»: ячейки заданного размера (или по
             // самому широкому ребёнку) до правого края — инвентарь, который
@@ -154,30 +160,39 @@ glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
             columns = std::max(1, (int)std::floor((innerW + sp) / (w + sp)));
         }
         if (cellW <= 0.0f) cellW = std::max(0.0f, (innerW - sp * (float)(columns - 1)) / (float)columns);
-        const float cellH = stack.CellSize.y > 0.0f ? stack.CellSize.y : tallest;
-        const int rows = ((int)slots.size() + columns - 1) / columns;
-        for (size_t i = 0; i < slots.size(); ++i) {
-            const int col = (int)i % columns;
-            const int row = (int)i / columns;
-            LayoutSlot& s = slots[i];
-            const float x0 = left + (float)col * (cellW + sp);
-            const float y0 = top + (float)row * (cellH + sp);
-            // Поперёк в сетке — и по ширине, и по высоте ячейки: «по центру
-            // ячейки» — это центр по обеим осям.
-            const float dx = PlaceAcross(stack.Cross, cellW, s.Size.x);
-            const float dy = PlaceAcross(stack.Cross, cellH, s.Size.y);
+        const int rows = (n + columns - 1) / columns;
+        float cellH = arr.CellSize.y;
+        if (cellH <= 0.0f)
+            cellH = arr.Rows > 0 && fillH
+                        ? std::max(0.0f, (innerH - sp * (float)(arr.Rows - 1)) / (float)arr.Rows)
+                        : tallest;
+        for (int i = 0; i < n; ++i) {
+            LayoutSlot& s = slots[(size_t)i];
+            const float x0 = left + (float)(i % columns) * (cellW + sp);
+            const float y0 = top + (float)(i / columns) * (cellH + sp);
+            // Поперёк в сетке — по обеим осям ячейки: «по центру ячейки» —
+            // это центр и по ширине, и по высоте.
+            const float dx = PlaceAcross(arr.Alignment, fillW, cellW, s.Size.x);
+            const float dy = PlaceAcross(arr.Alignment, fillH, cellH, s.Size.y);
             s.Pos = {x0 + dx, y0 + dy};
         }
         const float usedW = (float)columns * cellW + sp * (float)(columns - 1);
-        return glm::vec2(std::max(usedW, stack.Columns > 0 ? innerW : usedW),
+        return glm::vec2(std::max(usedW, arr.Columns > 0 ? innerW : usedW),
                          (float)rows * cellH + sp * (float)(rows - 1));
     }
 
-    const bool horizontal = stack.Direction == Stack::Flow::Horizontal;
+    const bool horizontal = arr.Horizontal();
+    const bool wrap = arr.Wraps();
     const float mainSpace = horizontal ? innerW : innerH;
     const float crossSpace = horizontal ? innerH : innerW;
+    const bool fillMain = horizontal ? fillW : fillH;
+    const bool fillCross = horizontal ? fillH : fillW;
     auto mainOf = [horizontal](glm::vec2& v) -> float& { return horizontal ? v.x : v.y; };
     auto crossOf = [horizontal](glm::vec2& v) -> float& { return horizontal ? v.y : v.x; };
+    // «Во всё место» вдоль оси — каждый ребёнок берёт долю свободного места;
+    // своё Element::Grow остаётся для неравных долей (1:2).
+    if (fillMain)
+        for (LayoutSlot& s : slots) s.Grow = std::max(s.Grow, 1.0f);
 
     // СТРОКИ. Без переноса строка одна; с переносом ребёнок, который не
     // влезает в остаток строки, начинает следующую (но в строке всегда хотя
@@ -189,7 +204,7 @@ glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
         for (size_t i = 0; i < slots.size(); ++i) {
             const float m = mainOf(slots[i].Size);
             const float need = (i == start) ? m : used + sp + m;
-            if (stack.Wrap && i > start && need > mainSpace + 0.5f) {
+            if (wrap && i > start && need > mainSpace + 0.5f) {
                 lines.push_back({start, i});
                 start = i;
                 used = m;
@@ -213,13 +228,11 @@ glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
             growSum += std::max(slots[i].Grow, 0.0f);
             lineCross = std::max(lineCross, crossOf(slots[i].Size));
         }
-        // Одна строка занимает весь контейнер поперёк: «по центру» и
-        // «растянуть» считаются от него, а не от самого высокого соседа.
-        if (lines.size() == 1) lineCross = std::max(lineCross, crossSpace);
-        if (!stack.Wrap) lineCross = crossSpace;
+        // Без переноса строка одна и занимает весь контейнер поперёк:
+        // «по центру» и «во всё место» считаются от него.
+        if (!wrap) lineCross = crossSpace;
 
         // РОСТ: свободное место раздаётся тем, у кого Grow > 0, пропорционально.
-        // «Поле ввода занимает всё, что осталось от кнопки справа».
         float free = mainSpace - content;
         if (growSum > 0.0f && free > 0.0f) {
             for (size_t i = b; i < e; ++i)
@@ -230,25 +243,22 @@ glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
 
         float cursor = 0.0f;
         float gap = sp;
-        switch (stack.Justify) {
-            case Stack::Align::Start: break;
-            case Stack::Align::Center: cursor = free * 0.5f; break;
-            case Stack::Align::End: cursor = free; break;
-            case Stack::Align::SpaceBetween:
-                // Свободное место раздаётся МЕЖДУ детьми, а не по краям: именно
-                // так выглядит строка «Назад ... Далее» внизу окна.
+        switch (arr.Distribution) {
+            case Arrangement::Spread::Start: break;
+            case Arrangement::Spread::Center: cursor = free * 0.5f; break;
+            case Arrangement::Spread::End: cursor = free; break;
+            case Arrangement::Spread::SpaceBetween:
+                // Свободное место — МЕЖДУ детьми, а не по краям: строка
+                // «Назад ... Далее» внизу окна.
                 if (n > 1) gap = sp + std::max(0.0f, free) / (float)(n - 1);
                 break;
-            case Stack::Align::SpaceAround: {
-                // Каждому — поровну с обеих сторон: у края половина промежутка.
+            case Arrangement::Spread::SpaceAround: {
                 const float each = std::max(0.0f, free) / (float)n;
                 cursor = each * 0.5f;
                 gap = sp + each;
                 break;
             }
-            case Stack::Align::SpaceEvenly: {
-                // Все промежутки равны, включая края: ряд кнопок меню, который
-                // выглядит ровным на любой ширине окна.
+            case Arrangement::Spread::SpaceEvenly: {
                 const float each = std::max(0.0f, free) / (float)(n + 1);
                 cursor = each;
                 gap = sp + each;
@@ -260,7 +270,7 @@ glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
         for (size_t i = b; i < e; ++i) {
             LayoutSlot& s = slots[i];
             float cross = crossOf(s.Size);
-            const float shift = PlaceAcross(stack.Cross, lineCross, cross);
+            const float shift = PlaceAcross(arr.Alignment, fillCross, lineCross, cross);
             crossOf(s.Size) = cross;
             if (horizontal) s.Pos = {left + cursor, top + crossCursor + shift};
             else s.Pos = {left + crossCursor + shift, top + cursor};
@@ -270,7 +280,7 @@ glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
         mainExtent = std::max(mainExtent, cursor - gap);
         // Без переноса занятое поперёк — самый крупный ребёнок (по нему
         // контейнер «по содержимому» подгоняет себя); с переносом — сумма строк.
-        crossCursor += (stack.Wrap ? lineCross : lineExtent) + (li + 1 < lines.size() ? sp : 0.0f);
+        crossCursor += (wrap ? lineCross : lineExtent) + (li + 1 < lines.size() ? sp : 0.0f);
     }
     return horizontal ? glm::vec2(mainExtent, crossCursor) : glm::vec2(crossCursor, mainExtent);
 }
@@ -308,22 +318,41 @@ std::vector<Preset> BuildPresets() {
         return out.back();
     };
 
+    // ===================== КОНТЕЙНЕРЫ ===================================
+    //
+    // Детей держат ТОЛЬКО они (и главный контейнер интерфейса). Как дети
+    // расставлены — режим Arrangement самого контейнера (ручной, ряд, столбец,
+    // сетка, перенос), а не отдельный тип «ряд» или «столбец».
+    {
+        // CONTAINER — невидимый: группирует и расставляет детей.
+        Preset& p = add(SAGE_UI_TEXT("Container"));
+        p.Category = SAGE_UI_TEXT("Containers");
+        p.Container = true;
+        p.Icon = "layout";
+        p.Hint = SAGE_UI_TEXT("Invisible: groups and arranges its children");
+        p.Box.Size = {320.0f, 240.0f};
+        p.HasArrangement = true;
+    }
+    {
+        // PANEL — то же плюс своё оформление: цвет, картинка, девятина.
+        Preset& p = add(SAGE_UI_TEXT("Panel"));
+        p.Category = SAGE_UI_TEXT("Containers");
+        p.Container = true;
+        p.Icon = "ui-panel";
+        p.Hint = SAGE_UI_TEXT("A visible container: a background of colour or your own picture");
+        p.Box.Size = {320.0f, 240.0f};
+        p.HasFill = true;
+        p.HasArrangement = true;
+    }
+
     // ===================== ЭЛЕМЕНТЫ =====================================
     //
     // Элемент — то, что ВИДНО: у каждого типа своё устройство (части), свои
-    // состояния и свои настройки. Детей он может держать, но расставляет их
-    // не он: для этого внутрь кладут контейнер.
-    {
-        Preset& p = add(SAGE_UI_TEXT("Panel"));
-        p.Category = SAGE_UI_TEXT("Basic");
-        p.Icon = "ui-panel";
-        p.Hint = SAGE_UI_TEXT("A background: colour or your own picture, 9-slice included");
-        p.Box.Size = {260.0f, 140.0f};
-        p.HasFill = true;
-    }
+    // состояния и свои настройки. Детей он не держит — для этого есть
+    // Container и Panel.
     {
         Preset& p = add(SAGE_UI_TEXT("Text"));
-        p.Category = SAGE_UI_TEXT("Basic");
+        p.Category = SAGE_UI_TEXT("Text");
         p.Icon = "ui-text";
         p.Hint = SAGE_UI_TEXT("A line or a paragraph of text");
         p.Box.Size = {220.0f, 40.0f};
@@ -333,7 +362,7 @@ std::vector<Preset> BuildPresets() {
     }
     {
         Preset& p = add(SAGE_UI_TEXT("Image"));
-        p.Category = SAGE_UI_TEXT("Basic");
+        p.Category = SAGE_UI_TEXT("Graphics");
         p.Icon = "ui-image";
         p.Hint = SAGE_UI_TEXT("A picture from the project");
         p.Box.Size = {160.0f, 160.0f};
@@ -341,7 +370,7 @@ std::vector<Preset> BuildPresets() {
     }
     {
         Preset& p = add(SAGE_UI_TEXT("Icon"));
-        p.Category = SAGE_UI_TEXT("Basic");
+        p.Category = SAGE_UI_TEXT("Graphics");
         p.Icon = "sun";
         p.Hint = SAGE_UI_TEXT("A vector icon of the engine, in any colour");
         p.Box.Size = {40.0f, 40.0f};
@@ -404,7 +433,7 @@ std::vector<Preset> BuildPresets() {
     }
     {
         Preset& p = add(SAGE_UI_TEXT("Progress Bar"));
-        p.Category = SAGE_UI_TEXT("Controls");
+        p.Category = SAGE_UI_TEXT("Indicators");
         p.Icon = "ui-bar";
         p.Hint = SAGE_UI_TEXT("A fill level: health, loading, progress");
         p.Box.Size = {240.0f, 26.0f};
@@ -427,81 +456,6 @@ std::vector<Preset> BuildPresets() {
         p.Input.Placeholder = "Enter text";
     }
 
-    // ===================== КОНТЕЙНЕРЫ ====================================
-    //
-    // Контейнер НЕ ВИДЕН: он только расставляет детей. Подложку под список
-    // дают панелью-родителем, а не галкой у контейнера.
-    auto container = [&](const char* name, const char* icon, const char* hint) -> Preset& {
-        Preset& p = add(name);
-        p.Category = SAGE_UI_TEXT("Containers");
-        p.Container = true;
-        p.Icon = icon;
-        p.Hint = hint;
-        return p;
-    };
-    {
-        // ГРУППА — узел без раскладки: дети стоят по своим якорям. Нужна,
-        // чтобы двигать, прятать и гасить прозрачностью несколько элементов
-        // разом.
-        Preset& p = container(SAGE_UI_TEXT("Group"), "ui-empty",
-                              SAGE_UI_TEXT("Holds children where their anchors put them; move or fade them together"));
-        p.Box.Size = {240.0f, 160.0f};
-    }
-    {
-        Preset& p = container(SAGE_UI_TEXT("Row"), "ui-toolbar",
-                              SAGE_UI_TEXT("Children stand side by side, left to right"));
-        p.Box.Size = {400.0f, 56.0f};
-        p.HasStack = true;
-        p.StackRule.Direction = Stack::Flow::Horizontal;
-        p.StackRule.Cross = Stack::CrossAlign::Center;
-    }
-    {
-        Preset& p = container(SAGE_UI_TEXT("Column"), "ui-list",
-                              SAGE_UI_TEXT("Children stand one under another"));
-        p.Box.Size = {260.0f, 320.0f};
-        p.HasStack = true;
-        p.StackRule.Direction = Stack::Flow::Vertical;
-    }
-    {
-        Preset& p = container(SAGE_UI_TEXT("Grid"), "ui-grid",
-                              SAGE_UI_TEXT("Children stand in equal cells, row after row"));
-        p.Box.Size = {320.0f, 320.0f};
-        p.HasStack = true;
-        p.StackRule.Direction = Stack::Flow::Grid;
-        p.StackRule.Columns = 4;
-    }
-    {
-        Preset& p = container(SAGE_UI_TEXT("Wrap Row"), "layout",
-                              SAGE_UI_TEXT("A row that continues on the next line when it runs out of room"));
-        p.Box.Size = {400.0f, 120.0f};
-        p.HasStack = true;
-        p.StackRule.Direction = Stack::Flow::Horizontal;
-        p.StackRule.Wrap = true;
-        p.StackRule.Cross = Stack::CrossAlign::Start;
-    }
-    {
-        Preset& p = container(SAGE_UI_TEXT("Scroll View"), "list",
-                              SAGE_UI_TEXT("A column that scrolls with the wheel and clips what is outside"));
-        p.Box.Size = {280.0f, 320.0f};
-        p.HasStack = true;
-        p.StackRule.Direction = Stack::Flow::Vertical;
-        p.HasScroll = true;
-        p.HasMask = true;
-    }
-    {
-        Preset& p = container(SAGE_UI_TEXT("Clip Area"), "fit",
-                              SAGE_UI_TEXT("Children are cut off at its edges; they keep their anchors"));
-        p.Box.Size = {240.0f, 160.0f};
-        p.HasMask = true;
-    }
-    {
-        // РАСПОРКА: пустое место, которое забирает остаток ряда. «Назад» слева,
-        // «Далее» справа — две кнопки и распорка между ними.
-        Preset& p = container(SAGE_UI_TEXT("Spacer"), "align-center-x",
-                              SAGE_UI_TEXT("Empty room inside a row or column that takes what is left"));
-        p.Box.Size = {16.0f, 16.0f};
-        p.Box.Grow = 1.0f;
-    }
     return out;
 }
 
@@ -524,27 +478,6 @@ const std::vector<std::string>& PresetNames() {
 const Preset* FindPreset(const std::string& name) {
     for (const Preset& p : Presets()) {
         if (p.Name == name) return &p;
-    }
-    // Прежние имена. Заготовки зовут по имени из меню, из скрипта и из
-    // самопроверки, и переименование «Label -> Text» не имеет права молча
-    // превратить рабочий вызов в «заготовка неизвестна».
-    //
-    // «Экран» (подложка на весь экран) — больше не тип: это панель,
-    // растянутая на весь родитель. «Пустой» стал группой, «список» и «панель
-    // инструментов» — столбцом и рядом, «полоса» — полосой прогресса.
-    static const std::pair<const char*, const char*> kRenamed[] = {
-        {"Label", "Text"},
-        {"Input", "Input Field"},
-        {"Empty", "Group"},
-        {"Vertical List", "Column"},
-        {"Toolbar", "Row"},
-        {"Bar", "Progress Bar"},
-        {"Screen", "Panel"},
-    };
-    for (const auto& [was, now] : kRenamed) {
-        if (name != was) continue;
-        for (const Preset& p : Presets())
-            if (p.Name == now) return &p;
     }
     return nullptr;
 }

@@ -66,12 +66,14 @@ std::vector<entt::entity> InterfaceRoots(Scene& scene, entt::entity interfaceEnt
 // прямоугольник, и иначе ручки рамки растягивали бы надпись, а не кнопку.
 entt::entity ControlOf(Scene& scene, entt::entity element);
 
-// ГЛАВНЫЙ КОНТЕЙНЕР интерфейса (sage/ui/Interface.h): единственный элемент
-// прямо под объектом-интерфейсом. entt::null — интерфейс старого вида (корней
-// несколько) или пустой. Его нельзя переносить, удалять и дублировать, а
+// ГЛАВНЫЙ КОНТЕЙНЕР интерфейса (sage/ui/Interface.h): единственный контейнер
+// во весь экран прямо под объектом-интерфейсом. entt::null — его нет (объект
+// без файла или с элементами, собранными кодом). Его нельзя переносить, удалять и дублировать, а
 // «положить в корень» значит положить в него.
 entt::entity MainContainer(Scene& scene, entt::entity interfaceEntity);
 bool IsMainContainer(Scene& scene, entt::entity element);
+// Может ли элемент держать детей: Container, Panel (и главный контейнер).
+bool HoldsChildren(const entt::registry& reg, entt::entity e);
 
 bool CanReparent(Scene& scene, entt::entity element, entt::entity newParent);
 bool ReparentElement(Scene& scene, entt::entity element, entt::entity newParent);

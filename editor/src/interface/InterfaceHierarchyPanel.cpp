@@ -267,11 +267,15 @@ void InterfaceHierarchyPanel::DrawToolbar(EditorHost& host) {
     //
     // Категория и значок живут В САМОЙ ЗАГОТОВКЕ (sage::ui::Preset), а не
     // здесь: список типов — это и есть меню создания.
-    auto typeMenu = [&](bool containers) {
+    // ОДНО МЕНЮ ПО КАТЕГОРИЯМ: контейнеры, графика, текст, управление,
+    // индикаторы. Категория и значок живут В САМОЙ ЗАГОТОВКЕ (sage::ui::Preset):
+    // список типов — это и есть меню создания.
+    if (EditorIcons::Button("plus", T("Create"), T("Add an element: container, picture, text, control...")))
+        ImGui::OpenPopup("##ui_create");
+    if (Sage::UI::MenuScope createMenu; ImGui::BeginPopup("##ui_create")) {
         std::string category;
         for (const ui::Preset& preset : ui::Presets()) {
-            if (preset.Container != containers) continue;
-            if (!containers && preset.Category != category) {
+            if (preset.Category != category) {
                 category = preset.Category;
                 ImGui::SeparatorText(T(category.c_str()));
             }
@@ -283,19 +287,6 @@ void InterfaceHierarchyPanel::DrawToolbar(EditorHost& host) {
             }
             if (preset.Hint && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(preset.Hint));
         }
-    };
-    if (EditorIcons::Button("plus", T("Element"), T("Add a visible element: text, button, picture...")))
-        ImGui::OpenPopup("##ui_create");
-    if (Sage::UI::MenuScope createMenu; ImGui::BeginPopup("##ui_create")) {
-        typeMenu(false);
-        ImGui::EndPopup();
-    }
-    ImGui::SameLine();
-    if (EditorIcons::Button("layout", T("Container"),
-                            T("Add an invisible layout: row, column, grid, scroll view...")))
-        ImGui::OpenPopup("##ui_create_container");
-    if (Sage::UI::MenuScope containerMenu; ImGui::BeginPopup("##ui_create_container")) {
-        typeMenu(true);
         ImGui::EndPopup();
     }
 
@@ -473,7 +464,7 @@ bool InterfaceHierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::ent
         const ImU32 textCol = ImGui::GetColorU32(dim ? ImGuiCol_TextDisabled : ImGuiCol_Text);
         // Контейнер — значком ДРУГОГО цвета: он невидим в игре, и в дереве
         // его отличают от видимых элементов с первого взгляда.
-        const ImU32 iconCol = (type && type->Container && !dim)
+        const ImU32 iconCol = (type && type->Container && !type->HasFill && !dim)
                                   ? ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::Accent))
                                   : textCol;
         EditorIcons::DrawLabeled(ImGui::GetWindowDrawList(), ImVec2(rowPos.x + indent, rowPos.y),
@@ -518,7 +509,9 @@ bool InterfaceHierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::ent
                     ui::ReparentElement(scene, dragged, e);
                 }
             } else if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem)) {
-                ImGui::SetTooltip("%s", T("An element cannot go inside itself"));
+                ImGui::SetTooltip("%s", ui::HoldsChildren(reg, e)
+                                            ? T("An element cannot go inside itself")
+                                            : T("Only a Container or a Panel holds elements"));
             }
             ImGui::EndDragDropTarget();
         }

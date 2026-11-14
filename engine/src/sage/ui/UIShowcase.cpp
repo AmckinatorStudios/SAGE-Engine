@@ -184,7 +184,7 @@ int BuildShowcase(Scene& scene) {
         MakeUI(scene, std::string("Skill_") + n.Name, node, skills);
     }
 
-    NormalizeElements(scene);   // типы собранным кодом элементам
+    InferMissingTypes(scene);   // типы собранным кодом элементам
     return root.Id();
 }
 

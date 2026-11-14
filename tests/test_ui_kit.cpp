@@ -60,7 +60,7 @@ TEST(UIKit_builders_make_elements_with_their_parts) {
         t.x = 4
         p.anchor = "center"
         p.visible = false
-        ui.group{parent = s, name = "List", layout = "column", gap = 4}
+        ui.container{parent = s, name = "List", arrange = "vertical", spacing = 4}
     )");
     auto& reg = scene.Registry();
     const entt::entity screen = Named(scene, "Menu"), back = Named(scene, "Back");
@@ -74,7 +74,8 @@ TEST(UIKit_builders_make_elements_with_their_parts) {
     CHECK_TRUE(reg.get<sage::ui::Label>(title).Text == "Options");
     CHECK_NEAR(reg.get<sage::ui::Label>(title).Scale, 2.0f, 1e-4f);   // строка 16 пикселей
     CHECK_NEAR(reg.get<sage::ui::Element>(title).Position.x, 4.0f, 1e-4f);
-    CHECK_TRUE(reg.get<sage::ui::Stack>(list).Direction == sage::ui::Stack::Flow::Vertical);
+    CHECK_TRUE(reg.get<sage::ui::Arrangement>(list).Mode == sage::ui::Arrangement::Kind::Vertical);
+    CHECK_TRUE(reg.get<sage::ui::Element>(list).Type == "Container");
 }
 
 TEST(UIKit_typos_are_errors_not_silence) {
@@ -149,11 +150,10 @@ TEST(UIKit_slider_reports_value_in_game_units) {
 // Поля детей и равномерное распределение в раскладке. Прежде поля ребёнка
 // раскладка не видела вовсе, а свободное место умела делить только «между».
 TEST(UIKit_layout_child_margins_and_even_spacing) {
-    sage::ui::Stack row;
-    row.Direction = sage::ui::Stack::Flow::Horizontal;
+    sage::ui::Arrangement row;
+    row.Mode = sage::ui::Arrangement::Kind::Horizontal;
     row.Spacing = 0.0f;
     row.Padding = glm::vec4(0.0f);
-    row.Cross = sage::ui::Stack::CrossAlign::Start;
     const sage::ui::UIRect box{0.0f, 0.0f, 100.0f, 20.0f};
 
     // Два ребёнка по 10 с полем 5 слева у второго: второй встаёт на 15.
@@ -166,7 +166,7 @@ TEST(UIKit_layout_child_margins_and_even_spacing) {
     CHECK_NEAR(slots[1].Size.x, 10.0f, 1e-4f);   // размер — свой, без полей
 
     // Равномерно: три по 10 в 100 — четыре промежутка по 17.5, включая края.
-    row.Justify = sage::ui::Stack::Align::SpaceEvenly;
+    row.Distribution = sage::ui::Arrangement::Spread::SpaceEvenly;
     std::vector<sage::ui::LayoutSlot> three(3);
     for (auto& s : three) s.Size = {10.0f, 10.0f};
     sage::ui::ApplyLayout(row, box, three);
@@ -175,25 +175,80 @@ TEST(UIKit_layout_child_margins_and_even_spacing) {
     CHECK_NEAR(100.0f - (three[2].Pos.x + 10.0f), 17.5f, 1e-3f);
 
     // Вокруг каждого: у краёв половина промежутка между.
-    row.Justify = sage::ui::Stack::Align::SpaceAround;
+    row.Distribution = sage::ui::Arrangement::Spread::SpaceAround;
     sage::ui::ApplyLayout(row, box, three);
     const float between = three[1].Pos.x - (three[0].Pos.x + 10.0f);
     CHECK_NEAR(three[0].Pos.x * 2.0f, between, 1e-3f);
 }
 
-TEST(UIKit_group_justify_evenly_from_script) {
+TEST(UIKit_container_distribute_evenly_from_script) {
     ScriptEngine se;
     Scene scene("S");
     se.BindScene(scene);
     se.Lua().script(R"(
-        local g = ui.group{name = "Row", w = 300, h = 40, layout = "row", justify = "evenly",
-                           padding = {4, 2, 4, 2}}
+        local g = ui.container{name = "Row", w = 300, h = 40, arrange = "horizontal",
+                               distribute = "evenly", padding = {4, 2, 4, 2}}
         ui.panel{parent = g, name = "A", w = 50, h = 20, margin = {0, 5, 0, 0}}
     )");
-    const auto& st = scene.Registry().get<sage::ui::Stack>(Named(scene, "Row"));
-    CHECK_TRUE(st.Justify == sage::ui::Stack::Align::SpaceEvenly);
+    const auto& st = scene.Registry().get<sage::ui::Arrangement>(Named(scene, "Row"));
+    CHECK_TRUE(st.Distribution == sage::ui::Arrangement::Spread::SpaceEvenly);
     CHECK_NEAR(st.Padding.y, 2.0f, 1e-4f);
     CHECK_NEAR(scene.Registry().get<sage::ui::Element>(Named(scene, "A")).Margin.y, 5.0f, 1e-4f);
+}
+
+// Размер детей: Fill — всё место (вдоль — поровну, поперёк — целиком), Fixed —
+// свой. Прежде «растянуть поперёк» было режимом выравнивания и спорило с
+// размером ребёнка.
+TEST(UIKit_arrangement_child_size_fill_and_fixed) {
+    sage::ui::Arrangement col;
+    col.Mode = sage::ui::Arrangement::Kind::Vertical;
+    col.Spacing = 0.0f;
+    col.ChildWidth = sage::ui::Arrangement::ChildSize::Fill;
+    const sage::ui::UIRect box{0.0f, 0.0f, 200.0f, 100.0f};
+    std::vector<sage::ui::LayoutSlot> slots(2);
+    for (auto& s : slots) s.Size = {50.0f, 20.0f};
+    sage::ui::ApplyLayout(col, box, slots);
+    CHECK_NEAR(slots[0].Size.x, 200.0f, 1e-4f);   // поперёк — во всю ширину
+    CHECK_NEAR(slots[0].Size.y, 20.0f, 1e-4f);    // вдоль — свой
+
+    col.ChildHeight = sage::ui::Arrangement::ChildSize::Fill;
+    for (auto& s : slots) s.Size = {50.0f, 20.0f};
+    sage::ui::ApplyLayout(col, box, slots);
+    CHECK_NEAR(slots[0].Size.y, 50.0f, 1e-4f);    // вдоль — поровну
+    CHECK_NEAR(slots[1].Pos.y, 50.0f, 1e-4f);
+
+    // Ручной режим не трогает детей вовсе.
+    col.Mode = sage::ui::Arrangement::Kind::Manual;
+    for (auto& s : slots) { s.Size = {50.0f, 20.0f}; s.Pos = {7.0f, 7.0f}; }
+    sage::ui::ApplyLayout(col, box, slots);
+    CHECK_NEAR(slots[1].Pos.x, 7.0f, 1e-4f);
+    CHECK_NEAR(slots[1].Size.x, 50.0f, 1e-4f);
+}
+
+// Сетка по числу строк и перенос столбцами.
+TEST(UIKit_arrangement_grid_rows_and_wrap) {
+    sage::ui::Arrangement grid;
+    grid.Mode = sage::ui::Arrangement::Kind::Grid;
+    grid.Columns = 0;
+    grid.Rows = 2;
+    grid.Spacing = 0.0f;
+    const sage::ui::UIRect box{0.0f, 0.0f, 300.0f, 100.0f};
+    std::vector<sage::ui::LayoutSlot> six(6);
+    for (auto& s : six) s.Size = {10.0f, 10.0f};
+    sage::ui::ApplyLayout(grid, box, six);
+    CHECK_NEAR(six[3].Pos.y, 10.0f, 1e-4f);       // 3 столбца на 2 строки: 4-й — вторая строка
+    CHECK_NEAR(six[3].Pos.x, 0.0f, 1e-4f);
+
+    sage::ui::Arrangement wrap;
+    wrap.Mode = sage::ui::Arrangement::Kind::Wrap;
+    wrap.WrapVertical = true;
+    wrap.Spacing = 0.0f;
+    const sage::ui::UIRect tall{0.0f, 0.0f, 100.0f, 25.0f};
+    std::vector<sage::ui::LayoutSlot> three(3);
+    for (auto& s : three) s.Size = {10.0f, 10.0f};
+    sage::ui::ApplyLayout(wrap, tall, three);
+    CHECK_NEAR(three[2].Pos.x, 10.0f, 1e-4f);     // третий не влез в столбец — следующий столбец
+    CHECK_NEAR(three[2].Pos.y, 0.0f, 1e-4f);
 }
 
 // Слой, маска и целый масштаб экрана из скрипта.
@@ -203,8 +258,8 @@ TEST(UIKit_layer_mask_and_pixel_screen) {
     se.BindScene(scene);
     se.Lua().script(R"(
         local s = ui.screen{name = "Pixel", scale = "pixel", reference = {320, 180}, max = 4}
-        local list = ui.group{parent = s, name = "List", w = 100, h = 60,
-                              mask = {shape = "rounded", rounding = 6, feather = 2}}
+        local list = ui.container{parent = s, name = "List", w = 100, h = 60,
+                                  mask = {shape = "rounded", rounding = 6, feather = 2}}
         local tip = ui.panel{parent = list, name = "Tip", layer = 5}
         local hole = ui.panel{parent = s, name = "Hole", mask = {invert = true, padding = 4}}
         hole.mask = false
@@ -220,6 +275,6 @@ TEST(UIKit_layer_mask_and_pixel_screen) {
     CHECK_NEAR(mask.Feather, 2.0f, 1e-4f);
     CHECK_EQ(reg.get<sage::ui::Element>(Named(scene, "Tip")).DrawLayer, 5);
     CHECK_FALSE(reg.all_of<sage::ui::Mask>(Named(scene, "Hole")));
-    CHECK_TRUE(Throws(se, "ui.group{mask = 'star'}", "форма 'star'"));
+    CHECK_TRUE(Throws(se, "ui.container{mask = 'star'}", "форма 'star'"));
     CHECK_TRUE(Throws(se, "ui.screen{scale = 'big'}", "scale 'big'"));
 }

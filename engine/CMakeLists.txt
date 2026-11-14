@@ -284,6 +284,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/UISerialize.cpp
     src/sage/ui/Interface.cpp
     src/sage/ui/InterfaceSource.cpp
+    src/sage/ui/UITree.cpp
     src/sage/ui/UIRenderer.cpp
     src/sage/ui/UIIcons.cpp
     src/sage/ui/UISceneSystem.cpp
@@ -292,7 +293,6 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/UIStyle.cpp
     src/sage/ui/UI.cpp
     src/sage/ui/UILayoutTools.cpp
-    src/sage/scene/SceneLegacyUI.cpp
     src/sage/ui/UIDemos.cpp
     src/sage/ui/UIShowcase.cpp
 )

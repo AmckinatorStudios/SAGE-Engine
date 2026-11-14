@@ -14,7 +14,7 @@
 // Устройство:
 //   Element.h             — САМ ЭЛЕМЕНТ: раскладка, порядок, видимость, замок
 //   components/InterfaceComponent.h — ГРАНИЦА интерфейса: чьи это элементы
-//   components/Layout.h   — что он делает с местом: Mask, Stack, Canvas, Group
+//   components/Layout.h   — что он делает с местом: Mask, Arrangement, Canvas, Group
 //   components/Visual.h   — из чего он сделан: Fill, Label, Image, Bar, Icon
 //   components/Interact.h — что он делает: Interactable, TextInput, Range, State
 //   UI.h / UI.cpp         — математика раскладки и заготовки (этот файл)
@@ -35,7 +35,7 @@
 //   кнопка   = Element + Fill + Label + Interactable
 //   картинка = Element + Image
 //   шкала    = Element + Fill + Bar (+ Icon + Label, если нужно)
-//   список   = Element + Fill + Mask + Stack (дети раскладываются сами)
+//   панель   = Element + Fill + Arrangement (дети раскладываются сами)
 // Свой вид элемента — свой компонент и своя система, без единой правки здесь.
 // ---------------------------------------------------------------------------
 namespace sage::ui {
@@ -76,7 +76,7 @@ struct LayoutSlot {
 // Раскладывает детей внутри контейнера. Порядок — тот, в каком их подали
 // (вызывающий сортирует по Layer). Возвращает размер, занятый содержимым, —
 // по нему контейнер с FitContent подгоняет себя.
-glm::vec2 ApplyLayout(const Stack& stack, const UIRect& container,
+glm::vec2 ApplyLayout(const Arrangement& arrangement, const UIRect& container,
                       std::vector<LayoutSlot>& slots);
 
 // --- Заготовки --------------------------------------------------------------
@@ -99,10 +99,8 @@ struct Preset {
     // Ключи английские и переводятся редактором, как все остальные его строки.
     std::string Category = "Basic";
 
-    // КОНТЕЙНЕР — невидимая раскладка детей (ряд, столбец, сетка, прокрутка,
-    // группа). У него нет ни подложки, ни текста, ни реакции на мышь; у
-    // визуального элемента нет раскладки детей. Так «кнопка» и «столбец» не
-    // путаются, и ни одна настройка одного не лежит без дела у другого.
+    // КОНТЕЙНЕР — держит детей и расставляет их (Container, Panel). Положить
+    // элемент можно только в контейнер: у кнопки или надписи своих детей нет.
     bool Container = false;
     const char* Icon = "ui-empty";
 
@@ -125,8 +123,8 @@ struct Preset {
     TextInput Input;
     bool HasRange = false;
     Range RangeValue;
-    bool HasStack = false;
-    Stack StackRule;
+    bool HasArrangement = false;
+    Arrangement Arrange;
     bool HasMask = false;
     Mask MaskRule;
     bool HasScroll = false;

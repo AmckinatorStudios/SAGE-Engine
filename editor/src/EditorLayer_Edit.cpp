@@ -201,7 +201,11 @@ GameObject EditorLayer::CreateUIEntity(const std::string& preset) {
     entt::entity parent = entt::null;
     if (m_selection.Primary() >= 0) {
         GameObject sel = m_scene->Get(m_selection.Primary());
-        if (sel.Valid() && sage::ui::IsElement(reg, sel.Entity())) parent = sel.Entity();
+        // Детей держат только контейнеры: выделена кнопка — новый элемент
+        // встаёт рядом с ней, в её контейнер.
+        if (sel.Valid() && sage::ui::IsElement(reg, sel.Entity()))
+            parent = sage::ui::HoldsChildren(reg, sel.Entity()) ? sel.Entity()
+                                                                : m_scene->ParentOf(sel.Entity());
         // Выбран сам интерфейс — новый элемент становится его КОРНЕМ: ровно
         // это и значит «создать элемент в этом интерфейсе».
         else if (sel.Valid() && reg.all_of<sage::ui::InterfaceComponent>(sel.Entity()))

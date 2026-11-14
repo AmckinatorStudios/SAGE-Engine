@@ -11,6 +11,7 @@
 #include "sage/scene/Scene.h"
 #include "sage/ui/Interface.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scene/Prefab.h"
@@ -79,10 +80,12 @@ namespace {
 
 // Тот же пример, но внутри объекта-интерфейса: так он и лежит в сцене.
 entt::entity SampleInterface(Scene& scene) {
-    GameObject iface = scene.CreateEmptyObject("Inventory");
-    scene.Registry().emplace<sage::ui::InterfaceComponent>(iface.Entity());
-    for (entt::entity r : BuildSample(scene)) scene.SetParent(r, iface.Entity());
-    return iface.Entity();
+    Interface blank;
+    blank.Name = "Inventory";
+    const entt::entity iface = sage::ui::Instantiate(scene, blank);
+    const entt::entity main = sage::ui::MainContainer(scene, iface);
+    for (entt::entity r : BuildSample(scene)) scene.SetParent(r, main);
+    return iface;
 }
 
 entt::entity ParentOf(Scene& scene, const std::string& name) {
@@ -195,24 +198,33 @@ TEST(Interface_does_not_swallow_scene_objects) {
     CHECK_EQ((int)ui.Root.Children[0].Children.size(), 2);
 }
 
-TEST(Interface_old_file_with_several_roots_opens_inside_a_main_container) {
-    // Файл первого формата: два корня. Открывается он без потерь — оба корня
-    // ложатся в главный контейнер, и на экране не меняется ничего.
-    const char* v1 = R"({"sage_interface_version":1,"name":"Old",
-        "roots":[{"name":"HUD","data":{"element":{}}},{"name":"Pause","data":{"element":{}}}]})";
+TEST(Interface_old_file_format_is_refused) {
+    // Файл первой версии (несколько корней) не читается: интерфейс того вида
+    // создают заново. Отказ — с причиной, а не пустой экран.
+    const char* v1 = R"({"sage_interface_version":1,"name":"Old","roots":[]})";
     Interface ui;
     std::string err;
-    CHECK_TRUE(Interface::FromJsonString(v1, ui, err));
-    CHECK_EQ((int)ui.Root.Children.size(), 2);
-    CHECK_TRUE(ui.Root.Children[0].Name == "HUD");
+    CHECK_FALSE(Interface::FromJsonString(v1, ui, err));
+    CHECK_FALSE(err.empty());
+}
 
+TEST(Interface_only_containers_hold_children) {
+    // Детей держат Container и Panel; кнопка или надпись — нет.
     Scene scene("S");
-    const entt::entity iface = sage::ui::Instantiate(scene, ui);
+    const entt::entity iface = sage::ui::Instantiate(scene, Interface{});
     const entt::entity main = sage::ui::MainContainer(scene, iface);
-    CHECK_TRUE(main != entt::null);
-    CHECK_EQ((int)scene.ChildrenOf(main).size(), 2);
-    const sage::ui::Element& box = scene.Registry().get<sage::ui::Element>(main);
-    CHECK_TRUE(box.Mode == sage::ui::Element::Stretch::Both);
+    auto make = [&](const char* type) {
+        GameObject o = scene.CreateEmptyObject(type);
+        sage::ui::ApplyPreset(scene, o.Entity(), type);
+        scene.SetParent(o.Entity(), main);
+        return o.Entity();
+    };
+    const entt::entity panel = make("Panel");
+    const entt::entity button = make("Button");
+    const entt::entity text = make("Text");
+    CHECK_TRUE(sage::ui::CanReparent(scene, text, panel));
+    CHECK_FALSE(sage::ui::CanReparent(scene, text, button));
+    CHECK_TRUE(sage::ui::HoldsChildren(scene.Registry(), main));
 }
 
 TEST(Interface_main_container_stays_the_root) {
@@ -267,37 +279,39 @@ TEST(Interface_presets_build_from_elements_and_components) {
         CHECK_EQ((int)button->Children.size(), 1);
     }
 
-    // Пустой — тоже заготовка, и без единого компонента: им собирают всё
-    // остальное.
-    const sage::ui::Preset* empty = sage::ui::FindPreset("Group");
-    CHECK_TRUE(empty != nullptr);
-    if (empty) {
-        CHECK_FALSE(empty->HasFill);
-        CHECK_FALSE(empty->HasLabel);
-        CHECK_FALSE(empty->HasImage);
-        CHECK_TRUE(empty->Children.empty());
+    // Container — невидимый держатель детей: только раскладка, ни одной
+    // видимой части. Panel — то же с подложкой.
+    const sage::ui::Preset* container = sage::ui::FindPreset("Container");
+    CHECK_TRUE(container != nullptr);
+    if (container) {
+        CHECK_TRUE(container->Container);
+        CHECK_TRUE(container->HasArrangement);
+        CHECK_FALSE(container->HasFill);
+        CHECK_FALSE(container->HasLabel);
+        CHECK_TRUE(container->Children.empty());
+    }
+    const sage::ui::Preset* panel = sage::ui::FindPreset("Panel");
+    CHECK_TRUE(panel != nullptr);
+    if (panel) {
+        CHECK_TRUE(panel->Container);
+        CHECK_TRUE(panel->HasFill);
+        CHECK_TRUE(panel->HasArrangement);
     }
 
     // Запрошенный набор Add/Create на месте.
-    for (const char* name : {"Group", "Text", "Image", "Button", "Input Field"}) {
+    for (const char* name : {"Container", "Panel", "Text", "Image", "Button", "Input Field"}) {
         if (!sage::ui::FindPreset(name))
             sagetest::ReportFail(__FILE__, __LINE__, std::string("нет заготовки: ") + name);
     }
 }
 
-TEST(Interface_old_preset_names_still_resolve) {
-    // Заготовки зовут по имени из меню, из скрипта и из самопроверки, и
-    // переименование не имеет права молча превратить рабочий вызов в
-    // «заготовка неизвестна».
-    const sage::ui::Preset* text = sage::ui::FindPreset("Label");
-    CHECK_TRUE(text != nullptr);
-    if (text) CHECK_TRUE(text->Name == "Text");
-
-    const sage::ui::Preset* input = sage::ui::FindPreset("Input");
-    CHECK_TRUE(input != nullptr);
-    if (input) CHECK_TRUE(input->Name == "Input Field");
-
-    CHECK_TRUE(sage::ui::FindPreset("нет такой") == nullptr);
+TEST(Interface_types_are_only_the_current_ones) {
+    // Ряд, столбец, сетка, прокрутка, обрезка — режимы контейнера, а не типы;
+    // прежних имён нет вовсе.
+    for (const char* gone : {"Group", "Row", "Column", "Grid", "Wrap Row", "Scroll View", "Clip Area",
+                             "Spacer", "Label", "Input", "Screen"})
+        if (sage::ui::FindPreset(gone))
+            sagetest::ReportFail(__FILE__, __LINE__, std::string("лишний тип: ") + gone);
 }
 
 // ===========================================================================
@@ -475,47 +489,26 @@ TEST(Interface_order_between_interfaces_belongs_to_the_interface) {
     CHECK_TRUE(sage::ui::InterfaceOf(scene, rects[1].Entity) == menu);
 }
 
-TEST(Interface_migration_gives_every_old_root_its_own_interface) {
-    // Сцены, собранные до появления границ: два корня россыпью. Каждый обязан
-    // получить свой интерфейс — иначе меню и HUD остались бы одним экраном, то
-    // есть ровно тем, на что и жаловались.
+TEST(Interface_old_scene_loses_its_inline_elements) {
+    // Элементы прямо в сцене — старый вид. Интерфейс живёт в файле .sageui,
+    // поэтому старые элементы при открытии сцены уходят целиком, вместе с
+    // детьми; объект-интерфейс остаётся — ему назначают файл.
     const std::string old = R"({
-      "name": "Old", "sage_scene_version": 12,
+      "name": "Old", "sage_scene_version": 18,
       "objects": [
-        {"id": 1, "name": "HUD",
-         "ui": {"transform": {"size": {"x": 200, "y": 40}},
-                "canvas": {"mode": 1, "sortOrder": 5,
-                           "reference": {"x": 1280, "y": 720}}}},
-        {"id": 2, "name": "Menu", "ui": {"transform": {"size": {"x": 100, "y": 100}}}},
-        {"id": 3, "name": "Label", "parent": 1, "ui": {"transform": {}}}
+        {"id": 1, "name": "Menu", "interface": {"visible": true}},
+        {"id": 2, "name": "Panel", "parent": 1, "ui": {"element": {}}},
+        {"id": 3, "name": "Caption", "parent": 2, "ui": {"element": {}}},
+        {"id": 4, "name": "Box"}
       ]
     })";
-    std::unique_ptr<Scene> scene = SceneSerializer::LoadFromString(
-        SceneSerializer::MigrateSceneJson(old));
+    std::unique_ptr<Scene> scene = SceneSerializer::LoadFromString(SceneSerializer::MigrateSceneJson(old));
     CHECK_TRUE(scene != nullptr);
     if (!scene) return;
-
-    CHECK_EQ((int)sage::ui::SortedInterfaces(*scene).size(), 2);
-    GameObject hud = FindByName(*scene, "HUD");
-    GameObject menu = FindByName(*scene, "Menu");
-    GameObject label = FindByName(*scene, "Label");
-    CHECK_TRUE(hud.Valid() && menu.Valid() && label.Valid());
-    if (!hud.Valid() || !menu.Valid() || !label.Valid()) return;
-
-    const entt::entity hudIface = sage::ui::InterfaceOf(*scene, hud.Entity());
-    const entt::entity menuIface = sage::ui::InterfaceOf(*scene, menu.Entity());
-    CHECK_TRUE(hudIface != entt::null);
-    CHECK_TRUE(menuIface != entt::null);
-    CHECK_TRUE(hudIface != menuIface);
-    // Ребёнок уехал вместе со своим корнем, а не остался в чужом экране.
-    CHECK_TRUE(sage::ui::InterfaceOf(*scene, label.Entity()) == hudIface);
-
-    // Холст корня переехал в интерфейс целиком: это его свойство.
-    const sage::ui::InterfaceComponent& info =
-        scene->Registry().get<sage::ui::InterfaceComponent>(hudIface);
-    CHECK_EQ(info.SortOrder, 5);
-    CHECK_TRUE(info.Canvas.Mode == sage::ui::Canvas::Scale::ScaleWithSize);
-    CHECK_NEAR(info.Canvas.Reference.x, 1280.0f, 0.001f);
+    CHECK_FALSE(FindByName(*scene, "Panel").Valid());
+    CHECK_FALSE(FindByName(*scene, "Caption").Valid());
+    CHECK_TRUE(FindByName(*scene, "Box").Valid());
+    CHECK_EQ((int)sage::ui::SortedInterfaces(*scene).size(), 1);
 }
 
 TEST(Interface_component_survives_a_scene_round_trip) {

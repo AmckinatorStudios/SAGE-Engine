@@ -17,7 +17,6 @@
 #include <vector>
 #include "sage/core/Log.h"
 #include "sage/assets/AssetDatabase.h"
-#include "sage/scene/SceneLegacyUI.h"
 #include "sage/ui/UIPart.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISerialize.h"
@@ -103,8 +102,6 @@ void SaveTweens(json& j, const sage::anim::TweenComponent& tc);
 sage::anim::TweenComponent ParseTweens(const json& list);
 void SaveIK(json& j, const IKComponent& ik);
 IKComponent ParseIK(const json& ij);
-sage::scene::LegacyElement::Kind UIKindFromString(const std::string& s);
-sage::scene::LegacyElement ParseUIElement(const json& uj);
 void SaveAudio(json& j, const AudioSourceComponent& a);
 AudioSourceComponent ParseAudio(const json& aj);
 void SaveParticles(json& j, const ParticleEmitterComponent& pe);

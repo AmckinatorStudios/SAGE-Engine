@@ -80,16 +80,18 @@ int BuildMenu(Scene& scene) {
     Add(scene, title, Text("SAGE", 6.0f, {1.0f, 0.95f, 0.82f, 1.0f}));
 
     Element listXf;
-    // Якорь Center уже центрирует элемент — Pivot здесь не нужен (см. Stack.h).
+    // Якорь Center уже центрирует элемент — Pivot здесь не нужен (см. Element.h).
     // А вот отступ обнулить НАДО: по умолчанию он {16,16} (разумно для угла), и
     // с ним «по центру» оказывается на шестнадцать пикселей правее и ниже.
     listXf.Anchor = UIAnchor::Center;
     listXf.Position = {0.0f, 0.0f};
     listXf.Size = {320.0f, 260.0f};
     GameObject list = MakeElement(scene, "MenuButtons", screen, listXf);
-    Stack layout;
-    layout.Direction = Stack::Flow::Vertical;
-    layout.Justify = Stack::Align::Center;
+    Arrangement layout;
+    layout.Mode = Arrangement::Kind::Vertical;
+    layout.Distribution = Arrangement::Spread::Center;
+    layout.ChildWidth = Arrangement::ChildSize::Fill;
+    layout.Padding = {8.0f, 8.0f, 8.0f, 8.0f};
     layout.Spacing = 12.0f;
     Add(scene, list, layout);
 
@@ -190,8 +192,10 @@ int BuildHud(Scene& scene) {
     GameObject quests = MakeElement(scene, "HudQuests", screen, questsXf);
     Add(scene, quests, PanelFill({0.05f, 0.06f, 0.10f, 0.72f}, 10.0f));
     Add(scene, quests, Mask{});
-    Stack questLayout;
-    questLayout.Direction = Stack::Flow::Vertical;
+    Arrangement questLayout;
+    questLayout.Mode = Arrangement::Kind::Vertical;
+    questLayout.ChildWidth = Arrangement::ChildSize::Fill;
+    questLayout.Padding = {8.0f, 8.0f, 8.0f, 8.0f};
     questLayout.Spacing = 6.0f;
     Add(scene, quests, questLayout);
 
@@ -222,8 +226,9 @@ int BuildSettings(Scene& scene) {
     canvas.Mode = Canvas::Scale::ScaleWithSize;
     canvas.SortOrder = 20;
     Add(scene, panel, canvas);
-    Stack layout;
-    layout.Direction = Stack::Flow::Vertical;
+    Arrangement layout;
+    layout.Mode = Arrangement::Kind::Vertical;
+    layout.ChildWidth = Arrangement::ChildSize::Fill;
     layout.Spacing = 10.0f;
     layout.Padding = {18.0f, 18.0f, 18.0f, 18.0f};
     // Панель обнимает содержимое: высота 340 в Element — лишь запасная, на
@@ -246,8 +251,9 @@ int BuildSettings(Scene& scene) {
     // видно на первом же кадре. Раскладка строки расставляет обе части сама.
     auto labelledRow = [&](const std::string& name, const std::string& caption, float height) {
         GameObject line = row(name + "Row", height);
-        Stack inner;
-        inner.Direction = Stack::Flow::Horizontal;
+        Arrangement inner;
+        inner.Mode = Arrangement::Kind::Horizontal;
+        inner.ChildHeight = Arrangement::ChildSize::Fill;
         inner.Spacing = 10.0f;
         inner.Padding = {0.0f, 0.0f, 0.0f, 0.0f};
         Add(scene, line, inner);
@@ -345,7 +351,7 @@ int BuildDemo(Scene& scene, const std::string& name) {
     else if (name == "settings") root = BuildSettings(scene);
     // Демо собраны частями прямо в коде — типы им выводятся, а панель со
     // списком делится на панель и контейнер так же, как в старой сцене.
-    if (root >= 0) NormalizeElements(scene);
+    if (root >= 0) InferMissingTypes(scene);
     return root;
 }
 

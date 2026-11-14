@@ -127,9 +127,8 @@ std::string MaskText(const std::string& text);
 void DrawTextInputPart(const PartDrawContext& c);
 const std::vector<PartField>& InteractableFields();
 const std::vector<PartField>& MaskFields();
-const std::vector<PartField>& LayoutFields();
+const std::vector<PartField>& ArrangementFields();
 const std::vector<PartField>& ScrollFields();
-const std::vector<PartField>& CanvasFields();
 const std::vector<PartField>& GroupFields();
 
 } // namespace sage::ui::parts

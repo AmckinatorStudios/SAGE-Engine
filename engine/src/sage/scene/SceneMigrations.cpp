@@ -5,6 +5,7 @@
 #include <string>
 #include <algorithm>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -18,7 +19,6 @@
 #include "sage/scene/Transform.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/ui/UIAnchor.h"
-#include "sage/scene/SceneLegacyUI.h"
 
 using json = nlohmann::json;
 
@@ -187,152 +187,6 @@ void SunFieldToEntity(json& root) {
 
 void MigrateV4toV5(json& root) { SunFieldToEntity(root); }
 
-// v5 -> v6. Части перестали двигать и перекрашивать друг друга.
-//
-// ПОЧЕМУ ПОМЕНЯЛОСЬ. Часть рисует себя в прямоугольнике СВОЕГО элемента и
-// ничего не знает о соседях. Раньше было наоборот, и правила жили только в
-// исходниках отрисовки: значок сдвигал подпись вправо на свою ширину, галка —
-// на сторону квадратика, ползунок красился подложкой соседа, а «акцент» брал у
-// шкалы, которую для этого надо было повесить рядом; при этом подложка,
-// оказавшись рядом с диапазоном, переставала закрашивать элемент целиком. Ни
-// одно из этих правил нельзя было увидеть в инспекторе или отменить.
-//
-// ЧТО ДЕЛАЕТ МИГРАЦИЯ — три перевода, каждый сохраняет прежний ВИД:
-//   1. Диапазон забирает себе цвета, которые брал у подложки и шкалы, а сами
-//      подложка и шкала с такого элемента убираются: раньше их всё равно не
-//      рисовали (подложка шла в дорожку, шкала не рисовалась вовсе), а теперь
-//      нарисовали бы поверх.
-//   2. Значок, стоявший рядом с чем-то ещё, переезжает в свой дочерний объект
-//      того же размера и на то же место — раньше он в этом случае жался
-//      квадратиком к левому краю, а один в элементе занимал его целиком.
-//   3. Подпись, которую двигали значок или галка, переезжает в дочерний объект,
-//      растянутый на родителя, с левым полем ровно в прежний сдвиг.
-//
-// Чего миграция НЕ трогает: элементы без значка и галки (там текст и раньше
-// рисовался по всему прямоугольнику) и поля ввода — их текст рисует САМО ПОЛЕ
-// (он бывает скрыт точками и обрезан кареткой), и вынос его к ребёнку показал
-// бы рядом вторую, неживую копию.
-void MigrateV5toV6(json& root) {
-    int maxId = 0;
-    for (const json& obj : root["objects"]) maxId = std::max(maxId, obj.value("id", 0));
-
-    // Дети собираются отдельно: дописывать в массив, по которому идёт цикл, —
-    // это ссылки, протухшие при первом же расширении вектора.
-    std::vector<json> born;
-
-    for (json& obj : root["objects"]) {
-        if (!obj.contains("ui") || !obj["ui"].is_object()) continue;
-        json& uj = obj["ui"];
-        const int ownerId = obj.value("id", 0);
-        if (ownerId <= 0) continue; // без id ребёнка не к чему привязать
-
-        const bool hasLabel = uj.contains("label") && uj["label"].is_object();
-        const bool hasInput = uj.contains("textInput");
-        const bool hasImage = uj.contains("image") && uj["image"].is_object();
-        const bool hasBar = uj.contains("bar") && uj["bar"].is_object();
-        const bool hasRange = uj.contains("range") && uj["range"].is_object();
-        const bool hasIcon = uj.contains("icon") && uj["icon"].is_object() &&
-                             !uj["icon"].value("name", std::string()).empty();
-
-        const json tj = uj.value("transform", json::object());
-        const glm::vec2 size = Vec2FromJson(tj.value("size", json::object()), {200.0f, 56.0f});
-        const float w = size.x > 0.0f ? size.x : 200.0f;
-        const float h = size.y > 0.0f ? size.y : 56.0f;
-        const int layer = tj.value("layer", 0);
-
-        // Заготовка дочернего элемента: те же поля, что пишет SaveUIComponents,
-        // — иначе загрузчик подставит СВОИ умолчания вместо наших.
-        auto makeChild = [&](const char* name) {
-            json child;
-            child["id"] = ++maxId;
-            // Имя латиницей: это ДАННЫЕ сцены, а не строка интерфейса (см.
-            // «Sun» в миграции v4->v5) — от смены языка редактора имя объекта
-            // меняться не должно.
-            child["name"] = name;
-            child["parent"] = ownerId;
-            // Элемент интерфейса рисует система UI, а не меш (см. "Sun" выше).
-            child["noMesh"] = true;
-            json& cu = child["ui"];
-            cu["transform"]["anchor"] = (int)UIAnchor::TopLeft;
-            cu["transform"]["stretch"] = (int)sage::ui::Element::Stretch::None;
-            cu["transform"]["offset"] = Vec2ToJson({0.0f, 0.0f});
-            cu["transform"]["size"] = Vec2ToJson(size);
-            cu["transform"]["margin"] = Vec4ToJson(glm::vec4(0.0f));
-            cu["transform"]["pivot"] = Vec2ToJson({0.0f, 0.0f});
-            // Слой берётся у родителя: часть обязана лечь поверх того же, поверх
-            // чего лежала, а не всплыть на нулевой слой холста.
-            cu["transform"]["layer"] = layer;
-            cu["transform"]["visible"] = true;
-            return child;
-        };
-
-        // --- 1. Диапазон забирает чужие цвета себе --------------------------
-        if (hasRange) {
-            json& rj = uj["range"];
-            if (uj.contains("fill") && uj["fill"].is_object()) {
-                const json& fj = uj["fill"];
-                if (fj.contains("color")) rj["trackColor"] = fj["color"];
-                if (fj.contains("rounding")) rj["rounding"] = fj["rounding"];
-                if (fj.contains("borderColor")) rj["borderColor"] = fj["borderColor"];
-                if (fj.contains("borderThickness"))
-                    rj["borderThickness"] = fj["borderThickness"];
-                uj.erase("fill");
-            }
-            if (hasBar) {
-                if (uj["bar"].contains("fillColor")) rj["accentColor"] = uj["bar"]["fillColor"];
-                uj.erase("bar");
-            }
-        }
-
-        // Сдвиг подписи считается ТЕМИ ЖЕ формулами, что были в старой
-        // отрисовке, — иначе «выглядит как раньше» станет «примерно как раньше».
-        const float iconPad = std::min(4.0f, h * 0.18f);
-        const float declaredIcon = hasIcon ? uj["icon"].value("size", 0.0f) : 0.0f;
-        const float iconSide =
-            declaredIcon > 0.0f ? declaredIcon : std::max(h - iconPad * 2.0f, 4.0f);
-
-        // --- 2. Значок рядом с чем-то ещё — в свой объект --------------------
-        if (hasIcon && (hasLabel || hasImage || hasBar || hasRange)) {
-            json child = makeChild("Icon");
-            child["ui"]["transform"]["offset"] = Vec2ToJson({iconPad, iconPad});
-            child["ui"]["transform"]["size"] = Vec2ToJson({iconSide, iconSide});
-            child["ui"]["icon"] = uj["icon"];
-            uj.erase("icon");
-            born.push_back(std::move(child));
-        }
-
-        // --- 3. Сдвинутая подпись — в свой объект ----------------------------
-        if (hasLabel && !hasInput) {
-            const float padX = uj["label"].value("padX", 8.0f);
-            float left = padX;
-            bool shifted = false;
-            if (hasIcon) {
-                left = iconPad * 2.0f + iconSide;
-                shifted = true;
-            }
-            if (hasRange && uj["range"].value("toggle", false)) {
-                left = std::max(left, std::min(w, h) + padX);
-                shifted = true;
-            }
-            if (shifted) {
-                json child = makeChild("Text");
-                json& ctj = child["ui"]["transform"];
-                // Растянут на родителя: иначе подпись зависела бы от размера,
-                // записанного однажды, и разъезжалась бы при растяжении самого
-                // элемента.
-                ctj["stretch"] = (int)sage::ui::Element::Stretch::Both;
-                // Левое поле — прежний сдвиг МИНУС боковой отступ надписи: его
-                // надпись добавит сама, и без вычитания он посчитался бы дважды.
-                ctj["margin"] = Vec4ToJson({std::max(left - padX, 0.0f), 0.0f, 0.0f, 0.0f});
-                child["ui"]["label"] = uj["label"];
-                uj.erase("label");
-                born.push_back(std::move(child));
-            }
-        }
-    }
-
-    for (json& child : born) root["objects"].push_back(std::move(child));
-}
 
 using MigrationFn = void (*)(json&);
 
@@ -373,87 +227,7 @@ void MigrateV6toV7(json& root) {
     }
 }
 
-// --- 7 -> 8: у картинки появился РЕЖИМ ----------------------------------------
-//
-// Раньше девятина включалась тем, что рамка переставала быть нулевой: признака
-// «режим» не было вовсе. Теперь он есть, и по умолчанию это «растянуть» —
-// значит сцена, сохранённая вчера, открылась бы с картинками, у которых рамка
-// на месте, а девятины нет. На экране это выглядит как испорченные панели:
-// углы размазаны вместе с серединой.
-//
-// Правило ровно то, по которому работал старый движок: ненулевая рамка —
-// девятина. Обратное неверно, и додумывать здесь нечего: замощения в старом
-// формате не существовало.
-void MigrateV7toV8(json& root) {
-    for (json& obj : root["objects"]) {
-        if (!obj.contains("ui") || !obj["ui"].is_object()) continue;
-        json& uj = obj["ui"];
-        if (!uj.contains("image") || !uj["image"].is_object()) continue;
-        json& img = uj["image"];
-        if (img.contains("mode")) continue;   // уже новый формат — не трогаем
-        const json& b = img.contains("sliceBorder") ? img["sliceBorder"] : json();
-        bool sliced = false;
-        if (b.is_array() && b.size() == 4) {
-            for (const json& v : b) {
-                if (v.is_number() && v.get<double>() > 0.0) { sliced = true; break; }
-            }
-        }
-        img["mode"] = sliced ? 1 : 0;   // 1 — NineSlice, 0 — Normal
-    }
-}
 
-// --- 8 -> 9: у элемента интерфейса появился ТИП -------------------------------
-//
-// Раньше типа не было: элемент был набором включаемых частей, и «кнопка»
-// существовала только как знание человека о том, какие четыре галки надо
-// поставить. Теперь тип записан в самом элементе, и по нему инспектор решает,
-// что показывать.
-//
-// Сцена, сохранённая вчера, открылась бы с пустым типом: инспектор показал бы
-// «элемент неизвестно чего», а список создания — не тот значок. Выводим тип ПО
-// НАБОРУ ЧАСТЕЙ — ровно по тому правилу, по которому его читал человек, глядя
-// на галки. Правило приблизительное по своей природе (частей у элемента могло
-// быть сколько угодно), и там, где оно не срабатывает, честнее оставить пусто:
-// «неизвестный тип» редактор показывает как есть и править не мешает.
-void MigrateV8toV9(json& root) {
-    for (json& obj : root["objects"]) {
-        if (!obj.contains("ui") || !obj["ui"].is_object()) continue;
-        json& uj = obj["ui"];
-        json* el = uj.contains("element") ? &uj["element"]
-                   : uj.contains("transform") ? &uj["transform"] : nullptr;
-        if (!el || !el->is_object()) continue;
-        if (el->contains("type")) continue;   // уже новый формат
-
-        const bool fill = uj.contains("fill");
-        const bool label = uj.contains("label");
-        const bool image = uj.contains("image");
-        const bool bar = uj.contains("bar");
-        const bool range = uj.contains("range");
-        const bool input = uj.contains("textInput");
-        const bool act = uj.contains("interactable");
-        const bool stack = uj.contains("layout");
-
-        std::string type;
-        // Порядок проверок — от САМОГО ОПРЕДЕЛЁННОГО набора к менее: у поля
-        // ввода есть и подложка, и надпись, и реакция, и оно же единственное
-        // с textInput. Начни с подложки — и каждое поле ввода стало бы панелью.
-        if (input) type = "Input Field";
-        else if (range && uj["range"].is_object() && uj["range"].value("toggle", false)) type = "Checkbox";
-        else if (range) type = "Slider";
-        else if (bar) type = "Bar";
-        else if (stack) {
-            const json& st = uj["layout"];
-            const int dir = st.is_object() ? st.value("direction", 0) : 0;
-            type = dir == 2 ? "Grid" : (dir == 0 ? "Toolbar" : "Vertical List");
-        } else if (image && !fill) type = "Image";
-        else if (label && !fill) type = "Text";
-        else if (act && fill) type = "Button";
-        else if (fill) type = "Panel";
-        else if (!fill && !label && !image) type = "Empty";
-
-        if (!type.empty()) (*el)["type"] = type;
-    }
-}
 
 // --- 9 -> 10: у ПАПКИ не бывает выключателя видимости -----------------------
 //
@@ -521,144 +295,9 @@ void MigrateV11toV12(json& root) {
     }
 }
 
-// v12 -> v13. У интерфейса появился СВОЙ объект — граница.
-//
-// ПОЧЕМУ ПОМЕНЯЛОСЬ. Элементы лежали в сцене россыпью, и «интерфейс» был лишь
-// наблюдением «эти прямоугольники рядом». Пока интерфейс был один, это
-// работало; два интерфейса в одной сцене оказывались в ОДНОМ дереве редактора,
-// вперемешку, и верстать один, не задевая другой, можно было только пряча
-// чужие объекты. Разбор — в комментарии к InterfaceComponent.
-//
-// ЧТО ДЕЛАЕТ МИГРАЦИЯ. Каждому корневому элементу (тому, у кого нет
-// родителя-элемента) заводит объект-интерфейс и кладёт корень внутрь него.
-// Холст корня (опорное разрешение, порядок показа) переезжает в интерфейс:
-// теперь это свойство интерфейса, а не первого его элемента.
-//
-// Почему КАЖДОМУ корню свой интерфейс, а не один на всех: корни якорятся к
-// экрану независимо, у каждого свой холст и свой порядок — то есть это и были
-// разные интерфейсы, просто без имени. Сложить их в один значило бы решить за
-// автора сцены, что его меню и его HUD — одно и то же.
-void MigrateV12toV13(json& root) {
-    if (!root.contains("objects")) return;
 
-    // Кто тут элемент и кто чей родитель — по тем же ключам, какими сцена
-    // записана: "ui" у элемента, "parent" у ребёнка.
-    std::vector<int> elementIds;
-    std::unordered_map<int, int> parentOf;
-    int maxId = 0;
-    for (const json& obj : root["objects"]) {
-        const int id = obj.value("id", 0);
-        maxId = std::max(maxId, id);
-        if (obj.contains("parent")) parentOf[id] = obj.value("parent", -1);
-        if (obj.contains("ui")) elementIds.push_back(id);
-    }
-    if (elementIds.empty()) return;
-    const std::vector<int> elements = elementIds;
-    auto isElement = [&elements](int id) {
-        return std::find(elements.begin(), elements.end(), id) != elements.end();
-    };
 
-    json added = json::array();
-    for (json& obj : root["objects"]) {
-        if (!obj.contains("ui")) continue;
-        const int id = obj.value("id", 0);
-        const auto parent = parentOf.find(id);
-        if (parent != parentOf.end() && isElement(parent->second)) continue; // не корень
 
-        json iface;
-        iface["id"] = ++maxId;
-        // Имя — от элемента: «HUD Panel» превращается в интерфейс «HUD Panel
-        // Interface», и в иерархии видно, что это тот же экран, а не новый.
-        iface["name"] = obj.value("name", std::string("Interface")) + " Interface";
-        iface["position"] = Vec3ToJson(glm::vec3(0.0f));
-        iface["rotation"] = Vec3ToJson(glm::vec3(0.0f));
-        iface["scale"] = Vec3ToJson(glm::vec3(1.0f));
-        iface["noMesh"] = true;   // граница ничего не рисует
-        json ic;
-        ic["visible"] = true;
-        ic["receivesInput"] = true;
-        // Холст корня переезжает в интерфейс целиком.
-        const json& ui = obj["ui"];
-        if (ui.contains("canvas")) {
-            const json& c = ui["canvas"];
-            ic["sortOrder"] = c.value("sortOrder", 0);
-            ic["canvasMode"] = c.value("mode", 0);
-            if (c.contains("reference")) ic["reference"] = c["reference"];
-            ic["matchWidthOrHeight"] = c.value("matchWidthOrHeight", 0.5f);
-        } else {
-            ic["sortOrder"] = 0;
-        }
-        iface["interface"] = ic;
-        // Интерфейс встаёт НА МЕСТО корня в иерархии: если корень лежал внутри
-        // папки или объекта сцены, интерфейс ложится туда же, а корень — в него.
-        if (parent != parentOf.end() && parent->second >= 0) iface["parent"] = parent->second;
-        obj["parent"] = iface["id"];
-        if (obj.contains("ui")) obj["ui"].erase("canvas");
-        added.push_back(std::move(iface));
-    }
-    for (json& iface : added) root["objects"].push_back(std::move(iface));
-}
-
-// v13 -> v14: галка «pixelArt» стала ФИЛЬТРАЦИЕЙ.
-//
-// Движок не знает и не может знать, нарисована картинка по пикселям или снята
-// фотоаппаратом: он знает, ближайшего соседа брать или сглаживание. Галка
-// называлась жанром и потому обещала знание, которого нет, — а заодно мешала
-// включить резкость там, где название жанра звучит неправдой (мелкая иконка,
-// которую надо показать чёткой). Старое true — это и есть Nearest.
-void MigrateV13toV14(json& root) {
-    if (!root.contains("objects")) return;
-    for (json& obj : root["objects"]) {
-        if (!obj.contains("ui")) continue;
-        json& uj = obj["ui"];
-        if (uj.contains("image") && uj["image"].contains("pixelArt")) {
-            const bool sharp = uj["image"].value("pixelArt", false);
-            uj["image"]["filter"] = sharp ? 1 : 0;   // TextureFiltering::Nearest / Smooth
-            uj["image"].erase("pixelArt");
-        }
-        if (uj.contains("label") && uj["label"].contains("fontPixelArt")) {
-            const bool sharp = uj["label"].value("fontPixelArt", false);
-            uj["label"]["fontFilter"] = sharp ? 1 : 0;
-            uj["label"].erase("fontPixelArt");
-        }
-    }
-}
-
-// v14 -> v15: КРАТНЫЙ МАСШТАБ отделён от фильтрации.
-//
-// Целый масштаб («не растягивать пиксель исходника дробно») включался заодно с
-// резкой фильтрацией. Это разные вопросы: один про то, чем сглаживать, другой
-// — можно ли рисовать пиксель исходника дробным числом экранных. Пока они были
-// одним флагом, смена фильтрации ВИДИМО меняла только размер картинки — «стала
-// на пиксель меньше», — а резкость оставалась прежней.
-//
-// Вид уже собранных экранов менять нельзя, поэтому у всего, что было резким,
-// кратный масштаб включается: ровно так эти элементы и выглядели.
-void MigrateV14toV15(json& root) {
-    if (!root.contains("objects")) return;
-    for (json& obj : root["objects"]) {
-        if (!obj.contains("ui") || !obj["ui"].contains("image")) continue;
-        json& im = obj["ui"]["image"];
-        if (im.contains("snapPixels")) continue;
-        im["snapPixels"] = im.value("filter", 0) == 1;   // 1 — Nearest
-    }
-}
-
-// v15 -> v16: кратный масштаб ШРИФТА тоже отделён от фильтрации.
-//
-// У надписи он включался вместе с резким шрифтом — и давал ступени размера
-// там, где просили просто резкость. Разделяем так же, как у картинки, и по
-// той же причине сохраняем вид уже собранных экранов: что было резким,
-// продолжает считаться целым масштабом.
-void MigrateV15toV16(json& root) {
-    if (!root.contains("objects")) return;
-    for (json& obj : root["objects"]) {
-        if (!obj.contains("ui") || !obj["ui"].contains("label")) continue;
-        json& label = obj["ui"]["label"];
-        if (label.contains("fontSnapPixels")) continue;
-        label["fontSnapPixels"] = label.value("fontFilter", 0) == 1;   // 1 — Nearest
-    }
-}
 
 // v16 -> v17: углы Эйлера — в соглашении R = Ry*Rx*Rz (см. Transform.h).
 //
@@ -708,24 +347,69 @@ void MigrateV17toV18(json& root) {
     }
 }
 
+// Шаги старых версий, которые переводили ИНТЕРФЕЙС ВНУТРИ СЦЕНЫ (типы
+// элементов, девятина, фильтрация, холст корня, объекты-интерфейсы). Интерфейс
+// больше в сцене не живёт — его элементы в файлах .sageui, и шаг v18 -> v19
+// убирает их из старых сцен целиком; переводить их по дороге незачем.
+void Skip(json&) {}
+
+// v18 -> v19: ИНТЕРФЕЙС УШЁЛ ИЗ СЦЕНЫ.
+//
+// Элементы интерфейса прямо в сцене (и россыпью, и внутри объекта-интерфейса
+// без файла) — старый вид: интерфейс теперь отдельный файл .sageui, а в сцене
+// стоит один объект со ссылкой на него. Старые элементы убираются вместе с
+// потомками; объект-интерфейс остаётся — ему назначают файл в инспекторе.
+void MigrateV18toV19(json& root) {
+    if (!root.contains("objects")) return;
+    json& objects = root["objects"];
+    std::unordered_map<int, int> parentOf;
+    std::unordered_set<int> doomed;
+    for (const json& obj : objects) {
+        const int id = obj.value("id", 0);
+        if (obj.contains("parent")) parentOf[id] = obj.value("parent", -1);
+        if (obj.contains("ui")) doomed.insert(id);
+    }
+    auto underDoomed = [&](int id) {
+        for (int guard = 0; guard < 256; ++guard) {
+            auto it = parentOf.find(id);
+            if (it == parentOf.end()) return false;
+            id = it->second;
+            if (doomed.count(id)) return true;
+        }
+        return false;
+    };
+    json kept = json::array();
+    for (json& obj : objects) {
+        const int id = obj.value("id", 0);
+        if (doomed.count(id) || underDoomed(id)) continue;
+        if (obj.contains("interface") && obj["interface"].is_object()) {
+            json& ij = obj["interface"];
+            for (const char* k : {"canvasMode", "reference", "matchWidthOrHeight"}) ij.erase(k);
+        }
+        kept.push_back(std::move(obj));
+    }
+    objects = std::move(kept);
+}
+
 const MigrationFn kMigrations[] = {
     &MigrateV1toV2,
     &MigrateV2toV3,
     &MigrateV3toV4,
     &MigrateV4toV5,
-    &MigrateV5toV6,
+    &Skip,
     &MigrateV6toV7,
-    &MigrateV7toV8,
-    &MigrateV8toV9,
+    &Skip,
+    &Skip,
     &MigrateV9toV10,
     &MigrateV10toV11,
     &MigrateV11toV12,
-    &MigrateV12toV13,
-    &MigrateV13toV14,
-    &MigrateV14toV15,
-    &MigrateV15toV16,
+    &Skip,
+    &Skip,
+    &Skip,
+    &Skip,
     &MigrateV16toV17,
     &MigrateV17toV18,
+    &MigrateV18toV19,
 };
 
 } // namespace

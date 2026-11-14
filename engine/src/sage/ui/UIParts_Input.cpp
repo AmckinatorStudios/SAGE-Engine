@@ -312,44 +312,58 @@ const std::vector<PartField>& MaskFields() {
     return f;
 }
 
-const char* const kFlow[] = {SAGE_UI_TEXT("Row"), SAGE_UI_TEXT("Column"), SAGE_UI_TEXT("Grid")};
-const char* const kJustify[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT("Center"), SAGE_UI_TEXT("End"),
-                                SAGE_UI_TEXT("Even"), SAGE_UI_TEXT("Around"), SAGE_UI_TEXT("Evenly")};
-const char* const kCross[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT("Center"), SAGE_UI_TEXT("End"),
-                              SAGE_UI_TEXT("Stretch")};
+const char* const kArrangement[] = {SAGE_UI_TEXT("Manual"), SAGE_UI_TEXT("Horizontal"),
+                                    SAGE_UI_TEXT("Vertical"), SAGE_UI_TEXT("Grid"), SAGE_UI_TEXT("Wrap")};
+const char* const kDistribution[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT("Center"), SAGE_UI_TEXT("End"),
+                                     SAGE_UI_TEXT("Even"), SAGE_UI_TEXT("Around"), SAGE_UI_TEXT("Evenly")};
+const char* const kAlignment[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT("Center"), SAGE_UI_TEXT("End")};
+const char* const kChildSize[] = {SAGE_UI_TEXT("Fixed"), SAGE_UI_TEXT("Fit Content"),
+                                  SAGE_UI_TEXT("Fill Available Space")};
 
-const std::vector<PartField>& LayoutFields() {
-    // Поля сетки видны только у сетки, перенос — только у ряда и столбца:
-    // «столбцы» у ряда и «перенос» у сетки не значат ничего.
+const std::vector<PartField>& ArrangementFields() {
+    using K = Arrangement::Kind;
+    // У ручного режима настроек нет вовсе: дети стоят по своим якорям. Поля
+    // сетки — только у сетки, направление переноса — только у переноса:
+    // «столбцы» у ряда не значат ничего.
+    constexpr int arranged = ShowIfNot((int)K::Manual);
     static const std::vector<PartField> f = {
-        {"direction", SAGE_UI_TEXT("Direction"), PartField::Kind::Enum, offsetof(Stack, Direction), 0.0f, 0.0f,
-         nullptr, kFlow, 3},
-        {"justify", SAGE_UI_TEXT("Along"), PartField::Kind::Enum, offsetof(Stack, Justify), 0.0f, 0.0f,
-         "Where the children gather along the main direction when there is\n"
-         "room left. Children with Grow take that room instead.\n"
+        {"mode", SAGE_UI_TEXT("Arrangement"), PartField::Kind::Enum, offsetof(Arrangement, Mode), 0.0f, 0.0f,
+         "Manual: children stand at their anchors. Otherwise the container places them.",
+         kArrangement, 5},
+        {"padding", SAGE_UI_TEXT("Padding (l,t,r,b)"), PartField::Kind::Vec4, offsetof(Arrangement, Padding),
+         0.0f, 256.0f, nullptr, nullptr, 0, PartField::Widget::Auto, "mode", arranged},
+        {"spacing", SAGE_UI_TEXT("Spacing"), PartField::Kind::Float, offsetof(Arrangement, Spacing), 0.0f,
+         128.0f, nullptr, nullptr, 0, PartField::Widget::Auto, "mode", arranged},
+        {"alignment", SAGE_UI_TEXT("Alignment"), PartField::Kind::Enum, offsetof(Arrangement, Alignment), 0.0f,
+         0.0f, "Where each child stands across the direction (in a grid: inside its cell).", kAlignment, 3,
+         PartField::Widget::Auto, "mode", arranged},
+        {"distribution", SAGE_UI_TEXT("Distribution"), PartField::Kind::Enum,
+         offsetof(Arrangement, Distribution), 0.0f, 0.0f,
+         "Where the free room goes along the direction.\n"
          "Even: between the children; Around: around each; Evenly: all gaps equal.",
-         kJustify, 6},
-        {"cross", SAGE_UI_TEXT("Across"), PartField::Kind::Enum, offsetof(Stack, Cross), 0.0f, 0.0f,
-         "Where each child stands across the main direction — or stretch it\n"
-         "to the full width (height) of the container.",
-         kCross, 4},
-        {"spacing", SAGE_UI_TEXT("Spacing"), PartField::Kind::Float, offsetof(Stack, Spacing), 0.0f, 128.0f},
-        {"padding", SAGE_UI_TEXT("Padding (l,t,r,b)"), PartField::Kind::Vec4, offsetof(Stack, Padding), 0.0f,
-         256.0f},
-        {"wrap", SAGE_UI_TEXT("Wrap"), PartField::Kind::Bool, offsetof(Stack, Wrap), 0.0f, 1.0f,
-         "Children that do not fit go on to the next line.", nullptr, 0, PartField::Widget::Auto,
-         "direction", ShowIfNot((int)Stack::Flow::Grid)},
-        {"columns", SAGE_UI_TEXT("Columns"), PartField::Kind::Int, offsetof(Stack, Columns), 0.0f, 32.0f,
-         "0 — as many as fit at the cell size.", nullptr, 0, PartField::Widget::Auto, "direction",
-         (int)Stack::Flow::Grid},
-        {"cellSize", SAGE_UI_TEXT("Cell size"), PartField::Kind::Vec2, offsetof(Stack, CellSize), 0.0f,
+         kDistribution, 6, PartField::Widget::Auto, "mode", arranged},
+        {"childWidth", SAGE_UI_TEXT("Child width"), PartField::Kind::Enum, offsetof(Arrangement, ChildWidth),
+         0.0f, 0.0f, "Fixed: the child's own width. Fit Content: by its text. Fill: all the room there is.",
+         kChildSize, 3, PartField::Widget::Auto, "mode", arranged},
+        {"childHeight", SAGE_UI_TEXT("Child height"), PartField::Kind::Enum,
+         offsetof(Arrangement, ChildHeight), 0.0f, 0.0f, nullptr, kChildSize, 3, PartField::Widget::Auto,
+         "mode", arranged},
+        {"columns", SAGE_UI_TEXT("Columns"), PartField::Kind::Int, offsetof(Arrangement, Columns), 0.0f, 32.0f,
+         "0 — as many as fit at the cell size.", nullptr, 0, PartField::Widget::Auto, "mode", (int)K::Grid},
+        {"rows", SAGE_UI_TEXT("Rows"), PartField::Kind::Int, offsetof(Arrangement, Rows), 0.0f, 32.0f,
+         "0 — as many as the children need.", nullptr, 0, PartField::Widget::Auto, "mode", (int)K::Grid},
+        {"cellSize", SAGE_UI_TEXT("Cell size"), PartField::Kind::Vec2, offsetof(Arrangement, CellSize), 0.0f,
          2048.0f, "0 — width from the columns, height from the tallest child.", nullptr, 0,
-         PartField::Widget::Auto, "direction", (int)Stack::Flow::Grid},
+         PartField::Widget::Auto, "mode", (int)K::Grid},
+        {"wrapVertical", SAGE_UI_TEXT("Wrap into columns"), PartField::Kind::Bool,
+         offsetof(Arrangement, WrapVertical), 0.0f, 1.0f, "Off: rows that continue below. On: columns.",
+         nullptr, 0, PartField::Widget::Auto, "mode", (int)K::Wrap},
         {"fitContent", SAGE_UI_TEXT("Size from content"), PartField::Kind::Bool,
-         offsetof(Stack, FitContent)},
+         offsetof(Arrangement, FitContent), 0.0f, 1.0f, nullptr, nullptr, 0, PartField::Widget::Auto, "mode",
+         arranged},
     };
     static const bool marked = [] {
-        MarkAdvanced(const_cast<std::vector<PartField>&>(f), {"cellSize", "fitContent", "padding"});
+        MarkAdvanced(const_cast<std::vector<PartField>&>(f), {"cellSize", "fitContent"});
         return true;
     }();
     (void)marked;
@@ -374,26 +388,6 @@ const std::vector<PartField>& ScrollFields() {
         return true;
     }();
     (void)marked;
-    return f;
-}
-
-const char* const kCanvasScale[] = {SAGE_UI_TEXT("Pixels"), SAGE_UI_TEXT("Scale to reference"),
-                                    SAGE_UI_TEXT("Whole-number scale")};
-
-const std::vector<PartField>& CanvasFields() {
-    static const std::vector<PartField> f = {
-        {"mode", SAGE_UI_TEXT("Scale mode"), PartField::Kind::Enum, offsetof(Canvas, Mode), 0.0f, 0.0f, nullptr,
-         kCanvasScale, 3},
-        {"reference", SAGE_UI_TEXT("Reference resolution"), PartField::Kind::Vec2, offsetof(Canvas, Reference),
-         64.0f, 8192.0f},
-        {"matchWidthOrHeight", SAGE_UI_TEXT("Follow"), PartField::Kind::Float,
-         offsetof(Canvas, MatchWidthOrHeight), 0.0f, 1.0f,
-         "0 follows the width, 1 the height, 0.5 the average."},
-        {"maxScale", SAGE_UI_TEXT("Largest scale"), PartField::Kind::Int, offsetof(Canvas, MaxScale), 0.0f,
-         16.0f, "Whole-number scale only. 0 — as large as fits."},
-        {"sortOrder", SAGE_UI_TEXT("Root order"), PartField::Kind::Int, offsetof(Canvas, SortOrder), -100.0f,
-         100.0f, "The HUD under the pause menu, the menu under a dialog."},
-    };
     return f;
 }
 
