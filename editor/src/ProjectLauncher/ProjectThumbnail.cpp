@@ -94,89 +94,79 @@ fs::path ProjectThumbnail::CachePathFor(const std::string& source) {
 ProjectThumbnail::~ProjectThumbnail() { Shutdown(); }
 
 void ProjectThumbnail::Shutdown() {
-    if (m_worker.joinable()) {
-        m_stop = true;
-        m_wake.notify_all();
-        m_worker.join();
+    // Не начатые — отменить, идущее — дождаться: задача пишет в m_ready.
+    if (m_decoder) {
+        m_decoder->CancelAll();
+        m_decoder->Wait();
+        m_decoder.reset();
     }
     m_items.clear();   // текстуры отпускаются, пока контекст ещё жив
     m_ready.clear();
-    m_queue.clear();
     m_pending = 0;
 }
 
 void ProjectThumbnail::EnsureWorker() {
-    if (m_worker.joinable()) return;
-    m_stop = false;
-    m_worker = std::thread([this] {
-        // Свой порядок строк: движок ставит глобальный флаг переворота на
-        // время своих загрузок (см. render/Texture.cpp), и без этой строки
-        // обложка приезжала бы то так, то вверх ногами — в зависимости от
-        // того, что грузилось в главном потоке в ту же секунду.
-        stbi_set_flip_vertically_on_load_thread(0);
-        for (;;) {
-            std::string job;
-            {
-                std::unique_lock<std::mutex> lock(m_mutex);
-                m_wake.wait(lock, [this] { return m_stop.load() || !m_queue.empty(); });
-                if (m_stop) return;
-                job = m_queue.front();
-                m_queue.pop_front();
-            }
+    if (m_decoder) return;
+    m_decoder = std::make_unique<sage::jobs::Throttle>(
+        1, sage::jobs::JobOptions("launcher.thumbnail", sage::jobs::Category::Editor, sage::jobs::Lane::IO));
+}
 
-            Decoded result;
-            result.Source = job;
+ProjectThumbnail::Decoded ProjectThumbnail::DecodeOne(const std::string& job) {
+    // Свой порядок строк: движок ставит флаг переворота на время своих
+    // загрузок (см. render/Texture.cpp), флаг — поточный, а поток ввода-вывода
+    // общий. Без этой строки обложка приезжала бы то так, то вверх ногами — в
+    // зависимости от того, что этот поток декодировал перед ней.
+    stbi_set_flip_vertically_on_load_thread(0);
+    Decoded result;
+    result.Source = job;
 
-            const fs::path cache = CachePathFor(job);
-            const bool cacheFresh = FileStamp(cache) != 0 && FileStamp(cache) >= FileStamp(job);
+    const fs::path cache = CachePathFor(job);
+    const bool cacheFresh = FileStamp(cache) != 0 && FileStamp(cache) >= FileStamp(job);
 
-            int w = 0, h = 0, comp = 0;
-            unsigned char* pixels = nullptr;
-            if (cacheFresh) pixels = stbi_load(sage::PathToUtf8(cache).c_str(), &w, &h, &comp, 4);
-            if (!pixels) pixels = stbi_load(job.c_str(), &w, &h, &comp, 4);
-            if (!pixels || w <= 0 || h <= 0) {
-                result.Failed = true;
-            } else if (cacheFresh) {
-                result.W = w;
-                result.H = h;
-                result.Pixels.assign(pixels, pixels + (size_t)w * h * 4);
-            } else {
-                // Вписываем в предельный размер, сохраняя пропорции: обложка
-                // отвечает на вопрос «что это за проект», и растянутая картинка
-                // отвечает на него неправильно.
-                const float k = std::min((float)kThumbWidth / (float)w,
-                                         (float)kThumbHeight / (float)h);
-                const int dw = std::max(1, (int)std::lround(w * std::min(k, 1.0f)));
-                const int dh = std::max(1, (int)std::lround(h * std::min(k, 1.0f)));
-                result.W = dw;
-                result.H = dh;
-                result.Pixels = (dw == w && dh == h)
-                                    ? std::vector<unsigned char>(pixels, pixels + (size_t)w * h * 4)
-                                    : Downscale(pixels, w, h, dw, dh);
-                std::error_code ec;
-                fs::create_directories(cache.parent_path(), ec);
-                stbi_write_png(sage::PathToUtf8(cache).c_str(), dw, dh, 4, result.Pixels.data(),
-                               dw * 4);
-            }
-            if (pixels) stbi_image_free(pixels);
+    int w = 0, h = 0, comp = 0;
+    unsigned char* pixels = nullptr;
+    if (cacheFresh) pixels = stbi_load(sage::PathToUtf8(cache).c_str(), &w, &h, &comp, 4);
+    if (!pixels) pixels = stbi_load(job.c_str(), &w, &h, &comp, 4);
+    if (!pixels || w <= 0 || h <= 0) {
+        result.Failed = true;
+    } else if (cacheFresh) {
+        result.W = w;
+        result.H = h;
+        result.Pixels.assign(pixels, pixels + (size_t)w * h * 4);
+    } else {
+        // Вписываем в предельный размер, сохраняя пропорции: обложка
+        // отвечает на вопрос «что это за проект», и растянутая картинка
+        // отвечает на него неправильно.
+        const float k = std::min((float)kThumbWidth / (float)w,
+                                 (float)kThumbHeight / (float)h);
+        const int dw = std::max(1, (int)std::lround(w * std::min(k, 1.0f)));
+        const int dh = std::max(1, (int)std::lround(h * std::min(k, 1.0f)));
+        result.W = dw;
+        result.H = dh;
+        result.Pixels = (dw == w && dh == h)
+                            ? std::vector<unsigned char>(pixels, pixels + (size_t)w * h * 4)
+                            : Downscale(pixels, w, h, dw, dh);
+        std::error_code ec;
+        fs::create_directories(cache.parent_path(), ec);
+        stbi_write_png(sage::PathToUtf8(cache).c_str(), dw, dh, 4, result.Pixels.data(),
+                       dw * 4);
+    }
+    if (pixels) stbi_image_free(pixels);
 
-            {
-                std::lock_guard<std::mutex> lock(m_mutex);
-                m_ready.push_back(std::move(result));
-            }
-            --m_pending;
-        }
-    });
+    return result;
 }
 
 void ProjectThumbnail::Request(const std::string& source) {
     EnsureWorker();
-    {
-        std::lock_guard<std::mutex> lock(m_mutex);
-        m_queue.push_back(source);
-    }
     ++m_pending;
-    m_wake.notify_one();
+    m_decoder->Async([this, source] {
+        Decoded result = DecodeOne(source);
+        {
+            std::lock_guard<std::mutex> lock(m_mutex);
+            m_ready.push_back(std::move(result));
+        }
+        --m_pending;
+    });
 }
 
 void ProjectThumbnail::Pump() {

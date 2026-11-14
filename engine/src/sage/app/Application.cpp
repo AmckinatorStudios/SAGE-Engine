@@ -123,10 +123,20 @@ Application::Application(const AppConfig& config) : m_config(config) {
     rhi::GraphicsDevice::SetCurrent(m_device.get());
     m_context->SetDevice(m_device.get());
 
-    // Пул задач: фоновые воркеры под параллельную подготовку кадра (отсечение/
-    // батчи). Поднимается один раз на процесс; слои затем зовут ParallelFor.
-    m_context->Jobs().Initialize(config.WorkerThreads);
-    m_context->Jobs().SetEnabled(config.MultithreadedRender);
+    // Единая система задач: воркеры, потоки ввода-вывода, очереди главного
+    // потока и рендера. Поднимается один раз на процесс, ДО слоёв: им она
+    // нужна уже в OnAttach (фоновая загрузка, миниатюры). Поток, поднявший
+    // её, — главный и (пока рендер не вынесен) поток графического контекста.
+    {
+        jobs::JobSystemConfig jc;
+        jc.WorkerThreads = config.WorkerThreads;
+        jc.IoThreads = config.IoThreads;
+        jc.MaxIoThreads = config.MaxIoThreads;
+        jc.BackgroundLimit = config.BackgroundJobLimit;
+        jc.HungJobMs = (double)config.HungJobMs;
+        jc.Enabled = config.MultithreadedRender;
+        m_context->Jobs().Initialize(jc);
+    }
 
     // Состав и версии подсистем — в лог любой сборки (игра/редактор/рантайм).
     LogEngineSystems();
@@ -249,6 +259,13 @@ void Application::Run() {
         // ассетов). Только здесь — у главного потока единственного GL-контекст.
         profile::BeginFrame();
         {
+            // Результаты фоновых задач, которым место в главном потоке
+            // (интерфейс, сцена, Lua), — с бюджетом: сотня накопившихся
+            // ответов не должна дать один кадр в полсекунды.
+            SAGE_PROFILE("Задачи главного потока");
+            m_context->Jobs().PumpMainThread(4.0);
+        }
+        {
             SAGE_PROFILE("Загрузка ресурсов");
             ResourceManager::Instance().PumpAsyncUploads();
         }
@@ -271,6 +288,12 @@ void Application::Run() {
         }
 
         m_device->SetViewport(0, 0, m_window->Width(), m_window->Height());
+        {
+            // Команды графическому контексту от фоновых задач (заливка
+            // текстур, буферов) — здесь, в его потоке, до отрисовки кадра.
+            SAGE_PROFILE("Задачи рендера");
+            m_context->Jobs().PumpRenderThread(4.0);
+        }
         {
             SAGE_PROFILE("Отрисовка");
             for (auto& layer : m_layers) layer->OnRender();

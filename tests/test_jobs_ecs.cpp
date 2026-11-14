@@ -314,3 +314,25 @@ TEST(EcsCommandBuffer_applies_structural_edits_deterministically) {
     for (size_t i = 0; sorted && i < order.size(); ++i) sorted = order[i] == (int)i;
     CHECK_TRUE(sorted);  // порядок — по ключу, не по тому, кто успел
 }
+
+
+TEST(EcsGraph_each_system_runs_exactly_once_per_frame) {
+    // Регрессия: начальный проход «кто готов» читал счётчики после запуска
+    // первой системы; та успевала закончиться на воркере и сама запустить
+    // последователя — и последователь шёл второй раз (кадр «через раз»
+    // применял затухание дважды).
+    Workers(4);
+    static std::atomic<int> moveCalls{0}, decayCalls{0};
+    sage::SystemScheduler sp;
+    sp.Add(Stage::Update, "move", [](Scene&, float) { ++moveCalls; },
+           SystemAccess::Parallel().Write<Velocity>().Read<Health>());
+    sp.Add(Stage::Update, "decay", [](Scene&, float) { ++decayCalls; },
+           SystemAccess::Parallel().Write<Health>(), 1);
+    sp.Add(Stage::Update, "free", [](Scene&, float) {}, SystemAccess::Parallel().Write<Tag>(), 2);
+    Scene scene("Once");
+    moveCalls = 0;
+    decayCalls = 0;
+    for (int f = 0; f < 2000; ++f) sp.Run(scene, 0.016f);
+    CHECK_EQ(moveCalls.load(), 2000);
+    CHECK_EQ(decayCalls.load(), 2000);
+}

@@ -81,7 +81,7 @@ void AssetsPanel::DrawImportButton(EditorHost& host) {
     }
 
     if (!m_importBrowser.Draw()) return;
-    if (m_import.valid()) return;   // одно внесение за раз: два потока в одну папку — гонка
+    if (m_import.Valid()) return;   // одно внесение за раз: два потока в одну папку — гонка
 
     // ВНЕСЕНИЕ ИДЁТ ФОНОМ, А НА ЭКРАНЕ — ПОЛОСА.
     //
@@ -97,11 +97,13 @@ void AssetsPanel::DrawImportButton(EditorHost& host) {
                                        source.filename().string());
     const uint64_t task = m_importTask;
     const fs::path dest = host.AssetsCwd();
-    m_import = std::async(std::launch::async, [source, dest, task]() {
+    // Копирование — ожидание диска: полоса ввода-вывода общей системы задач,
+    // а не свой поток на каждое внесение.
+    m_import = sage::jobs::Async([source, dest, task]() {
         return CopyIntoProject(source, dest, [task](float fraction, const std::string& what) {
             sage::editor::progress::Update(task, fraction, what);
         });
-    });
+    }, sage::jobs::JobOptions("asset.import", sage::jobs::Category::AssetImport, sage::jobs::Lane::IO));
 }
 
 
@@ -109,9 +111,21 @@ void AssetsPanel::DrawImportButton(EditorHost& host) {
 // сказать человеку, чем кончилось. Только главный поток — см. AssetsPanel.h.
 void AssetsPanel::FinishImport(EditorHost& host) {
     namespace progress = sage::editor::progress;
-    if (!m_import.valid()) return;
-    if (m_import.wait_for(std::chrono::seconds(0)) != std::future_status::ready) return;
-    const ImportReport r = m_import.get();
+    if (!m_import.Valid() || !m_import.IsReady()) return;
+    ImportReport r;
+    if (ImportReport* done = m_import.TryGet()) {
+        r = std::move(*done);
+    } else {
+        // Задача упала исключением или отменена (выход из редактора).
+        r.Ok = false;
+        r.Error = m_import.Canceled() ? T("the job was canceled") : T("the job failed");
+        try {
+            m_import.Rethrow();
+        } catch (const std::exception& e) {
+            r.Error = e.what();
+        } catch (...) {
+        }
+    }
     m_import = {};
 
     if (!r.Ok) {

@@ -45,6 +45,11 @@ struct GroupState;
 struct JobRecord {
     virtual ~JobRecord();
     virtual void Run() = 0;
+    // Уничтожить тело (замыкание и всё, что оно захватило). Зовётся ДО того,
+    // как завершение станет видно ждущим (FinishCascade): дождавшийся задачи
+    // или группы вправе считать, что её захваты уже отпущены — подсистема,
+    // ждущая свои задачи в деструкторе, не получит их Release после себя.
+    virtual void DropBody() {}
 
     void AddRef() { Refs.fetch_add(1, std::memory_order_relaxed); }
     void Release() {
@@ -82,7 +87,7 @@ struct JobRecord {
     bool SuccClosed = false;                   // задача завершена: новых не принимает
     std::vector<JobRecord*> Successors;        // каждая со своей ссылкой
 
-    int64_t CreateNs = 0, ReadyNs = 0, StartNs = 0, EndNs = 0;
+    int64_t ReadyNs = 0, StartNs = 0, EndNs = 0;
 };
 
 // Полный тип для Future<T>: результат лежит прямо в записи — одно выделение
@@ -96,12 +101,13 @@ struct ValueRecord<void> : JobRecord {};
 
 template <class T, class F>
 struct ValueJob final : ValueRecord<T> {
-    explicit ValueJob(F&& f) : Fn(std::move(f)) {}
+    explicit ValueJob(F&& f) { Fn.emplace(std::move(f)); }
     void Run() override {
-        if constexpr (std::is_void_v<T>) Fn();
-        else this->Value.emplace(Fn());
+        if constexpr (std::is_void_v<T>) (*Fn)();
+        else this->Value.emplace((*Fn)());
     }
-    F Fn;
+    void DropBody() override { Fn.reset(); }
+    std::optional<F> Fn;
 };
 
 template <class T>

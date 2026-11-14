@@ -685,3 +685,40 @@ TEST(Jobs_no_job_runs_twice_under_stress) {
     CHECK_EQ(st.DuplicateRunsPrevented, (uint64_t)0);
     CHECK_TRUE(st.Completed >= (uint64_t)(kJobs / 2));
 }
+
+TEST(Jobs_captures_are_released_before_completion_is_visible) {
+    // Подсистема ждёт свои задачи в деструкторе и сразу освобождает то, на что
+    // они ссылаются. Если бы захваты задачи разрушались ПОСЛЕ того, как
+    // ожидание вернулось, их Release приходил бы в уже мёртвый объект — так
+    // падал мост Jolt при разрушении мира физики.
+    Fresh(4);
+    struct Probe {
+        std::atomic<int>* Alive;
+        explicit Probe(std::atomic<int>* a) : Alive(a) { ++*Alive; }
+        Probe(const Probe& o) : Alive(o.Alive) { ++*Alive; }
+        ~Probe() { --*Alive; }
+    };
+    for (int rep = 0; rep < 200; ++rep) {
+        std::atomic<int> alive{0};
+        {
+            TaskGroup g;
+            for (int i = 0; i < 16; ++i) {
+                Probe p(&alive);
+                g.Run([p] { SpinFor(std::chrono::microseconds(5)); });
+            }
+            g.Wait();
+            if (alive.load() != 0) break;
+        }
+        CHECK_EQ(alive.load(), 0);
+        if (alive.load() != 0) break;
+        // И для отменённых, не начатых задач.
+        TaskGroup g2;
+        g2.Cancel();
+        for (int i = 0; i < 4; ++i) {
+            Probe p(&alive);
+            g2.Run([p] {});
+        }
+        g2.Wait();
+        CHECK_EQ(alive.load(), 0);
+    }
+}

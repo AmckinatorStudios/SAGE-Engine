@@ -146,8 +146,36 @@ struct TraceRing {
     }
 };
 
+struct CategoryCounters {
+    std::atomic<uint64_t> Executed{0}, Failed{0}, Canceled{0};
+    std::atomic<int64_t> ExecNs{0}, QueueNs{0}, MaxExecNs{0};
+};
+
+// Счётчики одного потока. Пишет их только сам поток (relaxed), а снимок
+// складывает по всем потокам. Общие на систему атомики на каждую задачу —
+// это линия кэша, которую все ядра перекидывают друг другу на каждом
+// завершении: учёт стоил бы дороже самой мелкой задачи.
+struct SlotCounters {
+    std::atomic<uint64_t> Submitted{0}, Completed{0}, Failed{0}, Canceled{0};
+    CategoryCounters Cats[(int)Category::Count];
+    void Reset() {
+        Submitted = 0;
+        Completed = 0;
+        Failed = 0;
+        Canceled = 0;
+        for (auto& c : Cats) {
+            c.Executed = 0;
+            c.Failed = 0;
+            c.Canceled = 0;
+            c.ExecNs = 0;
+            c.QueueNs = 0;
+            c.MaxExecNs = 0;
+        }
+    }
+};
+
 // Поток системы (воркер, поток ввода-вывода или «главный» — без своего потока).
-struct ThreadSlot {
+struct alignas(64) ThreadSlot {
     std::thread Thread;
     std::string Name;
     Lane Kind = Lane::Worker;      // Worker / IO / Main
@@ -158,7 +186,8 @@ struct ThreadSlot {
     // умереть сразу после её завершения, и читать её имя из чужого потока
     // по указателю было бы обращением к освобождённой памяти.
     sync::SpinLock InfoLock;
-    char CurrentName[64] = {0};
+    char CurrentName[64] = {0};       // имя, собранное на лету (если CurrentStatic пуст)
+    const char* CurrentStatic = nullptr; // имя-литерал
     Lane CurrentLane = Lane::Worker;
     Category CurrentCat = Category::General;
     std::atomic<int64_t> CurrentStartNs{0};   // 0 — свободен
@@ -171,16 +200,12 @@ struct ThreadSlot {
     uint32_t PickCounter = 0;
 
     TraceRing Trace;
+    SlotCounters C;
 
     // Предыдущий снимок для доли занятости (только под Core::StatsM).
     int64_t LastBusyNs = 0;
     int64_t LastSampleNs = 0;
     double LastUtil = 0.0;
-};
-
-struct CategoryCounters {
-    std::atomic<uint64_t> Executed{0}, Failed{0}, Canceled{0};
-    std::atomic<int64_t> ExecNs{0}, QueueNs{0}, MaxExecNs{0};
 };
 
 struct Core {
@@ -208,6 +233,8 @@ struct Core {
     bool IsMainThread() const { return std::this_thread::get_id() == MainThread; }
     bool IsRenderThread() const { return std::this_thread::get_id() == RenderThread; }
     void RecordError(JobRecord* job);
+    // Счётчики потока, на котором идёт вызов.
+    SlotCounters& CountersHere();
 
     JobSystemConfig Cfg;
     int BackgroundLimit = 1;
@@ -225,6 +252,13 @@ struct Core {
     std::array<std::unique_ptr<LaneQueue>, (size_t)Lane::Count> Queues;
     Parker WorkerParker;
     Parker IoParker;
+    // Воркеры, которые сейчас крутятся в поиске работы. Пока такой есть, будить
+    // спящего незачем: ищущий найдёт задачу сам, а пробуждение — это вызов
+    // ядра ОС на каждую постановку.
+    std::atomic<int> Spinning{0};
+    void WakeWorker() {
+        if (Spinning.load(std::memory_order_seq_cst) == 0) WorkerParker.NotifyOne();
+    }
 
     std::atomic<bool> Stopping{false};
     std::atomic<int> BackgroundRunning{0};
@@ -236,13 +270,11 @@ struct Core {
     std::mutex WaitingM;
     std::unordered_set<JobRecord*> WaitingSet;
 
-    std::atomic<int> RunningNow{0};
-    std::atomic<uint64_t> Submitted{0}, Completed{0}, Failed{0}, Canceled{0};
+    SlotCounters Foreign;   // постановки и завершения из чужих потоков
     std::atomic<uint64_t> Steals{0}, StealAttempts{0}, Helped{0}, DupPrevented{0};
     std::atomic<uint64_t> MainWaits{0};
     std::atomic<int64_t> MainWaitNs{0};
     std::atomic<int> RenderViolations{0};
-    CategoryCounters Cats[(int)Category::Count];
 
     std::mutex ErrorsM;
     std::deque<JobError> Errors;

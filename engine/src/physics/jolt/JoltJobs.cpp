@@ -18,6 +18,11 @@ public:
         JobSystemWithBarrier::Init(maxBarriers);
         m_jobs.Init(maxJobs, maxJobs);
     }
+    // Обёртка задачи Jolt может пережить шаг: барьер Jolt выполняет задачи и
+    // сам, пока ждёт, и наша обёртка, стоящая в очереди, приходит уже к
+    // сделанной. Её последний Release освобождает запись в m_jobs — поэтому
+    // планировщик не разрушается, пока последняя обёртка не отработала.
+    ~EngineJobSystem() override { m_group.Wait(); }
 
     int GetMaxConcurrency() const override {
         sage::JobSystem* js = Engine();
@@ -50,6 +55,7 @@ public:
         JPH::Ref<Job> ref(job);
         sage::jobs::JobOptions o("jolt", sage::jobs::Category::Physics, sage::jobs::Lane::Worker,
                                  sage::jobs::Priority::High);
+        o.Group = &m_group;
         js->Run([ref]() { ref->Execute(); }, o);
     }
 
@@ -67,6 +73,7 @@ private:
 
     using Jobs = JPH::FixedSizeFreeList<Job>;
     Jobs m_jobs;
+    sage::jobs::TaskGroup m_group;  // разрушается первой: ждёт обёртки до m_jobs
 };
 
 } // namespace

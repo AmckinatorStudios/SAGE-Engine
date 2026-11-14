@@ -17,6 +17,7 @@ add_executable(sage_template
     ${SAGE_ENGINE_ROOT}/engine/src/sage/core/CrashHandler.cpp
     ${SAGE_ENGINE_ROOT}/engine/src/sage/core/Problems.cpp
     ${SAGE_ENGINE_ROOT}/engine/src/sage/core/Paths.cpp
+    ${SAGE_ENGINE_ROOT}/engine/src/sage/jobs/ParallelFor.cpp   # без системы задач — последовательно
 )
 target_include_directories(sage_template PRIVATE
     ${SAGE_ENGINE_ROOT}/engine/src

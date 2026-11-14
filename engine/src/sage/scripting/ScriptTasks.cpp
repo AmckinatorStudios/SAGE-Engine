@@ -224,7 +224,10 @@ struct ScriptTasks::Impl {
     // больше нет.
     std::unique_ptr<sage::jobs::Throttle> Limiter;
 
-    static int AutoWorkers() { return std::max(1, (int)std::thread::hardware_concurrency() - 2); }
+    // По умолчанию — потоков системы задач без одного: кадру остаётся ядро.
+    // Сколько из них реально займут долгие задачи разом, всё равно решает
+    // система задач (BackgroundLimit).
+    static int AutoWorkers() { return std::max(1, sage::jobs::Parallelism() - 1); }
 
     void EnsureStarted() {
         if (Limiter) return;

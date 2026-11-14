@@ -69,35 +69,42 @@ bool GIBakeSection::Start(EditorHost& host) {
     if (m_job) return false;
     Scene& scene = host.CurrentScene();
     if (StaticCount(scene) == 0) return false;
-    auto job = std::make_unique<Job>();
+    auto job = std::make_shared<Job>();
     job->Settings = SettingsFor(m_quality, m_probeCell);
     job->Target = &scene;
     job->Hash = sage::gi::ComputeGeometryHash(scene, job->Settings);
     // Вход собирается ЗДЕСЬ, на главном потоке: сцену правят из интерфейса, и
     // читать её из фонового потока нельзя. Дальше — чистая математика.
     auto input = std::make_shared<sage::gi::BakeInput>(sage::gi::CollectBakeInput(scene, job->Settings));
+    // Долгая задача общей системы задач: внутри бейк дробится на куски низкого
+    // приоритета (LightBaker.cpp), и кадр редактора идёт впереди них.
     Job* raw = job.get();
-    job->Thread = std::thread([raw, input] {
+    job->Handle = sage::jobs::Run([job, raw, input] {
         raw->Result = sage::gi::Bake(*input, [raw](float p, const char* phase) {
             raw->Progress = p;
             std::lock_guard<std::mutex> lock(raw->PhaseMutex);
             raw->Phase = phase ? phase : "";
         });
         raw->Done = true;
-    });
+    }, sage::jobs::JobOptions("gi.bake", sage::jobs::Category::Render, sage::jobs::Lane::Background));
+    // Отклонена (выход из редактора) — считать законченной без результата.
+    if (job->Handle.IsDone() && !job->Handle.Succeeded()) job->Done = true;
     m_job = std::move(job);
     m_lastMessage.clear();
     return true;
 }
 
 void GIBakeSection::Wait() {
-    if (m_job && m_job->Thread.joinable()) m_job->Thread.join();
+    if (m_job) m_job->Handle.Wait();
 }
 
 bool GIBakeSection::Poll(EditorHost& host) {
-    if (!m_job || !m_job->Done) return false;
-    if (m_job->Thread.joinable()) m_job->Thread.join();   // Wait мог дождаться раньше
-    std::unique_ptr<Job> job = std::move(m_job);
+    if (!m_job) return false;
+    // Упавший бейк (исключение) тоже заканчивает работу — без результата.
+    if (!m_job->Done && !(m_job->Handle.IsDone() && !m_job->Handle.Succeeded())) return false;
+    m_job->Handle.Wait();   // Done ставится последней строкой задачи — дождаться её конца
+    (void)m_job->Handle.Error();
+    std::shared_ptr<Job> job = std::move(m_job);
     Scene& scene = host.CurrentScene();
     // Результат применяется, только если это ТА ЖЕ сцена и её статика за время
     // запекания не изменилась: иначе свет лёг бы на геометрию, которой уже нет.

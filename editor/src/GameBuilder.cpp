@@ -17,14 +17,15 @@ struct GameBuilder::Shared {
 };
 
 GameBuilder::~GameBuilder() {
-    // Редактор закрывают посреди сборки — поток дорабатывает до отмены, а не
+    // Редактор закрывают посреди сборки — задача дорабатывает до отмены, а не
     // обрывается вместе с процессом на полуслове записи пакета.
     m_cancel = true;
     Join();
 }
 
 void GameBuilder::Join() {
-    if (m_thread.joinable()) m_thread.join();
+    m_job.Wait();
+    m_job = {};
 }
 
 std::string GameBuilder::Stage() const {
@@ -56,7 +57,7 @@ bool GameBuilder::Start(const Request& request) {
         m_gameDir.clear();
     }
     m_running = true;
-    m_thread = std::thread([this, request] {
+    m_job = sage::jobs::Run([this, request] {
         Shared shared;
         shared.Progress = [this](float p) { m_progress = p; };
         shared.Stage = [this](const std::string& s) {
@@ -73,7 +74,14 @@ bool GameBuilder::Start(const Request& request) {
         m_ok = ok;
         m_finished = true;
         m_running = false;
-    });
+    }, sage::jobs::JobOptions("game.build", sage::jobs::Category::Editor, sage::jobs::Lane::IO));
+    if (m_job.IsDone() && !m_job.Succeeded()) {
+        // Система задач не приняла сборку (редактор закрывается).
+        std::lock_guard<std::mutex> lk(m_mx);
+        m_error = T("the job was canceled");
+        m_finished = true;
+        m_running = false;
+    }
     return true;
 }
 

@@ -1,6 +1,8 @@
 #include "sage/rhi/GraphicsDevice.h"
 #include "rhi/null/NullDevice.h"
 #include "rhi/opengl/OpenGLDevice.h"
+#include "sage/core/Log.h"
+#include <atomic>
 #include <cctype>
 #include <stdexcept>
 
@@ -137,5 +139,25 @@ GraphicsDevice& GraphicsDevice::Get() {
 void GraphicsDevice::SetCurrent(GraphicsDevice* device) {
     s_current = device;
 }
+
+} // namespace sage::rhi
+
+namespace sage::rhi {
+
+namespace {
+std::atomic<int> g_threadViolations{0};
+} // namespace
+
+bool GraphicsDevice::CheckThread(const char* what) const {
+    if (IsDeviceThread()) return true;
+    // Первые — в лог с именем вызова; дальше только счётчик: ошибка в цикле не
+    // должна залить журнал.
+    if (g_threadViolations.fetch_add(1, std::memory_order_relaxed) < 8)
+        LOG_ERROR("RHI") << "Вызов графического устройства не из его потока: " << (what ? what : "?")
+                         << " — нужна очередь рендера (jobs::PostToRender)";
+    return false;
+}
+
+int GraphicsDevice::ThreadViolations() { return g_threadViolations.load(std::memory_order_relaxed); }
 
 } // namespace sage::rhi

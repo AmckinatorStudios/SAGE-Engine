@@ -6,6 +6,7 @@
 #include "sage/jobs/JobSystem.h"
 #include "sage/physics/PhysicsWorld.h"
 
+#include <atomic>
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
@@ -100,4 +101,36 @@ TEST(JobsIntegration_async_texture_decodes_on_io_lane_and_uploads_on_main) {
         CHECK_EQ(rm.PendingAsyncTextures(), 0);
     }
     sage::rhi::GraphicsDevice::SetCurrent(nullptr);
+}
+
+// --- Рендер: устройство знает свой поток, фоновая задача идёт в очередь рендера
+
+TEST(JobsIntegration_gpu_calls_only_from_device_thread) {
+    sage::JobSystem& js = IntegrationWorkers(4);
+    auto device = sage::rhi::GraphicsDevice::Create(sage::rhi::Backend::Null);
+    device->BindToCurrentThread();
+    CHECK_TRUE(device->CheckThread("тест: свой поток"));
+    const int before = sage::rhi::GraphicsDevice::ThreadViolations();
+    // Прямой вызов из фоновой задачи — нарушение, пойманное и посчитанное.
+    std::atomic<bool> fromIo{true};
+    js.Run([&] { fromIo = device->CheckThread("тест: из потока ввода-вывода"); },
+           sage::jobs::JobOptions().OnLane(sage::jobs::Lane::IO)).Wait();
+    CHECK_FALSE(fromIo.load());
+    CHECK_EQ(sage::rhi::GraphicsDevice::ThreadViolations(), before + 1);
+    // Правильный путь: фоновая задача готовит данные, «заливку» выполняет
+    // очередь рендера в потоке устройства.
+    std::atomic<bool> uploadOk{false};
+    sage::jobs::Future<int> prepared = js.Async([] { return 42; },
+                                                sage::jobs::JobOptions().OnLane(sage::jobs::Lane::IO));
+    sage::jobs::JobOptions renderLane("upload", sage::jobs::Category::Render, sage::jobs::Lane::Render);
+    sage::jobs::JobHandle upload = prepared.Then([&](int& v) { uploadOk = v == 42 && device->CheckThread("заливка"); },
+                                                 renderLane);
+    prepared.Wait();
+    for (int i = 0; i < 200 && !upload.IsDone(); ++i) {
+        js.PumpRenderThread();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    CHECK_TRUE(upload.IsDone());
+    CHECK_TRUE(uploadOk.load());
+    CHECK_EQ(sage::rhi::GraphicsDevice::ThreadViolations(), before + 1);
 }

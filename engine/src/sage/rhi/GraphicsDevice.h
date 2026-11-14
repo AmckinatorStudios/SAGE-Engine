@@ -1,6 +1,7 @@
 #pragma once
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 #include "sage/rhi/Resources.h"
 
@@ -393,6 +394,24 @@ public:
     // подсистемам доступ к устройству без протаскивания указателя повсюду.
     static GraphicsDevice& Get();
     static void SetCurrent(GraphicsDevice* device);
+
+    // --- Поток устройства ---------------------------------------------------
+    // Контекст OpenGL привязан к одному потоку: вызов из другого — это не
+    // ошибка драйвера с понятным текстом, а молчаливая порча состояния или
+    // падение «где-то потом». Поэтому устройство знает свой поток (тот, что
+    // вызвал Init), а бэкенд сверяется с ним на входах, создающих GPU-объекты.
+    // Фоновой задаче, которой нужна видеокарта, — очередь рендера
+    // (sage::jobs::PostToRender), а не прямой вызов.
+    void BindToCurrentThread() { m_thread = std::this_thread::get_id(); }
+    bool IsDeviceThread() const {
+        return m_thread == std::thread::id() || m_thread == std::this_thread::get_id();
+    }
+    // false — вызов не из потока устройства (записано в лог и счётчик).
+    bool CheckThread(const char* what) const;
+    static int ThreadViolations();
+
+private:
+    std::thread::id m_thread;
 };
 
 } // namespace sage::rhi

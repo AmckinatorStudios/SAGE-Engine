@@ -160,6 +160,7 @@ add_executable(SageEditor WIN32
     src/panels/InputPanel_Properties.cpp
     src/panels/DialogsPanel.cpp
     src/panels/ProfilerPanel.cpp
+    src/panels/ProfilerPanel_Threads.cpp
     src/AssetCovers.cpp
     src/FileBrowser.cpp
     src/PathScope.cpp

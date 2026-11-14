@@ -193,8 +193,14 @@ void SystemScheduler::RunStageGraph(size_t begin, size_t end, Scene& scene, floa
         st.Handles.push_back(std::move(h));
     };
 
+    // Готовые с самого начала — СПИСКОМ до первого запуска. Читать счётчики
+    // по ходу запусков нельзя: первая система может успеть закончиться на
+    // воркере и сама обнулить счётчик последователя — и тот был бы запущен
+    // второй раз отсюда (система выполнялась дважды за кадр).
+    std::vector<int> roots;
     for (int k = 0; k < n; ++k)
-        if (st.Remaining[(size_t)k].load(std::memory_order_acquire) == 0) launch(k);
+        if (m_deps[begin + (size_t)k].empty()) roots.push_back(k);
+    for (int k : roots) launch(k);
 
     // Главный поток: свои системы (по порядку регистрации среди готовых),
     // а в промежутках — помощь воркерам вместо простоя.

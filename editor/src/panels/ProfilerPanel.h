@@ -1,5 +1,9 @@
 #pragma once
+#include <cstdint>
+
 #include "sage/rhi/ResourceLedger.h"
+
+namespace sage { class SystemScheduler; }
 
 // ---------------------------------------------------------------------------
 // Панель «Профилировщик» — то, чего у профилировщика не было: читателя.
@@ -19,9 +23,25 @@ class ProfilerPanel {
 public:
     // open — флаг видимости из меню Window; панель сама включает и выключает
     // профилировщик по нему.
-    void Draw(bool* open);
+    // systems — планировщик систем кадра (граф ECS на вкладке «Потоки»).
+    void Draw(bool* open, sage::SystemScheduler* systems = nullptr);
 
 private:
+    void DrawFrameTab();
+    // Вкладка «Потоки»: система задач — потоки, очереди, подсистемы, замки,
+    // зависшие задачи, ошибки, шкала времени и граф систем кадра
+    // (ProfilerPanel_Threads.cpp).
+    void DrawThreadsTab(sage::SystemScheduler* systems);
+    void DrawTimeline();
+
+    // Пропускная способность — по разнице между кадрами панели.
+    uint64_t m_lastCompleted = 0;
+    double m_lastStatsMs = 0.0;
+    double m_jobsPerSecond = 0.0;
+    bool m_threadsTabOpen = false;
+    bool m_timeline = true;
+    float m_timelineWindowMs = 50.0f;
+
     // Показывать усреднённые значения, а не покадровые. По умолчанию да:
     // покадровые скачут на десятки процентов от планировщика ОС, и читать их
     // невозможно — цифра меняется быстрее, чем взгляд её схватывает.

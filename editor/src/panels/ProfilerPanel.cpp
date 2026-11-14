@@ -7,6 +7,7 @@
 
 #include "imgui.h"
 #include "sage/core/Profiler.h"
+#include "sage/jobs/JobSystem.h"
 #include "sage/rhi/ResourceLedger.h"
 #include "../Localization.h"
 #include "EditorIcons.h"
@@ -52,7 +53,7 @@ void DrawRow(const sage::profile::Entry& e, double maxMs, bool gpu) {
 
 } // namespace
 
-void ProfilerPanel::Draw(bool* open) {
+void ProfilerPanel::Draw(bool* open, sage::SystemScheduler* systems) {
     // Профилирование живёт ровно столько, сколько открыта панель.
     const bool wantEnabled = open && *open;
     if (wantEnabled != m_wasEnabled) {
@@ -65,7 +66,13 @@ void ProfilerPanel::Draw(bool* open) {
             m_hasGpuBaseline = true;
         }
     }
-    if (!wantEnabled) return;
+    if (!wantEnabled) {
+        if (m_threadsTabOpen) {
+            m_threadsTabOpen = false;
+            sage::JobSystem::Get().SetTracing(false);
+        }
+        return;
+    }
 
     if (!ImGui::Begin(EditorIcons::WindowTitle("chart", T("Profiler"), "Profiler").c_str(), open,
                       panelwindows::WindowFlags("Profiler"))) {
@@ -73,6 +80,28 @@ void ProfilerPanel::Draw(bool* open) {
         return;
     }
 
+    bool threadsOpen = false;
+    if (ImGui::BeginTabBar("##profilerTabs")) {
+        if (ImGui::BeginTabItem(T("Frame"))) {
+            DrawFrameTab();
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem(T("Threads"))) {
+            threadsOpen = true;
+            DrawThreadsTab(systems);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+    // Шкала времени задач пишется, только пока на неё смотрят.
+    if (threadsOpen != m_threadsTabOpen) {
+        m_threadsTabOpen = threadsOpen;
+        sage::JobSystem::Get().SetTracing(threadsOpen && m_timeline);
+    }
+    ImGui::End();
+}
+
+void ProfilerPanel::DrawFrameTab() {
     const bool gpu = sage::profile::GpuTimersAvailable();
 
     ImGui::Text(T("Frame: CPU %.2f ms"), sage::profile::FrameCpuMs());
@@ -127,7 +156,6 @@ void ProfilerPanel::Draw(bool* open) {
     if (entries.empty()) {
         ImGui::Separator();
         ImGui::TextDisabled("%s", T("Timestamps are not ready yet — wait a few frames."));
-        ImGui::End();
         return;
     }
 
@@ -153,6 +181,4 @@ void ProfilerPanel::Draw(bool* open) {
         for (const sage::profile::Entry& e : entries) DrawRow(e, maxMs, gpu);
         ImGui::EndTable();
     }
-
-    ImGui::End();
 }

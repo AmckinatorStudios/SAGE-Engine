@@ -67,6 +67,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/jobs/JobDiagnostics.cpp
     src/sage/jobs/Sync.cpp
     src/sage/jobs/Throttle.cpp
+    src/sage/jobs/ParallelFor.cpp
     src/sage/core/Log.cpp
     src/sage/core/Paths.cpp
     src/sage/core/ChildProcess.cpp

@@ -6,13 +6,11 @@
 #include <atomic>
 #include <cctype>
 #include <cmath>
-#include <condition_variable>
 #include <cstdio>
 #include <cstring>
 #include <deque>
 #include <memory>
 #include <mutex>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -20,6 +18,7 @@
 
 #include "Localization.h"
 #include "sage/assets/format/TextureFormat.h"
+#include "sage/jobs/JobSystem.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/Texture.h"
 
@@ -188,7 +187,6 @@ struct State {
     size_t Bytes = 0;
 
     std::mutex JobMx;
-    std::condition_variable JobCv;
     // СТЕК, а не очередь. Пролистав папку, человек ставит в очередь сотни
     // задач, а смотрит на те полсотни плиток, что под курсором сейчас. Очередь
     // отдала бы ему сначала то, что уже уехало за край экрана, — то есть
@@ -196,20 +194,20 @@ struct State {
     std::vector<Job> Jobs;
     std::mutex DoneMx;
     std::deque<Done> Ready;
-    std::vector<std::thread> Workers;
+    // Разборщики стека — задачи полосы ввода-вывода общей системы задач, а не
+    // свои потоки. Число идущих разом — не больше kDrainers (под JobMx).
+    int Active = 0;
+    std::vector<sage::jobs::JobHandle> Drainers;  // только главный поток
     std::atomic<bool> Stop{false};
-    bool Started = false;
+    bool Started = false;  // задачи обложек хоть раз ставились (только главный поток)
 
-    // Потоки останавливаются ДО того, как начнут разрушаться очереди и мьютексы,
-    // которых они касаются. Без этого выход из редактора — гонка: главный поток
-    // разбирает статические объекты, а воркер в этот момент ждёт на условной
-    // переменной, которой уже нет.
+    // Разборщики дорабатывают ДО того, как начнут разрушаться очереди и
+    // мьютексы, которых они касаются. Без этого выход из редактора — гонка:
+    // главный поток разбирает статические объекты, а разборщик ещё пишет в
+    // очередь готового.
     ~State() {
         Stop.store(true);
-        JobCv.notify_all();
-        for (std::thread& t : Workers) {
-            if (t.joinable()) t.join();
-        }
+        for (const sage::jobs::JobHandle& h : Drainers) h.Wait();
     }
 };
 
@@ -278,14 +276,25 @@ void RunJob(const Job& job, Done& out) {
     out.Ok = true;
 }
 
-void WorkerLoop() {
+// Два разборщика, а не один: декодирование фотографии — это десятки
+// миллисекунд, и папка из сотни снимков в один поток раскрывается вдвое
+// дольше. Больше двух не берём: файлы читаются с одного диска, и очередь к
+// нему от лишних потоков только растёт.
+constexpr int kDrainers = 2;
+
+void Drain() {
     State& s = S();
     for (;;) {
         Job job;
         {
-            std::unique_lock<std::mutex> lk(s.JobMx);
-            s.JobCv.wait(lk, [&] { return s.Stop.load() || !s.Jobs.empty(); });
-            if (s.Stop.load()) return;
+            std::lock_guard<std::mutex> lk(s.JobMx);
+            // Пусто — выйти, сняв себя со счёта ПОД ТЕМ ЖЕ замком, под которым
+            // кладут задачи: иначе новая задача могла бы прийти в зазор и
+            // остаться без разборщика.
+            if (s.Stop.load() || s.Jobs.empty()) {
+                --s.Active;
+                return;
+            }
             job = std::move(s.Jobs.back());
             s.Jobs.pop_back();
         }
@@ -298,16 +307,28 @@ void WorkerLoop() {
     }
 }
 
-void StartWorkers() {
+// Задача положена в стек — при нехватке разборщиков завести ещё одного.
+void KickDrainers() {
     State& s = S();
-    if (s.Started) return;
     s.Started = true;
-    // Два потока, а не один: декодирование фотографии — это десятки
-    // миллисекунд, и папка из сотни снимков на одном потоке раскрывается вдвое
-    // дольше. Больше двух не берём: файлы читаются с одного диска, и очередь к
-    // нему от лишних потоков только растёт.
-    const unsigned n = std::min(2u, std::max(1u, std::thread::hardware_concurrency() / 2));
-    for (unsigned i = 0; i < n; ++i) s.Workers.emplace_back(WorkerLoop);
+    {
+        std::lock_guard<std::mutex> lk(s.JobMx);
+        if (s.Active >= kDrainers || s.Jobs.empty()) return;
+        ++s.Active;
+    }
+    // Отслужившие ручки — прочь, чтобы список не рос.
+    s.Drainers.erase(std::remove_if(s.Drainers.begin(), s.Drainers.end(),
+                                    [](const sage::jobs::JobHandle& h) { return h.IsDone(); }),
+                     s.Drainers.end());
+    sage::jobs::JobHandle h = sage::jobs::Run([] { Drain(); },
+        sage::jobs::JobOptions("thumbnail.decode", sage::jobs::Category::Editor, sage::jobs::Lane::IO));
+    if (h.IsDone() && h.Canceled()) {
+        // Система задач остановлена (выход) — разборщика не будет.
+        std::lock_guard<std::mutex> lk(s.JobMx);
+        --s.Active;
+        return;
+    }
+    s.Drainers.push_back(std::move(h));
 }
 
 void Release(State& s, Entry& e) {
@@ -360,7 +381,6 @@ Thumb Get(const fs::path& path, Size size) {
         e.Loading = true;
         e.Stamp = StampOf(path);
         e.CheckFrame = frame;
-        StartWorkers();
         {
             std::lock_guard<std::mutex> lk(s.JobMx);
             // Превью под курсором — одно и прямо сейчас; плиток полсотни и они
@@ -368,7 +388,7 @@ Thumb Get(const fs::path& path, Size size) {
             if (s.Jobs.size() >= kMaxJobs) s.Jobs.erase(s.Jobs.begin());
             s.Jobs.push_back(Job{key, path, file, target});
         }
-        s.JobCv.notify_one();
+        KickDrainers();
     }
 
     out.Id = e.Tex ? e.Tex->NativeHandle() : 0;

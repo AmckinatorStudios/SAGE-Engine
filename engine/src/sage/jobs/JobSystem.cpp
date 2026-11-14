@@ -223,11 +223,16 @@ void Core::WorkerLoop(ThreadSlot* slot) {
         if (Stopping.load(std::memory_order_acquire)) break;
         // Короткое кручение до сна: работа часто приходит через микросекунды
         // (следующий кусок кадра), а сон и пробуждение стоят десятки.
+        Spinning.fetch_add(1, std::memory_order_seq_cst);
         for (int i = 0; i < 64 && !j; ++i) {
             sync::CpuRelax();
             if ((i & 15) == 15) j = FindWorkerJob(slot, stolen);
         }
+        Spinning.fetch_sub(1, std::memory_order_seq_cst);
         if (j) {
+            // Нашёл, перестав быть «ищущим», — работа, похоже, идёт потоком:
+            // разбудить соседа, чтобы следующую задачу не ждали.
+            WakeWorker();
             Execute(j, slot, stolen);
             continue;
         }
@@ -337,7 +342,21 @@ JobSystem* JobSystem::TryGet() {
     return ctx ? &ctx->Jobs() : nullptr;
 }
 
-JobSystem::JobSystem() = default;
+namespace {
+// Исполнитель для sage::jobs::ParallelFor (ParallelFor.h): система задач
+// текущего контекста, без контекста — последовательно.
+void ParallelForViaContext(std::size_t count, const std::function<void(std::size_t, std::size_t)>& body,
+                           const ParallelOptions& options) {
+    if (JobSystem* js = JobSystem::TryGet()) js->ParallelFor(count, body, options);
+    else body(0, count);
+}
+int ParallelismViaContext() {
+    JobSystem* js = JobSystem::TryGet();
+    return js ? js->ThreadCount() : 1;
+}
+} // namespace
+
+JobSystem::JobSystem() { jobs::SetParallelBackend(&ParallelForViaContext, &ParallelismViaContext); }
 
 JobSystem::~JobSystem() { Shutdown(); }
 

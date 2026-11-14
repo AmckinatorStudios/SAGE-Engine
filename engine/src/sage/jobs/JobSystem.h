@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "sage/jobs/JobHandle.h"
+#include "sage/jobs/ParallelFor.h"
 #include "sage/jobs/JobStats.h"
 #include "sage/jobs/TaskGroup.h"
 
@@ -52,14 +53,6 @@ struct JobSystemConfig {
     double HungJobMs = 2000.0;    // порог «зависшей» кадровой задачи
     double HungBackgroundMs = 120000.0; // для Background/IO
     bool Enabled = true;          // false — ParallelFor последовательно
-};
-
-struct ParallelOptions {
-    std::size_t Grain = 256;      // минимум элементов на кусок
-    const char* Name = "parallel_for";
-    Category Cat = Category::General;
-    Priority Prio = Priority::High;  // кадровая работа ждётся сразу — она срочная
-    CancellationToken Token;
 };
 
 } // namespace jobs
@@ -192,14 +185,6 @@ inline JobHandle WhenAll(std::vector<JobHandle> deps, JobOptions opts = {}) {
 }
 // Выполнить на главном потоке (в ближайшем PumpMainThread). Безопасная
 // передача результата из фоновой задачи в интерфейс/сцену/Lua.
-// Параллельный проход в системе текущего контекста, а без контекста —
-// последовательно на вызывающем потоке. Для кода, который живёт и в движке, и
-// в утилитах без EngineContext (упаковщик, импорт из командной строки).
-inline void ParallelFor(std::size_t count, const std::function<void(std::size_t, std::size_t)>& body,
-                        const ParallelOptions& options = {}) {
-    if (JobSystem* js = JobSystem::TryGet()) js->ParallelFor(count, body, options);
-    else if (count > 0 && !options.Token.IsCancelled()) body(0, count);
-}
 template <class F>
 JobHandle PostToMain(F&& f, const char* name = "main", Category cat = Category::General) {
     return Run(std::forward<F>(f), JobOptions(name, cat, Lane::Main));

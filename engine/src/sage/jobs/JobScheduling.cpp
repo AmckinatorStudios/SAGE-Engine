@@ -63,7 +63,6 @@ void Prepare(JobRecord* job, const JobOptions& opts) {
     job->RunIfDepFailed = opts.RunIfDependencyFailed;
     job->Token = opts.Token.State();
     if (opts.Group) job->Group = opts.Group->State();
-    job->CreateNs = NowNs();
 }
 
 void RequestCancel(JobRecord* job) {
@@ -150,22 +149,24 @@ void FinishCascade(JobRecord* first, JobStatus firstStatus, std::exception_ptr f
         Pending p = std::move(work.back());
         work.pop_back();
         JobRecord* r = p.Job;
+        r->DropBody();  // захваты — до того, как кто-то увидит завершение
         if (p.St == JobStatus::Failed && p.Err) {
             std::lock_guard<sync::SpinLock> lk(r->SuccLock);
             r->Error = p.Err;
         }
         Core* core = r->Owner;
         if (core) {
-            CategoryCounters& c = core->Cats[(int)r->Cat];
+            SlotCounters& sc = core->CountersHere();
+            CategoryCounters& c = sc.Cats[(int)r->Cat];
             if (p.St == JobStatus::Failed) {
-                core->Failed.fetch_add(1, std::memory_order_relaxed);
+                sc.Failed.fetch_add(1, std::memory_order_relaxed);
                 c.Failed.fetch_add(1, std::memory_order_relaxed);
                 core->RecordError(r);
             } else if (p.St == JobStatus::Canceled) {
-                core->Canceled.fetch_add(1, std::memory_order_relaxed);
+                sc.Canceled.fetch_add(1, std::memory_order_relaxed);
                 c.Canceled.fetch_add(1, std::memory_order_relaxed);
             }
-            core->Completed.fetch_add(1, std::memory_order_relaxed);
+            sc.Completed.fetch_add(1, std::memory_order_relaxed);
         }
 
         // Итог — до закрытия списка: тот, кто увидит список закрытым, обязан
@@ -214,7 +215,7 @@ void Submit(Core* core, JobRecord* job, const JobHandle* deps, size_t depCount) 
         FinishCascade(job, JobStatus::Canceled, nullptr);
         return;
     }
-    core->Submitted.fetch_add(1, std::memory_order_relaxed);
+    core->CountersHere().Submitted.fetch_add(1, std::memory_order_relaxed);
     job->Unfinished.store(1 + (int)depCount, std::memory_order_relaxed);
     if (depCount > 0) {
         std::lock_guard<std::mutex> lk(core->WaitingM);
@@ -278,7 +279,7 @@ bool Core::Enqueue(JobRecord* job) {
                 Queues[(int)Lane::Worker]->Push(job);
             }
             if (Workers.empty()) IoParker.NotifyOne();
-            else WorkerParker.NotifyOne();
+            else WakeWorker();
             return true;
         case Lane::Background:
             Queues[(int)Lane::Background]->Push(job);
@@ -286,7 +287,7 @@ bool Core::Enqueue(JobRecord* job) {
                 MaybeGrowIo();
                 IoParker.NotifyOne();
             } else {
-                WorkerParker.NotifyOne();
+                WakeWorker();
             }
             return true;
         case Lane::IO:
@@ -302,6 +303,13 @@ bool Core::Enqueue(JobRecord* job) {
             Queues[(int)job->InLane]->Push(job);
             return true;
     }
+}
+
+SlotCounters& Core::CountersHere() {
+    ThreadCtx& ctx = Ctx();
+    if (ctx.Owner == this && ctx.Slot) return ctx.Slot->C;
+    if (IsMainThread()) return MainSlot.C;
+    return Foreign;
 }
 
 bool Core::TryAcquireBackgroundSlot() {
@@ -394,20 +402,30 @@ void Core::Execute(JobRecord* job, ThreadSlot* slot, bool stolen) {
     job->ThreadIndex = (int16_t)slot->Index;
     // Вложенное исполнение (помощь во время ожидания) — внешняя задача того
     // же потока уже отмечена; показываем самую внутреннюю.
+    // Имя-литерал (почти все задачи) запоминается указателем — он вечен;
+    // копируется только имя, собранное на лету (система ECS): запись задачи
+    // умрёт раньше, чем панель профилировщика его прочтёт.
+    const bool owned = !job->OwnedName.empty();
     char savedName[64];
+    const char* savedStatic = slot->CurrentStatic;
+    const bool savedOwned = savedStatic == nullptr && slot->CurrentStartNs.load(std::memory_order_relaxed) != 0;
     int64_t savedStart = slot->CurrentStartNs.load(std::memory_order_relaxed);
     Lane savedLane = slot->CurrentLane;
     Category savedCat = slot->CurrentCat;
     {
         std::lock_guard<sync::SpinLock> lk(slot->InfoLock);
-        std::memcpy(savedName, slot->CurrentName, sizeof(savedName));
-        std::strncpy(slot->CurrentName, job->DisplayName(), sizeof(slot->CurrentName) - 1);
-        slot->CurrentName[sizeof(slot->CurrentName) - 1] = 0;
+        if (savedOwned) std::memcpy(savedName, slot->CurrentName, sizeof(savedName));
+        if (owned) {
+            std::strncpy(slot->CurrentName, job->OwnedName.c_str(), sizeof(slot->CurrentName) - 1);
+            slot->CurrentName[sizeof(slot->CurrentName) - 1] = 0;
+            slot->CurrentStatic = nullptr;
+        } else {
+            slot->CurrentStatic = job->Name;
+        }
         slot->CurrentLane = job->InLane;
         slot->CurrentCat = job->Cat;
         slot->CurrentStartNs.store(start, std::memory_order_relaxed);
     }
-    RunningNow.fetch_add(1, std::memory_order_relaxed);
 
     JobStatus status = JobStatus::Succeeded;
     std::exception_ptr error;
@@ -420,10 +438,10 @@ void Core::Execute(JobRecord* job, ThreadSlot* slot, bool stolen) {
 
     const int64_t end = NowNs();
     job->EndNs = end;
-    RunningNow.fetch_sub(1, std::memory_order_relaxed);
     {
         std::lock_guard<sync::SpinLock> lk(slot->InfoLock);
-        std::memcpy(slot->CurrentName, savedName, sizeof(savedName));
+        if (savedOwned) std::memcpy(slot->CurrentName, savedName, sizeof(savedName));
+        slot->CurrentStatic = savedStatic;
         slot->CurrentLane = savedLane;
         slot->CurrentCat = savedCat;
         slot->CurrentStartNs.store(savedStart, std::memory_order_relaxed);
@@ -436,7 +454,7 @@ void Core::Execute(JobRecord* job, ThreadSlot* slot, bool stolen) {
     if (!prev) slot->BusyNs.fetch_add(exec, std::memory_order_relaxed);
     slot->Executed.fetch_add(1, std::memory_order_relaxed);
     if (stolen) slot->Stolen.fetch_add(1, std::memory_order_relaxed);
-    CategoryCounters& c = Cats[(int)job->Cat];
+    CategoryCounters& c = slot->C.Cats[(int)job->Cat];
     c.Executed.fetch_add(1, std::memory_order_relaxed);
     c.ExecNs.fetch_add(exec, std::memory_order_relaxed);
     c.QueueNs.fetch_add(std::max<int64_t>(0, start - job->ReadyNs), std::memory_order_relaxed);

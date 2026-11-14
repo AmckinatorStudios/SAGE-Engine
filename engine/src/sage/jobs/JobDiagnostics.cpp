@@ -29,7 +29,7 @@ ThreadStats SnapshotThread(const Core& core, ThreadSlot& s, int64_t now, bool& h
         std::lock_guard<sync::SpinLock> lk(s.InfoLock);
         start = s.CurrentStartNs.load(std::memory_order_relaxed);
         if (start) {
-            t.CurrentJob = s.CurrentName;
+            t.CurrentJob = s.CurrentStatic ? s.CurrentStatic : s.CurrentName;
             lane = s.CurrentLane;
             cat = s.CurrentCat;
         }
@@ -80,16 +80,11 @@ JobSystemStats JobSystem::Stats() const {
     for (int l = 0; l < (int)Lane::Count; ++l)
         st.Queued[l] = core->Queues[(size_t)l]->Size.load(std::memory_order_relaxed);
     for (auto& w : core->Workers) st.Queued[(int)Lane::Worker] += (int)w->Deque.SizeApprox();
-    st.Running_ = core->RunningNow.load(std::memory_order_relaxed);
     {
         std::lock_guard<std::mutex> wl(core->WaitingM);
         st.WaitingOnDeps = (int)core->WaitingSet.size();
     }
     st.BackgroundRunning = core->BackgroundRunning.load(std::memory_order_relaxed);
-    st.Submitted = core->Submitted.load(std::memory_order_relaxed);
-    st.Completed = core->Completed.load(std::memory_order_relaxed);
-    st.Failed = core->Failed.load(std::memory_order_relaxed);
-    st.Canceled = core->Canceled.load(std::memory_order_relaxed);
     st.Steals = core->Steals.load(std::memory_order_relaxed);
     st.StealAttempts = core->StealAttempts.load(std::memory_order_relaxed);
     st.HelpedWhileWaiting = core->Helped.load(std::memory_order_relaxed);
@@ -110,17 +105,37 @@ JobSystemStats JobSystem::Stats() const {
         std::lock_guard<std::mutex> il(core->IoM);
         for (auto& s : core->Io) add(*s);
     }
+    // Счётчики — по всем потокам (каждый пишет свои, см. SlotCounters).
+    std::vector<jobs::detail::SlotCounters*> counters{&core->MainSlot.C, &core->Foreign};
+    for (auto& w : core->Workers) counters.push_back(&w->C);
+    {
+        std::lock_guard<std::mutex> il(core->IoM);
+        for (auto& s : core->Io) counters.push_back(&s->C);
+    }
+    for (auto* sc : counters) {
+        st.Submitted += sc->Submitted.load(std::memory_order_relaxed);
+        st.Completed += sc->Completed.load(std::memory_order_relaxed);
+        st.Failed += sc->Failed.load(std::memory_order_relaxed);
+        st.Canceled += sc->Canceled.load(std::memory_order_relaxed);
+    }
+    for (const ThreadStats& t : st.Threads) st.Running_ += t.CurrentJob.empty() ? 0 : 1;
     for (int c = 0; c < (int)Category::Count; ++c) {
-        const auto& cc = core->Cats[c];
         CategoryStats cs;
         cs.Cat = (Category)c;
-        cs.Executed = cc.Executed.load(std::memory_order_relaxed);
-        cs.Failed = cc.Failed.load(std::memory_order_relaxed);
-        cs.Canceled = cc.Canceled.load(std::memory_order_relaxed);
+        int64_t exec = 0, queue = 0, mx = 0;
+        for (auto* sc : counters) {
+            const auto& cc = sc->Cats[c];
+            cs.Executed += cc.Executed.load(std::memory_order_relaxed);
+            cs.Failed += cc.Failed.load(std::memory_order_relaxed);
+            cs.Canceled += cc.Canceled.load(std::memory_order_relaxed);
+            exec += cc.ExecNs.load(std::memory_order_relaxed);
+            queue += cc.QueueNs.load(std::memory_order_relaxed);
+            mx = std::max<int64_t>(mx, cc.MaxExecNs.load(std::memory_order_relaxed));
+        }
         if (cs.Executed == 0 && cs.Failed == 0 && cs.Canceled == 0) continue;
-        cs.ExecMs = (double)cc.ExecNs.load(std::memory_order_relaxed) / 1e6;
-        cs.QueueMs = (double)cc.QueueNs.load(std::memory_order_relaxed) / 1e6;
-        cs.MaxExecMs = (double)cc.MaxExecNs.load(std::memory_order_relaxed) / 1e6;
+        cs.ExecMs = (double)exec / 1e6;
+        cs.QueueMs = (double)queue / 1e6;
+        cs.MaxExecMs = (double)mx / 1e6;
         st.Categories.push_back(cs);
     }
     {
@@ -134,28 +149,18 @@ void JobSystem::ResetStats() {
     Core* core = m_core.get();
     sync::ResetLockStats();
     if (!core) return;
-    core->Submitted = 0;
-    core->Completed = 0;
-    core->Failed = 0;
-    core->Canceled = 0;
     core->Steals = 0;
     core->StealAttempts = 0;
     core->Helped = 0;
     core->DupPrevented = 0;
     core->MainWaits = 0;
     core->MainWaitNs = 0;
-    for (auto& c : core->Cats) {
-        c.Executed = 0;
-        c.Failed = 0;
-        c.Canceled = 0;
-        c.ExecNs = 0;
-        c.QueueNs = 0;
-        c.MaxExecNs = 0;
-    }
+    core->Foreign.Reset();
     auto reset = [](ThreadSlot& s) {
         s.Executed = 0;
         s.Stolen = 0;
         s.Parks = 0;
+        s.C.Reset();
     };
     reset(core->MainSlot);
     for (auto& w : core->Workers) reset(*w);

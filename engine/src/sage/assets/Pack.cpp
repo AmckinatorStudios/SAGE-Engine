@@ -7,7 +7,7 @@
 
 #include "sage/assets/format/Blob.h"
 #include "sage/core/Log.h"
-#include "sage/jobs/JobSystem.h"
+#include "sage/jobs/ParallelFor.h"
 #include "sage/core/Paths.h"
 
 #include <atomic>
@@ -328,8 +328,7 @@ bool PackWriter::Save(const fs::path& file, const Progress& progress) const {
 
     // Сжатие и шифрование — в общей системе задач (своих потоков упаковщик
     // больше не заводит). Пачками: в памяти лежит не весь пакет, а пачка.
-    sage::JobSystem* js = sage::JobSystem::TryGet();
-    const size_t threads = js ? (size_t)js->ThreadCount() : 1;
+    const size_t threads = (size_t)sage::jobs::Parallelism();
     const size_t batch = std::max<size_t>(2, threads * 2);
     for (size_t first = 0; first < m_entries.size(); first += batch) {
         const size_t count = std::min(batch, m_entries.size() - first);
