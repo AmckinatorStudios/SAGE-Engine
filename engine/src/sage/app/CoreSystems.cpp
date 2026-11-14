@@ -11,7 +11,10 @@
 #include "sage/ecs/DayNightCycle.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/render/ParticleECS.h"
+#include "sage/render/ParticleComponents.h"
 #include "sage/render/ParticleSystem.h"
+#include "sage/audio/AudioComponents.h"
+#include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/scripting/ScriptingSystem.h"
@@ -126,9 +129,17 @@ void RegisterCoreSystems(SystemScheduler& scheduler, const CoreSystems& systems)
                 return true;
             });
         }
+        // Частицы объявляют доступ и идут на воркере — параллельно со звуком,
+        // который им ничем не мешает: свои компоненты, свой движок, общие —
+        // только чтение трансформов. Шаг симуляции внутри ещё и сам дробится
+        // по эмиттерам (ParticleSystem::Update).
         scheduler.Add(Stage::Effects, "particles", [particles](Scene& scene, float dt) {
             sage::fx::UpdateEmitters(scene, *particles, dt);
-        });
+        }, SystemAccess::Parallel()
+               .Write<ParticleEmitterComponent>()
+               .Read<Transform, HierarchyComponent, HiddenComponent, FolderComponent>()
+               .WriteResource("particles")
+               .ReadResource("physics"));
     }
 
     // Звук последним: он читает позиции источников и слушателя, и читать их
@@ -145,7 +156,11 @@ void RegisterCoreSystems(SystemScheduler& scheduler, const CoreSystems& systems)
             // сообщения о причине.
             sage::audio::Update(scene, *audio);
             audio->Update();
-        }, 10);
+        }, SystemAccess::MainThreadOnly()
+               .Write<AudioSourceComponent>()
+               .Read<Transform, HierarchyComponent, FolderComponent>()
+               .WriteResource("audio"),
+           10);
     }
 }
 

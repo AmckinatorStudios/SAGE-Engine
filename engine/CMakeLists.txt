@@ -61,7 +61,12 @@ set(SAGE_ENGINE_SOURCES
     src/sage/app/EngineContext.cpp
     src/sage/app/FatalReport.cpp
     src/sage/core/Config.cpp
-    src/sage/core/JobSystem.cpp
+    src/sage/jobs/JobSystem.cpp
+    src/sage/jobs/JobScheduling.cpp
+    src/sage/jobs/JobParallel.cpp
+    src/sage/jobs/JobDiagnostics.cpp
+    src/sage/jobs/Sync.cpp
+    src/sage/jobs/Throttle.cpp
     src/sage/core/Log.cpp
     src/sage/core/Paths.cpp
     src/sage/core/ChildProcess.cpp
@@ -117,6 +122,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/CrashHandler.cpp
     src/sage/core/Problems.cpp
     src/sage/core/SystemScheduler.cpp
+    src/sage/core/SystemSchedulerGraph.cpp
+    src/sage/core/SystemAccess.cpp
     src/sage/app/CoreSystems.cpp
     src/sage/render/MeshData.cpp
     src/sage/render/MeshRaycast.cpp

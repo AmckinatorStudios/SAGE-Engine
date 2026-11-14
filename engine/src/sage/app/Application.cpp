@@ -6,7 +6,7 @@
 #include "sage/core/CrashHandler.h"
 #include "sage/core/Log.h"
 #include "sage/core/Systems.h"
-#include "sage/core/JobSystem.h"
+#include "sage/jobs/JobSystem.h"
 #include "sage/core/Profiler.h"
 #include "sage/render/ResourceManager.h"
 #include <GLFW/glfw3.h>

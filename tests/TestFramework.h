@@ -9,6 +9,7 @@
 // которым нужен рендер.
 // ---------------------------------------------------------------------------
 #include <cstdio>
+#include <cstdlib>
 #include <functional>
 #include <string>
 #include <vector>
@@ -55,7 +56,11 @@ inline int RunAll() {
     int passed = 0, failed = 0;
     std::vector<std::string> failedNames;
     std::printf("=== sage_tests: %zu тестов ===\n", Registry().size());
+    // SAGE_TEST_FILTER=подстрока — прогнать только совпавшие (например,
+    // сотню раз подряд тесты задач, ловя редкую гонку). Не путь — только имя.
+    const char* filter = std::getenv("SAGE_TEST_FILTER");
     for (auto& tc : Registry()) {
+        if (filter && *filter && tc.name.find(filter) == std::string::npos) continue;
         CurrentFailures() = 0;
         try {
             tc.fn();

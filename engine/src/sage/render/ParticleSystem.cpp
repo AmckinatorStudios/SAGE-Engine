@@ -11,6 +11,7 @@
 
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"
+#include "sage/jobs/JobSystem.h"
 #include "sage/render/Camera.h"
 #include "sage/render/MeshData.h"
 #include "sage/render/ParticleEffectIO.h"
@@ -548,27 +549,80 @@ size_t ParticleSystem::StreamAlive(const std::string& id) const {
     return it == m->Streams.end() ? 0 : it->second->CountTree();
 }
 
+namespace {
+// Дерево эффекта без дочерних эмиттеров: его шаг не трогает ничего общего
+// (кэш эффектов, счётчик зёрен) — только свой симулятор со своим генератором.
+bool SelfContained(const ParticleSystemInstance& inst) {
+    if (!inst.Fx.SubEmitters.empty()) return false;
+    for (const auto& s : inst.Subs)
+        if (s && !SelfContained(*s)) return false;
+    return true;
+}
+// Шаг самодостаточного дерева — в том же порядке, что StepTree (родитель,
+// затем дети вглубь); событий оно не обрабатывает — обрабатывать нечего.
+void StepPlain(ParticleSystemInstance& inst, float dt, const sage::fx::CollisionQuery* world) {
+    inst.Sim.Step(inst.Fx, inst.World, dt, world);
+    for (auto& s : inst.Subs)
+        if (s) StepPlain(*s, dt, world);
+}
+} // namespace
+
 void ParticleSystem::Update(float dt) {
-    for (auto it = m->Entities.begin(); it != m->Entities.end();) {
-        ParticleSystemInstance& inst = *it->second;
+    for (auto& [key, slot] : m->Entities) {
+        ParticleSystemInstance& inst = *slot;
         if (!inst.Synced && !inst.Orphan) {
             // Объект пропал: эмиттер больше не рождает, живые доживают.
             inst.Orphan = true;
             inst.Sim.Stop();
         }
-        auto pending = m->PendingEmit.find(it->first);
+        auto pending = m->PendingEmit.find(key);
         if (pending != m->PendingEmit.end()) {
             inst.Sim.Emit(inst.Fx, inst.World, pending->second);
             m->PendingEmit.erase(pending);
         }
-        m->StepTree(inst, dt);
+    }
+    m->PendingEmit.clear();
+
+    // Шаг симуляции — главная цена частиц, и эмиттеры друг от друга не
+    // зависят: самодостаточные деревья идут параллельно на воркерах. Деревья
+    // с дочерними эмиттерами — следом, последовательно и в прежнем порядке:
+    // они берут общий кэш эффектов и общий счётчик зёрен, и только так кадр
+    // остаётся побайтово тем же при любом числе потоков.
+    std::vector<ParticleSystemInstance*> parallel, serial;
+    auto sort = [&](ParticleSystemInstance& inst) {
+        (SelfContained(inst) ? parallel : serial).push_back(&inst);
+    };
+    for (auto& [key, slot] : m->Entities) sort(*slot);
+    for (auto& [id, inst] : m->Streams) sort(*inst);
+    for (auto& inst : m->OneShots) sort(*inst);
+
+    // Столкновения — луч в физику сцены; её запросы не обязаны быть
+    // потокобезопасными, поэтому из параллельной фазы — по одному.
+    sage::sync::Mutex collisionLock("particles.collision");
+    sage::fx::CollisionQuery guarded;
+    if (m->Collision) {
+        guarded = [&](const glm::vec3& from, const glm::vec3& to, sage::fx::CollisionHit& hit) {
+            std::lock_guard<sage::sync::Mutex> lk(collisionLock);
+            return m->Collision(from, to, hit);
+        };
+    }
+    if (!parallel.empty()) {
+        sage::jobs::ParallelOptions po;
+        po.Grain = 4;
+        po.Name = "particles.step";
+        po.Cat = sage::jobs::Category::Render;
+        sage::JobSystem::Get().ParallelFor(parallel.size(), [&](size_t b, size_t e) {
+            for (size_t i = b; i < e; ++i) StepPlain(*parallel[i], dt, guarded ? &guarded : nullptr);
+        }, po);
+    }
+    for (ParticleSystemInstance* inst : serial) m->StepTree(*inst, dt);
+
+    for (auto it = m->Entities.begin(); it != m->Entities.end();) {
+        ParticleSystemInstance& inst = *it->second;
         inst.Synced = false;
         if (inst.Orphan && !inst.AliveTree()) it = m->Entities.erase(it);
         else ++it;
     }
-    m->PendingEmit.clear();
-    for (auto& [id, inst] : m->Streams) m->StepTree(*inst, dt);
-    for (auto& inst : m->OneShots) m->StepTree(*inst, dt);
     m->OneShots.erase(std::remove_if(m->OneShots.begin(), m->OneShots.end(),
                                      [](const std::unique_ptr<ParticleSystemInstance>& i) { return !i->AliveTree(); }),
                       m->OneShots.end());
