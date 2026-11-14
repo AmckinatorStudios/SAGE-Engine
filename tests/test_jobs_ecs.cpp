@@ -181,11 +181,11 @@ TEST(EcsGraph_run_after_orders_and_cycle_is_reported) {
 
     // Цикл: x после y, y после x — граф строится без явных рёбер, с ошибкой.
     sage::SystemScheduler c;
-    int ran = 0;
+    std::atomic<int> ran{0};  // без явного порядка x и y законно идут одновременно
     c.Add(Stage::Update, "x", [&](Scene&, float) { ++ran; }, SystemAccess::Parallel().RunAfter("y"));
     c.Add(Stage::Update, "y", [&](Scene&, float) { ++ran; }, SystemAccess::Parallel().RunAfter("x"));
     c.Run(scene, 0.016f);
-    CHECK_EQ(ran, 2);  // кадр не потерян
+    CHECK_EQ(ran.load(), 2);  // кадр не потерян
     CHECK_FALSE(c.GraphError().empty());
 }
 

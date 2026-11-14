@@ -40,8 +40,11 @@ public:
         Ring* r = m_ring.load(std::memory_order_relaxed);
         if (b - t > r->Capacity - 1) r = Grow(r, b, t);
         r->Put(b, item);
-        std::atomic_thread_fence(std::memory_order_release);
-        m_bottom.store(b + 1, std::memory_order_relaxed);
+        // Публикация элемента: release-запись низа. В статье здесь барьер +
+        // relaxed-запись; release-запись не слабее, на x86 ничего не стоит, и
+        // её понимает ThreadSanitizer (отдельные барьеры он не моделирует и
+        // видел бы гонку на содержимом задачи у вора).
+        m_bottom.store(b + 1, std::memory_order_release);
     }
 
     // Только владелец. nullptr — пусто (или последний элемент увёл вор).
