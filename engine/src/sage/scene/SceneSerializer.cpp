@@ -21,6 +21,7 @@
 #include "sage/ui/UIPart.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISerialize.h"
+#include "sage/ui/InterfaceSource.h"
 #include "sage/scene/SceneJson.h"
 #include "sage/scene/ComponentRegistry.h"
 #include "sage/scene/SceneValueJson.h"
@@ -71,6 +72,9 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         return reg.get<IdComponent>(a).Id < reg.get<IdComponent>(b).Id;
     });
     for (entt::entity e : entities) {
+        // Развёрнутый из .sageui интерфейс — копия файла, а не часть сцены
+        // (sage/ui/InterfaceSource.h): в сцену пишется только ссылка на файл.
+        if (reg.all_of<sage::ui::InterfaceInstanceTag>(e)) continue;
         const Transform& tr = reg.get<Transform>(e);
         // Указатель, а не ссылка: MeshRenderer есть НЕ У ВСЕХ. Пустой объект
         // (узел иерархии, точка привязки, держатель скрипта) его не несёт, и
@@ -222,6 +226,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         if (const sage::ui::InterfaceComponent* ic =
                 reg.try_get<sage::ui::InterfaceComponent>(e)) {
             json ij;
+            SaveAssetRef(ij, "source", ic->Source);
             ij["visible"] = ic->Visible;
             ij["sortOrder"] = ic->SortOrder;
             ij["receivesInput"] = ic->ReceivesInput;
@@ -410,6 +415,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("interface")) {
             const json& ij = j["interface"];
             sage::ui::InterfaceComponent ic;
+            ic.Source = LoadAssetRef(ij, "source");
             ic.Visible = ij.value("visible", true);
             ic.SortOrder = ij.value("sortOrder", 0);
             ic.ReceivesInput = ij.value("receivesInput", true);
@@ -466,6 +472,9 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
     // Интерфейс старого вида (раскладка «галкой» у видимого элемента, старые
     // имена типов) — к нынешнему. После SetNextId: деление заводит объекты.
     sage::ui::NormalizeElements(*scene);
+    // Интерфейсы из файлов — сразу, а не с первым кадром: скрипт, стартующий
+    // вместе со сценой, ищет кнопки меню по имени, и они обязаны уже быть.
+    sage::ui::SyncInterfaceSources(*scene);
     scene->Lighting = LightingFromJson(root);
     scene->Reflections = ReflectionsFromJson(root);
     if (root.contains("gi")) scene->GI = GIFromJson(root["gi"]);

@@ -163,10 +163,16 @@ public:
     int CurrentInterfaceId() const override { return m_currentInterface; }
     void SetCurrentInterface(int id) override { m_currentInterface = id; }
     sage::ui::UIScope UiScope() const override;
-    // Выбирает интерфейс, с которым работать: прежний, если он ещё жив; иначе
-    // тот, которому принадлежит выделенное; иначе первый в сцене. Зовётся при
-    // входе в пространство вёрстки и при смене сцены.
-    void ResolveCurrentInterface();
+
+    bool OpenInterface(const std::string& assetRef) override;
+    bool OpenInterfaceObject(int objectId) override;
+    void NewInterfaceDocument() override;
+    bool SaveInterfaceDocument() override;
+    const std::string& InterfaceDocumentPath() const override { return m_uiDocPath; }
+    bool HasInterfaceDocument() const override { return m_uiDocOpen; }
+    bool InterfaceDocumentDirty() const override {
+        return m_uiDocActive ? m_sceneDirty : m_uiDocDirty;
+    }
 
     void OpenAnimationClip(const std::string& clipPath) override {
         m_panels[EditorPanel::Animation] = true;
@@ -351,7 +357,9 @@ public:
     std::string CurrentSceneName() const override {
         return m_scenePath.empty() ? m_scene->Name() : m_scenePath.filename().string();
     }
-    bool SceneDirty() const override { return m_sceneDirty; }
+    // Изменённость УРОВНЯ: пока на месте сцены документ интерфейса, флаг
+    // уровня ждёт вместе с ним (см. SwapInterfaceDocument).
+    bool SceneDirty() const override { return m_uiDocActive ? m_uiDocDirty : m_sceneDirty; }
     void AssetsDeleted(const std::vector<std::filesystem::path>& paths) override;
 
     uint64_t GameTexture() const override { return m_renderer.GameTexture(); }
@@ -429,6 +437,11 @@ private:
 public:
     void RequestDialog(const char* id) override { m_pendingDialog = id; }
     void SaveCurrentScene() override {
+        // Ctrl+S в пространстве «Интерфейс» сохраняет то, что там правят.
+        if (m_uiDocActive) {
+            SaveInterfaceDocument();
+            return;
+        }
         if (m_scenePath.empty()) RequestDialog("Save Scene As");
         else SaveSceneToFile(m_scenePath);
     }
@@ -676,6 +689,30 @@ private:
     // Историю со сценой знакомит слой: она умеет снять снимок и применить
     // снимок, а КАК это делается — знание сериализатора и сцены, не истории.
     EditorHistory m_history;
+
+    // --- Документ интерфейса (EditorLayer_InterfaceDoc.cpp) ---
+    //
+    // ДВЕ СЦЕНЫ, ОДНА НА МЕСТЕ. Пространство «Интерфейс» правит файл .sageui
+    // (см. EditorHost::OpenInterface), и пока оно на экране, на месте m_scene
+    // стоит документ, а уровень ждёт в m_uiDocOther — вместе со своей
+    // историей, флагом изменённости и выбранным интерфейсом. Переход между
+    // пространствами меняет их местами (SwapInterfaceDocument). Так каждая
+    // правка, отмена, удаление и дублирование редактора работают с документом
+    // без второй копии кода, а уровень не видит ни одной из них.
+    std::unique_ptr<Scene> m_uiDocOther;   // то, что сейчас НЕ на месте m_scene
+    EditorHistory m_uiDocHistory;          // история того, что не на месте
+    bool m_uiDocDirty = false;             // изменённость того, что не на месте
+    int m_uiDocInterface = -1;             // m_currentInterface того, что не на месте
+    bool m_uiDocOpen = false;              // документ вообще есть
+    bool m_uiDocActive = false;            // документ стоит на месте m_scene
+    std::string m_uiDocPath;               // ссылка на файл; пусто — ещё без файла
+
+    void SwapInterfaceDocument();
+    // Закрыть документ. save — сохранить изменения (у документа без файла —
+    // только если есть проект, куда его положить).
+    void CloseInterfaceDocument(bool save = true);
+    // Поставить готовый документ на место (сцена документа уже собрана).
+    void AdoptInterfaceDocument(std::unique_ptr<Scene> doc, const std::string& path);
 
     // --- выбор и замок инспектора (см. EditorSelection.h); размеры окон
     //     живут в m_renderer ---

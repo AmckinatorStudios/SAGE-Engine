@@ -32,6 +32,7 @@ add_executable(SageEditor WIN32
     src/EditorTools.cpp
     src/EditorLayer_Assets.cpp
     src/EditorLayer_Ui.cpp
+    src/EditorLayer_InterfaceDoc.cpp
     src/CursorCapture.cpp
     src/EditorLayer_Panels.cpp
     src/PanelRegistry.cpp
@@ -142,6 +143,7 @@ add_executable(SageEditor WIN32
     src/Progress.cpp
     src/TextureSet.cpp
     src/UIElementProperties.cpp
+    src/InterfaceProperties.cpp
     src/UIElementProperties_Layout.cpp
     src/VarsEditor.cpp
     src/SignalLinksEditor.cpp

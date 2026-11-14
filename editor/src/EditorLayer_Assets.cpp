@@ -14,6 +14,8 @@
 #include "ModelHierarchy.h"
 #include <limits>
 #include "EditorLayer.h"
+#include "sage/ui/InterfaceSource.h"
+#include "sage/ui/UI.h"
 #include <sstream>
 #include "sage/scene/VisualScriptComponent.h"
 #include "sage/scene/AiAgentComponent.h"
@@ -448,6 +450,17 @@ bool EditorLayer::AddAssetToScene(const fs::path& asset) {
         GameObject obj = m_scene->CreateObject(asset.stem().string());
         ReportModelMaterials(SetEntityMesh(m_project, m_scene->Registry(), obj.Entity(),
                                            MeshRef::Type::Model, ref, std::move(mesh)));
+        newId = obj.Id();
+    } else if (ext == sage::ui::kInterfaceExtension) {
+        // ИНТЕРФЕЙС — ОДНИМ ОБЪЕКТОМ со ссылкой на файл: его элементы
+        // развернутся сами (sage/ui/InterfaceSource.h) и в сцену не запишутся.
+        if (m_uiDocActive) return false;   // в вёрстке сцены нет — класть некуда
+        PushUndoSnapshot();
+        GameObject obj = m_scene->CreateEmptyObject(asset.stem().string());
+        sage::ui::InterfaceComponent ic;
+        ic.Source = ref;
+        m_scene->Registry().emplace<sage::ui::InterfaceComponent>(obj.Entity(), ic);
+        sage::ui::SyncInterfaceSources(*m_scene);
         newId = obj.Id();
     } else {
         return false;

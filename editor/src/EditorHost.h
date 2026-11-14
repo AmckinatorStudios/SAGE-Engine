@@ -193,6 +193,27 @@ public:
     virtual int CurrentInterfaceId() const = 0;
     virtual void SetCurrentInterface(int id) = 0;
 
+    // --- ДОКУМЕНТ ИНТЕРФЕЙСА ------------------------------------------------
+    //
+    // Пространство «Интерфейс» правит ФАЙЛ .sageui, а не сцену: пока оно на
+    // экране, CurrentScene() — это документ (главный контейнер и его
+    // элементы), а сцена уровня ждёт в стороне со своей историей правок. В
+    // сцене интерфейс — один объект со ссылкой на файл (InterfaceComponent::
+    // Source), и его содержимое там не правится.
+    //
+    // Открыть файл (ссылка на ассет) в пространстве «Интерфейс».
+    virtual bool OpenInterface(const std::string& assetRef) = 0;
+    // Открыть интерфейс объекта сцены. Интерфейс старого вида (элементы прямо
+    // в сцене) сначала выносится в свой файл.
+    virtual bool OpenInterfaceObject(int objectId) = 0;
+    // Новый пустой документ (без файла: файл появится при сохранении).
+    virtual void NewInterfaceDocument() = 0;
+    virtual bool SaveInterfaceDocument() = 0;
+    // Ссылка на файл открытого документа; пусто — документ без файла или его нет.
+    virtual const std::string& InterfaceDocumentPath() const = 0;
+    virtual bool HasInterfaceDocument() const = 0;
+    virtual bool InterfaceDocumentDirty() const = 0;
+
     // Область работы для расчётов интерфейса: в пространстве вёрстки — только
     // текущий интерфейс, в пространстве сцены — всё, как в игре.
     virtual sage::ui::UIScope UiScope() const = 0;
@@ -240,7 +261,7 @@ public:
     // --- сущности ---
     virtual GameObject CreateCubeEntity(const std::string& name) = 0;
     // Создаёт объект по ключу КАТАЛОГА (editor/src/ObjectCatalog.h): "empty",
-    // "shape.cube", "light.spot", "fx.particles.fire", "ui.screen.hud", …
+    // "shape.cube", "light.spot", "fx.particles.fire", "ui.interface", …
     // Возвращает id созданного объекта или -1, если ключ неизвестен.
     //
     // Ключом, а не набором методов на каждый пункт: список объектов правят

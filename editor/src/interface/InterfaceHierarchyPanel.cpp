@@ -15,11 +15,17 @@
 #include "InterfaceWidgets.h"
 #include "../Localization.h"
 #include "../PanelWindows.h"
+#include "../FsCache.h"
+#include "../Project.h"
 #include "../ui/UI.h"
 
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/ui/UI.h"
+#include "sage/core/Paths.h"
+#include "sage/ui/InterfaceSource.h"
+#include "sage/ui/UISceneSystem.h"
+#include <filesystem>
 
 namespace uiclip = sage::editor::uiclipboard;
 namespace ui = sage::ui;
@@ -153,22 +159,23 @@ void InterfaceHierarchyPanel::Draw(EditorHost& host, bool& open) {
 
     ImGui::BeginChild("##ui_tree_scroll");
     const std::vector<entt::entity> roots = Roots(host, scene);
+    // У интерфейса один корень — главный контейнер, и встать РЯДОМ с ним
+    // нельзя: полосы броска между корнями есть только у интерфейса старого вида.
+    const bool single = roots.size() == 1 && ui::IsMainContainer(scene, roots.front());
     for (size_t i = 0; i < roots.size(); ++i) {
-        DropGap(host, scene, roots[i], entt::null);
+        if (!single) DropGap(host, scene, roots[i], entt::null);
         DrawNode(host, scene, roots[i], 0);
     }
-    if (!roots.empty()) DropGap(host, scene, entt::null, entt::null);
+    if (!roots.empty() && !single) DropGap(host, scene, entt::null, entt::null);
 
     if (roots.empty()) {
         ImGui::Spacing();
-        if (host.CurrentInterfaceId() < 0) {
-            // Интерфейсов в сцене нет вовсе. Предлагаем завести — а не молчим:
-            // «элементов нет» при отсутствующем интерфейсе отвечает не на тот
-            // вопрос, с которым сюда пришли.
-            ImGui::TextDisabled("%s", T("No interface in the scene yet."));
-            if (EditorIcons::Button("plus", T("Create interface"),
-                                    T("An interface object: its elements live inside it")))
-                CreateInterface(host);
+        if (!host.HasInterfaceDocument()) {
+            // Документа нет — предлагаем завести, а не молчим.
+            ImGui::TextDisabled("%s", T("No interface is open."));
+            if (EditorIcons::Button("plus", T("New interface"),
+                                    T("A new interface: one main container, everything else inside it")))
+                host.NewInterfaceDocument();
         } else {
             ImGui::TextDisabled("%s", T("No interface elements yet."));
             ImGui::TextDisabled("%s", T("Add one with Create above."));
@@ -202,71 +209,51 @@ void InterfaceHierarchyPanel::Draw(EditorHost& host, bool& open) {
 
 // ЧТО ИМЕННО ВЕРСТАЕМ — ПЕРВОЙ СТРОКОЙ ПАНЕЛИ.
 //
-// Интерфейсов в сцене может быть сколько угодно, и работают всегда с одним.
-// Раньше выбора не было вовсе: дерево показывало все сразу, и «переключиться
-// на другое меню» означало спрятать чужие объекты. Теперь это список: выбрал —
-// и дерево, холст и инспектор показывают именно его.
+// Пространство правит ОДИН файл .sageui. Его имя — первой строкой (со
+// звёздочкой, если есть несохранённое), а в списке — другие интерфейсы
+// проекта и «новый». Выбор открывает файл, прежний сохраняется сам.
 void InterfaceHierarchyPanel::DrawInterfacePicker(EditorHost& host) {
-    Scene& scene = host.CurrentScene();
-    entt::registry& reg = scene.Registry();
+    namespace fs = std::filesystem;
+    const std::string& path = host.InterfaceDocumentPath();
+    std::string current = path.empty() ? std::string(T("New interface"))
+                                       : fs::path(sage::PathFromUtf8(path)).stem().string();
+    if (host.InterfaceDocumentDirty()) current += "*";
 
-    struct Row {
-        int Id = 0;
-        std::string Name;
-    };
-    std::vector<Row> rows;
-    for (entt::entity e : ui::SortedInterfaces(scene)) {
-        const IdComponent* id = reg.try_get<IdComponent>(e);
-        const NameComponent* name = reg.try_get<NameComponent>(e);
-        if (!id) continue;
-        rows.push_back({id->Id, name ? name->Name : std::string("Interface")});
-    }
-    // Элементы без интерфейса — отдельной строкой, а не подмешанные к чужому
-    // экрану: их собирает код или скрипт, и они существуют сами по себе.
-    if (!ui::InterfaceRoots(scene, entt::null).empty()) rows.push_back({0, T("No interface")});
-
-    std::string current = T("Nothing to edit");
-    for (const Row& r : rows)
-        if (r.Id == host.CurrentInterfaceId()) current = r.Name;
-
-    ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() - ImGui::GetStyle().ItemSpacing.x);
+    ImGui::SetNextItemWidth(-ImGui::GetFrameHeight() * 2.0f - ImGui::GetStyle().ItemSpacing.x * 2.0f);
     if (ImGui::BeginCombo("##interface", current.c_str())) {
-        for (const Row& r : rows) {
-            const bool selected = r.Id == host.CurrentInterfaceId();
-            if (ImGui::Selectable(r.Name.c_str(), selected)) {
-                host.SetCurrentInterface(r.Id);
-                // Выделение сбрасывается: выбранный элемент принадлежал
-                // ПРОШЛОМУ интерфейсу, и инспектор показывал бы чужое.
-                host.Selection().Clear();
+        // Файлы проекта — через кэш папок (FsCache): список рисуется каждый
+        // кадр, пока открыт, а на диск ходить каждый кадр нельзя.
+        std::vector<fs::path> files;
+        if (host.CurrentProject().Loaded()) {
+            std::vector<fs::path> dirs{host.CurrentProject().AssetsDir()};
+            for (size_t i = 0; i < dirs.size() && i < 256; ++i) {
+                const auto& listing = sage::editor::fscache::List(dirs[i]);
+                dirs.insert(dirs.end(), listing.Dirs.begin(), listing.Dirs.end());
+                for (const fs::path& f : listing.Files)
+                    if (f.extension() == ui::kInterfaceExtension) files.push_back(f);
             }
+        }
+        std::sort(files.begin(), files.end());
+        for (const fs::path& f : files) {
+            const std::string ref = host.CurrentProject().AssetRef(f);
+            const bool selected = ref == path;
+            if (ImGui::Selectable(f.stem().string().c_str(), selected)) host.OpenInterface(ref);
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", ref.c_str());
             if (selected) ImGui::SetItemDefaultFocus();
         }
-        // ИМЕННО EndCombo, а не EndPopup. Разница не косметическая: EndCombo
-        // ещё и уменьшает счётчик глубины списков ImGui, по которому тот
-        // ПЕРЕИСПОЛЬЗУЕТ окна («##Combo_00», «##Combo_01» …). С EndPopup
-        // счётчик рос каждый кадр, пока список открыт, и следующий же список
-        // редактора закрывался с проверкой «EndCombo() в чужом окне» — ImGui
-        // прерывал отрисовку окна, и интерфейс редактора разваливался целиком.
+        if (files.empty()) ImGui::TextDisabled("%s", T("No interface files in the project yet"));
+        // ИМЕННО EndCombo, а не EndPopup: EndCombo ещё и уменьшает счётчик
+        // глубины списков ImGui, и без него разваливается СЛЕДУЮЩИЙ список
+        // редактора, а не этот.
         ImGui::EndCombo();
     }
     ImGui::SameLine();
-    // КНОПКА ТОЛЬКО ЗНАЧКОМ. У кнопки со значком и подписью подпись рисуется
-    // как есть — «##new_interface» и печаталось рядом со значком, а ширина
-    // кнопки считалась по этой надписи: кнопка вылезала за правый край панели,
-    // где её обрезал ImGui, и нажатие не доходило («кнопка не работает»).
-    if (EditorIcons::IconOnlyButton("plus", T("New interface in this scene")))
-        CreateInterface(host);
-}
-
-void InterfaceHierarchyPanel::CreateInterface(EditorHost& host) {
-    host.PushUndoSnapshot();
-    Scene& scene = host.CurrentScene();
-    // БЕЗ МЕША: интерфейс ничего не рисует сам, он граница. Объект с
-    // компонентом «Меш» обещал бы модель, цвет и тени, которых у него нет.
-    GameObject obj = scene.CreateEmptyObject("Interface");
-    scene.Registry().emplace<sage::ui::InterfaceComponent>(obj.Entity());
-    host.SetCurrentInterface(obj.Id());
-    host.Selection().SetPrimary(obj.Id());
+    // КНОПКИ ТОЛЬКО ЗНАЧКОМ: у кнопки со значком и подписью «##имя» печаталось
+    // рядом со значком, и кнопка уезжала за край панели.
+    if (EditorIcons::IconOnlyButton("plus", T("New interface"))) host.NewInterfaceDocument();
+    ImGui::SameLine();
+    if (EditorIcons::IconOnlyButton("save", T("Save the interface (Ctrl+S)")))
+        host.SaveInterfaceDocument();
 }
 
 void InterfaceHierarchyPanel::DrawToolbar(EditorHost& host) {
@@ -590,9 +577,13 @@ void InterfaceHierarchyPanel::DrawContextMenu(EditorHost& host, Scene& scene, en
             const NameComponent* name = scene.Registry().try_get<NameComponent>(e);
             std::snprintf(m_renameBuf, sizeof(m_renameBuf), "%s", name ? name->Name.c_str() : "");
         }
-        if (EditorIcons::MenuItem("copy", T("Duplicate"), "Ctrl+D")) host.DuplicateSelected();
+        // Главный контейнер один на интерфейс: копировать, дублировать,
+        // выносить и удалять его нечего — пункты видны, но выключены, чтобы
+        // было понятно, что их нет не по ошибке.
+        const bool main = ui::IsMainContainer(scene, e);
+        if (EditorIcons::MenuItem("copy", T("Duplicate"), "Ctrl+D", !main)) host.DuplicateSelected();
         ImGui::Separator();
-        if (EditorIcons::MenuItem("copy", T("Copy"), "Ctrl+C"))
+        if (EditorIcons::MenuItem("copy", T("Copy"), "Ctrl+C", !main))
             uiclip::Copy(scene, SelectedEntities(host, scene));
         if (EditorIcons::MenuItem("paste", T("Paste"), "Ctrl+V")) {
             host.PushUndoSnapshot();
@@ -612,12 +603,14 @@ void InterfaceHierarchyPanel::DrawContextMenu(EditorHost& host, Scene& scene, en
             box.Locked = !box.Locked;
         }
         if (EditorIcons::MenuItem("up", T("Detach to root"), nullptr,
-                                  scene.ParentOf(e) != entt::null)) {
+                                  ui::CanReparent(scene, e, entt::null) &&
+                                      ui::IsElement(scene.Registry(), scene.ParentOf(e)) &&
+                                      !ui::IsMainContainer(scene, scene.ParentOf(e)))) {
             host.PushUndoSnapshot();
             ui::ReparentElement(scene, e, entt::null);
         }
         ImGui::Separator();
-        if (EditorIcons::MenuItem("trash", T("Delete"), "Del")) host.DeleteSelected();
+        if (EditorIcons::MenuItem("trash", T("Delete"), "Del", !main)) host.DeleteSelected();
         ImGui::EndPopup();
     }
 }
@@ -648,7 +641,7 @@ void InterfaceHierarchyPanel::HandleShortcuts(EditorHost& host) {
         // панель, вставил — кнопка внутри панели.
         const entt::entity parent = host.SelectedObject().Valid()
                                         ? host.SelectedObject().Entity()
-                                        : entt::null;
+                                        : CurrentInterface(host);
         uiclip::Paste(scene, parent);
     }
     if (ImGui::IsKeyPressed(ImGuiKey_F2, false) && host.SelectedObject().Valid()) {

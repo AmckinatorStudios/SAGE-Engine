@@ -11,6 +11,7 @@
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/ui/UI.h"
+#include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UISerialize.h"
 
 using json = nlohmann::json;
@@ -20,7 +21,43 @@ namespace {
 
 // Версия формата ресурса. Та же дисциплина, что у сцен и сохранений: без
 // номера первое же ломающее изменение молча испортило бы чужие файлы.
-constexpr int kInterfaceVersion = 1;
+//   1 — несколько корней ("roots");
+//   2 — один главный контейнер ("root") и холст ("canvas").
+constexpr int kInterfaceVersion = 2;
+
+// 1 -> 2: корни ложатся в главный контейнер. На экране не меняется ничего:
+// контейнер во весь экран, и дети якорятся к его краям так же, как к краям
+// экрана.
+void UpgradeRootsToMainContainer(json& doc) {
+    InterfaceNode root = Interface::MainContainerNode(doc.value("name", std::string("Interface")));
+    json node;
+    node["name"] = root.Name;
+    node["data"] = root.Data;
+    if (doc.contains("roots") && doc["roots"].is_array() && !doc["roots"].empty())
+        node["children"] = doc["roots"];
+    doc.erase("roots");
+    doc["root"] = std::move(node);
+}
+
+json CanvasToJson(const Canvas& c) {
+    json j;
+    j["mode"] = (int)c.Mode;
+    j["reference"] = {c.Reference.x, c.Reference.y};
+    j["maxScale"] = c.MaxScale;
+    j["match"] = c.MatchWidthOrHeight;
+    return j;
+}
+
+Canvas CanvasFromJson(const json& j) {
+    Canvas c;
+    if (!j.is_object()) return c;
+    c.Mode = (Canvas::Scale)j.value("mode", 0);
+    if (j.contains("reference") && j["reference"].is_array() && j["reference"].size() == 2)
+        c.Reference = {j["reference"][0].get<float>(), j["reference"][1].get<float>()};
+    c.MaxScale = j.value("maxScale", 0);
+    c.MatchWidthOrHeight = j.value("match", 0.5f);
+    return c;
+}
 
 json NodeToJson(const InterfaceNode& n) {
     json j;
@@ -77,25 +114,43 @@ InterfaceNode Snap(const Scene& scene, entt::entity e) {
 
 } // namespace
 
+InterfaceNode Interface::MainContainerNode(const std::string& name) {
+    // Через реестр, а не руками в JSON: запись элемента одна
+    // (sage/ui/UISerialize.h), и вторая копия её формата здесь разошлась бы с
+    // ней на первом же новом поле.
+    entt::registry reg;
+    const entt::entity e = reg.create();
+    Element& el = reg.emplace<Element>(e);
+    el.Type = "Group";
+    el.Mode = Element::Stretch::Both;
+    el.Position = {0.0f, 0.0f};
+    InterfaceNode n;
+    n.Name = name.empty() ? std::string("Interface") : name;
+    SaveElement(n.Data, reg, e);
+    return n;
+}
+
 std::string Interface::ToJsonString() const {
     json root;
     root["sage_interface_version"] = kInterfaceVersion;
     root["name"] = Name;
-    json roots = json::array();
-    for (const InterfaceNode& n : Roots) roots.push_back(NodeToJson(n));
-    root["roots"] = std::move(roots);
+    root["canvas"] = CanvasToJson(Canvas);
+    root["root"] = NodeToJson(Root);
     return root.dump(2);
 }
 
 bool Interface::FromJsonString(const std::string& text, Interface& out, std::string& err) {
     try {
         json root = json::parse(text);
-        static const sage::format::Spec spec{"sage_interface_version", kInterfaceVersion, "интерфейс", {}};
+        static const sage::format::Spec spec{
+            "sage_interface_version", kInterfaceVersion, "интерфейс",
+            {{1, UpgradeRootsToMainContainer}}};
         if (!sage::format::Upgrade(root, spec, err)) return false;
         out = Interface{};
         out.Name = root.value("name", std::string("Interface"));
-        if (root.contains("roots") && root["roots"].is_array())
-            for (const json& n : root["roots"]) out.Roots.push_back(NodeFromJson(n));
+        if (root.contains("canvas")) out.Canvas = CanvasFromJson(root["canvas"]);
+        if (root.contains("root") && root["root"].is_object()) out.Root = NodeFromJson(root["root"]);
+        else out.Root = MainContainerNode(out.Name);
         return true;
     } catch (const std::exception& e) {
         err = e.what();
@@ -110,6 +165,10 @@ bool Interface::SaveFile(const std::string& path, std::string& err) const {
         return false;
     }
     f << ToJsonString() << '\n';
+    if (!f) {
+        err = "не удалось записать: " + path;
+        return false;
+    }
     return true;
 }
 
@@ -122,47 +181,103 @@ bool Interface::LoadFile(const std::string& path, Interface& out, std::string& e
     return FromJsonString(text, out, err);
 }
 
-std::vector<entt::entity> Instantiate(Scene& scene, const Interface& ui, entt::entity parent) {
-    entt::registry& reg = scene.Registry();
+std::string InterfaceFragment::ToJsonString() const {
+    json root;
+    root["sage_interface_fragment"] = 1;
+    json nodes = json::array();
+    for (const InterfaceNode& n : Nodes) nodes.push_back(NodeToJson(n));
+    root["nodes"] = std::move(nodes);
+    return root.dump();
+}
 
-    // КУДА ЛЯЖЕТ РЕСУРС — зависит от того, КУДА его разворачивают.
-    //
-    //   • в элемент или в готовый интерфейс — прямо туда: контекст уже задан,
-    //     и заводить внутри чужого экрана ещё один значит строить матрёшку там,
-    //     где человек просто вставил скопированную кнопку;
-    //   • в пустое место (или в обычный объект сцены) — СВОИМ интерфейсом.
-    //     Два окна инвентаря рядом — это один ресурс, развёрнутый дважды, и без
-    //     своей границы их элементы оказались бы в одном дереве редактора
-    //     вперемешку: ровно та беда, ради которой интерфейс и стал объектом.
-    const bool intoContext = parent != entt::null && reg.valid(parent) &&
-                             (reg.all_of<Element>(parent) || reg.all_of<InterfaceComponent>(parent));
-    entt::entity container = parent;
-    if (!intoContext) {
-        GameObject obj = scene.CreateEmptyObject(ui.Name.empty() ? "Interface" : ui.Name);
-        reg.emplace<InterfaceComponent>(obj.Entity());
-        if (parent != entt::null) scene.SetParent(obj.Entity(), parent);
-        container = obj.Entity();
-    }
+bool InterfaceFragment::FromJsonString(const std::string& text, InterfaceFragment& out) {
+    json root = json::parse(text, nullptr, /*allow_exceptions=*/false);
+    if (root.is_discarded() || !root.is_object() || !root.contains("nodes") ||
+        !root["nodes"].is_array())
+        return false;
+    out = InterfaceFragment{};
+    for (const json& n : root["nodes"]) out.Nodes.push_back(NodeFromJson(n));
+    return true;
+}
 
-    std::vector<entt::entity> roots;
-    // Наружу отдаются КОРНИ — те, у кого нет родителя-элемента. Вставка внутрь
-    // элемента корней не даёт: корень там перестаёт быть корнем.
-    const bool exposeRoots = !(parent != entt::null && reg.valid(parent) && reg.all_of<Element>(parent));
-    for (const InterfaceNode& n : ui.Roots) Build(scene, n, container, roots, exposeRoots);
+entt::entity BuildMainContainer(Scene& scene, const Interface& ui, entt::entity interfaceEntity) {
+    std::vector<entt::entity> made;
+    Build(scene, ui.Root, interfaceEntity, made, /*isRoot=*/true);
     // Ресурс, сохранённый до разделения элементов и контейнеров, приходит со
     // старыми типами — приводим так же, как сцену.
     NormalizeElements(scene);
-    return roots;
+    return made.empty() ? entt::null : made.front();
 }
 
-Interface Capture(const Scene& scene, const std::vector<entt::entity>& roots) {
+entt::entity Instantiate(Scene& scene, const Interface& ui, entt::entity parent) {
+    entt::registry& reg = scene.Registry();
+    GameObject obj = scene.CreateEmptyObject(ui.Name.empty() ? "Interface" : ui.Name);
+    InterfaceComponent& ic = reg.emplace<InterfaceComponent>(obj.Entity());
+    ic.Canvas = ui.Canvas;
+    if (parent != entt::null && reg.valid(parent)) scene.SetParent(obj.Entity(), parent);
+    BuildMainContainer(scene, ui, obj.Entity());
+    return obj.Entity();
+}
+
+Interface Capture(const Scene& scene, entt::entity interfaceEntity) {
     Interface out;
     const entt::registry& reg = scene.Registry();
-    for (entt::entity e : roots) {
-        if (!reg.try_get<Element>(e)) continue;
-        out.Roots.push_back(Snap(scene, e));
+    if (interfaceEntity == entt::null || !reg.valid(interfaceEntity)) return out;
+    if (const NameComponent* nc = reg.try_get<NameComponent>(interfaceEntity)) out.Name = nc->Name;
+    if (const InterfaceComponent* ic = reg.try_get<InterfaceComponent>(interfaceEntity))
+        out.Canvas = ic->Canvas;
+    // Правило «что считать главным контейнером» — одно (UISceneSystem.h).
+    const entt::entity main = MainContainer(const_cast<Scene&>(scene), interfaceEntity);
+    if (main != entt::null) {
+        out.Root = Snap(scene, main);
+        return out;
     }
+    std::vector<entt::entity> kids;
+    if (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(interfaceEntity))
+        for (entt::entity c : h->Children)
+            if (reg.valid(c) && reg.all_of<Element>(c)) kids.push_back(c);
+    // Старый вид — корни кладутся в главный контейнер.
+    out.Root = Interface::MainContainerNode(out.Name);
+    for (entt::entity c : kids) out.Root.Children.push_back(Snap(scene, c));
     return out;
+}
+
+InterfaceFragment CaptureFragment(const Scene& scene, const std::vector<entt::entity>& roots) {
+    InterfaceFragment out;
+    const entt::registry& reg = scene.Registry();
+    for (entt::entity e : roots)
+        if (reg.valid(e) && reg.all_of<Element>(e)) out.Nodes.push_back(Snap(scene, e));
+    return out;
+}
+
+std::vector<entt::entity> InstantiateFragment(Scene& scene, const InterfaceFragment& frag,
+                                              entt::entity parent) {
+    entt::registry& reg = scene.Registry();
+    // КУДА ЛЯЖЕТ ФРАГМЕНТ — зависит от того, КУДА его вставляют.
+    //
+    //   • в элемент — прямо туда;
+    //   • в объект-интерфейс — в его главный контейнер (если он есть): всё
+    //     содержимое интерфейса живёт внутри главного контейнера;
+    //   • в пустое место (или в обычный объект сцены) — СВОИМ интерфейсом,
+    //     иначе вставленное оказалось бы вне всех экранов и пропало из дерева.
+    entt::entity container = parent;
+    const bool valid = parent != entt::null && reg.valid(parent);
+    if (valid && !reg.all_of<Element>(parent) && reg.all_of<InterfaceComponent>(parent)) {
+        const entt::entity main = MainContainer(scene, parent);
+        if (main != entt::null) container = main;
+    } else if (!valid || !reg.all_of<Element>(parent)) {
+        GameObject obj = scene.CreateEmptyObject("Interface");
+        reg.emplace<InterfaceComponent>(obj.Entity());
+        if (valid) scene.SetParent(obj.Entity(), parent);
+        container = obj.Entity();
+    }
+    // Наружу отдаются КОРНИ. Вставка внутрь элемента корней не даёт: там
+    // вставленное корнем быть перестаёт.
+    const bool expose = !(valid && reg.all_of<Element>(parent));
+    std::vector<entt::entity> roots;
+    for (const InterfaceNode& n : frag.Nodes) Build(scene, n, container, roots, expose);
+    NormalizeElements(scene);
+    return roots;
 }
 
 } // namespace sage::ui

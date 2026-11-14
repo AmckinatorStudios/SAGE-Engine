@@ -91,29 +91,16 @@ Group Catalog() {
          },
          {}},
 
+        // ИНТЕРФЕЙС В СЦЕНЕ — ОДИН ОБЪЕКТ со ссылкой на файл .sageui. Элементы
+        // (кнопки, надписи, панели) создаются в пространстве «Интерфейс», а не
+        // россыпью в сцене: иначе у экрана было бы два места правки, и правка
+        // в сцене не доходила бы до файла.
         {T("Interface"),
-         {},
          {
-             {T("Elements"),
-              {
-                  {"ui.Panel",    T("Panel"),    T("A background: colour or your own picture")},
-                  {"ui.Button",   T("Button"),   T("Backing, caption and a reaction to the mouse")},
-                  {"ui.Label",    T("Label"),    T("Line of text")},
-                  {"ui.Image",    T("Image"),    T("Picture from the project")},
-                  {"ui.Bar",      T("Progress Bar"), T("Fill level: health, loading, progress")},
-                  {"ui.Checkbox", T("Checkbox"), T("On/off switch")},
-                  {"ui.Slider",   T("Slider"),   T("Value picked by dragging")},
-                  {"ui.Input",    T("Input"),    T("Text field")},
-              },
-              {}},
-             {T("Screens"),
-              {
-                  {"ui.screen.menu",     T("Main menu"),  T("Ready screen: title and a column of buttons")},
-                  {"ui.screen.hud",      T("HUD"),        T("Health, ammo and a crosshair over the game")},
-                  {"ui.screen.settings", T("Settings"),   T("Sound, quality and controls on one screen")},
-              },
-              {}},
-         }},
+             {"ui.interface", T("Interface"),
+              T("A .sageui file shown in the scene: its elements are edited in the Interface workspace")},
+         },
+         {}},
     };
     return root;
 }
@@ -135,10 +122,7 @@ const char* IconForId(const char* id) {
         {"light.sun", "sun"},         {"light.point", "light"}, {"light.spot", "cone"},
         {"light.area", "ui-panel"},
         {"fx.probe", "probe"},        {"fx.decal", "texture"},
-        {"ui.Panel", "ui-panel"},     {"ui.Button", "ui-button"},
-        {"ui.Label", "ui-text"},      {"ui.Image", "ui-image"},
-        {"ui.Bar", "ui-bar"},         {"ui.Checkbox", "ui-check"},
-        {"ui.Slider", "ui-slider"},   {"ui.Input", "ui-input"},
+        {"ui.interface", "layout"},
     };
     for (const Row& r : kExact) {
         if (std::strcmp(id, r.Id) == 0) return r.Icon;
@@ -147,7 +131,7 @@ const char* IconForId(const char* id) {
     static const Row kPrefix[] = {
         {"shape.", "cube"},   {"light.", "light"},  {"camera.", "camera"},
         {"logic.", "script"}, {"audio.", "audio"},  {"anim.", "anim"},
-        {"physics.", "physics"}, {"fx.", "particles"}, {"ui.screen.", "ui-screen"},
+        {"physics.", "physics"}, {"fx.", "particles"},
         {"ui.", "ui-empty"},
     };
     for (const Row& r : kPrefix) {

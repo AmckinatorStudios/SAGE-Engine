@@ -3660,6 +3660,26 @@
     "Remove folder": "Убрать папку",
     "Add folder": "Добавить папку",
     "Where it lives": "Где лежит",
-    "skins": "skins"
+    "skins": "skins",
+    "A new interface: one main container, everything else inside it": "Новый интерфейс: один главный контейнер, всё остальное — внутри него",
+    "Create and open": "Создать и открыть",
+    "Display order": "Порядок показа",
+    "Edit the content in the Interface workspace": "Править содержимое в пространстве «Интерфейс»",
+    "Interface file: its elements are edited in the Interface workspace": "Файл интерфейса: его элементы правятся в пространстве «Интерфейс»",
+    "Interface saved: ": "Интерфейс сохранён: ",
+    "Move to a file and open": "Вынести в файл и открыть",
+    "New interface": "Новый интерфейс",
+    "No interface files in the project yet": "В проекте пока нет файлов интерфейса",
+    "No interface is open.": "Интерфейс не открыт.",
+    "Old-style interface: its elements live in the scene. Moving them to a file keeps the look and makes them editable in the Interface workspace.": "Интерфейс старого вида: его элементы лежат в сцене. Вынос в файл сохраняет вид и даёт править их в пространстве «Интерфейс».",
+    "Open Interface": "Открыть интерфейс",
+    "Open a project to move the interface into its own file": "Откройте проект, чтобы вынести интерфейс в свой файл",
+    "Open a project to save the interface": "Откройте проект, чтобы сохранить интерфейс",
+    "Save the interface (Ctrl+S)": "Сохранить интерфейс (Ctrl+S)",
+    "The interface could not be opened: ": "Интерфейс не открылся: ",
+    "The interface was not saved: ": "Интерфейс не сохранён: ",
+    "The main container is the whole interface area: everything else lives inside it.": "Главный контейнер — вся область интерфейса: всё остальное лежит внутри него.",
+    "interface": "интерфейс",
+    "A .sageui file shown in the scene: its elements are edited in the Interface workspace": "Файл .sageui, показанный в сцене: его элементы правятся в пространстве «Интерфейс»"
   }
 }

@@ -88,6 +88,7 @@ std::string KindLabel(const fs::path& path, bool isDir) {
     if (ext == ".slua") return T("SAGE Lua script");
     if (ext == ".sgraph") return T("Script Graph");
     if (ext == ".aigraph") return T("AI Graph");
+    if (ext == ".sageui") return T("Interface");
     if (ext == ".vgraph") return T("Visual Script (old)");
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".fbx" || ext == ".blend" ||
         ext == ".bbmodel" || ext == ".sagemesh")
@@ -116,6 +117,7 @@ AssetStyle StyleForPath(const fs::path& path, bool isDir) {
     if (ext == ".slua") return { ImVec4(0.40f, 0.85f, 0.75f, 1.0f), "slua", "script" };
     if (ext == ".sgraph" || ext == ".vgraph") return { ImVec4(0.45f, 0.70f, 0.98f, 1.0f), "graph", "wire" };
     if (ext == ".aigraph") return { ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "ai", "wire" };
+    if (ext == ".sageui") return { ImVec4(0.55f, 0.85f, 0.60f, 1.0f), "ui", "layout" };
     if (ext == ".obj" || ext == ".gltf" || ext == ".glb" || ext == ".fbx" || ext == ".blend" ||
         ext == ".bbmodel" || ext == ".sagemesh")
         return { ImVec4(0.70f, 0.55f, 0.92f, 1.0f), ext.substr(1), "model" };
@@ -527,6 +529,7 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
                 case OpenAs::Clip: openLabel = T("Open in the animation tool"); openIcon = "anim"; break;
                 case OpenAs::AiGraph: openLabel = T("Open in AI Graph"); openIcon = "wire"; break;
                 case OpenAs::VisualScript: openLabel = T("Open in Script Graph"); openIcon = "wire"; break;
+                case OpenAs::Interface: openLabel = T("Open Interface"); openIcon = "layout"; break;
                 case OpenAs::Text: openLabel = T("Open in the code editor"); openIcon = "code"; break;
                 case OpenAs::None: break;
             }

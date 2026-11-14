@@ -283,6 +283,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/SpriteSheet.cpp
     src/sage/ui/UISerialize.cpp
     src/sage/ui/Interface.cpp
+    src/sage/ui/InterfaceSource.cpp
     src/sage/ui/UIRenderer.cpp
     src/sage/ui/UIIcons.cpp
     src/sage/ui/UISceneSystem.cpp

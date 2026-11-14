@@ -174,7 +174,11 @@ void EditorLayer::RegisterCommands() {
 EditorLayer::EditorLayer()
     : sage::Layer("Editor"),
       m_history([this] { return SceneSerializer::SaveToString(*m_scene); },
-                [this](const std::string& snapshot) { return RestoreSceneFromString(snapshot); }) {}
+                [this](const std::string& snapshot) { return RestoreSceneFromString(snapshot); }),
+      // Та же пара функций: обе истории работают с ТЕМ, что стоит на месте
+      // m_scene, и меняются местами вместе со сценами (SwapInterfaceDocument).
+      m_uiDocHistory([this] { return SceneSerializer::SaveToString(*m_scene); },
+                     [this](const std::string& snapshot) { return RestoreSceneFromString(snapshot); }) {}
 
 void EditorLayer::OnAttach() {
     InitImGui();
@@ -188,6 +192,10 @@ void EditorLayer::OnAttach() {
 }
 
 void EditorLayer::OnDetach() {
+    // Документ интерфейса: вопрос о несохранённом при выходе задаётся про
+    // уровень, и правки вёрстки иначе пропали бы молча — сохраняем их туда,
+    // откуда документ открыт (новый — в папку интерфейсов проекта).
+    CloseInterfaceDocument();
     // Список строк, которым не нашлось перевода. Без него новая панель молча
     // выходит по-английски, и узнаётся об этом от пользователя, а не от
     // проверки: SAGE_EDITOR_L10N_MISSING=<файл> выгружает их при выходе.
@@ -239,10 +247,12 @@ void EditorLayer::OnUpdate(float dt) {
     //
     // Только в режиме правки: во время Play сцена живёт по игровым правилам, и
     // сохранять её состояние значило бы записывать середину игры вместо уровня.
-    m_recovery.Tick(dt, m_sceneDirty && m_scene != nullptr, m_play.Active(),
+    // Страхуется УРОВЕНЬ: пока на месте m_scene документ интерфейса, уровень
+    // лежит в m_uiDocOther (см. SwapInterfaceDocument).
+    m_recovery.Tick(dt, SceneDirty() && m_scene != nullptr, m_play.Active(),
                     [this](const std::string& path) {
                         try {
-                            SceneSerializer::Save(*m_scene, path);
+                            SceneSerializer::Save(m_uiDocActive ? *m_uiDocOther : *m_scene, path);
                             return true;
                         } catch (const std::exception& e) {
                             LOG_WARN("Editor") << "Автосохранение не удалось: " << e.what();

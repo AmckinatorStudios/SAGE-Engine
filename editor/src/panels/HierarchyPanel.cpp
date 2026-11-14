@@ -127,8 +127,16 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     entt::registry& reg = scene.Registry();
     int id = reg.get<IdComponent>(e).Id;
     const std::string& name = reg.get<NameComponent>(e).Name;
-    const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e);
-    bool hasChildren = h && !h->Children.empty();
+    // ИНТЕРФЕЙС — ОДНА СТРОКА БЕЗ СТРЕЛКИ. Его элементы живут в файле .sageui и
+    // правятся в пространстве «Интерфейс»; в дереве уровня их нет, иначе у
+    // экрана было бы два места правки, и второе не сохранялось бы никуда.
+    const bool isInterface = reg.all_of<sage::ui::InterfaceComponent>(e);
+    std::vector<entt::entity> kids = scene.ChildrenOf(e);
+    if (isInterface)
+        kids.erase(std::remove_if(kids.begin(), kids.end(),
+                                  [&reg](entt::entity k) { return reg.all_of<sage::ui::Element>(k); }),
+                   kids.end());
+    bool hasChildren = !kids.empty();
 
     ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
                                ImGuiTreeNodeFlags_DrawLinesNone;
@@ -249,6 +257,13 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     // убрать из набора (множественный выбор), обычный клик — одиночный.
     // Пока ведут рамку, клики не разбираем: жест уже начат, и «выбрать один»
     // посреди него означало бы мигание выбора.
+    // Двойной щелчок по интерфейсу открывает его в пространстве «Интерфейс».
+    if (isInterface && !m_rectActive && ImGui::IsItemHovered() &&
+        ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+        // Сцена уровня при этом уходит в сторону, но не исчезает: ссылка
+        // scene остаётся живой, и строки этого кадра дорисовываются как есть.
+        host.OpenInterfaceObject(id);
+    }
     if (!m_rectActive && !eyeClicked && ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
         const ImGuiIO& io = ImGui::GetIO();
         // Пипетка слота объекта: щелчок по строке назначает объект полю.
@@ -428,7 +443,7 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
             if (!host.SaveSelectedAsPrefab(dir / (safe + ".sageprefab"), perr))
                 host.SetStatusMessage("Prefab save failed: " + perr);
         }
-        bool hasParent = h && h->Parent != entt::null;
+        bool hasParent = scene.ParentOf(e) != entt::null;
         if (EditorIcons::MenuItem("up", T("Unparent"), nullptr, hasParent)) {
             host.PushUndoSnapshot();
             scene.SetParent(e, entt::null);
@@ -441,7 +456,6 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     if (open && hasChildren) {
         // Копия детей в порядке списка (см. Scene::ChildrenOf): перенос во
         // время обхода мог бы менять сам список.
-        const std::vector<entt::entity> kids = scene.ChildrenOf(e);
         const int myDepth = m_depth;
         ++m_depth;
         for (auto k : kids)
