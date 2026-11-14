@@ -102,6 +102,7 @@ void EditorLayer::InitImGui() {
     m_play.Attach(m_playInputBridge, app.GetWindow());
     // Вид гизмо коллайдеров — привычка человека, а не сцены: из настроек редактора.
     m_tools.ColliderGizmo.Load();
+    m_tools.Gizmos.Load();
     m_tools.LoadSnap();
 
     // --- ImGui: docking + multi-viewport (панели можно вытаскивать в

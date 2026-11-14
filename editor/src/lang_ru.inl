@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 3660.
+// Язык: Русский. Строк: 3670.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -746,6 +746,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Оси независимы: каждая масштабируется сама по себе"},
     {"Axes are linked: dragging one scales all three",
      "Оси связаны: тянешь одну — меняются все три"},
+    {"Axes of the selection",
+     "Оси выделенного"},
     {"Axis",
      "Ось"},
     {"Axis (-1 .. 1)",
@@ -1068,6 +1070,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Камера внутри этой коробки использует этот зонд"},
     {"Camera, light and ready-made interface screens",
      "Камера, свет и готовые экраны интерфейса"},
+    {"Cameras",
+     "Камеры"},
     {"Can Run Task",
      "Можно запустить задачу"},
     {"Can See",
@@ -1370,6 +1374,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Вид коллайдеров"},
     {"Collider handles use the move step",
      "Ручки коллайдера идут шагом переноса"},
+    {"Colliders",
+     "Коллайдеры"},
     {"Collides With",
      "Сталкивается со слоями"},
     {"Collision",
@@ -2700,6 +2706,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Пространство гизмо: мировое или локальное"},
     {"Gizmo: move, rotate, scale",
      "Гизмо: перенос, поворот, масштаб"},
+    {"Gizmos",
+     "Гизмо"},
+    {"Gizmos on/off. Right click: choose which",
+     "Гизмо: показать/скрыть. Правая кнопка — выбрать, какие"},
     {"Glare",
      "Свечение"},
     {"Global",
@@ -3646,6 +3656,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Перенести в контекст"},
     {"Move up",
      "Выше"},
+    {"Move, rotate and scale handles always stay",
+     "Ручки перемещения, поворота и масштаба остаются всегда"},
     {"Move: %d",
      "Перенести: %d"},
     {"Moved %d items into %s",
@@ -4348,6 +4360,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Эмиттер частиц"},
     {"Particle effects (*.sagefx)",
      "Эффекты частиц (*.sagefx)"},
+    {"Particle emitters",
+     "Эмиттеры частиц"},
     {"Particle radius",
      "Радиус частицы"},
     {"Particle system",
@@ -4858,6 +4872,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Зонд отражений"},
     {"Reflection probe",
      "Зонд отражений"},
+    {"Reflection probes",
+     "Зонды отражений"},
     {"Reflections",
      "Отражения"},
     {"Reflections are off",
@@ -5338,6 +5354,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Script Graph объекта"},
     {"Script assigned: ",
      "Скрипт назначен: "},
+    {"Script debug drawing",
+     "Отладочная графика скриптов"},
     {"Script graphs of the project (assets/visual)",
      "Script Graph проекта (assets/visual)"},
     {"Script name (the file goes to assets/visual)",
@@ -5574,6 +5592,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Показывать отладочные"},
     {"Show everything",
      "Показать всё"},
+    {"Show gizmos",
+     "Показывать гизмо"},
     {"Show hidden files",
      "Показать скрытые файлы"},
     {"Show in Assets",

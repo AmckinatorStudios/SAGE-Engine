@@ -12,6 +12,7 @@ float EditorTools::SnapStepForCurrentOp() const {
 }
 
 #include <algorithm>
+#include <string>
 
 #include "EditorPrefs.h"
 
@@ -36,6 +37,34 @@ void ColliderGizmoStyle::Save() const {
     prefs::SetInt(kColliderMode, (int)Draw);
     prefs::SetFloat(kColliderOpacity, FillOpacity);
     prefs::SetBool(kColliderSelected, OnlySelected);
+}
+
+const char* GizmoVisibility::Key(Kind kind) {
+    switch (kind) {
+        case Cameras: return "cameras";
+        case Lights: return "lights";
+        case Particles: return "particles";
+        case Probes: return "probes";
+        case Colliders: return "colliders";
+        case SelectionAxes: return "axes";
+        case ScriptDebug: return "script";
+        default: return "";
+    }
+}
+
+void GizmoVisibility::Load() {
+    namespace prefs = sage::editor::prefs;
+    // По умолчанию видно всё: так редактор вёл себя до выключателей, и
+    // человек, не знающий про них, не должен потерять ни одного гизмо.
+    Enabled = prefs::GetBool("gizmo.visible", true);
+    for (int k = 0; k < Count; ++k)
+        Show[k] = prefs::GetBool(std::string("gizmo.show.") + Key((Kind)k), true);
+}
+
+void GizmoVisibility::Save() const {
+    namespace prefs = sage::editor::prefs;
+    prefs::SetBool("gizmo.visible", Enabled);
+    for (int k = 0; k < Count; ++k) prefs::SetBool(std::string("gizmo.show.") + Key((Kind)k), Show[k]);
 }
 
 namespace {

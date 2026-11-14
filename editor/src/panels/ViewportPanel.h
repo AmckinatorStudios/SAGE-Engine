@@ -106,6 +106,8 @@ private:
     void DrawSnapMenu(EditorHost& host);     // оси: мира или объекта
     void DrawShadingMenu(EditorHost& host);   // чем показывать сцену
     void DrawMoreMenu(EditorHost& host);      // редкие инструменты и раскладка видов
+    void DrawGizmoMenu(EditorHost& host);     // какие гизмо видны
+    void GizmoChecks(EditorHost& host);       // пункты выбора гизмо (меню и подменю «…»)
     // Рисует один вид раскладки в текущем регионе. Возвращает true, если курсор
     // над ним (для взаимодействия).
     bool DrawViewImage(EditorHost& host, int slot, ViewKind kind, ImVec2 size, ImVec2& outPos);

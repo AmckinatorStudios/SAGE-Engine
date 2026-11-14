@@ -135,6 +135,7 @@ public:
     // вызывается в цикле по всем видам раскладки.
     void SetShowBounds(bool show) { m_showBounds = show; }
     void SetColliderGizmo(const ColliderGizmoStyle& style) { m_colliderGizmo = style; }
+    void SetGizmoVisibility(const GizmoVisibility& v) { m_gizmos = v; }
 
     // Отладочная графика ИГРЫ (Debug:DrawLine из скриптов). Указатель, а не
     // копия: буфер живёт у системы скриптинга и пуст, пока игра не запущена.
@@ -346,6 +347,7 @@ private:
     int m_outlineMaskW = 1280, m_outlineMaskH = 720;
     bool m_showBounds = false;
     ColliderGizmoStyle m_colliderGizmo;
+    GizmoVisibility m_gizmos;   // какие гизмо видны во вьюпорте (EditorTools.h)
     const sage::render::DebugLines* m_scriptDebug = nullptr;
     // Переливает заказы скриптов в DebugDraw. Одно место на оба вида (вьюпорт и
     // панель Game): две копии этого цикла разошлись бы на первом же новом виде

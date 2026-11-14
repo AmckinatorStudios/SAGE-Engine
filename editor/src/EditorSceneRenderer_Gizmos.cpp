@@ -42,8 +42,11 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
         return std::find(selection.begin(), selection.end(), id) != selection.end();
     };
     // Камеры: каркас усечённой пирамиды (frustum).
+    // Каждый вид — под своим выключателем (GizmoVisibility): в плотной сцене
+    // человек гасит то, что мешает смотреть, не теряя остального.
+    using GV = GizmoVisibility;
     auto camView = reg.view<CameraComponent, Transform, IdComponent>();
-    for (auto e : camView) {
+    if (m_gizmos.Shows(GV::Cameras)) for (auto e : camView) {
         bool selected = isSel(camView.get<IdComponent>(e).Id);
         glm::vec3 color = selected ? glm::vec3(1.0f, 0.8f, 0.2f) : glm::vec3(0.5f, 0.7f, 0.9f);
         glm::mat4 world = scene.WorldMatrix(e); // мировая (иерархия)
@@ -60,13 +63,13 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
     // лампа звёздочкой, прожектор конусом, панель рамкой; у выделенного — его
     // дальность и форма целиком.
     auto lightView = reg.view<LightComponent, Transform, IdComponent>();
-    for (auto e : lightView) {
+    if (m_gizmos.Shows(GV::Lights)) for (auto e : lightView) {
         const bool selected = isSel(lightView.get<IdComponent>(e).Id);
         sage::editor::DrawLightGizmo(*m_debugDraw, lightView.get<LightComponent>(e), scene.WorldMatrix(e), selected);
     }
     // Эмиттеры частиц: маркер в позиции.
     auto fxView = reg.view<ParticleEmitterComponent, Transform, IdComponent>();
-    for (auto e : fxView) {
+    if (m_gizmos.Shows(GV::Particles)) for (auto e : fxView) {
         bool selected = isSel(fxView.get<IdComponent>(e).Id);
         glm::vec3 color = selected ? glm::vec3(1.0f, 0.85f, 0.3f) : glm::vec3(0.9f, 0.6f, 0.3f);
         glm::vec3 wpos = glm::vec3(scene.WorldMatrix(e)[3]);
@@ -77,7 +80,7 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
     // именно она отвечает на вопрос «какой зонд подхватит камера здесь», а
     // ответить на него по числам в инспекторе нельзя.
     auto probeView = reg.view<ReflectionProbeComponent, Transform, IdComponent>();
-    for (auto e : probeView) {
+    if (m_gizmos.Shows(GV::Probes)) for (auto e : probeView) {
         const bool selected = isSel(probeView.get<IdComponent>(e).Id);
         const ReflectionProbeComponent& rp = probeView.get<ReflectionProbeComponent>(e);
         const glm::vec3 wpos = glm::vec3(scene.WorldMatrix(e)[3]);
@@ -127,7 +130,7 @@ void EditorSceneRenderer::DrawEntityGizmos(Scene& scene, const std::vector<int>&
                 break;   // формы по мешу рисуются рёбрами модели (см. ниже)
         }
     };
-    for (auto e : colView) {
+    if (m_gizmos.Shows(GV::Colliders)) for (auto e : colView) {
         const ColliderComponent& col = colView.get<ColliderComponent>(e);
         bool selected = isSel(colView.get<IdComponent>(e).Id);
         if (cg.OnlySelected && !selected) continue;

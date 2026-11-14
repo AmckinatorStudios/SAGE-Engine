@@ -3660,6 +3660,16 @@
     "Remove folder": "Убрать папку",
     "Add folder": "Добавить папку",
     "Where it lives": "Где лежит",
-    "skins": "skins"
+    "skins": "skins",
+    "Gizmos on/off. Right click: choose which": "Гизмо: показать/скрыть. Правая кнопка — выбрать, какие",
+    "Show gizmos": "Показывать гизмо",
+    "Gizmos": "Гизмо",
+    "Cameras": "Камеры",
+    "Particle emitters": "Эмиттеры частиц",
+    "Reflection probes": "Зонды отражений",
+    "Colliders": "Коллайдеры",
+    "Axes of the selection": "Оси выделенного",
+    "Script debug drawing": "Отладочная графика скриптов",
+    "Move, rotate and scale handles always stay": "Ручки перемещения, поворота и масштаба остаются всегда"
   }
 }

@@ -649,7 +649,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     //
     // С тестом глубины по буферу сцены: объекты заслоняют гизмо, как и должны.
     DrawEntityGizmos(scene, selection, (float)m_gameW / (float)std::max(m_gameH, 1));
-    if (selectedObj.Valid()) {
+    if (selectedObj.Valid() && m_gizmos.Shows(GizmoVisibility::SelectionAxes)) {
         glm::mat4 world = scene.WorldMatrix(selectedObj.Entity());
         m_debugDraw->Axes(world, 1.4f);
         // Свет выделенного — его значком целиком (DrawEntityGizmos выше).
@@ -676,7 +676,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     }
     // Отладочная графика игры — вместе с гизмо редактора: и то и другое линии
     // с тестом глубины, и рисовать их двумя разными способами незачем.
-    DrawScriptDebug();
+    if (m_gizmos.Shows(GizmoVisibility::ScriptDebug)) DrawScriptDebug();
     // Вид редактора показывает и заслонённую часть гизмо — бледно (см. DebugDraw).
     m_debugDraw->SetHiddenLineAlpha(0.22f);
     m_debugDraw->Flush(outView, outProj, h);

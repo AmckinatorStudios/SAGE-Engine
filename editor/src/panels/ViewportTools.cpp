@@ -173,6 +173,32 @@ void ViewportPanel::DrawShadingMenu(EditorHost& host) {
     ImGui::EndPopup();
 }
 
+// --- Какие гизмо видны -------------------------------------------------------
+// Пункты общие для отдельного меню (правая кнопка по «глазу») и подменю «…»:
+// два списка одного и того же однажды разошлись бы.
+void ViewportPanel::GizmoChecks(EditorHost& host) {
+    GizmoVisibility& g = host.Tools().Gizmos;
+    bool changed = ImGui::Checkbox(T("Show gizmos"), &g.Enabled);
+    ImGui::Separator();
+    const char* names[GizmoVisibility::Count] = {T("Cameras"), T("Lights"), T("Particle emitters"),
+                                                 T("Reflection probes"), T("Colliders"),
+                                                 T("Axes of the selection"), T("Script debug drawing")};
+    ImGui::BeginDisabled(!g.Enabled);
+    for (int k = 0; k < GizmoVisibility::Count; ++k)
+        changed |= ImGui::Checkbox(names[k], &g.Show[k]);
+    ImGui::EndDisabled();
+    Sage::UI::TextSecondary("%s", T("Move, rotate and scale handles always stay"));
+    if (changed) g.Save();
+}
+
+void ViewportPanel::DrawGizmoMenu(EditorHost& host) {
+    Sage::UI::MenuScope menu;
+    if (!ImGui::BeginPopup("##gizmo_menu")) return;
+    Sage::UI::MenuSection(T("Gizmos"), true);
+    GizmoChecks(host);
+    ImGui::EndPopup();
+}
+
 // --- Редкое: «…» ------------------------------------------------------------
 void ViewportPanel::DrawMoreMenu(EditorHost& host) {
     Sage::UI::MenuScope menu;
@@ -208,6 +234,11 @@ void ViewportPanel::DrawMoreMenu(EditorHost& host) {
         ImGui::EndDisabled();
         if (ImGui::Checkbox(T("Only the selection"), &cg.OnlySelected)) changed = true;
         if (changed) cg.Save();
+        ImGui::EndMenu();
+    }
+
+    if (EditorIcons::BeginMenu("eye", T("Gizmos"))) {
+        GizmoChecks(host);
         ImGui::EndMenu();
     }
 
@@ -344,6 +375,18 @@ void ViewportPanel::DrawToolsOverlay(EditorHost& host, ImVec2 origin) {
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("grid", T("Viewport grid"), host.Tools().ShowGrid))
         host.Tools().ShowGrid = !host.Tools().ShowGrid;
+    // Гизмо целиком — одним нажатием; какие именно — правой кнопкой (или «…»).
+    ImGui::SameLine();
+    {
+        GizmoVisibility& g = host.Tools().Gizmos;
+        if (EditorIcons::IconOnlyButton(g.Enabled ? "eye" : "eye-off",
+                                        T("Gizmos on/off. Right click: choose which"), g.Enabled)) {
+            g.Enabled = !g.Enabled;
+            g.Save();
+        }
+        if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) ImGui::OpenPopup("##gizmo_menu");
+    }
+    DrawGizmoMenu(host);
 
     // --- 4. Как показывать сцену --------------------------------------------
     //

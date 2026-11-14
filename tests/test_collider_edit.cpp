@@ -209,3 +209,36 @@ TEST(Snap_steps_survive_a_restart_and_ctrl_inverts_while_dragging) {
     EditorTools def;
     def.SaveSnap();
 }
+
+TEST(Gizmo_visibility_master_switch_kinds_and_restart) {
+    using GV = GizmoVisibility;
+    GizmoVisibility g;
+    // По умолчанию видно всё — как до выключателей.
+    for (int k = 0; k < GV::Count; ++k) CHECK_TRUE(g.Shows((GV::Kind)k));
+    // Вид выключается сам по себе, остальные остаются.
+    g.Show[GV::Colliders] = false;
+    CHECK_FALSE(g.Shows(GV::Colliders));
+    CHECK_TRUE(g.Shows(GV::Cameras));
+    // Общий тумблер гасит всё, но не забывает выбор по видам.
+    g.Enabled = false;
+    for (int k = 0; k < GV::Count; ++k) CHECK_FALSE(g.Shows((GV::Kind)k));
+    g.Enabled = true;
+    CHECK_FALSE(g.Shows(GV::Colliders));
+    CHECK_TRUE(g.Shows(GV::Lights));
+    // У каждого вида свой непустой ключ в настройках.
+    for (int k = 0; k < GV::Count; ++k) CHECK_TRUE(std::string(GV::Key((GV::Kind)k)).size() > 0);
+    // Выбор переживает перезапуск редактора.
+    g.Show[GV::ScriptDebug] = false;
+    g.Enabled = false;
+    g.Save();
+    GizmoVisibility again;
+    again.Load();
+    CHECK_FALSE(again.Enabled);
+    again.Enabled = true;
+    CHECK_FALSE(again.Shows(GV::Colliders));
+    CHECK_FALSE(again.Shows(GV::ScriptDebug));
+    CHECK_TRUE(again.Shows(GV::SelectionAxes));
+    // Вернуть умолчания, чтобы не оставить следа другим тестам.
+    GizmoVisibility def;
+    def.Save();
+}
