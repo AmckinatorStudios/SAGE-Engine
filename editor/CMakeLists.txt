@@ -144,6 +144,7 @@ add_executable(SageEditor WIN32
     src/TextureSet.cpp
     src/UIElementProperties.cpp
     src/InterfaceProperties.cpp
+    src/UIButtonContent.cpp
     src/UIElementProperties_Layout.cpp
     src/VarsEditor.cpp
     src/SignalLinksEditor.cpp

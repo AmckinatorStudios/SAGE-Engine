@@ -32,6 +32,7 @@ add_executable(sage_tests
     test_ui_skins.cpp
     test_ui_shape.cpp
     test_ui_scroll.cpp
+    test_ui_controls.cpp
     test_vars_events.cpp
     test_signals.cpp
     test_environment.cpp

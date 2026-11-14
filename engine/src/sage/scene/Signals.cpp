@@ -62,7 +62,12 @@ void EnsureBuiltins() {
     DeclareUnlocked(
         "Text Input",
         [](const entt::registry& r, entt::entity e) { return r.all_of<sage::ui::TextInput>(e); },
-        {{kTextChanged, "", "data: the new text"}});
+        {{kTextChanged, "", "data: the new text"},
+         {kSubmitted, "", "Enter in the field: data: the text"}});
+    DeclareUnlocked(
+        "Dropdown",
+        [](const entt::registry& r, entt::entity e) { return r.all_of<sage::ui::Dropdown>(e); },
+        {{kValueChanged, "", "data: the number of the chosen option, from 0"}});
     DeclareUnlocked(
         "Physics",
         [](const entt::registry& r, entt::entity e) {
@@ -111,7 +116,7 @@ std::string Title(const std::string& signal) {
         {kClicked, "On Click"},           {kPressed, "On Press"},
         {kReleased, "On Release"},        {kHovered, "On Hover"},
         {kUnhovered, "On Unhover"},       {kValueChanged, "On Value Changed"},
-        {kTextChanged, "On Text Changed"}, {kCollision, "On Collision"},
+        {kTextChanged, "On Text Changed"}, {kSubmitted, "On Submit"}, {kCollision, "On Collision"},
         {kCollisionEnded, "On Collision End"}, {kTriggerEntered, "On Trigger Enter"},
         {kTriggerExited, "On Trigger Exit"},
     };

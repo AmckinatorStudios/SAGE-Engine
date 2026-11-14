@@ -820,7 +820,7 @@ function UI.get(name) end
 ---@param name string
 ---@return SageObject|nil
 function UI.find(name) end
----Создать элемент по пресету ("Button", "Label", "Slider", "Checkbox", ...).
+---Создать элемент по пресету ("Button", "Label", "Slider", "Toggle", "Dropdown", ...).
 ---@param preset string
 ---@param name? string
 ---@param parent? SageObject

@@ -299,7 +299,7 @@ TEST(Interface_presets_build_from_elements_and_components) {
     }
 
     // Запрошенный набор Add/Create на месте.
-    for (const char* name : {"Container", "Panel", "Text", "Image", "Button", "Input Field"}) {
+    for (const char* name : {"Container", "Panel", "Text", "Image", "Button", "Text Input"}) {
         if (!sage::ui::FindPreset(name))
             sagetest::ReportFail(__FILE__, __LINE__, std::string("нет заготовки: ") + name);
     }

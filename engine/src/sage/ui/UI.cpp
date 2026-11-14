@@ -454,11 +454,12 @@ std::vector<Preset> BuildPresets() {
         p.Children.push_back(text);
     }
     {
-        // Галка = квадратик слева ПЛЮС подпись рядом отдельным объектом.
-        Preset& p = add(SAGE_UI_TEXT("Checkbox"));
+        // Переключатель = квадратик (или таблетка «выключателя») слева ПЛЮС
+        // подпись рядом отдельным объектом. Вид — Style: Checkbox или Switch.
+        Preset& p = add(SAGE_UI_TEXT("Toggle"));
         p.Category = SAGE_UI_TEXT("Controls");
         p.Icon = "ui-check";
-        p.Hint = SAGE_UI_TEXT("An on/off switch: a box, a check mark and a caption");
+        p.Hint = SAGE_UI_TEXT("On or off: a checkbox or a switch, with a caption");
         p.Box.Size = {200.0f, 36.0f};
         p.HasInteractable = true;
         p.HasRange = true;
@@ -469,7 +470,7 @@ std::vector<Preset> BuildPresets() {
         // местом под подпись. Квадратик — свой вид галки.
         p.RangeValue.Track.BorderThickness = 1.0f;
         p.RangeValue.Track.BorderColor = {0.55f, 0.60f, 0.72f, 0.9f};
-        Preset text = TextChild("Текст", "Checkbox");
+        Preset text = TextChild("Текст", "Toggle");
         text.Box.Anchor = UIAnchor::CenterLeft;
         text.Box.Mode = Element::Stretch::None;
         text.Box.Position = {44.0f, 0.0f};      // правее квадратика
@@ -501,7 +502,7 @@ std::vector<Preset> BuildPresets() {
         p.BarStyle.Value = 0.6f; // пустая полоса неотличима от панели
     }
     {
-        Preset& p = add(SAGE_UI_TEXT("Input Field"));
+        Preset& p = add(SAGE_UI_TEXT("Text Input"));
         p.Category = SAGE_UI_TEXT("Controls");
         p.Icon = "ui-input";
         p.Hint = SAGE_UI_TEXT("A text field edited from the keyboard");
@@ -512,6 +513,19 @@ std::vector<Preset> BuildPresets() {
         p.HasInteractable = true;
         p.HasInput = true;
         p.Input.Placeholder = "Enter text";
+    }
+    {
+        // Выпадающий список: подложка, выбранный вариант и стрелка; раскрытый
+        // список рисуется поверх всего интерфейса.
+        Preset& p = add(SAGE_UI_TEXT("Dropdown"));
+        p.Category = SAGE_UI_TEXT("Controls");
+        p.Icon = "list";
+        p.Hint = SAGE_UI_TEXT("One value from a list that opens over everything");
+        p.Box.Size = {240.0f, 40.0f};
+        p.HasFill = true;
+        p.HasInteractable = true;
+        p.HasDropdown = true;
+        p.DropdownStyle.Options = "Option 1\nOption 2\nOption 3";
     }
 
     return out;

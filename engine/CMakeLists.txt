@@ -277,6 +277,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scripting/ScriptApi_Physics.cpp
     src/sage/ui/UIParts.cpp
     src/sage/ui/UIParts_Input.cpp
+    src/sage/ui/UIParts_Controls.cpp
+    src/sage/ui/UIControls.cpp
     src/sage/ui/UIParts_Look.cpp
     src/sage/ui/UIParts_Visual.cpp
     src/sage/ui/NineSlice.cpp
@@ -285,6 +287,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/Interface.cpp
     src/sage/ui/InterfaceSource.cpp
     src/sage/ui/UITree.cpp
+    src/sage/ui/UIButton.cpp
     src/sage/ui/ShapeGeometry.cpp
     src/sage/ui/ShapePath.cpp
     src/sage/ui/UIRendererShapes.cpp

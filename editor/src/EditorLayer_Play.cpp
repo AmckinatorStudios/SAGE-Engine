@@ -229,6 +229,9 @@ void EditorLayer::UpdatePlayUiInput(float dt) {
         in.Enter = ImGui::IsKeyPressed(ImGuiKey_Enter, false);
         in.Escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
         in.Tab = ImGui::IsKeyPressed(ImGuiKey_Tab, false);
+        in.Up = ImGui::IsKeyPressed(ImGuiKey_UpArrow, true);
+        in.Down = ImGui::IsKeyPressed(ImGuiKey_DownArrow, true);
+        in.Shift = ImGui::GetIO().KeyShift;
     }
     m_play.UpdateUiInput(*m_scene, in);
 }

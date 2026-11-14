@@ -135,6 +135,8 @@ struct Preset {
     TextInput Input;
     bool HasRange = false;
     Range RangeValue;
+    bool HasDropdown = false;
+    Dropdown DropdownStyle;
     bool HasArrangement = false;
     Arrangement Arrange;
     bool HasShape = false;

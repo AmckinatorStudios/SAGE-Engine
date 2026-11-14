@@ -19,6 +19,7 @@
 #include "sage/ui/UIMasks.h"
 #include "sage/ui/UISceneSolved.h"
 #include "sage/ui/UIScroll.h"
+#include "sage/ui/UIControls.h"
 
 namespace sage::ui {
 
@@ -115,33 +116,6 @@ std::vector<entt::entity> SortedUIRoots(Scene& scene) {
     return roots;
 }
 
-// Шаг влево/вправо по строке UTF-8. Курсор живёт в БАЙТАХ (строка — байты), но
-// двигаться обязан по СИМВОЛАМ: шаг в один байт разрежет кириллическую букву
-// пополам, и в поле окажется невалидный UTF-8.
-int PrevCharBoundary(const std::string& s, int i) {
-    if (i <= 0) return 0;
-    --i;
-    while (i > 0 && (static_cast<unsigned char>(s[(size_t)i]) & 0xC0) == 0x80) --i;
-    return i;
-}
-int NextCharBoundary(const std::string& s, int i) {
-    const int n = (int)s.size();
-    if (i >= n) return n;
-    ++i;
-    while (i < n && (static_cast<unsigned char>(s[(size_t)i]) & 0xC0) == 0x80) ++i;
-    return i;
-}
-
-// Что показывать вместо содержимого поля-пароля. Точки, а не звёздочки: в
-// пиксельных шрифтах звёздочка часто выше строки и ломает базовую линию.
-std::string MaskText(const std::string& text) {
-    std::string out;
-    out.reserve((size_t)Utf8Length(text) * 2);
-    for (int i = 0; i < Utf8Length(text); ++i) out += "\u2022";
-    return out;
-}
-
-
 // ОТРИСОВКА ЭЛЕМЕНТА — ПО РЕЕСТРУ ЧАСТЕЙ, а не по списку в этой функции.
 //
 // Здесь была функция на триста строк, которая знала все части наперечёт и
@@ -222,6 +196,11 @@ void DrawElement(const entt::registry& reg, entt::entity e, const UIRect& r, flo
         p.DrawOver(c);
     }
     if (blend != UIBlend::Normal) ui.SetBlend(UIBlend::Normal);
+    // ФОКУС С КЛАВИАТУРЫ ВИДЕН: без рамки стрелки двигали бы невидимое. У
+    // поля ввода фокус и так виден кареткой; свой вид фокуса — вместо рамки.
+    if (act && act->Runtime.Focused && act->Navigable && !act->UseFocusedLook && !reg.all_of<TextInput>(e))
+        ui.RoundedRectOutline(rect.x - 3.0f * scale, rect.y - 3.0f * scale, rect.w + 6.0f * scale,
+                              rect.h + 6.0f * scale, 6.0f * scale, 2.0f * scale, glm::vec3(1.0f), 0.85f * alpha);
 
     if (rotated) ui.PopRotation();
 }
@@ -689,6 +668,8 @@ void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH, const U
             if (owner.Clipped) ui.PopClipRect();
         }
     }
+    // Раскрытые списки — поверх всего интерфейса, без чужих обрезок.
+    DrawDropdownOverlays(reg, items, {(float)screenW, (float)screenH}, ui);
 }
 
 int HitTest(Scene& scene, float x, float y, int screenW, int screenH, const UIScope& scope) {
@@ -762,12 +743,6 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         if (PointIn(it.Rect, input.Mouse)) hovered = it.Entity;
     }
 
-    // Колесо, полосы прокрутки и перетаскивание содержимого (UIScroll.cpp).
-    // Нажатие на полосу — не нажатие на кнопку под ней; потянутый список —
-    // не щелчок по тому, на чём палец начал движение.
-    const ScrollInput scrolled = UpdateScrolling(reg, items, input, result);
-    if (scrolled.BlockPress) hovered = entt::null;
-
     // СИГНАЛЫ ЭЛЕМЕНТОВ (sage/scene/Signals.h). Кнопка не знает, что за ней
     // последует: она сообщает «меня нажали» (clicked), а что делать — решают
     // подписчики: скрипт или связь из инспектора, одним механизмом шины.
@@ -792,6 +767,27 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         if (!reg.valid(e) || !reg.all_of<IdComponent>(e)) return;
         signals.Queue.push_back({reg.get<IdComponent>(e).Id, signal, std::move(arg)});
     };
+    const SignalFn emit = [&](entt::entity e, const char* signal, sage::vars::Value arg) {
+        fire(e, signal, std::move(arg));
+    };
+
+    // РАСКРЫТЫЙ СПИСОК — первым: он поверх всего, и пока открыт, мышь,
+    // колесо и клавиши принадлежат ему, а не тому, что под ним.
+    const bool listTook = UpdateDropdowns(reg, items, hovered, input, {(float)screenW, (float)screenH}, emit);
+    if (listTook) {
+        hovered = entt::null;
+        result.WantsMouse = true;
+    }
+    // Колесо, полосы прокрутки и перетаскивание содержимого (UIScroll.cpp).
+    // Нажатие на полосу — не нажатие на кнопку под ней; потянутый список —
+    // не щелчок по тому, на чём палец начал движение.
+    UIInputState scrollInput = input;
+    if (listTook) scrollInput.Wheel = 0.0f, scrollInput.MousePressed = false;
+    const ScrollInput scrolled = UpdateScrolling(reg, items, scrollInput, result);
+    if (scrolled.BlockPress) hovered = entt::null;
+    // Фокус с клавиатуры и контроллера: Tab, стрелки, Enter.
+    if (!listTook) UpdateNavigation(reg, items, input, result, emit);
+
     // Значение для value_changed: галка — да/нет, ползунок — число.
     auto rangeValue = [&](entt::entity e) {
         const Range* r = reg.try_get<Range>(e);
@@ -811,7 +807,11 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
             // Вход и выход курсора — отдельные события: подсветка соседа,
             // подсказка и звук наведения нужны именно на переходе, а не каждый
             // кадр, пока курсор стоит на месте.
-            if (st->Hovered && !wasHovered) fire(it.Entity, sage::signals::kHovered);
+            if (st->Hovered && !wasHovered) {
+                fire(it.Entity, sage::signals::kHovered);
+                const Interactable& act = reg.get<Interactable>(it.Entity);
+                if (!act.HoverSound.empty()) result.Sounds.push_back(act.HoverSound);
+            }
             if (!st->Hovered && wasHovered) fire(it.Entity, sage::signals::kUnhovered);
             // Pressed здесь НЕ сбрасываем: в кадре отпускания кнопка уже не
             // удерживается, и сброс до разбора отпускания съел бы сам щелчок.
@@ -861,6 +861,8 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
                     st->Changed = true;
                 }
                 fire(hovered, sage::signals::kClicked);
+                if (const std::string& snd = reg.get<Interactable>(hovered).ClickSound; !snd.empty())
+                    result.Sounds.push_back(snd);
                 // Значение изменилось щелчком по галке — это то же «change»,
                 // что и у ползунка: слушателю всё равно, чем его подвинули.
                 if (st->Changed) fire(hovered, sage::signals::kValueChanged, rangeValue(hovered));
@@ -868,70 +870,12 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         }
     }
 
-    // Ползунок: тянется, пока кнопка удерживается, даже если курсор ушёл за
-    // пределы дорожки — иначе значение срывается от малейшего движения вбок.
-    for (const Solved& it : items) {
-        Range* range = reg.try_get<Range>(it.Entity);
-        State* st = stateOf(it.Entity);
-        if (!range || range->Toggle || !st || !usable(it.Entity)) continue;
-        if (!st->Pressed || !input.MouseDown) continue;
-        const float w = glm::max(it.Rect.w, 1.0f);
-        const float t = glm::clamp((input.Mouse.x - it.Rect.x) / w, 0.0f, 1.0f);
-        float v = range->Min + t * (range->Max - range->Min);
-        // Шаг: громкость по 5% должна прилипать к пятёркам, иначе ползунок
-        // выдаёт 0.4732 там, где человек ждёт 0.45.
-        if (range->Step > 0.0f) v = range->Min + std::round((v - range->Min) / range->Step) * range->Step;
-        v = glm::clamp(v, glm::min(range->Min, range->Max), glm::max(range->Min, range->Max));
-        if (v != range->Value) {
-            range->Value = v;
-            st->Changed = true;
-            fire(it.Entity, sage::signals::kValueChanged, rangeValue(it.Entity));
-        }
-        result.WantsMouse = true;
-    }
-
-    // Ввод текста — только в поле с фокусом.
-    for (const Solved& it : items) {
-        const TextInput* field = reg.try_get<TextInput>(it.Entity);
-        State* st = stateOf(it.Entity);
-        Label* lbl = textOf(it.Entity);
-        if (!field || !st || !lbl || !st->Focused || !usable(it.Entity)) continue;
-        result.WantsKeyboard = true;
-        st->CaretBlink += input.DeltaTime;
-        st->Caret = glm::clamp(st->Caret, 0, (int)lbl->Text.size());
-        if (field->ReadOnly) continue;   // показывать можно, править нельзя
-        const std::string textBefore = lbl->Text;
-
-        if (!input.TypedText.empty()) {
-            const bool room = field->MaxLength <= 0 ||
-                              Utf8Length(lbl->Text) + Utf8Length(input.TypedText) <= field->MaxLength;
-            if (room) {
-                lbl->Text.insert((size_t)st->Caret, input.TypedText);
-                st->Caret += (int)input.TypedText.size();
-                st->Changed = true;
-                st->CaretBlink = 0.0f;
-            }
-        }
-        if (input.Backspace && st->Caret > 0) {
-            const int prev = PrevCharBoundary(lbl->Text, st->Caret);
-            lbl->Text.erase((size_t)prev, (size_t)(st->Caret - prev));
-            st->Caret = prev;
-            st->Changed = true;
-            st->CaretBlink = 0.0f;
-        }
-        if (input.Delete && st->Caret < (int)lbl->Text.size()) {
-            const int next = NextCharBoundary(lbl->Text, st->Caret);
-            lbl->Text.erase((size_t)st->Caret, (size_t)(next - st->Caret));
-            st->Changed = true;
-            st->CaretBlink = 0.0f;
-        }
-        if (input.Left) { st->Caret = PrevCharBoundary(lbl->Text, st->Caret); st->CaretBlink = 0.0f; }
-        if (input.Right) { st->Caret = NextCharBoundary(lbl->Text, st->Caret); st->CaretBlink = 0.0f; }
-        if (input.Home) { st->Caret = 0; st->CaretBlink = 0.0f; }
-        if (input.End) { st->Caret = (int)lbl->Text.size(); st->CaretBlink = 0.0f; }
-        if (input.Enter || input.Escape) st->Focused = false;
-        if (lbl->Text != textBefore) fire(it.Entity, sage::signals::kTextChanged, sage::vars::Value(lbl->Text));
-    }
+    // Ползунки, поля ввода, бегунки переключателей (UIControls.cpp).
+    UpdateSliders(reg, items, input, result, emit);
+    UIInputState keys = input;
+    if (listTook) keys.Enter = keys.Escape = keys.Up = keys.Down = false;
+    UpdateTextInputs(reg, items, keys, result, emit);
+    AnimateToggles(reg, items, input.DeltaTime);
 
     // Сглаживание полос: значение едет к цели, а не прыгает.
     for (const Solved& it : items) {

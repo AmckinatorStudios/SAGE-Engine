@@ -753,7 +753,7 @@ TEST(UI_presets_are_the_same_everywhere) {
 
     // Поле ввода: текст влево (по центру набирать непривычно) и подсказка.
     GameObject input = scene.CreateObject("Input");
-    CHECK_TRUE(sage::ui::ApplyPreset(reg, input.Entity(), "Input Field"));
+    CHECK_TRUE(sage::ui::ApplyPreset(reg, input.Entity(), "Text Input"));
     const auto* field = reg.try_get<sage::ui::TextInput>(input.Entity());
     const auto* inputLabel = reg.try_get<sage::ui::Label>(input.Entity());
     CHECK_TRUE(field != nullptr);
@@ -1001,7 +1001,7 @@ TEST(UI2_presets_build_real_elements) {
 // проверить это можно только здесь: собери галку с подложкой, и она закрасит
 // весь ряд вместе с местом под подпись.
 TEST(UI2_a_range_carries_its_own_colours) {
-    const sage::ui::Preset* box = sage::ui::FindPreset("Checkbox");
+    const sage::ui::Preset* box = sage::ui::FindPreset("Toggle");
     CHECK_TRUE(box != nullptr);
     if (box) {
         CHECK_TRUE(box->HasRange && box->RangeValue.Toggle);
@@ -1899,7 +1899,7 @@ TEST(ui_infer_type_prefers_the_most_specific_set) {
     reg.emplace<sage::ui::Label>(input.Entity());
     reg.emplace<sage::ui::Interactable>(input.Entity());
     reg.emplace<sage::ui::TextInput>(input.Entity());
-    CHECK_TRUE(sage::ui::InferType(reg, input.Entity()) == "Input Field");
+    CHECK_TRUE(sage::ui::InferType(reg, input.Entity()) == "Text Input");
 }
 
 TEST(ui_parts_split_into_elements_and_containers) {

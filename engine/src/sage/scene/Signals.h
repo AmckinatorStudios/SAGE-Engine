@@ -43,6 +43,7 @@ inline constexpr const char* kHovered = "hovered";
 inline constexpr const char* kUnhovered = "unhovered";
 inline constexpr const char* kValueChanged = "value_changed";
 inline constexpr const char* kTextChanged = "text_changed";
+inline constexpr const char* kSubmitted = "submitted";
 inline constexpr const char* kCollision = "collision";
 inline constexpr const char* kCollisionEnded = "collision_ended";
 inline constexpr const char* kTriggerEntered = "trigger_entered";

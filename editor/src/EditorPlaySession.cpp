@@ -364,6 +364,9 @@ void EditorPlaySession::UpdateUiInput(Scene& scene, const PlayUiInput& in) {
         input.Enter = in.Enter;
         input.Escape = in.Escape;
         input.Tab = in.Tab;
+        input.Up = in.Up;
+        input.Down = in.Down;
+        input.Shift = in.Shift;
     }
 
     const sage::ui::UIInputResult result =
@@ -372,6 +375,9 @@ void EditorPlaySession::UpdateUiInput(Scene& scene, const PlayUiInput& in) {
     // Что интерфейс сцены съел, того игра не получит — так же, как в собранной
     // игре. Иначе щелчок по кнопке меню в панели Game одновременно стрелял бы,
     // и превью вело бы себя не как игра.
+    // Звуки элементов (наведение, щелчок) — звуку игры, как в собранной.
+    if (!result.Sounds.empty())
+        for (const std::string& sound : result.Sounds) Audio().PlaySound2D(sound);
     uint8_t eaten = sage::input::DeviceNone;
     if (result.WantsMouse) eaten |= sage::input::DeviceMouse;
     if (result.WantsKeyboard) eaten |= sage::input::DeviceKeyboard;

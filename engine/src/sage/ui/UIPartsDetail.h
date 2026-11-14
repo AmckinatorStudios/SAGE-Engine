@@ -129,6 +129,8 @@ UIRect ToggleBox(const UIRect& r);
 void DrawRangePart(const PartDrawContext& c);
 const std::vector<PartField>& TextInputFields();
 std::string MaskText(const std::string& text);
+const std::vector<PartField>& DropdownFields();
+void DrawDropdownPart(const PartDrawContext& c);
 void DrawTextInputPart(const PartDrawContext& c);
 const std::vector<PartField>& InteractableFields();
 const std::vector<PartField>& MaskFields();
