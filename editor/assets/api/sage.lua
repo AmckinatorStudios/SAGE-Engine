@@ -2685,6 +2685,9 @@ sage.ui = {}
 ui = nil
 
 ---@param entity Entity
+---@param t table
+function sage.ui.Arrange(entity, t) end
+---@param entity Entity
 function sage.ui.ClearImage(entity) end
 ---@param entity Entity
 function sage.ui.ClearLayout(entity) end
@@ -3417,13 +3420,15 @@ function ui.slider(o) end
 ---@return table
 function ui.bar(o) end
 
----Группа: невидимый контейнер. layout = "row" | "column" | "grid" расставляет
----детей сам: gap — зазор, padding — поля {л, в, п, н} или число, columns,
----justify = start | center | end | between | around | evenly, cross. У детей
----работает margin — свои поля вокруг. clip = true обрезает детей.
+---Контейнер: невидимый, держит и расставляет детей. arrange = "manual" |
+---"horizontal" | "vertical" | "grid" | "wrap"; spacing, padding ({л, в, п, н}
+---или число), align = start | center | end (поперёк), distribute = start |
+---center | end | between | around | evenly (вдоль), child_width / child_height
+---= fixed | fit | fill, columns, rows, wrap_columns, fit_content (свой размер по содержимому),
+---clip = true (обрезать детей), scroll = horizontal | vertical | both.
 ---@param o? table
 ---@return table
-function ui.group(o) end
+function ui.container(o) end
 
 ---Курсор мыши в пикселях интерфейса.
 ---@return Vec2
