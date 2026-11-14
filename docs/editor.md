@@ -1602,7 +1602,7 @@ SAGE Application
 ├── ProjectLauncher      editor/src/ProjectLauncher/
 │     ├── ProjectDatabase    список проектов, поиск, отбор, операции
 │     ├── ProjectCard        карточка: сетка и строка — ОДНА реализация
-│     ├── ProjectThumbnail   обложки: фоновый поток + кэш уменьшенных копий
+│     ├── ProjectThumbnail   обложки: очередь задач ввода-вывода + кэш уменьшенных копий
 │     └── ProjectLauncher    экран: разделы, список, подробности, диалоги
 └── EditorHost → редактор
 ```
