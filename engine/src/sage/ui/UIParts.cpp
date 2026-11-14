@@ -60,6 +60,12 @@ void RegisterBuiltins() {
     PartType shadow = MakePart<Fill>("fill.shadow", SAGE_UI_TEXT("Fill shadow"), 5, nullptr, DrawFillShadow);
     RegisterPart(shadow);
 
+    // Форма — на том же месте, что подложка: это другой способ оформить фон.
+    PartType shape = MakePart<Shape>("shape", SAGE_UI_TEXT("Shape"), 10, &ShapeFields(), DrawShapePart);
+    shape.Icon = "rect";
+    shape.Hint = SAGE_UI_TEXT("Rectangle, rounded rectangle, circle or ellipse: fill, gradient, stroke");
+    RegisterPart(shape);
+
     PartType image = MakePart<Image>("image", SAGE_UI_TEXT("Image"), 20, &ImageFields(), DrawImagePart);
     image.Icon = "texture";
     image.Hint = SAGE_UI_TEXT("A file, a piece of a sprite sheet, 9-slice, tiling");

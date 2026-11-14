@@ -71,9 +71,9 @@ const char* const kRepeatTip =
 // Режимы картинки. Имена — про то, ЧТО СТАНЕТ С КАРТИНКОЙ, а не про
 // механику: «девятина» без объяснения не говорит ничего, «углы неподвижны» —
 // говорит всё.
-const char* const kImageModeNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("9-slice"),
-                                       SAGE_UI_TEXT("Tile"), SAGE_UI_TEXT("Keep aspect"),
-                                       SAGE_UI_TEXT("Fill, keep aspect")};
+const char* const kImageModeNames[] = {SAGE_UI_TEXT("Stretch"), SAGE_UI_TEXT("Nine-Slice"),
+                                       SAGE_UI_TEXT("Tile"), SAGE_UI_TEXT("Aspect Fit"),
+                                       SAGE_UI_TEXT("Aspect Fill")};
 
 // Оформление (UIParts_Look.cpp).
 float AlphaOf(const PartDrawContext& c, float channelAlpha);
@@ -111,6 +111,11 @@ void DrawBarPart(const PartDrawContext& c);
 const std::vector<PartField>& IconFields();
 void DrawIconInto(UIRenderer& ui, const std::string& name, float x, float y, float size, glm::vec3 color, float alpha);
 void DrawIconPart(const PartDrawContext& c);
+// Форма: поля, отрисовка части и отрисовка по готовому компоненту (её зовёт
+// и оформление Panel — одна система на оба случая).
+const std::vector<PartField>& ShapeFields();
+void DrawShapePart(const PartDrawContext& c);
+void DrawShape(const PartDrawContext& c, const Shape& shape, const UIRect& r);
 const std::vector<PartField>& LabelFields();
 UITextStyle StyleOf(const Label& label, UIRenderer& ui);
 float AlignX(Label::Align a, float left, float avail, float textWidth);

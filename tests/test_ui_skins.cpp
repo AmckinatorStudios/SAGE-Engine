@@ -411,7 +411,9 @@ TEST(UISkin_engine_or_custom_skin_is_explicit) {
     sage::ui::LoadElement(j, other.Registry(), b.Entity());
     CHECK_TRUE(other.Registry().get<sage::ui::Element>(b.Entity()).Skin == sage::ui::Element::SkinMode::Custom);
 
-    // Запекание: панель получает форму движка, кнопка — свою.
+    // Запекание: панель с подложкой (Appearance: Image) получает форму
+    // движка, кнопка — свою.
+    scene.Registry().emplace_or_replace<sage::ui::Fill>(a.Entity());
     sage::ui::BakeEngineSkin(scene.Registry(), a.Entity());
     CHECK_NEAR(scene.Registry().get<sage::ui::Fill>(a.Entity()).Rounding, 10.0f, 1e-4f);
     GameObject btn = scene.CreateEmptyObject("Btn");

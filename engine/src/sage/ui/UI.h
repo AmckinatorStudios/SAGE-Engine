@@ -125,6 +125,8 @@ struct Preset {
     Range RangeValue;
     bool HasArrangement = false;
     Arrangement Arrange;
+    bool HasShape = false;
+    ::sage::ui::Shape ShapeStyle;
     bool HasMask = false;
     Mask MaskRule;
     bool HasScroll = false;

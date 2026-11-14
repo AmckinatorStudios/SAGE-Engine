@@ -35,6 +35,7 @@ void ApplyNode(entt::registry& reg, entt::entity e, const Preset& p) {
     part(p.HasInput, p.Input);
     part(p.HasRange, p.RangeValue);
     part(p.HasArrangement, p.Arrange);
+    part(p.HasShape, p.ShapeStyle);
     part(p.HasMask, p.MaskRule);
     part(p.HasScroll, p.ScrollRule);
     part(p.HasIcon, p.IconStyle);
@@ -96,6 +97,8 @@ bool ApplyPreset(Scene& scene, entt::entity e, const std::string& preset, bool r
 std::string InferType(const entt::registry& reg, entt::entity e) {
     if (!reg.all_of<Element>(e)) return {};
     const bool fill = reg.all_of<Fill>(e);
+    const bool shape = reg.all_of<Shape>(e);
+    const bool arranges = reg.all_of<Arrangement>(e);
     const bool label = reg.all_of<Label>(e);
     const bool image = reg.all_of<Image>(e);
     const bool icon = reg.all_of<Icon>(e);
@@ -108,12 +111,15 @@ std::string InferType(const entt::registry& reg, entt::entity e) {
     if (const Range* r = reg.try_get<Range>(e)) return r->Toggle ? "Checkbox" : "Slider";
     if (reg.all_of<Bar>(e)) return "Progress Bar";
     if (fill && act) return "Button";
+    // Контейнер с оформлением — Panel, будь оно формой или картинкой.
+    if ((fill || shape) && arranges && !label && !act) return "Panel";
+    if (shape && !fill && !label && !image && !icon && !act) return "Shape";
     if (image && !fill && !act) return "Image";
     if (icon && !fill && !label && !act) return "Icon";
     if (label && !fill && !act) return "Text";
     // Подложка — панель, ничего видимого — контейнер: оба держат детей.
     if (fill && !label && !image && !icon) return "Panel";
-    if (!fill && !label && !image && !icon && !act) return "Container";
+    if (!fill && !shape && !label && !image && !icon && !act) return "Container";
     return {};
 }
 

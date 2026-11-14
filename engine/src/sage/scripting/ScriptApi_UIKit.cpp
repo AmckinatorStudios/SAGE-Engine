@@ -651,7 +651,7 @@ void ScriptEngine::RegisterUIKitApi() {
         A& a = reg.get_or_emplace<A>(obj.Entity());
         // Тип — как у контейнера из редактора: держит детей, виден в дереве.
         sage::ui::Element& el = reg.get<sage::ui::Element>(obj.Entity());
-        el.Type = reg.all_of<sage::ui::Fill>(obj.Entity()) ? "Panel" : "Container";
+        el.Type = reg.any_of<sage::ui::Fill, sage::ui::Shape>(obj.Entity()) ? "Panel" : "Container";
         const std::string mode = t.get_or<std::string>("arrange", "manual");
         static const std::pair<const char*, A::Kind> kModes[] = {
             {"manual", A::Kind::Manual}, {"horizontal", A::Kind::Horizontal},

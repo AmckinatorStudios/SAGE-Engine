@@ -153,6 +153,16 @@ struct Label {
     bool Wrap = false; // переносить по ширине элемента
     // Ширина элемента подгоняется под текст (с учётом значка и полей).
     bool AutoWidth = false;
+    // AUTO SIZE — кегль уменьшается, пока текст не поместится в элемент:
+    // кнопка с длинным переводом не вылезает за край, а надпись не надо
+    // подбирать числом под каждый язык. Больше Scale кегль не становится.
+    bool AutoSize = false;
+    // Межстрочный интервал — доля высоты строки шрифта (1 — как в шрифте).
+    float LineSpacing = 1.0f;
+    // Что делать с текстом, который не помещается: показать как есть,
+    // обрезать по элементу или оборвать многоточием.
+    enum class Overflow { Visible, Clip, Ellipsis };
+    Overflow OverflowMode = Overflow::Visible;
     float PadX = 8.0f; // поле от края до содержимого
 
     // ТЕНЬ И ОБВОДКА ТЕКСТА. Без них светлая надпись поверх пёстрой сцены
@@ -368,6 +378,36 @@ struct Icon {
     std::string Name;
     glm::vec4 Color{1.0f, 1.0f, 1.0f, 1.0f};
     float Size = 0.0f; // 0 — по высоте элемента
+};
+
+// SHAPE — геометрическая форма: самостоятельный элемент и один из видов
+// оформления Panel (Appearance: Shape). Один компонент на оба случая: форма,
+// её заливка и обводка строятся и рисуются одной системой (ShapeGeometry.h),
+// а не своей копией у панели.
+//
+// Форма строится КОНТУРОМ — списком точек, — и рисуется веером с цветом в
+// каждой вершине: так градиент (линейный и радиальный) и обводка с любым
+// выравниванием получаются у любой формы одинаково, а свой контур (Custom
+// Shape) ляжет в ту же систему.
+struct Shape {
+    enum class Geometry { Rectangle, RoundedRectangle, Circle, Ellipse };
+    enum class FillKind { None, Solid, LinearGradient, RadialGradient };
+    // Где лежит обводка относительно края формы.
+    enum class StrokeAlign { Inside, Center, Outside };
+
+    Geometry Form = Geometry::RoundedRectangle;
+    float CornerRadius = 12.0f;               // у Rounded Rectangle
+
+    FillKind Fill = FillKind::Solid;
+    glm::vec4 Color{0.16f, 0.20f, 0.30f, 0.95f};    // заливка; у градиента — начало
+    glm::vec4 Color2{0.07f, 0.09f, 0.14f, 0.95f};   // конец градиента
+    // Направление линейного градиента, градусы: 0 — слева направо, 90 —
+    // сверху вниз. У радиального — от центра (Color) к краю (Color2).
+    float GradientAngle = 90.0f;
+
+    float StrokeWidth = 0.0f;                 // 0 — без обводки
+    glm::vec4 StrokeColor{1.0f, 1.0f, 1.0f, 0.6f};
+    StrokeAlign StrokeAlignment = StrokeAlign::Inside;
 };
 
 } // namespace sage::ui

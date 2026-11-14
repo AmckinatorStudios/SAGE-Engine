@@ -19,6 +19,7 @@ add_executable(sage_render_tests
     Checks_Materials.cpp     # материал: от файла до пикселей
     Checks_UI.cpp            # интерфейс: части не наезжают и не красят друг друга
     Checks_UIPixels.cpp      # интерфейс по пикселям: края, градиент, шрифт-картинка
+    Checks_UIShape.cpp       # формы: круг, эллипс, градиент, обводка
     Checks_Volumetrics.cpp   # объёмный свет: зерно, полосы, кайма
     Checks_Stability.cpp     # дрейф, утечки, разрешения, смена размера
     Checks_Textures.cpp      # мипмапы, детализация, анизотропия
