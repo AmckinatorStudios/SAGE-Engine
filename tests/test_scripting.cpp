@@ -1308,12 +1308,12 @@ TEST(Scripting_ui_layout_canvas_and_group_are_reachable) {
 
     CHECK_NEAR(scene.Registry().get<sage::ui::Icon>(e).Size, 18.0f, 1e-4f);
 
-    const auto& layout = scene.Registry().get<sage::ui::Stack>(e);
-    CHECK_TRUE(layout.Direction == sage::ui::Stack::Flow::Grid);
+    const auto& layout = scene.Registry().get<sage::ui::Arrangement>(e);
+    CHECK_TRUE(layout.Mode == sage::ui::Arrangement::Kind::Grid);
     CHECK_EQ(layout.Columns, 5);
     CHECK_NEAR(layout.Spacing, 6.0f, 1e-4f);
     CHECK_NEAR(layout.Padding.w, 3.0f, 1e-4f);
-    CHECK_TRUE(layout.Cross == sage::ui::Stack::CrossAlign::Start);
+    CHECK_TRUE(layout.Alignment == sage::ui::Arrangement::Align::Start);
     CHECK_TRUE(layout.FitContent);
 
     const auto& canvas = scene.Registry().get<sage::ui::Canvas>(e);
@@ -1325,7 +1325,7 @@ TEST(Scripting_ui_layout_canvas_and_group_are_reachable) {
     // Снять раскладку так же просто, как поставить: иначе «сделать из сетки
     // обычную панель» означало бы пересоздать её.
     se.Lua().script("sage.ui.ClearLayout(panel)");
-    CHECK_FALSE(scene.Registry().all_of<sage::ui::Stack>(e));
+    CHECK_FALSE(scene.Registry().get<sage::ui::Arrangement>(e).Arranges());
 }
 
 // Что под курсором — по ИМЕНИ ДЕЙСТВИЯ, как и что нажато. Без этого подсказка

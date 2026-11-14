@@ -17,7 +17,6 @@
 #include <vector>
 #include "sage/core/Log.h"
 #include "sage/assets/AssetDatabase.h"
-#include "sage/scene/SceneLegacyUI.h"
 #include "sage/ui/UIPart.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISerialize.h"
@@ -426,19 +425,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             obj.Registry()->emplace<sage::ui::InterfaceComponent>(obj.Entity(), ic);
         }
         if (j.contains("ui")) {
-            const json& uj = j["ui"];
-            // Старая запись (плоский элемент с "kind") — история формата СЦЕН,
-            // и разбирается она здесь, а не в общем читателе элемента: это два
-            // разных формата, и делать вид, что один плавно переходит в другой,
-            // значит получить третий.
-            if (uj.contains("kind")) {
-                sage::scene::Decompose(ParseUIElement(uj), *obj.Registry(), obj.Entity());
-                if (sage::ui::Image* im =
-                        obj.Registry()->try_get<sage::ui::Image>(obj.Entity()))
-                    sage::ui::ResolveImageTexture(*im);
-            } else {
-                sage::ui::LoadElement(uj, *obj.Registry(), obj.Entity());
-            }
+            sage::ui::LoadElement(j["ui"], *obj.Registry(), obj.Entity());
         }
 
         // Пересоздаём GPU-ресурс на основе описания
@@ -469,9 +456,6 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
     for (const auto& [childId, parentId] : parentLinks) scene->SetParentById(childId, parentId);
 
     scene->SetNextId(maxId + 1);
-    // Интерфейс старого вида (раскладка «галкой» у видимого элемента, старые
-    // имена типов) — к нынешнему. После SetNextId: деление заводит объекты.
-    sage::ui::NormalizeElements(*scene);
     // Интерфейсы из файлов — сразу, а не с первым кадром: скрипт, стартующий
     // вместе со сценой, ищет кнопки меню по имени, и они обязаны уже быть.
     sage::ui::SyncInterfaceSources(*scene);

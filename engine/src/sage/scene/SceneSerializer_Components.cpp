@@ -586,83 +586,6 @@ IKComponent ParseIK(const json& ij) {
     return ik;
 }
 
-// --- Интерфейс: ЧТЕНИЕ СТАРОГО ФОРМАТА ---------------------------------------
-//
-// Разбор блока "ui" с ключом "kind" — так элемент выглядел в файлах до перехода
-// на компоненты. Пишется всё уже компонентами (см. ниже), поэтому здесь только
-// чтение: однажды открытая и сохранённая сцена сюда больше не возвращается.
-
-sage::scene::LegacyElement::Kind UIKindFromString(const std::string& s) {
-    if (s == "label") return sage::scene::LegacyElement::Kind::Label;
-    if (s == "image") return sage::scene::LegacyElement::Kind::Image;
-    if (s == "bar")   return sage::scene::LegacyElement::Kind::Bar;
-    if (s == "icon")  return sage::scene::LegacyElement::Kind::Icon;
-    if (s == "input") return sage::scene::LegacyElement::Kind::Input;
-    if (s == "checkbox") return sage::scene::LegacyElement::Kind::Checkbox;
-    if (s == "slider") return sage::scene::LegacyElement::Kind::Slider;
-    return sage::scene::LegacyElement::Kind::Panel;
-}
-
-sage::scene::LegacyElement ParseUIElement(const json& uj) {
-    sage::scene::LegacyElement u;
-    u.Type = UIKindFromString(uj.value("kind", "panel"));
-    int anchor = uj.value("anchor", 0);
-    if (anchor >= 0 && anchor <= 8) u.Anchor = (UIAnchor)anchor;
-    if (uj.contains("offset")) {
-        u.Offset.x = uj["offset"].value("x", u.Offset.x);
-        u.Offset.y = uj["offset"].value("y", u.Offset.y);
-    }
-    if (uj.contains("size")) {
-        u.Size.x = uj["size"].value("x", u.Size.x);
-        u.Size.y = uj["size"].value("y", u.Size.y);
-    }
-    u.Layer = uj.value("layer", u.Layer);
-    u.Visible = uj.value("visible", u.Visible);
-    u.ClipChildren = uj.value("clipChildren", u.ClipChildren);
-    if (uj.contains("color")) u.Color = Vec4FromJson(uj["color"], u.Color);
-    u.Rounding = uj.value("rounding", u.Rounding);
-    u.BorderThickness = uj.value("borderThickness", u.BorderThickness);
-    if (uj.contains("borderColor")) u.BorderColor = Vec4FromJson(uj["borderColor"], u.BorderColor);
-    u.Text = uj.value("text", u.Text);
-    u.TextScale = uj.value("textScale", u.TextScale);
-    if (uj.contains("textColor")) u.TextColor = Vec4FromJson(uj["textColor"], u.TextColor);
-    u.TextCentered = uj.value("textCentered", u.TextCentered);
-    u.TexturePath = uj.value("texture", u.TexturePath);
-    u.Value = uj.value("value", u.Value);
-    if (uj.contains("barFillColor")) u.BarFillColor = Vec4FromJson(uj["barFillColor"], u.BarFillColor);
-    u.Icon = uj.value("icon", u.Icon);
-    if (uj.contains("iconColor")) u.IconColor = Vec4FromJson(uj["iconColor"], u.IconColor);
-    if (uj.contains("gradientColor")) u.GradientColor = Vec4FromJson(uj["gradientColor"], u.GradientColor);
-    u.ShadowSize = uj.value("shadowSize", u.ShadowSize);
-    if (uj.contains("sprite")) u.Sprite = Vec4FromJson(uj["sprite"], u.Sprite);
-    if (uj.contains("sliceBorder")) u.SliceBorder = Vec4FromJson(uj["sliceBorder"], u.SliceBorder);
-    u.PixelScale = uj.value("pixelScale", u.PixelScale);
-    u.Nearest = uj.value("pixelArt", u.Nearest);   // ключ старого формата
-    if (uj.contains("spriteHover")) u.SpriteHover = Vec4FromJson(uj["spriteHover"], u.SpriteHover);
-    if (uj.contains("spritePressed"))
-        u.SpritePressed = Vec4FromJson(uj["spritePressed"], u.SpritePressed);
-    u.Interactive = uj.value("interactive", u.Interactive);
-    u.Enabled = uj.value("enabled", u.Enabled);
-    u.Placeholder = uj.value("placeholder", u.Placeholder);
-    u.MaxLength = uj.value("maxLength", u.MaxLength);
-    u.Password = uj.value("password", u.Password);
-    u.MinValue = uj.value("minValue", u.MinValue);
-    u.MaxValue = uj.value("maxValue", u.MaxValue);
-    u.WrapText = uj.value("wrapText", u.WrapText);
-    u.PadX = uj.value("padX", u.PadX);
-    u.AutoWidth = uj.value("autoWidth", u.AutoWidth);
-    // Текстура картинки — рантайм, из кэша (nullptr при ошибке — заглушка цветом).
-    if (!u.TexturePath.empty()) {
-        // Фильтрация «ближайший пиксель» — без мипмапов: иначе набор спрайтов
-        // размывается, а мипмапы ЛИСТА подмешивают в края соседний спрайт.
-        u.Tex = u.Nearest
-                    ? ResourceManager::Instance().GetTexture(u.TexturePath, TextureFilter::Nearest,
-                                                             /*mipmaps=*/false)
-                    : ResourceManager::Instance().GetTexture(u.TexturePath);
-    }
-    return u;
-}
-
 // --- Интерфейс: КОМПОНЕНТЫ ---------------------------------------------------
 //
 // Элемент интерфейса — это набор компонентов (см. sage/ui/UI.h), и в файле он
@@ -671,11 +594,6 @@ sage::scene::LegacyElement ParseUIElement(const json& uj) {
 // label. Раньше писался один плоский блок на сорок полей, и у каждой надписи в
 // файле честно хранились скругление, девятина, предел длины поля ввода и
 // границы ползунка — поля, ничего для неё не значащие.
-//
-// СТАРЫЙ ФОРМАТ ЧИТАЕТСЯ. Признак — ключ "kind": он был видом элемента и в
-// новой записи не встречается. Такой блок разбирается прежним разбором и
-// раскладывается по компонентам (sage::scene::Decompose), поэтому сцены, сделанные до
-// перехода, открываются без единой правки руками.
 
 // --- Части элемента — ПО РЕЕСТРУ (sage/ui/UIPart.h) -------------------------
 //

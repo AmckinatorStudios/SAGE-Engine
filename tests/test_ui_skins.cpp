@@ -152,42 +152,6 @@ TEST(UISkin_looks_survive_save_and_load) {
     CHECK_TRUE(br.get<sage::ui::Fill>(b2).Texture == "ui/button.png");
 }
 
-TEST(UISkin_old_range_bar_and_layout_keys_are_read) {
-    // Сцена, записанная до видов: у ползунка «цвет дорожки» и «акцент», у
-    // полосы один цвет заполнения, у раскладки галка «растягивать поперёк».
-    const char* text = R"({
-      "sage_scene_version": 16, "name": "old", "objects": [
-        {"id": 1, "name": "Vol", "noMesh": true, "ui": {
-          "element": {"type": "Slider", "size": {"x": 200, "y": 30}},
-          "range": {"value": 0.5, "trackColor": {"x": 0.1, "y": 0.2, "z": 0.3, "w": 1},
-                    "accentColor": {"x": 0.9, "y": 0.5, "z": 0.1, "w": 1},
-                    "borderThickness": 2, "borderColor": {"x": 1, "y": 1, "z": 1, "w": 1}}}},
-        {"id": 2, "name": "HP", "noMesh": true, "ui": {
-          "element": {"type": "Bar"}, "fill": {},
-          "bar": {"value": 0.3, "fillColor": {"x": 0.8, "y": 0.1, "z": 0.1, "w": 1}}}},
-        {"id": 3, "name": "Col", "noMesh": true, "ui": {
-          "element": {"type": ""}, "layout": {"direction": 1, "stretchCross": false}}}
-      ]})";
-    std::unique_ptr<Scene> scene = SceneSerializer::LoadFromString(text);
-    CHECK_TRUE(scene != nullptr);
-    if (!scene) return;
-    auto& reg = scene->Registry();
-    const sage::ui::Range& r = reg.get<sage::ui::Range>(scene->FindByName("Vol").Entity());
-    CHECK_NEAR(r.Track.Color.z, 0.3f, 1e-5f);
-    CHECK_NEAR(r.Knob.Color.x, 0.9f, 1e-5f);
-    CHECK_NEAR(r.Filled.Color.y, 0.5f, 1e-5f);
-    CHECK_NEAR(r.Track.BorderThickness, 2.0f, 1e-5f);
-
-    const entt::entity hp = scene->FindByName("HP").Entity();
-    CHECK_NEAR(reg.get<sage::ui::Bar>(hp).Filled.Color.x, 0.8f, 1e-5f);
-    // Старое имя типа — к нынешнему.
-    CHECK_TRUE(reg.get<sage::ui::Element>(hp).Type == "Progress Bar");
-
-    const entt::entity col = scene->FindByName("Col").Entity();
-    CHECK_TRUE(reg.get<sage::ui::Stack>(col).Cross == sage::ui::Stack::CrossAlign::Start);
-    CHECK_TRUE(reg.get<sage::ui::Element>(col).Type == "Column");
-}
-
 TEST(UISkin_look_fields_show_only_what_acts) {
     // Поля девятины видны только в режиме девятины, а режим — только когда
     // выбрана картинка: цепочкой, а не одним условием.
@@ -275,11 +239,11 @@ TEST(UISkin_style_file_changes_look_but_not_content) {
 // --- Контейнеры ------------------------------------------------------------------------
 
 TEST(UISkin_row_grows_wraps_and_centres_across) {
-    sage::ui::Stack row;
-    row.Direction = sage::ui::Stack::Flow::Horizontal;
+    sage::ui::Arrangement row;
+    row.Mode = sage::ui::Arrangement::Kind::Horizontal;
     row.Padding = {0, 0, 0, 0};
     row.Spacing = 10.0f;
-    row.Cross = sage::ui::Stack::CrossAlign::Center;
+    row.Alignment = sage::ui::Arrangement::Align::Center;
 
     // Рост: 40 + 10 + (остаток) — второй забирает всё свободное место.
     std::vector<sage::ui::LayoutSlot> slots(2);
@@ -294,8 +258,8 @@ TEST(UISkin_row_grows_wraps_and_centres_across) {
     CHECK_NEAR(slots[0].Size.y, 20.0f, 1e-4f);
 
     // Перенос: пять по 80 в ширину 300 — три в первой строке, две во второй.
-    row.Wrap = true;
-    row.Cross = sage::ui::Stack::CrossAlign::Start;
+    row.Mode = sage::ui::Arrangement::Kind::Wrap;
+    row.Alignment = sage::ui::Arrangement::Align::Start;
     std::vector<sage::ui::LayoutSlot> tags(5);
     for (auto& t : tags) t.Size = {80, 30};
     const glm::vec2 used = sage::ui::ApplyLayout(row, UIRect{0, 0, 300, 200}, tags);
@@ -305,8 +269,8 @@ TEST(UISkin_row_grows_wraps_and_centres_across) {
     CHECK_NEAR(used.y, 70.0f, 1e-4f);
 
     // Сетка с автоматическим числом столбцов по размеру ячейки.
-    sage::ui::Stack grid;
-    grid.Direction = sage::ui::Stack::Flow::Grid;
+    sage::ui::Arrangement grid;
+    grid.Mode = sage::ui::Arrangement::Kind::Grid;
     grid.Padding = {0, 0, 0, 0};
     grid.Spacing = 0.0f;
     grid.Columns = 0;
@@ -322,11 +286,11 @@ TEST(UISkin_child_can_stand_outside_the_row) {
     Scene scene("ignore");
     const entt::entity hud = MakeInterface(scene);
     GameObject row = MakeElement(scene, "Row", hud, {0, 0}, {300, 50});
-    sage::ui::Stack st;
-    st.Direction = sage::ui::Stack::Flow::Horizontal;
+    sage::ui::Arrangement st;
+    st.Mode = sage::ui::Arrangement::Kind::Horizontal;
     st.Padding = {0, 0, 0, 0};
     st.Spacing = 0.0f;
-    scene.Registry().emplace<sage::ui::Stack>(row.Entity(), st);
+    scene.Registry().emplace<sage::ui::Arrangement>(row.Entity(), st);
     GameObject a = MakeElement(scene, "A", row.Entity(), {0, 0}, {40, 50});
     GameObject badge = MakeElement(scene, "Badge", row.Entity(), {0, 0}, {10, 10});
     GameObject b = MakeElement(scene, "B", row.Entity(), {0, 0}, {40, 50});
@@ -345,50 +309,6 @@ TEST(UISkin_child_can_stand_outside_the_row) {
     // И стоит по своему якорю — в правом верхнем углу ряда.
     CHECK_NEAR(rbadge->Rect.x, 290.0f, 1e-3f);
     CHECK_FALSE(rbadge->InLayout);
-}
-
-TEST(UISkin_old_panel_with_a_list_splits_without_moving_anything) {
-    // Старая «панель со списком»: подложка, маска и раскладка на одном
-    // элементе. Теперь это панель и контейнер внутри неё — а дети стоят там
-    // же, где стояли.
-    Scene scene("split");
-    const entt::entity hud = MakeInterface(scene);
-    GameObject list = MakeElement(scene, "List", hud, {20, 30}, {200, 300});
-    auto& reg = scene.Registry();
-    reg.emplace<sage::ui::Fill>(list.Entity());
-    reg.emplace<sage::ui::Mask>(list.Entity());
-    sage::ui::Stack st;
-    st.Direction = sage::ui::Stack::Flow::Vertical;
-    reg.emplace<sage::ui::Stack>(list.Entity(), st);
-    reg.get<sage::ui::Element>(list.Entity()).Type = "Vertical List";
-    GameObject one = MakeElement(scene, "One", list.Entity(), {0, 0}, {100, 40});
-    GameObject two = MakeElement(scene, "Two", list.Entity(), {0, 0}, {100, 40});
-
-    const auto before = sage::ui::SolveSceneRects(scene, 800, 600, true);
-    const UIRect oneBefore = RectOf(before, one.Entity())->Rect;
-    const UIRect twoBefore = RectOf(before, two.Entity())->Rect;
-
-    CHECK_EQ(sage::ui::NormalizeElements(scene), 1);
-    CHECK_FALSE(reg.all_of<sage::ui::Stack>(list.Entity()));
-    CHECK_FALSE(reg.all_of<sage::ui::Mask>(list.Entity()));
-    CHECK_TRUE(reg.get<sage::ui::Element>(list.Entity()).Type == "Panel");
-    const entt::entity box = scene.ParentOf(one.Entity());
-    CHECK_TRUE(box != list.Entity());
-    CHECK_TRUE(scene.ParentOf(box) == list.Entity());
-    CHECK_TRUE(reg.all_of<sage::ui::Stack>(box) && reg.all_of<sage::ui::Mask>(box));
-    CHECK_TRUE(reg.get<sage::ui::Element>(box).Type == "Clip Area" ||
-               reg.get<sage::ui::Element>(box).Type == "Column");
-
-    const auto after = sage::ui::SolveSceneRects(scene, 800, 600, true);
-    const UIRect oneAfter = RectOf(after, one.Entity())->Rect;
-    const UIRect twoAfter = RectOf(after, two.Entity())->Rect;
-    CHECK_NEAR(oneAfter.x, oneBefore.x, 1e-3f);
-    CHECK_NEAR(oneAfter.y, oneBefore.y, 1e-3f);
-    CHECK_NEAR(oneAfter.w, oneBefore.w, 1e-3f);
-    CHECK_NEAR(twoAfter.y, twoBefore.y, 1e-3f);
-
-    // Второй раз делить нечего.
-    CHECK_EQ(sage::ui::NormalizeElements(scene), 0);
 }
 
 TEST(UISkin_type_change_keeps_children) {

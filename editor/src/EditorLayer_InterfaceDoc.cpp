@@ -189,16 +189,16 @@ bool EditorLayer::OpenInterfaceObject(int objectId) {
     if (!ic) return false;
     if (!ic->Source.empty()) return OpenInterface(ic->Source);
 
-    // ИНТЕРФЕЙС СТАРОГО ВИДА: элементы лежат прямо в сцене. Выносим их в файл
-    // и оставляем в сцене ссылку — одним шагом отмены, без потери вида: на
-    // экране ничего не меняется, просто элементы теперь живут в файле.
+    // ФАЙЛА ЕЩЁ НЕТ — заводим пустой интерфейс с именем объекта и ставим
+    // ссылку на него: «Создать и открыть» одним шагом отмены.
     if (m_uiDocActive) SetWorkspace(EditorWorkspace::Scene);
     if (!m_project.Loaded()) {
-        SetStatusMessage(T("Open a project to move the interface into its own file"));
+        SetStatusMessage(T("Open a project to save the interface"));
         return false;
     }
-    sage::ui::Interface ui = sage::ui::Capture(*m_scene, obj.Entity());
+    sage::ui::Interface ui;
     ui.Name = obj.Name();
+    ui.Root = sage::ui::Interface::MainContainerNode(ui.Name);
     const fs::path dir = m_project.AssetsDir() / "ui";
     std::error_code ec;
     fs::create_directories(dir, ec);
@@ -210,15 +210,9 @@ bool EditorLayer::OpenInterfaceObject(int objectId) {
         return false;
     }
     PushUndoSnapshot();
-    entt::registry& reg = m_scene->Registry();
-    std::vector<int> inline_;
-    for (entt::entity c : m_scene->ChildrenOf(obj.Entity()))
-        if (reg.all_of<sage::ui::Element>(c) && !reg.all_of<sage::ui::InterfaceInstanceTag>(c))
-            if (const IdComponent* id = reg.try_get<IdComponent>(c)) inline_.push_back(id->Id);
-    for (int id : inline_) m_scene->RemoveObject(id);
-    reg.get<sage::ui::InterfaceComponent>(obj.Entity()).Source = ref;
+    m_scene->Registry().get<sage::ui::InterfaceComponent>(obj.Entity()).Source = ref;
     sage::ui::SyncInterfaceSources(*m_scene);
     MarkSceneDirty();
-    LOG_INFO("Editor") << "Интерфейс вынесен в файл: " << ref;
+    LOG_INFO("Editor") << "Интерфейс создан: " << ref;
     return OpenInterface(ref);
 }

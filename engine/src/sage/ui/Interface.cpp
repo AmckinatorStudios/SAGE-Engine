@@ -1,5 +1,4 @@
 #include "sage/ui/Interface.h"
-#include "sage/core/FormatVersion.h"
 #include "sage/assets/Pack.h"
 #include "sage/ui/UIPresets.h"
 
@@ -21,23 +20,10 @@ namespace {
 
 // Версия формата ресурса. Та же дисциплина, что у сцен и сохранений: без
 // номера первое же ломающее изменение молча испортило бы чужие файлы.
-//   1 — несколько корней ("roots");
-//   2 — один главный контейнер ("root") и холст ("canvas").
+// Версия 2: один главный контейнер ("root") и холст ("canvas"). Файлы первой
+// версии (несколько корней) больше не читаются — интерфейс того вида создают
+// заново.
 constexpr int kInterfaceVersion = 2;
-
-// 1 -> 2: корни ложатся в главный контейнер. На экране не меняется ничего:
-// контейнер во весь экран, и дети якорятся к его краям так же, как к краям
-// экрана.
-void UpgradeRootsToMainContainer(json& doc) {
-    InterfaceNode root = Interface::MainContainerNode(doc.value("name", std::string("Interface")));
-    json node;
-    node["name"] = root.Name;
-    node["data"] = root.Data;
-    if (doc.contains("roots") && doc["roots"].is_array() && !doc["roots"].empty())
-        node["children"] = doc["roots"];
-    doc.erase("roots");
-    doc["root"] = std::move(node);
-}
 
 json CanvasToJson(const Canvas& c) {
     json j;
@@ -121,9 +107,10 @@ InterfaceNode Interface::MainContainerNode(const std::string& name) {
     entt::registry reg;
     const entt::entity e = reg.create();
     Element& el = reg.emplace<Element>(e);
-    el.Type = "Group";
+    el.Type = "Container";
     el.Mode = Element::Stretch::Both;
     el.Position = {0.0f, 0.0f};
+    reg.emplace<Arrangement>(e);   // свой Arrangement, как у любого контейнера
     InterfaceNode n;
     n.Name = name.empty() ? std::string("Interface") : name;
     SaveElement(n.Data, reg, e);
@@ -142,15 +129,22 @@ std::string Interface::ToJsonString() const {
 bool Interface::FromJsonString(const std::string& text, Interface& out, std::string& err) {
     try {
         json root = json::parse(text);
-        static const sage::format::Spec spec{
-            "sage_interface_version", kInterfaceVersion, "интерфейс",
-            {{1, UpgradeRootsToMainContainer}}};
-        if (!sage::format::Upgrade(root, spec, err)) return false;
+        const int version = root.value("sage_interface_version", 0);
+        if (version != kInterfaceVersion) {
+            err = version > kInterfaceVersion
+                      ? "интерфейс сохранён более новой версией движка (формат " + std::to_string(version) + ")"
+                      : "интерфейс старого формата (" + std::to_string(version) +
+                            ") — такие больше не читаются, создайте его заново";
+            return false;
+        }
         out = Interface{};
         out.Name = root.value("name", std::string("Interface"));
         if (root.contains("canvas")) out.Canvas = CanvasFromJson(root["canvas"]);
-        if (root.contains("root") && root["root"].is_object()) out.Root = NodeFromJson(root["root"]);
-        else out.Root = MainContainerNode(out.Name);
+        if (!root.contains("root") || !root["root"].is_object()) {
+            err = "в файле нет главного контейнера";
+            return false;
+        }
+        out.Root = NodeFromJson(root["root"]);
         return true;
     } catch (const std::exception& e) {
         err = e.what();
@@ -203,9 +197,6 @@ bool InterfaceFragment::FromJsonString(const std::string& text, InterfaceFragmen
 entt::entity BuildMainContainer(Scene& scene, const Interface& ui, entt::entity interfaceEntity) {
     std::vector<entt::entity> made;
     Build(scene, ui.Root, interfaceEntity, made, /*isRoot=*/true);
-    // Ресурс, сохранённый до разделения элементов и контейнеров, приходит со
-    // старыми типами — приводим так же, как сцену.
-    NormalizeElements(scene);
     return made.empty() ? entt::null : made.front();
 }
 
@@ -232,13 +223,8 @@ Interface Capture(const Scene& scene, entt::entity interfaceEntity) {
         out.Root = Snap(scene, main);
         return out;
     }
-    std::vector<entt::entity> kids;
-    if (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(interfaceEntity))
-        for (entt::entity c : h->Children)
-            if (reg.valid(c) && reg.all_of<Element>(c)) kids.push_back(c);
-    // Старый вид — корни кладутся в главный контейнер.
+    // Без главного контейнера — пустой интерфейс: содержимое всегда лежит в нём.
     out.Root = Interface::MainContainerNode(out.Name);
-    for (entt::entity c : kids) out.Root.Children.push_back(Snap(scene, c));
     return out;
 }
 
@@ -276,7 +262,6 @@ std::vector<entt::entity> InstantiateFragment(Scene& scene, const InterfaceFragm
     const bool expose = !(valid && reg.all_of<Element>(parent));
     std::vector<entt::entity> roots;
     for (const InterfaceNode& n : frag.Nodes) Build(scene, n, container, roots, expose);
-    NormalizeElements(scene);
     return roots;
 }
 

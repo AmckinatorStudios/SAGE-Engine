@@ -562,9 +562,81 @@ bool TypeHasPart(const ui::Preset& t, const char* id) {
     return (s == "fill" && t.HasFill) || (s == "label" && t.HasLabel) ||
            (s == "image" && t.HasImage) || (s == "bar" && t.HasBar) ||
            (s == "interactable" && t.HasInteractable) || (s == "textInput" && t.HasInput) ||
-           (s == "range" && t.HasRange) || (s == "layout" && t.HasStack) ||
-           (s == "mask" && t.HasMask) || (s == "scroll" && t.HasScroll) ||
-           (s == "icon" && t.HasIcon);
+           (s == "range" && t.HasRange) || (s == "arrangement" && t.HasArrangement) ||
+           // Обрезка и прокрутка — настройки контейнера («Clip Children»,
+           // «Scroll»), а не добавка сверх типа.
+           ((s == "mask" || s == "scroll") && t.Container) || (s == "icon" && t.HasIcon);
+}
+
+// CONTENT контейнера: Arrangement — полями своей части (поля режима видны
+// только в нём), Clip Children — галкой, Scroll — выбором оси. Обрезка и
+// прокрутка остаются частями (Mask, Scroll), но включаются здесь, а не
+// «добавкой»: это настройки контейнера, а не новые элементы.
+void DrawContentSection(EditorHost& host, GameObject obj, const UIPropsContext& ctx, int selected) {
+    entt::registry& reg = host.CurrentScene().Registry();
+    const entt::entity e = obj.Entity();
+    if (const ui::PartType* arr = ui::FindPart("arrangement")) {
+        if (!arr->Has(reg, e)) {
+            // Контейнер без своей части (собран кодом) получает её здесь: у
+            // любого контейнера есть Arrangement, хотя бы ручной.
+            if (ImGui::Button(T("Arrange children"))) {
+                host.PushUndoSnapshot();
+                arr->Add(reg, e);
+            }
+        } else if (void* data = arr->GetMutable(reg, e)) {
+            ImGui::PushID("arrangement");
+            DrawPartSection(host, obj, ctx, *arr, data, FieldView{}, selected);
+            ImGui::PopID();
+        }
+    }
+
+    ImGui::Spacing();
+    const ui::PartType* mask = ui::FindPart("mask");
+    bool clip = mask && mask->Has(reg, e);
+    if (mask && ImGui::Checkbox(T("Clip Children"), &clip)) {
+        host.PushUndoSnapshot();
+        if (clip) mask->Add(reg, e);
+        else mask->Remove(reg, e);
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Children are cut off at the edges of this container"));
+    if (clip && mask) {
+        if (void* data = mask->GetMutable(reg, e)) {
+            ImGui::PushID("mask");
+            ImGui::Indent();
+            DrawPartSection(host, obj, ctx, *mask, data, FieldView{}, selected);
+            ImGui::Unindent();
+            ImGui::PopID();
+        }
+    }
+
+    // Прокрутка: ось выбирается одним списком, а не двумя галками и добавкой.
+    if (const ui::PartType* scroll = ui::FindPart("scroll")) {
+        ui::Scroll* sc = reg.try_get<ui::Scroll>(e);
+        int axis = !sc ? 0 : sc->Horizontal && sc->Vertical ? 3 : sc->Horizontal ? 1 : 2;
+        const char* kAxes[] = {T("Off"), T("Horizontal"), T("Vertical"), T("Both")};
+        if (ImGui::Combo(T("Scroll"), &axis, kAxes, 4)) {
+            host.PushUndoSnapshot();
+            if (axis == 0) {
+                scroll->Remove(reg, e);
+            } else {
+                ui::Scroll& s = reg.get_or_emplace<ui::Scroll>(e);
+                s.Horizontal = axis == 1 || axis == 3;
+                s.Vertical = axis == 2 || axis == 3;
+            }
+            sc = reg.try_get<ui::Scroll>(e);
+        }
+        if (sc) {
+            if (void* data = scroll->GetMutable(reg, e)) {
+                ImGui::PushID("scroll");
+                ImGui::Indent();
+                FieldView v;
+                DrawPartSection(host, obj, ctx, *scroll, data, v, selected);
+                ImGui::Unindent();
+                ImGui::PopID();
+            }
+        }
+    }
 }
 
 // Разделы инспектора. Объявлены здесь, определены ниже: главная функция читается
@@ -654,11 +726,8 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
                 if (ui::Element* now = reg.try_get<ui::Element>(e)) {
                     const std::string newType = now->Type;
                     const glm::vec2 presetSize = now->Size;
-                    const float presetGrow = now->Grow;
                     *now = keep;
                     now->Type = newType;
-                    // Распорка без роста — не распорка: у неё рост и есть смысл.
-                    if (presetGrow > 0.0f && now->Grow <= 0.0f) now->Grow = presetGrow;
                     if (now->Size.x <= 0.0f || now->Size.y <= 0.0f) now->Size = presetSize;
                     now->StyleVersion = -1;
                 }
@@ -672,8 +741,8 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     type = ui::FindPreset(xf->Type);
     if (type && type->Hint) HintWrapped("%s", T(type->Hint));
     if (!type)
-        HintWrapped("%s", T("An element from an older version or built by code: its parts are shown "
-                            "as they are. Pick a type above to rebuild it."));
+        HintWrapped("%s", T("An element built by code: its parts are shown as they are. Pick a type "
+                            "above to rebuild it."));
 
     // Стиль из файла — у видимых элементов (у контейнера виду взяться неоткуда).
     if (!isContainer) DrawStyleRow(host, obj, ctx, *xf);
@@ -685,7 +754,11 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     // картинка, у кнопки — её вид в каждом состоянии. Включать и выключать тут
     // нечего: это устройство типа, а не набор галок.
     auto belongs = [&](const ui::PartType& p) { return !type || TypeHasPart(*type, p.Id); };
-    if (!isContainer) {
+    // Вид есть у всего, кроме невидимого Container: у Panel — её подложка.
+    bool hasLook = false;
+    for (const ui::PartType& p : ui::Parts())
+        if (p.Fields && !p.Container && !p.Hidden && p.Has(reg, e) && belongs(p)) hasLook = true;
+    if (hasLook) {
         const std::string typeTitle =
             xf->Type.empty() ? std::string(T("Look")) : std::string(T(xf->Type.c_str()));
         if (ImGui::CollapsingHeader(typeTitle.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
@@ -746,24 +819,13 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
         }
     }
 
-    // --- КОНТЕЙНЕР: как расставлены дети -------------------------------------
-    if (isContainer || !type) {
-        bool any = false;
-        for (const ui::PartType& p : ui::Parts())
-            if (p.Fields && p.Container && !p.Hidden && p.Has(reg, e)) any = true;
-        if (any && ImGui::CollapsingHeader(T("Container"), ImGuiTreeNodeFlags_DefaultOpen)) {
-            for (const ui::PartType& p : ui::Parts()) {
-                if (!p.Fields || !p.Container || p.Hidden || !p.Has(reg, e)) continue;
-                void* data = p.GetMutable(reg, e);
-                if (!data) continue;
-                ImGui::SeparatorText(T(p.Title));
-                ImGui::PushID(p.Id);
-                DrawPartSection(host, obj, ctx, p, data, FieldView{}, selected);
-                ImGui::PopID();
-            }
-        }
-        if (isContainer && !any)
-            HintWrapped("%s", T("Children keep their own anchors inside this container."));
+    // --- CONTENT: как контейнер держит детей ---------------------------------
+    //
+    // Arrangement (ручной, ряд, столбец, сетка, перенос), обрезка детей по
+    // границам и прокрутка — РЕЖИМЫ контейнера, а не отдельные элементы: ни
+    // «области обрезки», ни «вьюпорта» в дереве не появляется.
+    if (isContainer && ImGui::CollapsingHeader(T("Content"), ImGuiTreeNodeFlags_DefaultOpen)) {
+        DrawContentSection(host, obj, ctx, selected);
     }
 
     // --- ПОВЕДЕНИЕ: что элемент делает ----------------------------------------
@@ -817,15 +879,6 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
         }
     }
 
-    ImGui::Separator();
-    if (ImGui::Button(T("Remove UI Element"))) {
-        host.PushUndoSnapshot();
-        // Снимаем ВСЕ зарегистрированные части, а не список из этого файла:
-        // часть, добавленная игрой, тоже должна уходить вместе с элементом.
-        for (const ui::PartType& p : ui::Parts())
-            if (p.Has(reg, e)) p.Remove(reg, e);
-        reg.remove<ui::Element>(e);
-    }
 }
 
 

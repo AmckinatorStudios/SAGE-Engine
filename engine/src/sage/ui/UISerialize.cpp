@@ -98,47 +98,6 @@ void LoadField(const json& in, void* data, const sage::ui::PartField& f) {
     }
 }
 
-// --- СТАРЫЕ КЛЮЧИ ЧАСТЕЙ ---------------------------------------------------------
-//
-// У ползунка и галки были цвета «дорожки» и «акцента», у полосы — один цвет
-// заполнения, у раскладки — галка «растягивать поперёк». Теперь это виды и
-// перечисление; сцена, сохранённая раньше, обязана открыться с тем же видом.
-// Переводится, только если нового ключа в файле нет: сохранённое уже новой
-// версией не трогается.
-void UpgradeLegacyKeys(const std::string& id, const json& pj, void* data) {
-    using namespace sage::ui;
-    auto has = [&pj](const char* k) { return pj.contains(k); };
-    if (id == "range") {
-        Range& r = *static_cast<Range*>(data);
-        if (has("track")) return;
-        if (has("trackColor")) r.Track.Color = Vec4FromJson(pj["trackColor"], r.Track.Color);
-        if (has("accentColor")) {
-            const glm::vec4 accent = Vec4FromJson(pj["accentColor"], r.Filled.Color);
-            r.Filled.Color = r.Knob.Color = r.Check.Color = accent;
-        }
-        const float border = pj.value("borderThickness", 0.0f);
-        const glm::vec4 borderColor =
-            has("borderColor") ? Vec4FromJson(pj["borderColor"], glm::vec4(0.0f)) : glm::vec4(0.0f);
-        r.Track.BorderThickness = r.Knob.BorderThickness = border;
-        r.Track.BorderColor = r.Knob.BorderColor = borderColor;
-        // Дорожка ползунка была «таблеткой» (скругление в половину толщины),
-        // квадратик галки — со своим скруглением.
-        if (r.Toggle) r.Track.Rounding = pj.value("rounding", r.Track.Rounding);
-        else r.Track.Rounding = r.Filled.Rounding = 64.0f;
-    } else if (id == "bar") {
-        Bar& b = *static_cast<Bar*>(data);
-        if (has("filled") || !has("fillColor")) return;
-        // Заполнение рисовалось градиентом от светлее к темнее — так и остаётся.
-        b.SetFillColor(Vec4FromJson(pj["fillColor"], b.Filled.Color));
-    } else if (id == "layout") {
-        Stack& st = *static_cast<Stack*>(data);
-        if (has("cross") || !has("stretchCross")) return;
-        const json& v = pj["stretchCross"];
-        st.Cross = (v.is_boolean() && !v.get<bool>()) ? Stack::CrossAlign::Start
-                                                      : Stack::CrossAlign::Stretch;
-    }
-}
-
 void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
     const sage::ui::Element* t = reg.try_get<sage::ui::Element>(e);
     if (!t) return;
@@ -211,12 +170,7 @@ void ResolveImageTextureImpl(sage::ui::Image& im) {
 
 void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
     sage::ui::Element t;
-    // Ключ "element", а прежде был "transform": раскладка стала частью самого
-    // элемента, и старое имя врало бы про устройство. Прежний ключ читается —
-    // сцены, сделанные до переименования, обязаны открываться.
-    const json* tjp = uj.contains("element")   ? &uj["element"]
-                      : uj.contains("transform") ? &uj["transform"]
-                                                 : nullptr;
+    const json* tjp = uj.contains("element") ? &uj["element"] : nullptr;
     if (tjp) {
         const json& tj = *tjp;
         t.Type = tj.value("type", t.Type);
@@ -224,10 +178,7 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
         if (anchor >= 0 && anchor <= 8) t.Anchor = (UIAnchor)anchor;
         const int stretch = tj.value("stretch", (int)t.Mode);
         if (stretch >= 0 && stretch <= 3) t.Mode = (sage::ui::Element::Stretch)stretch;
-        // "offset" -> "position", "layer" -> "order": те же значения под именами,
-        // которыми их зовут люди.
-        t.Position = Vec2FromJson(tj.value("position", tj.value("offset", json::object())),
-                                  t.Position);
+        t.Position = Vec2FromJson(tj.value("position", json::object()), t.Position);
         t.Size = Vec2FromJson(tj.value("size", json::object()), t.Size);
         if (tj.contains("margin")) t.Margin = Vec4FromJson(tj["margin"], t.Margin);
         t.Pivot = Vec2FromJson(tj.value("pivot", json::object()), t.Pivot);
@@ -235,7 +186,7 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
         UIBlendFromName(tj.value("blend", std::string("normal")), t.Blend);
         t.Scale = tj.value("scale", t.Scale);
         t.Opacity = tj.value("opacity", t.Opacity);
-        t.Order = tj.value("order", tj.value("layer", t.Order));
+        t.Order = tj.value("order", t.Order);
         t.DrawLayer = tj.value("drawLayer", t.DrawLayer);
         t.Visible = tj.value("visible", t.Visible);
         t.Active = tj.value("active", t.Active);
@@ -259,20 +210,6 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
         if (!data) continue;
         const json& pj = uj[p.Id];
         for (const sage::ui::PartField& f : *p.Fields) LoadField(pj, data, f);
-        UpgradeLegacyKeys(p.Id, pj, data);
-    }
-
-    // Связи старого формата жили списком "events" в части interactable. Теперь
-    // это связи сигналов объекта (sage/scene/Signals.h) — у любого объекта, а
-    // не только у кнопки; переводятся здесь, при чтении, один раз.
-    if (uj.contains("interactable") && uj["interactable"].is_object() &&
-        uj["interactable"].contains("events")) {
-        std::vector<sage::signals::Link> links;
-        sage::scene::LinksFromLegacyBindings(uj["interactable"]["events"], links);
-        if (!links.empty()) {
-            auto& sl = reg.get_or_emplace<sage::signals::SignalLinksComponent>(e);
-            sl.Links.insert(sl.Links.end(), links.begin(), links.end());
-        }
     }
 
     // Картинке нужен рантайм-указатель на текстуру: путь в файле есть, а

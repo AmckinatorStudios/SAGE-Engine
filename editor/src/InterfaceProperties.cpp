@@ -17,7 +17,6 @@
 
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
-#include "sage/ui/InterfaceSource.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
 
@@ -50,21 +49,10 @@ void DrawInterfaceProperties(EditorHost& host, GameObject obj) {
         info->Source = r.Path;   // копия развернётся заново на следующем кадре
     }
 
-    // Старый вид: элементы лежат прямо в сцене. Их можно только вынести в файл —
-    // править их здесь значило бы держать у экрана два места правки.
-    int inlineElements = 0;
-    for (entt::entity c : host.CurrentScene().ChildrenOf(obj.Entity()))
-        if (reg.all_of<ui::Element>(c) && !reg.all_of<ui::InterfaceInstanceTag>(c)) ++inlineElements;
-
-    const char* open = !info->Source.empty() ? T("Open Interface")
-                       : inlineElements > 0 ? T("Move to a file and open")
-                                            : T("Create and open");
+    const char* open = !info->Source.empty() ? T("Open Interface") : T("Create and open");
     if (EditorIcons::Button("ui-panel", open,
                             T("Edit the content in the Interface workspace")))
         host.OpenInterfaceObject(obj.Id());
-    if (info->Source.empty() && inlineElements > 0)
-        EditorTheme::Hint(T("Old-style interface: its elements live in the scene. Moving them "
-                            "to a file keeps the look and makes them editable in the Interface workspace."));
     ImGui::Separator();
 
     // --- ПОДКЛЮЧЕНИЕ: как показывать весь интерфейс ---------------------------
@@ -78,12 +66,6 @@ void DrawInterfaceProperties(EditorHost& host, GameObject obj) {
     if (ImGui::Checkbox(T("Receives input"), &info->ReceivesInput)) host.PushUndoSnapshot();
     EditorTheme::Hint(T("off — shown but not clickable: a splash, credits, a hint over the game"));
 
-    // Холст интерфейса из файла едет вместе с файлом и правится там же; у
-    // старого вида он живёт в сцене — показываем его здесь, как раньше.
-    if (info->Source.empty() && inlineElements > 0) {
-        ImGui::SeparatorText(T("Canvas"));
-        DrawInterfaceCanvas(host, obj);
-    }
 }
 
 void DrawInterfaceCanvas(EditorHost& host, GameObject interfaceObject) {

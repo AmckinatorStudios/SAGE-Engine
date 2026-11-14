@@ -1,5 +1,6 @@
 #include "sage/scripting/ScriptEngine.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <map>
 #include <system_error>
@@ -421,6 +422,19 @@ set.valign = function(s, v) (rawget(s, "label") or s.e).TextVAlign = ALIGN[v] or
 
 local function keys(...) local t = {} for _, tbl in ipairs({...}) do for k in pairs(tbl) do t[k] = 1 end end return t end
 
+-- Ключи содержимого контейнера — одни у ui.container и ui.panel.
+local CONTENT = {arrange = 1, spacing = 1, padding = 1, columns = 1, rows = 1, align = 1,
+                 distribute = 1, child_width = 1, child_height = 1, wrap_columns = 1, fit_content = 1,
+                 clip = 1, scroll = 1}
+
+local function content(obj, o)
+    U.Arrange(obj, {arrange = o.arrange or "manual", spacing = o.spacing, padding = o.padding,
+        columns = o.columns, rows = o.rows, align = o.align, distribute = o.distribute,
+        child_width = o.child_width, child_height = o.child_height,
+        wrap_columns = o.wrap_columns, fit_content = o.fit_content, clip = o.clip, scroll = o.scroll})
+end
+
+
 ---Экран: элемент во весь экран, корень интерфейса. order — порядок между
 ---экранами (больше — поверх), input = false — показывается, но не ловит мышь.
 ---scale = "pixel" — целый масштаб под опорный размер reference {w, h} (для
@@ -448,8 +462,9 @@ end
 ---@param o table
 ---@return table
 function U.panel(o)
-    local obj = new("panel", o, LOOK)
+    local obj = new("panel", o, keys(LOOK, CONTENT))
     U.SetLook(obj, "fill", look_of(o, {color = Vec4(0, 0, 0, 0.5), rounding = 0}))
+    content(obj, o)
     return finish(wrap(obj, "panel"), o)
 end
 
@@ -554,23 +569,19 @@ function U.bar(o)
     return finish(wrap(obj, "bar"), o)
 end
 
----Группа: невидимый контейнер. layout = "row" | "column" | "grid" расставляет
----детей сам: gap — зазор, padding — поля {л, в, п, н} или число, columns,
----justify = start | center | end | between | around | evenly, cross. У детей
----работает margin — свои поля вокруг. clip = true обрезает детей.
+---Контейнер: невидимый, держит и расставляет детей. arrange = "manual" |
+---"horizontal" | "vertical" | "grid" | "wrap"; spacing, padding ({л, в, п, н}
+---или число), align = start | center | end (поперёк), distribute = start |
+---center | end | between | around | evenly (вдоль), child_width / child_height
+---= fixed | fit | fill, columns, rows, wrap_columns, fit_content (свой размер по содержимому),
+---clip = true (обрезать детей), scroll = horizontal | vertical | both.
 ---@param o? table
 ---@return table
-function U.group(o)
+function U.container(o)
     o = o or {}
-    local obj, e = new("group", o, {layout = 1, gap = 1, padding = 1, columns = 1, justify = 1, cross = 1, clip = 1})
-    e.Type = UIKind.Panel
-    e.Color = Vec4(0, 0, 0, 0)
-    if o.layout then
-        SetUILayout(obj, {dir = o.layout, spacing = o.gap or 0, padding = vec4(o.padding or 0),
-            columns = o.columns or 0, justify = o.justify or "start", cross = o.cross or "start"})
-    end
-    if o.clip then e.ClipChildren = true end
-    return finish(wrap(obj, "group"), o)
+    local obj = new("container", o, CONTENT)
+    content(obj, o)
+    return finish(wrap(obj, "container"), o)
 end
 
 ---Курсор мыши в пикселях интерфейса.
@@ -627,6 +638,61 @@ void ScriptEngine::RegisterUIKitApi() {
         } else {
             throw std::runtime_error("ui.SetLook: часть '" + part +
                                      "' — нужно fill, hover, pressed, disabled, focused, track, filled, knob, check или bar");
+        }
+    });
+
+    // Содержимое контейнера (ui.container, ui.panel): Arrangement, обрезка
+    // детей и прокрутка — одной таблицей. Отсутствующий ключ — умолчание.
+    Bind("ui", "Arrange", nullptr, [](GameObject& obj, sol::table t) {
+        if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity()))
+            throw std::runtime_error("ui.Arrange: объект не элемент интерфейса");
+        using A = sage::ui::Arrangement;
+        entt::registry& reg = *obj.Registry();
+        A& a = reg.get_or_emplace<A>(obj.Entity());
+        // Тип — как у контейнера из редактора: держит детей, виден в дереве.
+        sage::ui::Element& el = reg.get<sage::ui::Element>(obj.Entity());
+        el.Type = reg.all_of<sage::ui::Fill>(obj.Entity()) ? "Panel" : "Container";
+        const std::string mode = t.get_or<std::string>("arrange", "manual");
+        static const std::pair<const char*, A::Kind> kModes[] = {
+            {"manual", A::Kind::Manual}, {"horizontal", A::Kind::Horizontal},
+            {"vertical", A::Kind::Vertical}, {"grid", A::Kind::Grid}, {"wrap", A::Kind::Wrap}};
+        bool known = false;
+        for (const auto& [n, k] : kModes)
+            if (mode == n) { a.Mode = k; known = true; }
+        if (!known)
+            throw std::runtime_error("ui: arrange '" + mode +
+                                     "' — нужно manual, horizontal, vertical, grid или wrap");
+        a.Spacing = t.get_or("spacing", a.Spacing);
+        if (t["padding"].valid()) a.Padding = Vec4Arg(t["padding"], "padding");
+        a.Columns = std::max(0, t.get_or("columns", a.Columns));
+        a.Rows = std::max(0, t.get_or("rows", a.Rows));
+        a.WrapVertical = t.get_or("wrap_columns", a.WrapVertical);
+        a.FitContent = t.get_or("fit_content", a.FitContent);
+        const std::string align = t.get_or<std::string>("align", "start");
+        a.Alignment = align == "center" ? A::Align::Center : align == "end" ? A::Align::End : A::Align::Start;
+        const std::string spread = t.get_or<std::string>("distribute", "start");
+        a.Distribution = spread == "center"    ? A::Spread::Center
+                         : spread == "end"     ? A::Spread::End
+                         : spread == "between" ? A::Spread::SpaceBetween
+                         : spread == "around"  ? A::Spread::SpaceAround
+                         : spread == "evenly"  ? A::Spread::SpaceEvenly
+                                               : A::Spread::Start;
+        auto size = [](const std::string& v) {
+            if (v == "fixed") return A::ChildSize::Fixed;
+            if (v == "fit") return A::ChildSize::FitContent;
+            if (v == "fill") return A::ChildSize::Fill;
+            throw std::runtime_error("ui: child_width/child_height '" + v + "' — нужно fixed, fit или fill");
+        };
+        a.ChildWidth = size(t.get_or<std::string>("child_width", "fixed"));
+        a.ChildHeight = size(t.get_or<std::string>("child_height", "fixed"));
+        if (t.get_or("clip", false)) reg.get_or_emplace<sage::ui::Mask>(obj.Entity());
+        const std::string scroll = t.get_or<std::string>("scroll", "");
+        if (!scroll.empty()) {
+            if (scroll != "horizontal" && scroll != "vertical" && scroll != "both")
+                throw std::runtime_error("ui: scroll '" + scroll + "' — нужно horizontal, vertical или both");
+            sage::ui::Scroll& sc = reg.get_or_emplace<sage::ui::Scroll>(obj.Entity());
+            sc.Horizontal = scroll != "vertical";
+            sc.Vertical = scroll != "horizontal";
         }
     });
 

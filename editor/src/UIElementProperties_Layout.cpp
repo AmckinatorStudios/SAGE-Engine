@@ -144,7 +144,8 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
     // В КОНТЕЙНЕРЕ место считает контейнер: якорь и положение не действуют, и
     // показывать их значило бы обещать то, чего не происходит.
     const entt::entity parent = host.CurrentScene().ParentOf(e);
-    const bool inStack = parent != entt::null && reg.all_of<ui::Stack>(parent);
+    const ui::Arrangement* parentArr = parent != entt::null ? reg.try_get<ui::Arrangement>(parent) : nullptr;
+    const bool inStack = parentArr && parentArr->Arranges();
     if (inStack) {
         ImGui::SeparatorText(T("In the container"));
         if (ImGui::Checkbox(T("Place by own anchor"), &xf->IgnoreLayout)) host.PushUndoSnapshot();

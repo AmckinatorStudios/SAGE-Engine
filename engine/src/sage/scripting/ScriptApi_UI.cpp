@@ -14,7 +14,6 @@
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Pack.h"
 #include <stb_image.h>
-#include "sage/scene/SceneLegacyUI.h"
 
 #include <algorithm>
 #include <cmath>
@@ -192,19 +191,24 @@ sol::object UIOf(GameObject& obj, sol::this_state ts) {
 // Разбор таблицы, а не десяток отдельных функций: раскладка задаётся ОДНИМ
 // решением («это сетка по пять в ряд с зазором шесть»), и разносить его по
 // пяти вызовам значило бы дать возможность настроить половину.
-sage::ui::Stack::Flow FlowFromName(const std::string& name) {
-    if (name == "row" || name == "horizontal") return sage::ui::Stack::Flow::Horizontal;
-    if (name == "grid") return sage::ui::Stack::Flow::Grid;
-    return sage::ui::Stack::Flow::Vertical;
+// Режим раскладки по слову. «row»/«column» — прежние слова ui.group{layout}.
+sage::ui::Arrangement::Kind ModeFromName(const std::string& name, bool wrap) {
+    using K = sage::ui::Arrangement::Kind;
+    if (name == "manual") return K::Manual;
+    if (name == "grid") return K::Grid;
+    if (name == "wrap" || wrap) return K::Wrap;
+    if (name == "row" || name == "horizontal") return K::Horizontal;
+    return K::Vertical;
 }
 
-sage::ui::Stack::Align AlignFromName(const std::string& name) {
-    if (name == "center") return sage::ui::Stack::Align::Center;
-    if (name == "end") return sage::ui::Stack::Align::End;
-    if (name == "between" || name == "space-between") return sage::ui::Stack::Align::SpaceBetween;
-    if (name == "around" || name == "space-around") return sage::ui::Stack::Align::SpaceAround;
-    if (name == "evenly" || name == "space-evenly") return sage::ui::Stack::Align::SpaceEvenly;
-    return sage::ui::Stack::Align::Start;
+sage::ui::Arrangement::Spread SpreadFromName(const std::string& name) {
+    using S = sage::ui::Arrangement::Spread;
+    if (name == "center") return S::Center;
+    if (name == "end") return S::End;
+    if (name == "between" || name == "space-between") return S::SpaceBetween;
+    if (name == "around" || name == "space-around") return S::SpaceAround;
+    if (name == "evenly" || name == "space-evenly") return S::SpaceEvenly;
+    return S::Start;
 }
 
 // Поля контейнера: число («со всех сторон одинаково») или Vec4 (л, в, п, н).
@@ -560,30 +564,31 @@ void ScriptEngine::RegisterUIApi() {
     //                             padding = 10, justify = "center", fit = true})
     Bind("ui", "SetLayout", "SetUILayout", [](GameObject& obj, sol::table opts) {
         if (!obj.Valid()) throw std::runtime_error("ui.SetLayout: сущность недействительна");
+        using A = sage::ui::Arrangement;
         obj.Registry()->get_or_emplace<sage::ui::Element>(obj.Entity());
-        sage::ui::Stack& layout = obj.Registry()->get_or_emplace<sage::ui::Stack>(obj.Entity());
-        layout.Direction = FlowFromName(opts.get_or<std::string>("dir", "column"));
-        layout.Justify = AlignFromName(opts.get_or<std::string>("justify", "start"));
-        layout.Spacing = opts.get_or("spacing", layout.Spacing);
-        layout.Padding = PaddingFrom(opts.get<sol::object>("padding"), layout.Padding);
-        layout.Columns = std::max(0, opts.get_or("columns", layout.Columns));
-        // «stretch» — прежняя галка «растягивать поперёк»; «cross» — то же
-        // словом: start / center / end / stretch.
-        if (opts["stretch"].valid())
-            layout.Cross = opts.get<bool>("stretch") ? sage::ui::Stack::CrossAlign::Stretch
-                                                     : sage::ui::Stack::CrossAlign::Start;
-        if (opts["cross"].valid()) {
-            const std::string c = opts.get<std::string>("cross");
-            layout.Cross = c == "center" ? sage::ui::Stack::CrossAlign::Center
-                           : c == "end"  ? sage::ui::Stack::CrossAlign::End
-                           : c == "start" ? sage::ui::Stack::CrossAlign::Start
-                                          : sage::ui::Stack::CrossAlign::Stretch;
-        }
-        layout.Wrap = opts.get_or("wrap", layout.Wrap);
-        layout.FitContent = opts.get_or("fit", layout.FitContent);
+        A& arr = obj.Registry()->get_or_emplace<A>(obj.Entity());
+        const std::string dir = opts.get_or<std::string>("dir", "column");
+        const bool wrap = opts.get_or("wrap", false);
+        arr.Mode = ModeFromName(dir, wrap && dir != "grid");
+        arr.WrapVertical = arr.Mode == A::Kind::Wrap && dir == "column";
+        arr.Distribution = SpreadFromName(opts.get_or<std::string>("justify", "start"));
+        arr.Spacing = opts.get_or("spacing", arr.Spacing);
+        arr.Padding = PaddingFrom(opts.get<sol::object>("padding"), arr.Padding);
+        arr.Columns = std::max(0, opts.get_or("columns", arr.Columns));
+        arr.Rows = std::max(0, opts.get_or("rows", arr.Rows));
+        // Поперёк: start / center / end — выравнивание; stretch — дети во всё
+        // место поперёк оси (размер ребёнка Fill).
+        const std::string c = opts.get_or<std::string>("cross", "stretch");
+        arr.Alignment = c == "center" ? A::Align::Center : c == "end" ? A::Align::End : A::Align::Start;
+        const A::ChildSize across = c == "stretch" ? A::ChildSize::Fill : A::ChildSize::Fixed;
+        if (arr.Horizontal()) arr.ChildHeight = across;
+        else if (arr.Mode != A::Kind::Grid) arr.ChildWidth = across;
+        arr.FitContent = opts.get_or("fit", arr.FitContent);
     });
     Bind("ui", "ClearLayout", "ClearUILayout", [](GameObject& obj) {
-        if (obj.Valid()) obj.Registry()->remove<sage::ui::Stack>(obj.Entity());
+        if (!obj.Valid()) return;
+        if (auto* arr = obj.Registry()->try_get<sage::ui::Arrangement>(obj.Entity()))
+            arr->Mode = sage::ui::Arrangement::Kind::Manual;
     });
 
     // Холст: масштаб интерфейса и порядок МЕЖДУ корнями.
@@ -960,7 +965,7 @@ void ScriptEngine::BindUIAccessors(sol::usertype<GameObject>& t) {
         if (!o.Valid()) return;
         namespace ui = sage::ui;
         o.Registry()->remove<ui::Element, ui::Fill, ui::Label, ui::Image, ui::Bar, ui::Icon,
-                             ui::Interactable, ui::TextInput, ui::Range, ui::Mask, ui::Stack,
+                             ui::Interactable, ui::TextInput, ui::Range, ui::Mask, ui::Arrangement,
                              ui::Canvas, ui::Group>(o.Entity());
     };
 }
