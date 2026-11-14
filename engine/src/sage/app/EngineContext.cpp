@@ -1,7 +1,7 @@
 #include "sage/core/EngineContext.h"
 
 #include "sage/core/Config.h"
-#include "sage/core/JobSystem.h"
+#include "sage/jobs/JobSystem.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/import/Importer.h"
 #include "sage/render/PostEffect.h"

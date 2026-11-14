@@ -33,7 +33,7 @@ BASELINE = os.path.join(ROOT, "scripts", "layer_baseline.json")
 # Снизу вверх. Каждый модуль engine/src/sage/* обязан быть в одном из слоёв —
 # новый модуль без слоя тоже провал: иначе он оказался бы вне правил.
 LAYERS = [
-    ("основа", ["rhi", "core"]),
+    ("основа", ["rhi", "core", "jobs"]),
     ("службы", ["events", "vars", "input", "physics", "ai"]),
     ("ресурсы", ["assets"]),
     ("мир", ["render", "ecs", "scene", "anim", "audio", "gi", "ui", "net"]),

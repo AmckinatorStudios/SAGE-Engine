@@ -1,17 +1,15 @@
 #pragma once
 #include <atomic>
-#include <condition_variable>
 #include <cstdint>
-#include <deque>
 #include <filesystem>
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
 #include "imgui.h"
+#include "sage/jobs/Throttle.h"
 
 class Texture;
 
@@ -95,6 +93,7 @@ private:
     };
 
     void Request(const std::string& source);
+    static Decoded DecodeOne(const std::string& source);
     void EnsureWorker();
     void EvictIfNeeded();
     // Обложка, нарисованная примитивами: своя у каждого проекта.
@@ -104,13 +103,13 @@ private:
     std::unordered_map<std::string, Item> m_items;
     uint64_t m_frame = 0;
 
-    // --- фоновый поток ---
-    std::thread m_worker;
+    // --- фоновое декодирование ---
+    // Строго по одной (с одного диска быстрее не станет) — последовательная
+    // очередь поверх общей системы задач, полоса ввода-вывода. Своего потока
+    // нет.
+    std::unique_ptr<sage::jobs::Throttle> m_decoder;
     std::mutex m_mutex;
-    std::condition_variable m_wake;
-    std::deque<std::string> m_queue;      // что разобрать
     std::vector<Decoded> m_ready;         // что готово забрать в кадре
-    std::atomic<bool> m_stop{false};
     std::atomic<int> m_pending{0};
 };
 

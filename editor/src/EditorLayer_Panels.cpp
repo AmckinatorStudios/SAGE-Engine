@@ -217,7 +217,7 @@ void EditorLayer::RegisterPanels() {
     }
     {
         PanelSpec s = make(EditorPanel::Profiler, "Profiler", "Profiler", "chart", PanelSection::Tools,
-                           [this](EditorHost&, bool* open, const std::string&) { m_profiler.Draw(open); });
+                           [this](EditorHost&, bool* open, const std::string&) { m_profiler.Draw(open, &m_systems); });
         s.Detachable = false;
         m_panelRegistry.Register(std::move(s));
     }

@@ -193,6 +193,7 @@ std::unique_ptr<ShaderProgram> OpenGLDevice::CreateProgram(const ShaderProgramDe
 }
 
 std::unique_ptr<GpuBuffer> OpenGLDevice::CreateBuffer(const BufferDesc& desc, const void* data) {
+    CheckThread("CreateBuffer");
     if (desc.Bytes == 0) return nullptr;
     if (desc.Usage == BufferUsage::Storage && !HasStorage()) return nullptr;
     return std::make_unique<GLGpuBuffer>(desc, data);

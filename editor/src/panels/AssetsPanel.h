@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
-#include <future>
+#include "sage/jobs/JobSystem.h"
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -174,7 +174,7 @@ private:
     void ConvertFolderHere(EditorHost& host);
 
     // Фоновое внесение файлов в проект: поток, его результат и карточка.
-    std::future<ImportReport> m_import;
+    sage::jobs::Future<ImportReport> m_import;  // задача полосы ввода-вывода
     uint64_t m_importTask = 0;
 
     // Очередь пакетной конвертации: что осталось перевести и что уже вышло.

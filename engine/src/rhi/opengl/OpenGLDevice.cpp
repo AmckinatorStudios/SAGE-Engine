@@ -12,6 +12,7 @@ namespace sage::rhi {
 float QueryMaxAnisotropy();
 
 void OpenGLDevice::Init(ProcLoader loader) {
+    BindToCurrentThread();  // контекст текущий в этом потоке — он и есть поток устройства
     if (!gladLoadGLLoader((GLADloadproc)loader)) {
         LOG_ERROR("RHI") << "Не удалось инициализировать glad (OpenGL)";
         throw std::runtime_error("Не удалось инициализировать glad (OpenGL)");
@@ -251,26 +252,32 @@ float OpenGLDevice::MaxAnisotropy() {
 
 std::unique_ptr<ShaderProgram> OpenGLDevice::CreateShaderProgram(const std::string& vertexSrc,
                                                                  const std::string& fragmentSrc) {
+    CheckThread("CreateShaderProgram");
     return std::make_unique<GLShaderProgram>(vertexSrc, fragmentSrc);
 }
 
 std::unique_ptr<Geometry> OpenGLDevice::CreateGeometry(const VertexLayout& layout) {
+    CheckThread("CreateGeometry");
     return std::make_unique<GLGeometry>(layout);
 }
 
 std::unique_ptr<Texture2D> OpenGLDevice::CreateTexture2D(const Texture2DDesc& desc, const void* pixels) {
+    CheckThread("CreateTexture2D");
     return std::make_unique<GLTexture2D>(desc, pixels);
 }
 
 std::unique_ptr<Texture3D> OpenGLDevice::CreateTexture3D(const Texture3DDesc& desc, const float* pixels) {
+    CheckThread("CreateTexture3D");
     return std::make_unique<GLTexture3D>(desc, pixels);
 }
 
 std::unique_ptr<TextureCube> OpenGLDevice::CreateTextureCube(const CubeFacePixels faces[6]) {
+    CheckThread("CreateTextureCube");
     return std::make_unique<GLTextureCube>(faces);
 }
 
 std::unique_ptr<RenderTarget> OpenGLDevice::CreateRenderTarget(const RenderTargetDesc& desc) {
+    CheckThread("CreateRenderTarget");
     // Создание таргета не должно менять, КУДА сейчас рисуют: сборка вложений
     // привязывает новый буфер и в конце отвязывает его в «экран». Таргет,
     // заведённый посреди прохода (копия кадра за материалом), иначе уводил

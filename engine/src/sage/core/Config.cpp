@@ -208,6 +208,13 @@ bool EngineConfig::CurrentPreset(QualityPreset& out) const {
 }
 
 void EngineConfig::Sanitize() {
+    // Потоки: отрицательное — авто; сверху — разумный предел (ошибка в файле
+    // не должна поднять тысячу потоков).
+    WorkerThreads = std::clamp(WorkerThreads, 0, 256);
+    IoThreads = std::clamp(IoThreads, 0, 64);
+    MaxIoThreads = std::clamp(MaxIoThreads, 0, 64);
+    BackgroundJobLimit = std::clamp(BackgroundJobLimit, 0, 256);
+    HungJobMs = std::clamp(HungJobMs, 50, 600000);
     auto pow2 = [](int v, int def) {
         for (int s : {512, 1024, 2048, 4096})
             if (v == s) return v;
@@ -318,6 +325,10 @@ bool EngineConfig::LoadFile(const std::string& path) {
     auto sys = j.value("system", json::object());
     WorkerThreads       = sys.value("workerThreads", WorkerThreads);
     MultithreadedRender = sys.value("multithreadedRender", MultithreadedRender);
+    IoThreads           = sys.value("ioThreads", IoThreads);
+    MaxIoThreads        = sys.value("maxIoThreads", MaxIoThreads);
+    BackgroundJobLimit  = sys.value("backgroundJobLimit", BackgroundJobLimit);
+    HungJobMs           = sys.value("hungJobMs", HungJobMs);
 
     auto build = j.value("build", json::object());
     BuildProjectFile = build.value("projectFile", BuildProjectFile);
@@ -370,6 +381,8 @@ std::string EngineConfig::ToJsonString() const {
     };
     j["system"] = {
         {"workerThreads", WorkerThreads}, {"multithreadedRender", MultithreadedRender},
+        {"ioThreads", IoThreads}, {"maxIoThreads", MaxIoThreads},
+        {"backgroundJobLimit", BackgroundJobLimit}, {"hungJobMs", HungJobMs},
     };
     // Сборка игры — своей секцией, а не в system: это не про то, как движок
     // работает, а про то, что получится в папке сборки (см. Config.h).

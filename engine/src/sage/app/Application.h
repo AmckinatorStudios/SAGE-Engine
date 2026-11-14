@@ -40,6 +40,10 @@ struct AppConfig {
     // --- Многопоточность (JobSystem) ---
     int WorkerThreads = 0;           // 0 — авто (аппаратные потоки − 1)
     bool MultithreadedRender = true; // параллельные отсечение/подготовка кадра
+    int IoThreads = 0;               // 0 — авто (см. EngineConfig)
+    int MaxIoThreads = 0;
+    int BackgroundJobLimit = 0;
+    int HungJobMs = 2000;
 
     // Заполняет оконные поля из глобального/переданного EngineConfig.
     static AppConfig FromEngineConfig(const EngineConfig& cfg) {
@@ -51,6 +55,8 @@ struct AppConfig {
         a.BackgroundFrameCap = cfg.BackgroundFrameCap;
         a.Backend = cfg.Backend;
         a.WorkerThreads = cfg.WorkerThreads; a.MultithreadedRender = cfg.MultithreadedRender;
+        a.IoThreads = cfg.IoThreads; a.MaxIoThreads = cfg.MaxIoThreads;
+        a.BackgroundJobLimit = cfg.BackgroundJobLimit; a.HungJobMs = cfg.HungJobMs;
         return a;
     }
 };

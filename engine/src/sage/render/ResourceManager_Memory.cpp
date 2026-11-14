@@ -168,7 +168,7 @@ ResourceManager::Stats ResourceManager::GetStats() const {
     s.Materials = m_materials.size();
     s.TextureBytes = m_textureBytes;
     s.TextureBudget = m_textureBudget;
-    s.PendingAsync = m_async ? (size_t)std::max(0, m_async->Pending.load()) : 0;
+    s.PendingAsync = m_async ? (size_t)m_async->Pending() : 0;
     s.Evictions = m_evictions;
     return s;
 }

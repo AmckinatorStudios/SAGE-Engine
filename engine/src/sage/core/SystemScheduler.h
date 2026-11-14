@@ -3,6 +3,8 @@
 #include <string>
 #include <vector>
 
+#include "sage/core/SystemAccess.h"
+
 class Scene;
 
 // ---------------------------------------------------------------------------
@@ -32,6 +34,17 @@ class Scene;
 //     sched.Add(Stage::Update, "мойИИ", [](Scene& s, float dt) { ... });
 //     ...
 //     sched.Run(scene, dt);   // каждый кадр
+//
+// ПАРАЛЛЕЛЬНО ВНУТРИ СТАДИИ. Система, объявившая доступ (SystemAccess.h),
+// становится узлом графа стадии: она ждёт только тех более ранних систем, с
+// которыми конфликтует по данным (или которых назвала в RunAfter), и идёт на
+// воркерах вместе с независимыми. Система без объявления эксклюзивна и идёт в
+// главном потоке — то есть старый код ведёт себя ровно как раньше. Граница
+// стадий остаётся барьером: всё из предыдущей стадии закончено до начала
+// следующей.
+//
+//     sched.Add(Stage::PostPhysics, "boids", UpdateBoids,
+//               SystemAccess::Parallel().Read<Transform>().Write<Boid>());
 // ---------------------------------------------------------------------------
 namespace sage {
 
@@ -67,6 +80,8 @@ public:
     // вторую. Иначе перезапуск Play-режима, который переподключает скрипты,
     // копил бы их дубликаты кадр за кадром.
     void Add(Stage stage, std::string name, SystemFn fn, int order = 0);
+    // С объявлением доступа — кандидат в параллельное выполнение.
+    void Add(Stage stage, std::string name, SystemFn fn, SystemAccess access, int order = 0);
     bool Remove(const std::string& name);
     void Clear();
 
@@ -86,9 +101,30 @@ public:
         std::string Name;
         Stage InStage = Stage::Update;
         float Milliseconds = 0.0f;
+        bool OnWorker = false;   // выполнялась на воркере (не в главном потоке)
     };
     const std::vector<Timing>& LastTimings() const { return m_timings; }
     void SetProfilingEnabled(bool on) { m_profiling = on; }
+
+    // Параллельное выполнение независимых систем (по умолчанию включено; без
+    // систем, объявивших доступ, ничего не меняет). Выключенное — строго
+    // последовательно в порядке Order(), как до графа.
+    void SetParallel(bool on) { m_parallel = on; }
+    bool Parallel() const { return m_parallel; }
+
+    // Граф кадра — для профилировщика и тестов: узел, где он выполняется и
+    // от кого ждёт (индексы в том же списке; рёбра только внутри стадии).
+    struct GraphNode {
+        std::string Name;
+        Stage InStage = Stage::Update;
+        bool MainThread = true;
+        bool Exclusive = true;
+        std::string Access;            // объявление словами
+        std::vector<int> DependsOn;
+    };
+    std::vector<GraphNode> Graph();
+    // Ошибка построения графа (цикл в RunAfter, неизвестное имя) — "" если нет.
+    const std::string& GraphError() const { return m_graphError; }
 
 private:
     struct Entry {
@@ -96,13 +132,23 @@ private:
         int Order = 0;
         std::string Name;
         SystemFn Fn;
+        SystemAccess Access;
     };
     void Sort();
+    void BuildGraph();
+    void RunSequential(size_t begin, size_t end, Scene& scene, float dt);
+    void RunStageGraph(size_t begin, size_t end, Scene& scene, float dt);
+    void RunOne(const Entry& e, Scene& scene, float dt, bool profileScope);
 
     std::vector<Entry> m_systems;
+    std::vector<std::vector<int>> m_deps;   // для каждой системы — от кого ждёт
+    std::vector<std::vector<int>> m_succ;   // и кто ждёт её
+    std::vector<int> m_topo;                // порядок внутри стадий (индексы)
     std::vector<Timing> m_timings;
+    std::string m_graphError;
     bool m_profiling = true;
     bool m_dirty = false;
+    bool m_parallel = true;
 };
 
 } // namespace sage

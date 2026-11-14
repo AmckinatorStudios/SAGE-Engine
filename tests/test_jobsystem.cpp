@@ -5,7 +5,7 @@
 // исключений и Dispatch разнородных задач.
 #include "TestFramework.h"
 
-#include "sage/core/JobSystem.h"
+#include "sage/jobs/JobSystem.h"
 
 #include <atomic>
 #include <numeric>

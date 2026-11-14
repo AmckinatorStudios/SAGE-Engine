@@ -3,8 +3,6 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
-#include <condition_variable>
-#include <deque>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -12,6 +10,7 @@
 #include <sol/sol.hpp>
 
 #include "sage/core/Log.h"
+#include "sage/jobs/Throttle.h"
 
 // Устройство и правила — в ScriptTasks.h. Здесь две вещи: перенос значений
 // между состояниями Lua (через сырой C API: на массивах в десятки тысяч чисел
@@ -198,38 +197,54 @@ struct Finished {
 
 } // namespace
 
+// Состояние Lua потока, на котором идут задачи. Своё у каждого потока
+// системы задач, взявшего задачу этого набора: lua_State нельзя делить между
+// потоками, а создавать его на каждую задачу — дорого (библиотеки, прелюдия,
+// модули). Живёт до Shutdown.
+struct TaskLuaState {
+    sol::state Lua;
+    uint64_t SeenVersion = 0;
+    bool Busy = false;
+    int Index = 0;
+};
+
 struct ScriptTasks::Impl {
     mutable std::mutex Mutex;
-    std::condition_variable Wake;
-    std::deque<Job> Queue;
     std::unordered_map<int64_t, Finished> Done;
     std::unordered_map<int64_t, bool> Outstanding;   // поставлены и не забраны
     std::unordered_map<std::string, std::pair<std::string, std::string>> Modules;   // имя -> (кусок, текст)
     uint64_t ModulesVersion = 0;
-    std::vector<std::thread> Threads;
-    std::atomic<bool> Stop{false};
+    std::unordered_map<std::thread::id, std::unique_ptr<TaskLuaState>> States;
     std::atomic<int64_t> BusyMicros{0};
     int64_t NextId = 1;
     int Pending = 0;
     int WantWorkers = 0;
+    // Не больше Workers() задач разом — в общей системе задач, на долгой
+    // полосе (кадру всегда остаются ядра). Своих потоков у задач скриптов
+    // больше нет.
+    std::unique_ptr<sage::jobs::Throttle> Limiter;
+
+    // По умолчанию — потоков системы задач без одного: кадру остаётся ядро.
+    // Сколько из них реально займут долгие задачи разом, всё равно решает
+    // система задач (BackgroundLimit).
+    static int AutoWorkers() { return std::max(1, sage::jobs::Parallelism() - 1); }
 
     void EnsureStarted() {
-        if (!Threads.empty()) return;
-        int n = WantWorkers;
-        if (n <= 0) {
-            const int hw = (int)std::thread::hardware_concurrency();
-            n = std::max(1, hw - 2);
-        }
-        for (int i = 0; i < n; ++i) Threads.emplace_back([this, i] { WorkerLoop(i); });
+        if (Limiter) return;
+        const int n = WantWorkers > 0 ? WantWorkers : AutoWorkers();
+        sage::jobs::JobOptions o("script.task", sage::jobs::Category::Scripts, sage::jobs::Lane::Background);
+        Limiter = std::make_unique<sage::jobs::Throttle>(n, o);
     }
 
-    void WorkerLoop(int index) {
-        sol::state lua;
+    std::unique_ptr<TaskLuaState> MakeState(int index) {
+        auto st = std::make_unique<TaskLuaState>();
+        st->Index = index;
+        sol::state& lua = st->Lua;
         lua.open_libraries(sol::lib::base, sol::lib::math, sol::lib::string, sol::lib::table,
                            sol::lib::utf8, sol::lib::coroutine, sol::lib::package);
         lua["package"]["path"] = "";
         lua["package"]["cpath"] = "";
-        // log из задачи — в общий журнал (он под замком), с номером воркера.
+        // log из задачи — в общий журнал (он под замком), с номером потока.
         lua["log"] = [index](sol::this_state ts, sol::variadic_args va) {
             lua_State* Ls = ts;
             std::string line;
@@ -246,95 +261,115 @@ struct ScriptTasks::Impl {
         lua.safe_script(kTaskPrelude, sol::script_pass_on_error, "tasks");
         // require — только из модулей, которые главный поток прочёл заранее.
         sol::table searchers = lua["package"]["searchers"];
-        searchers[2] = [this, &lua](const std::string& name) -> sol::object {
+        TaskLuaState* raw = st.get();
+        searchers[2] = [this, raw](const std::string& name) -> sol::object {
+            sol::state& L = raw->Lua;
             std::string chunk, source;
             {
                 std::lock_guard<std::mutex> lock(Mutex);
                 auto it = Modules.find(name);
                 if (it == Modules.end())
-                    return sol::make_object(lua, "\n\tмодуль '" + name +
-                                                     "' не передан задачам (tasks.preload(\"" + name + "\"))");
+                    return sol::make_object(L, "\n\tмодуль '" + name +
+                                                   "' не передан задачам (tasks.preload(\"" + name + "\"))");
                 chunk = it->second.first;
                 source = it->second.second;
             }
-            sol::load_result f = lua.load(source, "@" + chunk);
+            sol::load_result f = L.load(source, "@" + chunk);
             if (!f.valid()) {
                 sol::error e = f;
-                return sol::make_object(lua, std::string("\n\t") + e.what());
+                return sol::make_object(L, std::string("\n\t") + e.what());
             }
-            return sol::make_object(lua, f.get<sol::protected_function>());
+            return sol::make_object(L, f.get<sol::protected_function>());
         };
-        uint64_t seenVersion = 0;
+        return st;
+    }
 
-        for (;;) {
-            Job job;
-            {
-                std::unique_lock<std::mutex> lock(Mutex);
-                Wake.wait(lock, [this] { return Stop.load() || !Queue.empty(); });
-                if (Stop.load()) return;
-                job = std::move(Queue.front());
-                Queue.pop_front();
-                // Модули обновились (горячая перезагрузка) — забыть загруженные.
-                if (seenVersion != ModulesVersion) {
-                    seenVersion = ModulesVersion;
-                    sol::table loaded = lua["package"]["loaded"];
-                    for (const auto& kv : Modules) loaded[kv.first] = sol::lua_nil;
-                }
+    // Состояние этого потока. Поток, уже выполняющий задачу набора (быть не
+    // должно: долгие задачи не берутся «на помощь» при ожидании), получает
+    // временное — одно lua_State не входит само в себя.
+    TaskLuaState* Acquire(std::unique_ptr<TaskLuaState>& temp) {
+        std::lock_guard<std::mutex> lock(Mutex);
+        auto& slot = States[std::this_thread::get_id()];
+        if (!slot) slot = MakeState((int)States.size() - 1);
+        if (slot->Busy) {
+            temp = MakeState(-1);
+            temp->Busy = true;
+            return temp.get();
+        }
+        slot->Busy = true;
+        return slot.get();
+    }
+
+    void RunJob(const Job& job) {
+        std::unique_ptr<TaskLuaState> temp;
+        TaskLuaState* st = Acquire(temp);
+        sol::state& lua = st->Lua;
+        {
+            std::lock_guard<std::mutex> lock(Mutex);
+            // Модули обновились (горячая перезагрузка) — забыть загруженные.
+            if (st->SeenVersion != ModulesVersion) {
+                st->SeenVersion = ModulesVersion;
+                sol::table loaded = lua["package"]["loaded"];
+                for (const auto& kv : Modules) loaded[kv.first] = sol::lua_nil;
             }
-            const auto t0 = std::chrono::steady_clock::now();
-            Finished fin;
-            lua_State* L = lua.lua_state();
-            const int top = lua_gettop(L);
-            // require(module)[fn](args...) под pcall с трассировкой.
-            lua_getglobal(L, "require");
-            lua_pushlstring(L, job.Module.data(), job.Module.size());
-            if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
-                fin.Error = std::string("tasks: модуль '") + job.Module + "': " + lua_tostring(L, -1);
-            } else if (!lua_istable(L, -1)) {
-                fin.Error = "tasks: модуль '" + job.Module + "' не вернул таблицу функций";
+        }
+        const auto t0 = std::chrono::steady_clock::now();
+        Finished fin;
+        lua_State* L = lua.lua_state();
+        const int top = lua_gettop(L);
+        // require(module)[fn](args...) под pcall с трассировкой.
+        lua_getglobal(L, "require");
+        lua_pushlstring(L, job.Module.data(), job.Module.size());
+        if (lua_pcall(L, 1, 1, 0) != LUA_OK) {
+            fin.Error = std::string("tasks: модуль '") + job.Module + "': " + lua_tostring(L, -1);
+        } else if (!lua_istable(L, -1)) {
+            fin.Error = "tasks: модуль '" + job.Module + "' не вернул таблицу функций";
+        } else {
+            lua_getfield(L, -1, job.Fn.c_str());
+            if (!lua_isfunction(L, -1)) {
+                fin.Error = "tasks: в модуле '" + job.Module + "' нет функции '" + job.Fn + "'";
             } else {
-                lua_getfield(L, -1, job.Fn.c_str());
-                if (!lua_isfunction(L, -1)) {
-                    fin.Error = "tasks: в модуле '" + job.Module + "' нет функции '" + job.Fn + "'";
+                for (const TaskValue& a : job.Args) PushTaskValue(L, a);
+                const int base = lua_gettop(L) - (int)job.Args.size() - 1;
+                if (lua_pcall(L, (int)job.Args.size(), LUA_MULTRET, 0) != LUA_OK) {
+                    fin.Error = std::string("tasks: ") + job.Module + "." + job.Fn + ": " + lua_tostring(L, -1);
                 } else {
-                    for (const TaskValue& a : job.Args) PushTaskValue(L, a);
-                    const int base = lua_gettop(L) - (int)job.Args.size() - 1;
-                    if (lua_pcall(L, (int)job.Args.size(), LUA_MULTRET, 0) != LUA_OK) {
-                        fin.Error = std::string("tasks: ") + job.Module + "." + job.Fn + ": " + lua_tostring(L, -1);
-                    } else {
-                        const int nres = lua_gettop(L) - base;
-                        fin.Ok = true;
-                        fin.Results.resize((size_t)nres);
-                        for (int r = 0; r < nres && fin.Ok; ++r) {
-                            if (!ToTaskValue(L, base + 1 + r, fin.Results[(size_t)r], fin.Error)) {
-                                fin.Ok = false;
-                                fin.Error = "tasks: " + job.Module + "." + job.Fn + " вернула " + fin.Error;
-                            }
+                    const int nres = lua_gettop(L) - base;
+                    fin.Ok = true;
+                    fin.Results.resize((size_t)nres);
+                    for (int r = 0; r < nres && fin.Ok; ++r) {
+                        if (!ToTaskValue(L, base + 1 + r, fin.Results[(size_t)r], fin.Error)) {
+                            fin.Ok = false;
+                            fin.Error = "tasks: " + job.Module + "." + job.Fn + " вернула " + fin.Error;
                         }
                     }
                 }
             }
-            lua_settop(L, top);
-            // Мусор задачи — сразу: память воркера не копится между задачами.
-            lua_gc(L, LUA_GCSTEP, 0);
-            BusyMicros += std::chrono::duration_cast<std::chrono::microseconds>(
-                              std::chrono::steady_clock::now() - t0).count();
-            {
-                std::lock_guard<std::mutex> lock(Mutex);
-                Done[job.Id] = std::move(fin);
-            }
         }
+        lua_settop(L, top);
+        // Мусор задачи — сразу: память потока не копится между задачами.
+        lua_gc(L, LUA_GCSTEP, 0);
+        BusyMicros += std::chrono::duration_cast<std::chrono::microseconds>(
+                          std::chrono::steady_clock::now() - t0).count();
+        std::lock_guard<std::mutex> lock(Mutex);
+        st->Busy = false;
+        Done[job.Id] = std::move(fin);
     }
 
     void StopAll() {
-        {
-            std::lock_guard<std::mutex> lock(Mutex);
-            Stop = true;
+        // Не начатые — отменить, идущие — дождаться: только потом можно
+        // разрушать состояния Lua, на которых они выполняются.
+        if (Limiter) {
+            Limiter->CancelAll();
+            Limiter->Wait();
+            Limiter.reset();
         }
-        Wake.notify_all();
-        for (auto& t : Threads) if (t.joinable()) t.join();
-        Threads.clear();
-        Stop = false;
+        std::lock_guard<std::mutex> lock(Mutex);
+        // Отменённые задачи не придут никогда — ждущий скрипт получит ошибку,
+        // а не вечное «в пути».
+        for (const auto& kv : Outstanding)
+            if (!Done.count(kv.first)) Done[kv.first] = Finished{false, {}, "tasks: остановлено"};
+        States.clear();
     }
 };
 
@@ -358,11 +393,13 @@ int64_t ScriptTasks::Submit(const std::string& module, const std::string& fn, st
         std::lock_guard<std::mutex> lock(m_impl->Mutex);
         m_impl->EnsureStarted();
         id = m_impl->NextId++;
-        m_impl->Queue.push_back(Job{id, module, fn, std::move(args)});
         m_impl->Outstanding[id] = true;
         ++m_impl->Pending;
     }
-    m_impl->Wake.notify_one();
+    auto job = std::make_shared<Job>(Job{id, module, fn, std::move(args)});
+    Impl* impl = m_impl.get();  // живёт дольше задач: StopAll дожидается их
+    sage::jobs::Future<void> f = m_impl->Limiter->Async([impl, job] { impl->RunJob(*job); });
+    (void)f;
     return id;
 }
 
@@ -382,9 +419,9 @@ TaskState ScriptTasks::Take(int64_t id, std::vector<TaskValue>& results, std::st
 
 int ScriptTasks::Workers() const {
     std::lock_guard<std::mutex> lock(m_impl->Mutex);
-    if (!m_impl->Threads.empty()) return (int)m_impl->Threads.size();
+    if (m_impl->Limiter) return m_impl->Limiter->Limit();
     if (m_impl->WantWorkers > 0) return m_impl->WantWorkers;
-    return std::max(1, (int)std::thread::hardware_concurrency() - 2);
+    return Impl::AutoWorkers();
 }
 
 int ScriptTasks::Pending() const {
@@ -396,7 +433,8 @@ double ScriptTasks::BusyMs() const { return (double)m_impl->BusyMicros.load() / 
 
 void ScriptTasks::SetWorkerCount(int n) {
     std::lock_guard<std::mutex> lock(m_impl->Mutex);
-    if (m_impl->Threads.empty()) m_impl->WantWorkers = std::max(0, n);
+    m_impl->WantWorkers = std::max(0, n);
+    if (m_impl->Limiter) m_impl->Limiter->SetLimit(n > 0 ? n : Impl::AutoWorkers());
 }
 
 void ScriptTasks::Shutdown() {

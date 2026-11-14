@@ -6,7 +6,7 @@
 #include <algorithm>
 #include <string>
 
-#include "sage/core/JobSystem.h"
+#include "sage/jobs/JobSystem.h"
 #include "sage/ecs/RenderSystem.h"
 #include "sage/render/Frustum.h"
 #include "sage/render/LightingUpload.h"

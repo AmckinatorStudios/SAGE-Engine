@@ -55,6 +55,7 @@ python3 scripts/check_menu_style.py                               # отступ
 python3 scripts/check_release_ui.py                               # меню без проверочных пунктов
 python3 scripts/check_imgui_pairs.py                              # EndCombo и подписи кнопок
 python3 scripts/check_file_size.py                                # файлы ≤ 1000 строк
+python3 scripts/check_threads.py                                  # потоки — только система задач
 python3 scripts/gen_script_api.py --check                         # подсказка по API скриптов
 cmake --build build-windows -j"$(nproc)"                          # кросс-сборка mingw
 ```
@@ -178,6 +179,13 @@ mingw) — половина поломок Windows-сборки на Linux не 
   `editor/src/PanelRegistry.h`; встроенные — `EditorLayer_Panels.cpp`), а не
   правка меню «Окно», палитры, раскладки и отрисовки по отдельности: всё это
   читает реестр.
+- **Свои потоки заводит только система задач** (`engine/src/sage/jobs/`).
+  Фоновая работа — задача `sage::jobs::Async/Run` с полосой (Worker,
+  Background, IO, Main, Render) и подсистемой; «не больше N разом» —
+  `sage::jobs::Throttle`; результат в интерфейс/сцену/Lua — `ThenOnMain` /
+  `PostToMain`; GPU — `PostToRender`. Ни `std::thread`, ни `std::async`, ни
+  своего пула в подсистеме (docs/multithreading.md). Проверяет
+  `scripts/check_threads.py`.
 - **Файл редактора, движка и рантайма — не длиннее 1000 строк.** Вырос —
   разделить по обязанностям (секция, этап, операция), помощники модуля — в
   `<Модуль>Detail.h` (docs/architecture.md, «Модули редактора», «Крупные файлы

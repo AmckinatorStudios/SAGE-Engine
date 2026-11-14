@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <mutex>
 #include <string>
-#include <thread>
+#include "sage/jobs/JobSystem.h"
 
 #include "sage/assets/GameBuild.h"
 
@@ -48,7 +48,9 @@ private:
     static bool Run(const Request& request, Shared& shared);
     void Join();
 
-    std::thread m_thread;
+    // Сборка — задача полосы ввода-вывода общей системы (копирование файлов и
+    // запись пакета; сжатие внутри само идёт на воркерах), а не свой поток.
+    sage::jobs::JobHandle m_job;
     std::atomic<bool> m_running{false}, m_finished{false}, m_ok{false}, m_cancel{false};
     std::atomic<float> m_progress{0.0f};
     mutable std::mutex m_mx;

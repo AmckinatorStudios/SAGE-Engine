@@ -4,11 +4,11 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <thread>
 
 #include <entt/entt.hpp>
 
 #include "sage/gi/GI.h"
+#include "sage/jobs/JobSystem.h"
 
 class EditorHost;
 class Scene;
@@ -61,7 +61,7 @@ public:
 
 private:
     struct Job {
-        std::thread Thread;
+        sage::jobs::JobHandle Handle;   // долгая задача общей системы
         std::atomic<float> Progress{0.0f};
         std::atomic<bool> Done{false};
         std::mutex PhaseMutex;
@@ -71,7 +71,9 @@ private:
         uint64_t Hash = 0;
         sage::gi::GISettings Settings;
     };
-    std::unique_ptr<Job> m_job;
+    // Общее владение: задача держит своё состояние сама, и закрытая раньше
+    // времени панель не оставит её писать в освобождённую память.
+    std::shared_ptr<Job> m_job;
     Quality m_quality = Quality::Medium;
     float m_probeCell = 2.0f;
     std::string m_lastMessage;

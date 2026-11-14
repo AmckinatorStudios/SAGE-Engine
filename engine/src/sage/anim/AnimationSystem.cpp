@@ -7,6 +7,7 @@
 #include <exception>
 
 #include "sage/core/Log.h"
+#include "sage/jobs/JobSystem.h"
 #include "sage/anim/ClipFile.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/render/ResourceManager.h"
@@ -317,7 +318,16 @@ void SolveIKGoals(Scene& scene, entt::entity e, AnimationComponent& am, IKCompon
 }
 
 void UpdateAnimators(Scene& scene, float dt) {
+    // Три фазы. Подготовка (загрузка модели и клипов, смена клипа) и
+    // применение результата (корневое движение, IK) трогают общее — кэш
+    // ресурсов, трансформы, физику для IK — и идут последовательно в главном
+    // потоке, в прежнем порядке. Между ними — счёт позы: выборка ключей и
+    // смешивание костей. Это и есть цена анимации, и у каждого аниматора она
+    // своя: скелет и клипы модели только читаются, поза пишется в свой
+    // аниматор. Поэтому она идёт параллельно, а кадр остаётся тем же при любом
+    // числе потоков.
     auto view = scene.Registry().view<AnimationComponent>();
+    std::vector<entt::entity> active;
     for (auto e : view) {
         AnimationComponent& am = view.get<AnimationComponent>(e);
         EnsureReady(am, SkinnedPathOf(scene, e));
@@ -338,8 +348,22 @@ void UpdateAnimators(Scene& scene, float dt) {
         // переопределение (иначе снять его было бы нечем).
         am.Anim.SetPoseOverride(am.PoseOverrides.empty() ? nullptr : &am.PoseOverrides);
         am.Anim.SetRootMotion(am.RootMotion);
-        am.Anim.Update(am.Playing ? dt : 0.0f); // 0 dt: держим текущую позу
+        active.push_back(e);
+    }
 
+    sage::jobs::ParallelOptions po;
+    po.Grain = 2;  // поза персонажа — десятки костей: дробить мельче незачем
+    po.Name = "animation.pose";
+    po.Cat = sage::jobs::Category::Animation;
+    sage::JobSystem::Get().ParallelFor(active.size(), [&](size_t b, size_t end) {
+        for (size_t i = b; i < end; ++i) {
+            AnimationComponent& am = view.get<AnimationComponent>(active[i]);
+            am.Anim.Update(am.Playing ? dt : 0.0f); // 0 dt: держим текущую позу
+        }
+    }, po);
+
+    for (auto e : active) {
+        AnimationComponent& am = view.get<AnimationComponent>(e);
         // Корневое движение переносим на трансформ сущности. Поворотом
         // сущности — иначе персонаж, развёрнутый на 180°, шёл бы задом наперёд:
         // клип двигает его «вперёд» в СВОИХ координатах, а куда смотрит

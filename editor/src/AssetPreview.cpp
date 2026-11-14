@@ -3,7 +3,7 @@
 #include <chrono>
 #include <filesystem>
 #include <functional>
-#include <future>
+#include "sage/jobs/JobSystem.h"
 #include <system_error>
 #include <unordered_map>
 
@@ -265,7 +265,7 @@ ModelCoverData LoadModelCoverData(const std::string& file, const std::string& sc
 } // namespace
 
 struct AssetPreview::ModelCoverJob {
-    std::future<ModelCoverData> Future;
+    sage::jobs::Future<ModelCoverData> Future;
 };
 
 uint64_t AssetPreview::RenderModelCover(const std::string& path, int size, const std::string& key,
@@ -276,7 +276,7 @@ uint64_t AssetPreview::RenderModelCover(const std::string& path, int size, const
         // Не больше двух разборов разом: остальные ядра нужны кадру, а папка
         // набора — это сотни моделей, и все они разом положили бы машину.
         int running = 0;
-        for (const auto& kv : m_modelJobs) running += kv.second->Future.valid() ? 1 : 0;
+        for (const auto& kv : m_modelJobs) running += kv.second->Future.IsDone() ? 0 : 1;
         pending = true;
         if (running >= 2) return 0;
         // Путь, который откроется: разрешает его главный поток (база ассетов
@@ -288,16 +288,29 @@ uint64_t AssetPreview::RenderModelCover(const std::string& path, int size, const
                                               std::to_string(std::hash<std::string>{}(file));
         std::filesystem::create_directories(scratch, ec);
         auto job = std::make_shared<ModelCoverJob>();
-        job->Future = std::async(std::launch::async, LoadModelCoverData, file, scratch.string());
+        // Долгая задача общей системы (разбор модели — сотни миллисекунд), а не
+        // свой поток на каждую обложку. Захвачены копии строк, не this: панель,
+        // закрытая раньше, чем разбор кончился, ничем не рискует.
+        job->Future = sage::jobs::Async(
+            [file, dir = scratch.string()] { return LoadModelCoverData(file, dir); },
+            sage::jobs::JobOptions("preview.model", sage::jobs::Category::Editor, sage::jobs::Lane::Background));
         m_modelJobs.emplace(path, std::move(job));
         return 0;
     }
     ModelCoverJob& job = *it->second;
-    if (job.Future.wait_for(std::chrono::seconds(0)) != std::future_status::ready) {
+    if (!job.Future.IsReady()) {
         pending = true;
         return 0;
     }
-    ModelCoverData data = job.Future.get();
+    ModelCoverData* ready = job.Future.TryGet();
+    if (!ready) {
+        // Разбор упал или отменён (выход) — обложки не будет, но и ошибки,
+        // которую никто не прочёл, тоже.
+        (void)job.Future.Error();
+        m_modelJobs.erase(it);
+        return 0;
+    }
+    ModelCoverData data = std::move(*ready);
     m_modelJobs.erase(it);   // разобранное нужно ровно на один снимок
     if (!data.Ok) return 0;
 

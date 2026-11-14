@@ -21,7 +21,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "physics/builtin/BuiltinWorld.h"
-#include "sage/core/JobSystem.h"
+#include "sage/jobs/JobSystem.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/render/Frustum.h"
 #include "sage/scene/Components.h"
@@ -161,6 +161,57 @@ void RegisterJobCases() {
             (void)sink;
         });
     }
+    // Постановка и выполнение множества мелких задач группой: цена одной
+    // задачи (запись, очередь/дек, исполнение, учёт) — то, во что обходится
+    // «разбить работу на задачи» вместо одного прохода.
+    {
+        constexpr int kJobs = 20000;
+        Register("jobs: 20000 пустых задач группой", "задача", kJobs, [] {
+            sage::jobs::TaskGroup g;
+            for (int i = 0; i < kJobs; ++i) g.Run([] {});
+            g.Wait();
+        });
+    }
+    // Те же задачи, порождённые ИЗ задачи: идут в дек воркера и крадутся —
+    // путь без общей очереди и её замка.
+    {
+        constexpr int kJobs = 20000;
+        Register("jobs: 20000 вложенных задач (дек + кража)", "задача", kJobs, [] {
+            sage::jobs::Run([] {
+                sage::jobs::TaskGroup g;
+                for (int i = 0; i < kJobs; ++i) g.Run([] {});
+                g.Wait();
+            }, sage::jobs::JobOptions().OnLane(sage::jobs::Lane::Background)).Wait();
+        });
+    }
+    // Цепочка зависимостей: каждая задача ждёт предыдущую. Мера задержки
+    // «задача готова → последователь запущен».
+    {
+        constexpr int kLen = 2000;
+        Register("jobs: цепочка из 2000 зависимых задач", "задача", kLen, [] {
+            sage::jobs::JobHandle prev;
+            for (int i = 0; i < kLen; ++i) prev = sage::jobs::Run([] {}, sage::jobs::JobOptions().DependsOn(prev));
+            prev.Wait();
+        });
+    }
+    // Масштабирование настоящей работы: синтетическая математика на миллион
+    // элементов последовательно и через ParallelFor. Отношение двух строк —
+    // ускорение на этой машине.
+    {
+        constexpr std::size_t kN = 1u << 20;
+        static std::vector<float> data(kN, 1.0f);
+        auto work = [](std::size_t b, std::size_t e) {
+            for (std::size_t i = b; i < e; ++i) {
+                float x = data[i];
+                for (int k = 0; k < 16; ++k) x = x * 0.999f + 0.001f * (float)k;
+                data[i] = x;
+            }
+        };
+        Register("jobs: 1M элементов последовательно", "элемент", (long long)kN, [work] { work(0, kN); });
+        Register("jobs: 1M элементов через ParallelFor", "элемент", (long long)kN, [work] {
+            sage::JobSystem::Get().ParallelFor(kN, work, 4096);
+        });
+    }
 }
 
 void RegisterPhysicsCases() {
@@ -231,7 +282,9 @@ void RegisterScriptCases() {
             se->AttachScript(scene->CreateObject("o"), "sage_bench_script.lua");
         std::remove("sage_bench_script.lua");
 
-        Register("script: 200 OnUpdate x 200 кадров", "вызов", 200 * 200, [se] {
+        // Сцену держит и замер: движок скриптов хранит на неё ссылку, и без
+        // этого она умирала в конце блока — замер падал на первом же кадре.
+        Register("script: 200 OnUpdate x 200 кадров", "вызов", 200 * 200, [se, scene] {
             for (int i = 0; i < 200; ++i) se->UpdateAll(1.0f / 60.0f);
         });
     }

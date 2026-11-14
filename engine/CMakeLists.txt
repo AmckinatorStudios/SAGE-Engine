@@ -61,7 +61,13 @@ set(SAGE_ENGINE_SOURCES
     src/sage/app/EngineContext.cpp
     src/sage/app/FatalReport.cpp
     src/sage/core/Config.cpp
-    src/sage/core/JobSystem.cpp
+    src/sage/jobs/JobSystem.cpp
+    src/sage/jobs/JobScheduling.cpp
+    src/sage/jobs/JobParallel.cpp
+    src/sage/jobs/JobDiagnostics.cpp
+    src/sage/jobs/Sync.cpp
+    src/sage/jobs/Throttle.cpp
+    src/sage/jobs/ParallelFor.cpp
     src/sage/core/Log.cpp
     src/sage/core/Paths.cpp
     src/sage/core/ChildProcess.cpp
@@ -117,6 +123,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/CrashHandler.cpp
     src/sage/core/Problems.cpp
     src/sage/core/SystemScheduler.cpp
+    src/sage/core/SystemSchedulerGraph.cpp
+    src/sage/core/SystemAccess.cpp
     src/sage/app/CoreSystems.cpp
     src/sage/render/MeshData.cpp
     src/sage/render/MeshRaycast.cpp
@@ -345,9 +353,18 @@ target_link_libraries(sage_engine PRIVATE
 # включает jolt-ветки в PhysicsWorld.cpp/JoltWorld.cpp; всё под Jolt изолировано
 # в src/physics/jolt/ (как opengl-бэкенд изолирован в rhi/opengl/).
 if (TARGET Jolt)
-    target_sources(sage_engine PRIVATE src/physics/jolt/JoltWorld.cpp src/physics/jolt/JoltWorld_Bodies.cpp)
+    target_sources(sage_engine PRIVATE src/physics/jolt/JoltWorld.cpp src/physics/jolt/JoltWorld_Bodies.cpp
+        src/physics/jolt/JoltJobs.cpp)
     target_compile_definitions(sage_engine PRIVATE SAGE_HAS_JOLT)
     target_link_libraries(sage_engine PRIVATE Jolt)
+    # Мост планировщика наследует JPH::JobSystemWithBarrier, а Jolt собран без
+    # RTTI: сведения о типе базового класса в его библиотеке нет, и наследник
+    # с RTTI не слинковался бы. Мост ни typeid, ни dynamic_cast не использует.
+    if (MSVC)
+        set_source_files_properties(src/physics/jolt/JoltJobs.cpp PROPERTIES COMPILE_OPTIONS "/GR-")
+    else()
+        set_source_files_properties(src/physics/jolt/JoltJobs.cpp PROPERTIES COMPILE_OPTIONS "-fno-rtti")
+    endif()
 endif()
 
 # Графический бэкенд Vulkan (второй, рядом с OpenGL) — по той же схеме, что и
