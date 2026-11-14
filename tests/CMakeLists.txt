@@ -67,6 +67,7 @@ add_executable(sage_tests
     test_jobs_core.cpp
     test_jobs_sync.cpp
     test_jobs_ecs.cpp
+    test_jobs_integration.cpp
     test_net.cpp
     test_builtinphysics.cpp
     test_character.cpp

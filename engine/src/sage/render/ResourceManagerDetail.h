@@ -16,7 +16,7 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
-#include <thread>
+#include "sage/jobs/JobSystem.h"
 #include <utility>
 
 // Внутреннее устройство кэша ресурсов, общее для его файлов: загрузка и
@@ -24,10 +24,18 @@
 // бюджет памяти (ResourceManager_Memory.cpp).
 
 // ---------------------------------------------------------------------------
-// Асинхронный конвейер декодирования. Спрятан в .cpp, чтобы <thread>/очереди не
-// протекали в каждый TU, включающий ResourceManager.h. Один фоновый поток:
-// декодирует файлы изображений в CPU-буферы RGBA8; главный поток забирает
-// готовое в PumpAsyncUploads() и заливает в VRAM (GL только с главного потока).
+// Асинхронный конвейер декодирования — на общей системе задач.
+//
+// Раньше у кэша был СВОЙ фоновый поток с очередью и условной переменной —
+// третий независимый пул рядом с пулом движка и пулом Jolt. Теперь файл
+// читается и декодируется задачей полосы ввода-вывода (её потоки для того и
+// есть: ожидание диска не держит ядро кадра), а результат забирает главный
+// поток в PumpAsyncUploads() и заливает в VRAM (GL только там).
+//
+// Задача НЕ знает о кэше: она получает копии ключа и пути и возвращает
+// пиксели через Future. Поэтому кэш, разрушенный или очищенный раньше, чем
+// задача закончила, ничем не рискует — обращаться ей не к кому. Очистка
+// отменяет ещё не начатые и дожидается идущих (группа задач).
 // ---------------------------------------------------------------------------
 struct ResourceManager::AsyncImpl {
     struct Decoded {
@@ -36,47 +44,34 @@ struct ResourceManager::AsyncImpl {
         int W = 0, H = 0;
         bool Ok = false;
     };
+    struct InFlight {
+        std::string Key;
+        sage::jobs::Future<Decoded> Result;
+    };
+    // Только главный поток (постановка и разбор).
+    std::vector<InFlight> Jobs;
+    sage::jobs::TaskGroup Group;
 
-    std::thread Worker;
-    std::mutex JobMx;
-    std::condition_variable JobCv;
     // Ключ кэша и путь, который реально открывается, — разные строки (см.
     // Locate ниже). Разрешение делает главный поток при постановке задачи:
     // воркеру нельзя трогать базу ассетов, её могут пересканировать в этот же
     // момент.
-    struct Job {
-        std::string Key;
-        std::string File;
-        bool Bleed = false;   // вырез по альфе: цвет под прозрачностью (AlphaBleed.h)
-    };
-    std::deque<Job> Jobs;
-
-    std::mutex ResMx;
-    std::deque<Decoded> Results;
-
-    std::atomic<bool> Stop{false};
-    std::atomic<int> Pending{0}; // задач в полёте (в очереди/декодируются/ждут pump)
-
-    void Run() {
-        for (;;) {
-            Job job;
-            {
-                std::unique_lock<std::mutex> lk(JobMx);
-                JobCv.wait(lk, [&] { return Stop.load() || !Jobs.empty(); });
-                if (Stop.load() && Jobs.empty()) return;
-                if (Jobs.empty()) continue;
-                job = std::move(Jobs.front());
-                Jobs.pop_front();
-            }
+    void Submit(const std::string& key, const std::string& file, bool bleed) {
+        sage::jobs::JobOptions o("texture.decode", sage::jobs::Category::Resources, sage::jobs::Lane::IO);
+        o.Group = &Group;
+        Jobs.push_back({key, sage::JobSystem::Get().Async([key, file, bleed] {
             Decoded d;
-            d.Path = job.Key;
-            d.Ok = ResourceManager::DecodeImageFile(job.File, d.Pixels, d.W, d.H);
-            if (d.Ok && job.Bleed) sage::render::BleedTransparentColor(d.Pixels, d.W, d.H);
-            {
-                std::lock_guard<std::mutex> lk(ResMx);
-                Results.push_back(std::move(d));
-            }
-        }
+            d.Path = key;
+            d.Ok = ResourceManager::DecodeImageFile(file, d.Pixels, d.W, d.H);
+            if (d.Ok && bleed) sage::render::BleedTransparentColor(d.Pixels, d.W, d.H);
+            return d;
+        }, o)});
+    }
+    int Pending() const { return (int)Jobs.size(); }
+    void StopAll() {
+        Group.CancelAndWait();
+        Jobs.clear();
+        Group.Reset();
     }
 };
 

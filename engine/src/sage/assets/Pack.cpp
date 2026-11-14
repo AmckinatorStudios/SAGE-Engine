@@ -7,6 +7,7 @@
 
 #include "sage/assets/format/Blob.h"
 #include "sage/core/Log.h"
+#include "sage/jobs/JobSystem.h"
 #include "sage/core/Paths.h"
 
 #include <atomic>
@@ -325,19 +326,22 @@ bool PackWriter::Save(const fs::path& file, const Progress& progress) const {
         ChaChaXor(key, nonce, p.Bytes.data(), p.Bytes.size());
     };
 
-    const size_t threads = std::max<size_t>(1, std::min<size_t>(16, std::thread::hardware_concurrency()));
-    const size_t batch = threads * 2;
+    // Сжатие и шифрование — в общей системе задач (своих потоков упаковщик
+    // больше не заводит). Пачками: в памяти лежит не весь пакет, а пачка.
+    sage::JobSystem* js = sage::JobSystem::TryGet();
+    const size_t threads = js ? (size_t)js->ThreadCount() : 1;
+    const size_t batch = std::max<size_t>(2, threads * 2);
     for (size_t first = 0; first < m_entries.size(); first += batch) {
         const size_t count = std::min(batch, m_entries.size() - first);
         std::vector<Prepared> ready(count);
-        std::atomic<size_t> next{0};
-        std::vector<std::thread> pool;
-        for (size_t t = 0; t < std::min(threads, count); ++t) {
-            pool.emplace_back([&] {
-                for (size_t k; (k = next.fetch_add(1)) < count;) prepare(first + k, ready[k]);
-            });
-        }
-        for (std::thread& th : pool) th.join();
+        sage::jobs::ParallelOptions po;
+        po.Grain = 1;  // один файл — уже крупная работа
+        po.Name = "pack.prepare";
+        po.Cat = sage::jobs::Category::Resources;
+        po.Prio = sage::jobs::Priority::Normal;
+        sage::jobs::ParallelFor(count, [&](size_t b, size_t e) {
+            for (size_t k = b; k < e; ++k) prepare(first + k, ready[k]);
+        }, po);
 
         for (size_t k = 0; k < count; ++k) {
             const size_t i = first + k;

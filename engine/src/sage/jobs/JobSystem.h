@@ -73,6 +73,9 @@ public:
 
     // Система текущего EngineContext.
     static JobSystem& Get();
+    // То же, но nullptr без контекста движка (утилита командной строки,
+    // инструмент сборки): вызывающий выполняет работу сам, последовательно.
+    static JobSystem* TryGet();
 
     // --- Жизненный цикл ----------------------------------------------------
     // workerThreads: 0 — авто, >0 — точное число воркеров. Повторный вызов с
@@ -189,6 +192,14 @@ inline JobHandle WhenAll(std::vector<JobHandle> deps, JobOptions opts = {}) {
 }
 // Выполнить на главном потоке (в ближайшем PumpMainThread). Безопасная
 // передача результата из фоновой задачи в интерфейс/сцену/Lua.
+// Параллельный проход в системе текущего контекста, а без контекста —
+// последовательно на вызывающем потоке. Для кода, который живёт и в движке, и
+// в утилитах без EngineContext (упаковщик, импорт из командной строки).
+inline void ParallelFor(std::size_t count, const std::function<void(std::size_t, std::size_t)>& body,
+                        const ParallelOptions& options = {}) {
+    if (JobSystem* js = JobSystem::TryGet()) js->ParallelFor(count, body, options);
+    else if (count > 0 && !options.Token.IsCancelled()) body(0, count);
+}
 template <class F>
 JobHandle PostToMain(F&& f, const char* name = "main", Category cat = Category::General) {
     return Run(std::forward<F>(f), JobOptions(name, cat, Lane::Main));

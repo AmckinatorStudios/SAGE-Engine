@@ -321,7 +321,7 @@ std::shared_ptr<Texture> ResourceManager::LoadTextureFile(const std::string& fil
 }
 
 int ResourceManager::PendingAsyncTextures() const {
-    return m_async ? std::max(0, m_async->Pending.load()) : 0;
+    return m_async ? m_async->Pending() : 0;
 }
 
 std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
@@ -419,27 +419,37 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
     m_textures[key] = std::move(rec);
 
     StartWorker();
-    {
-        // Ключ задачи — тот же канонический: результат ищется в кэше по нему,
-        // и разойдись они, готовые пиксели не нашли бы своей записи.
-        std::lock_guard<std::mutex> lk(m_async->JobMx);
-        m_async->Jobs.push_back({key, Locate(path), bleed});
-    }
-    m_async->Pending.fetch_add(1);
-    m_async->JobCv.notify_one();
+    // Ключ задачи — тот же канонический: результат ищется в кэше по нему,
+    // и разойдись они, готовые пиксели не нашли бы своей записи.
+    m_async->Submit(key, Locate(path), bleed);
     return result;
 }
 
 int ResourceManager::PumpAsyncUploads() {
     if (!m_async) return 0;
-    std::deque<AsyncImpl::Decoded> ready;
-    {
-        std::lock_guard<std::mutex> lk(m_async->ResMx);
-        ready.swap(m_async->Results);
+    // Готовые — без ожидания: главный поток не ждёт декодирования, он
+    // забирает то, что уже доехало, остальное — в следующих кадрах.
+    std::vector<AsyncImpl::Decoded> ready;
+    auto& jobs = m_async->Jobs;
+    for (size_t i = 0; i < jobs.size();) {
+        if (!jobs[i].Result.IsReady()) {
+            ++i;
+            continue;
+        }
+        if (AsyncImpl::Decoded* d = jobs[i].Result.TryGet()) {
+            ready.push_back(std::move(*d));
+        } else {
+            // Задачу отменили (остановка системы) или она упала: запись не
+            // должна навсегда остаться «в пути».
+            AsyncImpl::Decoded failed;
+            failed.Path = jobs[i].Key;
+            (void)jobs[i].Result.Error();
+            ready.push_back(std::move(failed));
+        }
+        jobs.erase(jobs.begin() + (std::ptrdiff_t)i);
     }
     int uploaded = 0;
     for (auto& d : ready) {
-        m_async->Pending.fetch_sub(1);
         auto it = m_textures.find(d.Path);
         if (it == m_textures.end()) continue; // запись успели выгрузить/Clear
         TextureRecord& rec = it->second;
@@ -721,16 +731,13 @@ std::vector<size_t> ResourceManager::SelectDowngrades(
 void ResourceManager::StartWorker() {
     if (m_async) return;
     m_async = std::make_unique<AsyncImpl>();
-    m_async->Worker = std::thread([impl = m_async.get()] { impl->Run(); });
 }
 
 void ResourceManager::Clear() {
-    // Останавливаем фоновый поток ДО очистки карт: иначе он мог бы дописать
-    // результат для только что удалённой записи (безвредно, но чище так).
+    // Фоновые декодирования — отменить и дождаться ДО очистки карт: их
+    // результаты относятся к записям, которых сейчас не станет.
     if (m_async) {
-        m_async->Stop.store(true);
-        m_async->JobCv.notify_all();
-        if (m_async->Worker.joinable()) m_async->Worker.join();
+        m_async->StopAll();
         m_async.reset();
     }
     // ВСЕ формы разом: забыть одну нельзя, а забытая освобождала бы свой буфер
@@ -790,9 +797,5 @@ void ResourceManager::ForgetProjectAssets() {
 }
 
 ResourceManager::~ResourceManager() {
-    if (m_async) {
-        m_async->Stop.store(true);
-        m_async->JobCv.notify_all();
-        if (m_async->Worker.joinable()) m_async->Worker.join();
-    }
+    if (m_async) m_async->StopAll();
 }

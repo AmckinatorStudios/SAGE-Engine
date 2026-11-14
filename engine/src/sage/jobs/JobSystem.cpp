@@ -332,6 +332,11 @@ using jobs::detail::Core;
 
 JobSystem& JobSystem::Get() { return EngineContext::Current().Jobs(); }
 
+JobSystem* JobSystem::TryGet() {
+    EngineContext* ctx = EngineContext::CurrentOrNull();
+    return ctx ? &ctx->Jobs() : nullptr;
+}
+
 JobSystem::JobSystem() = default;
 
 JobSystem::~JobSystem() { Shutdown(); }

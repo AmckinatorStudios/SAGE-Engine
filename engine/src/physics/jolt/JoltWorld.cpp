@@ -7,7 +7,7 @@
 
 #include <Jolt/Core/Factory.h>
 #include <Jolt/Core/TempAllocator.h>
-#include <Jolt/Core/JobSystemThreadPool.h>
+#include "physics/jolt/JoltJobs.h"
 #include <Jolt/RegisterTypes.h>
 #include <Jolt/Physics/PhysicsSettings.h>
 #include <Jolt/Physics/PhysicsSystem.h>
@@ -606,10 +606,9 @@ JoltWorld::JoltWorld() {
     EnsureJoltGlobals();
 
     m_tempAllocator = std::make_unique<JPH::TempAllocatorImpl>(16 * 1024 * 1024);
-    unsigned threads = std::thread::hardware_concurrency();
-    m_jobSystem = std::make_unique<JPH::JobSystemThreadPool>(
-        JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers,
-        (int)(threads > 1 ? threads - 1 : 1));
+    // Задачи солвера и бродфазы — на общих воркерах движка (JoltJobs.h), а
+    // не на втором пуле «ядра − 1» рядом с ним.
+    m_jobSystem = sage::physics::CreateJoltJobSystem(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers);
 
     m_bpLayers = std::make_unique<JoltBPLayerInterface>();
     m_objectVsBpFilter = std::make_unique<JoltObjectVsBPFilter>();

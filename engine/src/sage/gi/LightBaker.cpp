@@ -3,11 +3,11 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
-#include <thread>
 
 #include <glm/gtc/constants.hpp>
 
 #include "sage/core/Log.h"
+#include "sage/jobs/JobSystem.h"
 #include "sage/gi/BVH.h"
 #include "sage/gi/LightmapUV.h"
 #include "sage/scene/Scene.h"
@@ -28,12 +28,14 @@
 // и спекуляр), поэтому двойного счёта нет: запекается только то, что заменяет
 // прежний однотонный ambient.
 //
-// Параллелизм — собственные потоки (std::thread), НЕ движковый JobSystem:
-// бейк запускается редактором в фоне одновременно с рендером, а два
-// конкурентных ParallelFor на общем пуле — гонка за воркеров. Каждый поток
-// пишет только свои тексели/пробы — гонок нет; сэмплинг детерминирован
-// (счётчик Уэлча по позиции текселя + Seed), результат не зависит от числа
-// потоков.
+// Параллелизм — общая система задач движка, НИЗКИЙ приоритет. Раньше здесь
+// были свои потоки (по одному на ядро, на каждый вызов): бейк идёт в фоне
+// одновременно с кадром, а старый пул не умел два ParallelFor разом. Новый
+// умеет (вызывающий сам разбирает куски, ожидание помогает), а низкий
+// приоритет ставит куски бейка ПОСЛЕ кадровой работы — редактор не
+// подтормаживает, пока печётся свет. Каждый кусок пишет только свои
+// тексели/пробы — гонок нет; сэмплинг детерминирован (счётчик Уэлча по
+// позиции текселя + Seed), результат не зависит от числа потоков.
 // ---------------------------------------------------------------------------
 namespace sage::gi {
 
@@ -186,17 +188,15 @@ glm::vec3 GatherSurface(const BVH& bvh, const LightingEnvironment& env,
     return acc / (float)samples;
 }
 
-// Локальный parallel-for на собственных потоках (см. комментарий модуля).
+// Параллельный проход бейка (см. комментарий модуля). Без контекста движка —
+// последовательно.
 void ParallelChunks(size_t count, const std::function<void(size_t, size_t)>& body) {
-    unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-    size_t chunk = (count + hw - 1) / hw;
-    if (count < 64 || hw == 1) { body(0, count); return; }
-    std::vector<std::thread> threads;
-    for (size_t begin = 0; begin < count; begin += chunk) {
-        size_t end = std::min(begin + chunk, count);
-        threads.emplace_back(body, begin, end);
-    }
-    for (auto& t : threads) t.join();
+    sage::jobs::ParallelOptions po;
+    po.Grain = 64;
+    po.Name = "gi.bake";
+    po.Cat = sage::jobs::Category::Render;
+    po.Prio = sage::jobs::Priority::Low;
+    sage::jobs::ParallelFor(count, body, po);
 }
 
 // Компоновка лайтмап: чарты каждой сущности -> мини-атлас сущности -> страницы.
