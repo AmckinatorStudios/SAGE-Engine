@@ -234,6 +234,9 @@ public:
     // радиальный ложатся сами — их считает тот, кто строит контур.
     void FillPolygon(glm::vec2 center, glm::vec4 centerColor, const std::vector<glm::vec2>& ring,
                      const std::vector<glm::vec4>& colors);
+    // Готовые треугольники (по три точки) с цветом в каждой вершине: заливка
+    // своего контура с отверстиями и его обводка (см. ShapePath.h).
+    void FillTriangles(const std::vector<glm::vec2>& points, const std::vector<glm::vec4>& colors);
     // Полоса между двумя замкнутыми контурами одной длины: обводка формы и
     // полоса сглаживания края (внешний цвет — с нулевой альфой).
     void StripPolygon(const std::vector<glm::vec2>& inner, const std::vector<glm::vec4>& innerColors,

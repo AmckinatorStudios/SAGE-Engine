@@ -85,3 +85,109 @@ TEST(UIShape_is_an_element_and_panel_appearance) {
     CHECK_TRUE(sage::ui::InferType(scene.Registry(), e.Entity()) == "Shape");
     CHECK_FALSE(sage::ui::HoldsChildren(scene.Registry(), e.Entity()));
 }
+
+// ===========================================================================
+//  СВОЙ КОНТУР (sage/ui/ShapePath.h)
+// ===========================================================================
+#include "sage/ui/ShapePath.h"
+#include "sage/ui/UIMasks.h"
+
+namespace {
+float TriArea(const std::vector<glm::vec2>& t) {
+    float a = 0.0f;
+    for (size_t i = 0; i + 2 < t.size(); i += 3) {
+        const glm::vec2 u = t[i + 1] - t[i], v = t[i + 2] - t[i];
+        a += std::abs(u.x * v.y - u.y * v.x) * 0.5f;
+    }
+    return a;
+}
+} // namespace
+
+TEST(UIShape_path_survives_text_and_back) {
+    // Квадрат с кривой стороной и отдельный открытый контур.
+    const std::string path = "M 0 0 L 1 0 C 1 0.3 1 0.7 1 1 L 0 1 Z M 0.2 0.5 L 0.8 0.5";
+    std::vector<sage::ui::PathContour> c;
+    CHECK_TRUE(sage::ui::ParseShapePath(path, c));
+    CHECK_EQ((int)c.size(), 2);
+    CHECK_EQ((int)c[0].Points.size(), 4);
+    CHECK_TRUE(c[0].Closed);
+    CHECK_FALSE(c[1].Closed);
+    CHECK_NEAR(c[0].Points[1].Out.y, 0.3f, 1e-5f);   // ручка выхода второй точки
+    CHECK_NEAR(c[0].Points[2].In.y, -0.3f, 1e-5f);   // ручка входа третьей
+    std::vector<sage::ui::PathContour> back;
+    CHECK_TRUE(sage::ui::ParseShapePath(sage::ui::FormatShapePath(c), back));
+    CHECK_TRUE(sage::ui::FormatShapePath(back) == sage::ui::FormatShapePath(c));
+    // Кривая, замыкающая контур, — ручка первой точки, а не лишняя точка.
+    CHECK_TRUE(sage::ui::ParseShapePath("M 0 0 L 1 0 L 1 1 C 0.5 1 0 0.5 0 0 Z", back));
+    CHECK_EQ((int)back[0].Points.size(), 3);
+    CHECK_FALSE(sage::ui::ParseShapePath("M 0 0 Q 1 1", back));   // неизвестная команда — ошибка
+}
+
+TEST(UIShape_contour_inside_another_is_a_hole) {
+    // Квадрат 100x100 с квадратным отверстием 50x50 в середине.
+    Shape s;
+    s.Form = Shape::Geometry::Custom;
+    s.Path = "M 0 0 L 1 0 L 1 1 L 0 1 Z M 0.25 0.25 L 0.75 0.25 L 0.75 0.75 L 0.25 0.75 Z";
+    const UIRect r{0, 0, 100, 100};
+    const auto rings = sage::ui::ShapeRings(s, r);
+    CHECK_EQ((int)rings.size(), 2);
+    CHECK_NEAR(TriArea(sage::ui::TriangulateRings(rings)), 7500.0f, 1.0f);   // 10000 - 2500
+    CHECK_TRUE(sage::ui::ShapeContains(s, r, {10, 10}));
+    CHECK_FALSE(sage::ui::ShapeContains(s, r, {50, 50}));   // в отверстии
+    const auto holes = sage::ui::RingHoles(rings);
+    CHECK_FALSE(holes[0]);
+    CHECK_TRUE(holes[1]);
+    // Вогнутый контур (буква «Г») режется ушами без лишней площади.
+    const std::vector<std::vector<glm::vec2>> ell = {{{0, 0}, {10, 0}, {10, 2}, {2, 2}, {2, 10}, {0, 10}}};
+    CHECK_NEAR(TriArea(sage::ui::TriangulateRings(ell)), 36.0f, 0.01f);
+}
+
+TEST(UIShape_stroke_has_joins_and_caps) {
+    const std::vector<glm::vec2> zig = {{0, 0}, {10, 0}, {10, 10}};
+    using J = Shape::Join;
+    using C = Shape::Cap;
+    const auto bevel = sage::ui::StrokeTriangles(zig, false, -1, 1, J::Bevel, C::Butt);
+    const auto round = sage::ui::StrokeTriangles(zig, false, -1, 1, J::Round, C::Butt);
+    const auto capped = sage::ui::StrokeTriangles(zig, false, -1, 1, J::Bevel, C::Round);
+    CHECK_EQ((int)(bevel.size() % 3), 0);
+    CHECK_TRUE(round.size() > bevel.size());    // дуга — больше треугольников
+    CHECK_TRUE(capped.size() > bevel.size());   // круглые концы
+    // Площадь обводки: два отрезка по 10 толщиной 2 плюс угол.
+    CHECK_TRUE(TriArea(bevel) > 39.0f && TriArea(bevel) < 42.0f);
+}
+
+TEST(UIShape_rasterized_mask_has_soft_edges) {
+    Shape circle;
+    circle.Form = Shape::Geometry::Circle;
+    const auto a = sage::ui::RasterizeShape(circle, 32, 32);
+    CHECK_EQ((int)a.size(), 32 * 32);
+    CHECK_EQ((int)a[16 * 32 + 16], 255);   // центр
+    CHECK_EQ((int)a[0], 0);                // угол
+    bool partial = false;
+    for (unsigned char v : a) partial = partial || (v > 10 && v < 245);
+    CHECK_TRUE(partial);                   // край сглажен
+}
+
+TEST(UIShape_clip_to_shape_limits_the_mouse) {
+    // Круглая Panel с обрезкой: кнопка во весь её квадрат нажимается только
+    // в круге — угол, которого не видно, мышь не ловит.
+    Scene scene("clip");
+    GameObject panel = scene.CreateEmptyObject("Avatar");
+    CHECK_TRUE(sage::ui::ApplyPreset(scene, panel.Entity(), "Panel"));
+    auto& reg = scene.Registry();
+    reg.get<sage::ui::Element>(panel.Entity()).Anchor = UIAnchor::TopLeft;
+    reg.get<sage::ui::Element>(panel.Entity()).Position = {0, 0};
+    reg.get<sage::ui::Element>(panel.Entity()).Size = {100, 100};
+    reg.get<sage::ui::Shape>(panel.Entity()).Form = Shape::Geometry::Circle;
+    reg.emplace<sage::ui::Mask>(panel.Entity()).Form = sage::ui::Mask::Shape::Auto;
+    GameObject btn = scene.CreateEmptyObject("Btn");
+    CHECK_TRUE(sage::ui::ApplyPreset(scene, btn.Entity(), "Button"));
+    reg.get<sage::ui::Element>(btn.Entity()).Anchor = UIAnchor::TopLeft;
+    reg.get<sage::ui::Element>(btn.Entity()).Position = {0, 0};
+    reg.get<sage::ui::Element>(btn.Entity()).Size = {100, 100};
+    scene.SetParent(btn.Entity(), panel.Entity());
+    const int center = sage::ui::HitTest(scene, 50, 50, 800, 600);
+    const int corner = sage::ui::HitTest(scene, 3, 3, 800, 600);
+    CHECK_TRUE(center >= 0 && center != panel.Id());   // кнопка (или её надпись)
+    CHECK_TRUE(corner != center);                       // в углу — уже не кнопка
+}

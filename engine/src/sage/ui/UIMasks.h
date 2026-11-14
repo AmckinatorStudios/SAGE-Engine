@@ -12,6 +12,10 @@ namespace sage::ui {
 // Маска хозяина owner для его поддерева: окно window (экранное), скругление
 // (своё или подложки хозяина), мягкий край, инверсия, картинка — в экранных
 // единицах при масштабе холста scale. Картинка-маска грузится здесь лениво.
+// Пропускает ли маска хозяина точку p (ввод режется видимой областью: часть
+// элемента, спрятанная маской, не нажимается).
+bool MaskAccepts(const entt::registry& reg, entt::entity owner, const UIRect& window, glm::vec2 p);
+
 UIRenderer::Mask ShapeMaskFor(const entt::registry& reg, entt::entity owner, const UIRect& window, float scale);
 
 } // namespace sage::ui

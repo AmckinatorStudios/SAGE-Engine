@@ -664,6 +664,7 @@ int HitTest(Scene& scene, float x, float y, int screenW, int screenH, const UISc
         // дереве.
         if (!it.Visible) continue;
         if (it.Clipped && !PointIn(it.Clip, {x, y})) continue;
+        if (!MaskAccepts(reg, it.MaskOwner, it.MaskRect, {x, y})) continue;
         if (PointIn(it.Rect, {x, y})) bestId = reg.get<IdComponent>(it.Entity).Id;
     }
     return bestId;
@@ -718,6 +719,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     for (const Solved& it : items) {
         if (!it.Interactive || !usable(it.Entity)) continue;
         if (it.Clipped && !PointIn(it.Clip, input.Mouse)) continue;
+        if (!MaskAccepts(reg, it.MaskOwner, it.MaskRect, input.Mouse)) continue;
         if (PointIn(it.Rect, input.Mouse)) hovered = it.Entity;
     }
 
@@ -735,6 +737,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         Scroll* target = nullptr;
         for (const Solved& it : items) {
             if (it.Clipped && !PointIn(it.Clip, input.Mouse)) continue;
+            if (!MaskAccepts(reg, it.MaskOwner, it.MaskRect, input.Mouse)) continue;
             if (!PointIn(it.Rect, input.Mouse)) continue;
             if (Scroll* sc = reg.try_get<Scroll>(it.Entity)) target = sc;
         }

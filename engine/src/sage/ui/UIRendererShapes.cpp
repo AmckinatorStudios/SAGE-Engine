@@ -51,3 +51,17 @@ void UIRenderer::StripPolygon(const std::vector<glm::vec2>& inner, const std::ve
         PushFreeQuad(p, c, a);
     }
 }
+
+void UIRenderer::FillTriangles(const std::vector<glm::vec2>& pts, const std::vector<glm::vec4>& colors) {
+    if (colors.size() != pts.size()) return;
+    for (size_t i = 0; i + 2 < pts.size(); i += 3) {
+        const glm::vec2 p[4] = {pts[i], pts[i + 1], pts[i + 2], pts[i + 2]};
+        glm::vec3 c[4];
+        float a[4];
+        for (int k = 0; k < 3; ++k) Split(colors[i + k], c[k], a[k]);
+        c[3] = c[2];
+        a[3] = a[2];
+        CurrentSegment(nullptr).QuadCount++;
+        PushFreeQuad(p, c, a);
+    }
+}
