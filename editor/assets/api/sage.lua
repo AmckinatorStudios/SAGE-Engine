@@ -2796,6 +2796,8 @@ function sage.ui.Sheet(path) end
 function sage.ui.SpawnDemo(name) end
 ---@return integer
 function sage.ui.SpawnShowcase() end
+---@param t table
+function sage.ui.safe_area(t) end
 
 ---@class sage.user_folder
 sage.user_folder = {}

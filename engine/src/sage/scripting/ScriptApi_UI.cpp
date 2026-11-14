@@ -307,6 +307,11 @@ void ScriptEngine::RegisterUIApi() {
         // В контейнере: доля свободного места и «стоять по своему якорю».
         "Grow", UI_FIELD(sage::ui::Element, Grow),
         "IgnoreLayout", UI_FIELD(sage::ui::Element, IgnoreLayout),
+        // Адаптивное размещение: пределы, пропорции, безопасная область.
+        "MinSize", UI_FIELD(sage::ui::Element, MinSize),
+        "MaxSize", UI_FIELD(sage::ui::Element, MaxSize),
+        "AspectRatio", UI_FIELD(sage::ui::Element, AspectRatio),
+        "SafeArea", UI_FIELD(sage::ui::Element, SafeArea),
         // Оформление: "engine" — движка (только цвета), "custom" — своё.
         "Skin", sol::property(
                     [](UIRef& r) {

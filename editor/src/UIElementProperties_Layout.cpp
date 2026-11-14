@@ -136,6 +136,27 @@ void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, u
     HintWrapped("%s", T("The look comes from the style file: changes made here are replaced when the file changes."));
 }
 
+// АДАПТИВНОЕ РАЗМЕЩЕНИЕ: пределы размера, пропорции и безопасная область.
+// Одним блоком и в контейнере, и вне его — пределы действуют в обоих случаях.
+void DrawAdaptiveSettings(EditorHost& host, ui::Element* xf) {
+    if (!ImGui::TreeNodeEx(T("Adaptive placement"), ImGuiTreeNodeFlags_SpanAvailWidth)) return;
+    ImGui::DragFloat2(T("Min size"), &xf->MinSize.x, 1.0f, 0.0f, 8192.0f, "%.0f");
+    host.TrackLastImGuiItem();
+    ImGui::DragFloat2(T("Max size"), &xf->MaxSize.x, 1.0f, 0.0f, 8192.0f, "%.0f");
+    host.TrackLastImGuiItem();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Keeps a stretched element within sensible limits on any screen. 0 — no limit."));
+    ImGui::DragFloat(T("Aspect ratio"), &xf->AspectRatio, 0.01f, 0.0f, 16.0f, "%.3f");
+    host.TrackLastImGuiItem();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Width divided by height: the element fits its place keeping this shape. 0 — free."));
+    if (ImGui::Checkbox(T("Inside the safe area"), &xf->SafeArea)) host.PushUndoSnapshot();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Anchors and stretching count from the safe area of the screen, not its edges:\n"
+                                  "a notch or a TV frame does not cover the element."));
+    ImGui::TreePop();
+}
+
 // --- Раздел «Где стоит» ------------------------------------------------------
 void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int selected) {
     entt::registry& reg = host.CurrentScene().Registry();
@@ -161,6 +182,7 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
             ImGui::DragFloat2(T("Size"), &xf->Size.x, 1.0f, 0.0f, 4096.0f);
             host.TrackLastImGuiItem();
             ImGui::Checkbox(T("Visible"), &xf->Visible);
+            DrawAdaptiveSettings(host, xf);
             if (ImGui::TreeNodeEx(T("More settings"), ImGuiTreeNodeFlags_SpanAvailWidth)) {
                 ImGui::DragInt(T("Order"), &xf->Order, 1);
                 host.TrackLastImGuiItem();
@@ -195,6 +217,7 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
         ImGui::DragFloat4(T("Margin l,t,r,b"), &xf->Margin.x, 1.0f); host.TrackLastImGuiItem();
     }
     ImGui::Checkbox(T("Visible"), &xf->Visible);
+    DrawAdaptiveSettings(host, xf);
 
     // Точка привязки, поворот, порядок, прозрачность — нужны реже, чем «где и
     // какого размера», и уходят под «Ещё».

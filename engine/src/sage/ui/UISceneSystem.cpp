@@ -18,6 +18,7 @@
 
 #include "sage/ui/UIMasks.h"
 #include "sage/ui/UISceneSolved.h"
+#include "sage/ui/UIScroll.h"
 
 namespace sage::ui {
 
@@ -246,6 +247,9 @@ glm::vec2 ScrollShift(entt::registry& reg, entt::entity ent, const UIRect& r,
     Scroll* s = reg.try_get<Scroll>(ent);
     if (!s) return glm::vec2(0.0f);
     if (content.x > 0.0f || content.y > 0.0f) s->Content = content;
+    // Заданные границы содержимого сильнее посчитанных — по своей оси.
+    for (int a = 0; a < 2; ++a)
+        if (s->ContentSize[a] > 0.0f) s->Content[a] = s->ContentSize[a];
     glm::vec2 off = s->Offset;
     if (!s->Horizontal) off.x = 0.0f;
     if (!s->Vertical) off.y = 0.0f;
@@ -263,6 +267,9 @@ glm::vec2 ScrollShift(entt::registry& reg, entt::entity ent, const UIRect& r,
 // Рекурсивный обход: считает прямоугольники, применяет раскладку, маски и
 // групповые свойства. forced — прямоугольник, назначенный раскладкой родителя
 // (nullptr — элемент стоит по своему якорю).
+// Экран текущего решения — от него считается безопасная область.
+UIRect g_screen{};
+
 void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRenderer* ui,
                   bool clipped, const UIRect& clip, float alpha, bool interactive,
                   const UIRect* forced, bool includeHidden, std::vector<Solved>& out) {
@@ -285,10 +292,13 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
     // Считать по нему раскладку значило бы, что панель «во всю ширину экрана»
     // молча остаётся размером 200x56 — то есть самая заметная возможность
     // новой системы не работает, и понять почему неоткуда.
-    glm::vec2 size = ResolveSize(t, parentRect);
+    // «Внутри безопасной области»: место элемента — его родитель, урезанный
+    // безопасной областью экрана (вырез, рамка телевизора).
+    const UIRect place = t.SafeArea && !forced ? Intersect(parentRect, SafeRect(g_screen)) : parentRect;
+    glm::vec2 size = ResolveSize(t, place);
     // Ширина по содержимому — единственное, что знает шрифт, а не раскладка.
     if (ui) size = MeasuredWidth(reg, ent, size, *ui);
-    UIRect r = forced ? *forced : Resolve(t, parentRect, size);
+    UIRect r = forced ? *forced : Resolve(t, place, size);
     if (forced) size = {forced->w, forced->h};
     // Фактический размер запоминается в САМОМ элементе: его читают попадание
     // курсором и следующий кадр, когда шрифта под рукой может не оказаться.
@@ -379,6 +389,7 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
                 // Поля: у растянутой оси ResolveSize их уже вычел из размера,
                 // раскладка добавит обратно — ребёнок займёт ровно контейнер.
                 slots[i].Margin = kt.Margin;
+                slots[i].MaxSize = kt.MaxSize;
             }
         };
         measure();
@@ -411,7 +422,7 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
                     : (layout->Mode == K::Vertical ? glm::vec2{r.w, padded.y} : padded);
             if (fitted != glm::vec2{r.w, r.h}) {
                 r = forced ? UIRect{r.x, r.y, fitted.x, fitted.y}
-                           : Resolve(t, parentRect, fitted);
+                           : Resolve(t, place, fitted);
                 reg.get<Element>(ent).Resolved = fitted;
                 out[self].Rect = r;
                 measure();
@@ -441,7 +452,15 @@ void SolveSubtree(Scene& scene, entt::entity ent, const UIRect& parentRect, UIRe
     // этом остаётся по настоящему элементу — иначе уехало бы и окно.
     UIRect inner = r;
     if (scroll) {
-        const glm::vec2 shift = ScrollShift(reg, ent, r, glm::vec2(0.0f));
+        // Дети по якорям: содержимое кончается там, где кончается самый
+        // дальний из них.
+        glm::vec2 extent(0.0f);
+        for (entt::entity k : kids) {
+            const Element& kt = reg.get<Element>(k);
+            const UIRect kr = Resolve(kt, r);
+            extent = glm::max(extent, glm::vec2(kr.x + kr.w - r.x, kr.y + kr.h - r.y));
+        }
+        const glm::vec2 shift = ScrollShift(reg, ent, r, extent);
         inner.x += shift.x;
         inner.y += shift.y;
     }
@@ -503,6 +522,7 @@ std::vector<Solved> SolveScene(Scene& scene, UIRenderer* ui, int screenW, int sc
         }
 
         const size_t first = out.size();
+        g_screen = screen;
         for (entt::entity root : roots)
             SolveSubtree(scene, root, screen, ui, false, UIRect{}, 1.0f, true, nullptr,
                          includeHidden, out);
@@ -634,11 +654,20 @@ void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH, const U
         SolveScene(scene, &ui, screenW, screenH, /*includeHidden=*/false, scope);
     const entt::registry& reg = scene.Registry();
 
-    for (const Solved& it : items) {
+    const auto bars = ScrollbarSlots(scene, items);
+    size_t bar = 0;
+    for (size_t i = 0; i < items.size(); ++i) {
+        const Solved& it = items[i];
         // Спрятанный элемент место в раскладке держит, а на экране его нет.
-        if (!it.Visible) continue;
+        if (!it.Visible) {
+            for (; bar < bars.size() && bars[bar].first == i; ++bar) {}
+            continue;
+        }
         if (it.Clipped) {
-            if (it.Clip.w <= 0.0f || it.Clip.h <= 0.0f) continue; // полностью обрезан
+            if (it.Clip.w <= 0.0f || it.Clip.h <= 0.0f) { // полностью обрезан
+                for (; bar < bars.size() && bars[bar].first == i; ++bar) {}
+                continue;
+            }
             ui.PushClipRect(it.Clip.x, it.Clip.y, it.Clip.w, it.Clip.h);
         }
         const bool masked = it.MaskOwner != entt::null;
@@ -649,6 +678,16 @@ void DrawSceneUI(Scene& scene, UIRenderer& ui, int screenW, int screenH, const U
         DrawElement(reg, it.Entity, it.Rect, it.Scale, it.Alpha, ui);
         if (masked) ui.PopMask();
         if (it.Clipped) ui.PopClipRect();
+        // Полосы прокрутки — сразу за последним потомком списка: поверх его
+        // содержимого, под тем, что нарисовано позже. Режет их окно самого
+        // списка, а не его детей.
+        for (; bar < bars.size() && bars[bar].first == i; ++bar) {
+            const Solved& owner = items[bars[bar].second];
+            if (!owner.Visible) continue;
+            if (owner.Clipped) ui.PushClipRect(owner.Clip.x, owner.Clip.y, owner.Clip.w, owner.Clip.h);
+            DrawScrollbars(reg, owner, ui);
+            if (owner.Clipped) ui.PopClipRect();
+        }
     }
 }
 
@@ -723,34 +762,11 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
         if (PointIn(it.Rect, input.Mouse)) hovered = it.Entity;
     }
 
-    // --- КОЛЕСО: ПРОКРУТКА ---------------------------------------------------
-    //
-    // Ищется САМЫЙ ВЕРХНИЙ прокручиваемый под курсором, и не важно, ловит ли он
-    // мышь: список с прокруткой обычно из неё и состоит — панель, а внутри
-    // кнопки. Требовать от него ещё и Interactable значило бы «крутится только
-    // то, что нажимается», а это разные вопросы.
-    //
-    // Вложенные прокрутки: крутится ВНУТРЕННЯЯ, потому что items идут в порядке
-    // отрисовки, и последний совпавший — самый глубокий. Ровно этого и ждут:
-    // курсор стоит над внутренним списком.
-    if (input.Wheel != 0.0f) {
-        Scroll* target = nullptr;
-        for (const Solved& it : items) {
-            if (it.Clipped && !PointIn(it.Clip, input.Mouse)) continue;
-            if (!MaskAccepts(reg, it.MaskOwner, it.MaskRect, input.Mouse)) continue;
-            if (!PointIn(it.Rect, input.Mouse)) continue;
-            if (Scroll* sc = reg.try_get<Scroll>(it.Entity)) target = sc;
-        }
-        if (target) {
-            // Вертикаль в приоритете: колесо у мыши одно, и список, у которого
-            // разрешены обе оси, крутят вниз, а не вбок.
-            if (target->Vertical) target->Offset.y -= input.Wheel * target->Speed;
-            else if (target->Horizontal) target->Offset.x -= input.Wheel * target->Speed;
-            // Щелчок колеса СЪЕДЕН интерфейсом: иначе тот же щелчок отъедет
-            // камерой сцены, и список прокрутится вместе с миром за ним.
-            result.WantsMouse = true;
-        }
-    }
+    // Колесо, полосы прокрутки и перетаскивание содержимого (UIScroll.cpp).
+    // Нажатие на полосу — не нажатие на кнопку под ней; потянутый список —
+    // не щелчок по тому, на чём палец начал движение.
+    const ScrollInput scrolled = UpdateScrolling(reg, items, input, result);
+    if (scrolled.BlockPress) hovered = entt::null;
 
     // СИГНАЛЫ ЭЛЕМЕНТОВ (sage/scene/Signals.h). Кнопка не знает, что за ней
     // последует: она сообщает «меня нажали» (clicked), а что делать — решают
@@ -927,6 +943,10 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
             bar->Displayed += glm::clamp(diff, -step, step);
         }
     }
+
+    if (scrolled.Dragging)
+        for (const Solved& it : items)
+            if (State* st = stateOf(it.Entity)) st->Pressed = false;
 
     // Кнопка отпущена — гасим «прижатие» у всех. ПОСЛЕ разбора отпускания:
     // до него Pressed ещё нужен, чтобы отличить щелчок от «отпустил в стороне».
