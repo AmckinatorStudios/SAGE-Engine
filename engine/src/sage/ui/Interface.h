@@ -5,6 +5,8 @@
 #include <entt/entt.hpp>
 #include <nlohmann/json.hpp>
 
+#include "sage/ui/components/Layout.h"   // Canvas
+
 class Scene;
 
 // ---------------------------------------------------------------------------
@@ -44,14 +46,28 @@ struct InterfaceNode {
     std::vector<InterfaceNode> Children;
 };
 
+// ГЛАВНЫЙ КОНТЕЙНЕР — ОДИН НА ИНТЕРФЕЙС.
+//
+// Раньше корней было сколько угодно, и у интерфейса не было своей области:
+// каждый корень якорился к экрану сам, а «раскладка всего экрана» и «отступы от
+// краёв» были настройкой каждого корня по отдельности. Теперь у файла ровно
+// один корень — главный контейнер во весь экран; всё остальное лежит в нём или
+// во вложенных контейнерах. Его нельзя удалить и нельзя положить внутрь
+// другого элемента (sage::ui::MainContainer, UISceneSystem.h).
+//
+// HUD и меню паузы одного файла — два контейнера ВНУТРИ главного, а не два
+// корня: так у них один холст, одна область и общий порядок показа.
 struct Interface {
     // Имя ресурса — то, что видно в панели ассетов и в заголовке редактора.
     // Не имя файла: файл можно переименовать, не трогая содержимого.
     std::string Name = "Interface";
-    // Корней может быть НЕСКОЛЬКО: HUD и меню паузы — два независимых дерева
-    // одного интерфейса, и заворачивать их в общий пустой узел только ради
-    // одного корня значит добавить в дерево строку, которая ничего не значит.
-    std::vector<InterfaceNode> Roots;
+    InterfaceNode Root = MainContainerNode();
+    // Холст — часть вёрстки: экран верстают под одно опорное разрешение, и
+    // оно обязано ехать вместе с файлом, а не жить в каждой сцене отдельно.
+    sage::ui::Canvas Canvas;
+
+    // Узел главного контейнера по умолчанию: группа во весь родитель.
+    static InterfaceNode MainContainerNode(const std::string& name = "Interface");
 
     // --- Файл ---------------------------------------------------------------
     std::string ToJsonString() const;
@@ -60,19 +76,43 @@ struct Interface {
     static bool LoadFile(const std::string& path, Interface& out, std::string& err);
 };
 
+// ФРАГМЕНТ — несколько узлов без главного контейнера: то, что лежит в буфере
+// обмена между «Копировать» и «Вставить». Это не интерфейс: у него нет ни
+// холста, ни своей области, и записывается он тем же узлом, что и файл.
+struct InterfaceFragment {
+    std::vector<InterfaceNode> Nodes;
+
+    std::string ToJsonString() const;
+    static bool FromJsonString(const std::string& text, InterfaceFragment& out);
+};
+
 // --- Сцена <-> ресурс --------------------------------------------------------
 
-// Создаёт в сцене сущности по дереву ресурса. parent — куда положить корни
-// (невалидная — в корень сцены). Возвращает созданные корневые сущности.
+// Создаёт в сцене объект-интерфейс (InterfaceComponent с холстом файла) и
+// разворачивает в него главный контейнер. parent — куда положить объект
+// (невалидная — в корень сцены). Возвращает объект-интерфейс.
 //
 // Не «загружает интерфейс», а РАЗВОРАЧИВАЕТ его: тот же ресурс можно
 // развернуть дважды (два окна инвентаря рядом), и копии не будут знать друг о
 // друге.
-std::vector<entt::entity> Instantiate(Scene& scene, const Interface& ui,
-                                      entt::entity parent = entt::null);
+entt::entity Instantiate(Scene& scene, const Interface& ui, entt::entity parent = entt::null);
 
-// Обратно: снимает поддерево сцены в ресурс. Берутся только сущности с Element
-// — 3D-объект, случайно попавший в поддерево интерфейса, в ресурс не поедет.
-Interface Capture(const Scene& scene, const std::vector<entt::entity>& roots);
+// Разворачивает ТОЛЬКО главный контейнер внутрь готового объекта-интерфейса
+// (у него уже есть InterfaceComponent). Возвращает главный контейнер.
+entt::entity BuildMainContainer(Scene& scene, const Interface& ui, entt::entity interfaceEntity);
+
+// Обратно: снимает объект-интерфейс в ресурс. Берутся только сущности с
+// Element — 3D-объект, случайно попавший в поддерево, в ресурс не поедет.
+// Интерфейс старого вида (несколько корней) снимается с главным контейнером
+// вокруг них — так он и переносится в файл.
+Interface Capture(const Scene& scene, entt::entity interfaceEntity);
+
+// Фрагмент: снять выбранные элементы и вставить их.
+//
+// Вставка в элемент или в объект-интерфейс — прямо туда; в пустое место —
+// своим интерфейсом, чтобы вставленное не оказалось вне всех экранов.
+InterfaceFragment CaptureFragment(const Scene& scene, const std::vector<entt::entity>& roots);
+std::vector<entt::entity> InstantiateFragment(Scene& scene, const InterfaceFragment& frag,
+                                              entt::entity parent = entt::null);
 
 } // namespace sage::ui

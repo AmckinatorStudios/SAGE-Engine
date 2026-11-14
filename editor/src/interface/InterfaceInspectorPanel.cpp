@@ -21,8 +21,8 @@
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/ui/UI.h"
-#include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
+#include "sage/ui/UIPresets.h"
 
 namespace {
 
@@ -144,8 +144,30 @@ void InterfaceInspectorPanel::Draw(EditorHost& host, bool& open) {
     const bool isElement = obj.Valid() && reg.all_of<ui::Element>(obj.Entity());
 
     const bool isInterface = obj.Valid() && reg.all_of<ui::InterfaceComponent>(obj.Entity());
+    const bool isMain = isElement && ui::IsMainContainer(host.CurrentScene(), obj.Entity());
 
-    if (isInterface) {
+    if (isMain) {
+        // ГЛАВНЫЙ КОНТЕЙНЕР — это сам интерфейс: его область и холст. Места,
+        // размера и якоря у него нет (он всегда во весь экран), поэтому и
+        // полей элемента здесь нет — только имя интерфейса и холст.
+        GameObject iface = host.CurrentScene().Get(host.CurrentInterfaceId());
+        ImGui::TextDisabled("%s", T("Interface"));
+        ImGui::SameLine();
+        ImGui::TextUnformatted(obj.Name().c_str());
+        ImGui::Separator();
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
+        if (ImGui::InputText(T("Name"), buf, sizeof(buf))) {
+            obj.SetName(buf);
+            if (iface.Valid()) iface.SetName(buf);   // имя ресурса — то же
+        }
+        host.TrackLastImGuiItem();
+        ImGui::PushItemWidth(-118.0f);
+        ImGui::SeparatorText(T("Canvas"));
+        sage::editor::DrawInterfaceCanvas(host, iface);
+        ImGui::PopItemWidth();
+        Hint(T("The main container is the whole interface area: everything else lives inside it."));
+    } else if (isInterface) {
         // ВЫБРАН САМ ИНТЕРФЕЙС — показываем ЕГО свойства, а не пустоту и не
         // поля элемента: это разные вещи, и окно обязано их различать.
         ImGui::TextDisabled("%s", T("Interface"));

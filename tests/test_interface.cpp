@@ -13,6 +13,9 @@
 #include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/scene/SceneSerializer.h"
+#include "sage/scene/Prefab.h"
+#include "sage/ui/InterfaceSource.h"
+#include <filesystem>
 #include <memory>
 
 #include <string>
@@ -72,18 +75,40 @@ GameObject FindByName(Scene& scene, const std::string& name) {
 
 } // namespace
 
+namespace {
+
+// Тот же пример, но внутри объекта-интерфейса: так он и лежит в сцене.
+entt::entity SampleInterface(Scene& scene) {
+    GameObject iface = scene.CreateEmptyObject("Inventory");
+    scene.Registry().emplace<sage::ui::InterfaceComponent>(iface.Entity());
+    for (entt::entity r : BuildSample(scene)) scene.SetParent(r, iface.Entity());
+    return iface.Entity();
+}
+
+entt::entity ParentOf(Scene& scene, const std::string& name) {
+    GameObject o = FindByName(scene, name);
+    return o.Valid() ? scene.ParentOf(o.Entity()) : entt::null;
+}
+
+} // namespace
+
 TEST(Interface_survives_scene_to_file_to_scene) {
     Scene source("S");
-    const Interface ui = sage::ui::Capture(source, BuildSample(source));
-    CHECK_EQ((int)ui.Roots.size(), 1);
+    const Interface ui = sage::ui::Capture(source, SampleInterface(source));
+    CHECK_TRUE(ui.Name == "Inventory");
+    // Панель 400x220 главным контейнером не становится — она ложится В НЕГО.
+    CHECK_EQ((int)ui.Root.Children.size(), 1);
 
     std::string err;
     Interface back;
     CHECK_TRUE(Interface::FromJsonString(ui.ToJsonString(), back, err));
 
     Scene target("T");
-    const std::vector<entt::entity> roots = sage::ui::Instantiate(target, back);
-    CHECK_EQ((int)roots.size(), 1);
+    const entt::entity iface = sage::ui::Instantiate(target, back);
+    CHECK_TRUE(target.Registry().all_of<sage::ui::InterfaceComponent>(iface));
+    const entt::entity main = sage::ui::MainContainer(target, iface);
+    CHECK_TRUE(main != entt::null);
+    CHECK_TRUE(ParentOf(target, "Panel") == main);
 
     // Раскладка элемента дошла целиком — включая то, чего раньше не было вовсе.
     GameObject panel = FindByName(target, "Panel");
@@ -105,9 +130,7 @@ TEST(Interface_survives_scene_to_file_to_scene) {
     CHECK_TRUE(caption.Valid());
     if (caption.Valid()) {
         CHECK_TRUE(target.Registry().get<sage::ui::Label>(caption.Entity()).Text == "Инвентарь");
-        const HierarchyComponent* h =
-            target.Registry().try_get<HierarchyComponent>(caption.Entity());
-        CHECK_TRUE(h && h->Parent == panel.Entity());
+        CHECK_TRUE(ParentOf(target, "Caption") == panel.Entity());
     }
     GameObject icon = FindByName(target, "Icon");
     CHECK_TRUE(icon.Valid());
@@ -119,21 +142,42 @@ TEST(Interface_survives_scene_to_file_to_scene) {
     }
 }
 
+TEST(Interface_canvas_travels_with_the_file) {
+    // Опорное разрешение — часть вёрстки: экран верстали под него, и в другой
+    // сцене он обязан открыться с тем же холстом.
+    Interface ui;
+    ui.Canvas.Mode = sage::ui::Canvas::Scale::ScaleWithSize;
+    ui.Canvas.Reference = {1280.0f, 720.0f};
+    std::string err;
+    Interface back;
+    CHECK_TRUE(Interface::FromJsonString(ui.ToJsonString(), back, err));
+    CHECK_TRUE(back.Canvas.Mode == sage::ui::Canvas::Scale::ScaleWithSize);
+    CHECK_NEAR(back.Canvas.Reference.x, 1280.0f, 0.001f);
+
+    Scene scene("S");
+    const entt::entity iface = sage::ui::Instantiate(scene, back);
+    CHECK_NEAR(scene.Registry().get<sage::ui::InterfaceComponent>(iface).Canvas.Reference.y,
+               720.0f, 0.001f);
+}
+
 TEST(Interface_can_be_instantiated_twice_without_the_copies_knowing) {
     // Два окна инвентаря рядом — это один ресурс, развёрнутый дважды. Правка
     // одной копии не имеет права задеть другую.
     Scene source("S");
-    const Interface ui = sage::ui::Capture(source, BuildSample(source));
+    const Interface ui = sage::ui::Capture(source, SampleInterface(source));
 
     Scene target("T");
-    const std::vector<entt::entity> a = sage::ui::Instantiate(target, ui);
-    const std::vector<entt::entity> b = sage::ui::Instantiate(target, ui);
-    CHECK_EQ((int)a.size(), 1);
-    CHECK_EQ((int)b.size(), 1);
-    CHECK_TRUE(a[0] != b[0]);
+    const entt::entity a = sage::ui::Instantiate(target, ui);
+    const entt::entity b = sage::ui::Instantiate(target, ui);
+    CHECK_TRUE(a != b);
+    const entt::entity ma = sage::ui::MainContainer(target, a);
+    const entt::entity mb = sage::ui::MainContainer(target, b);
+    CHECK_TRUE(ma != entt::null && mb != entt::null && ma != mb);
 
-    target.Registry().get<sage::ui::Element>(a[0]).Position = {999.0f, 999.0f};
-    CHECK_NEAR(target.Registry().get<sage::ui::Element>(b[0]).Position.x, 12.0f, 0.001f);
+    const entt::entity pa = target.ChildrenOf(ma).front();
+    const entt::entity pb = target.ChildrenOf(mb).front();
+    target.Registry().get<sage::ui::Element>(pa).Position = {999.0f, 999.0f};
+    CHECK_NEAR(target.Registry().get<sage::ui::Element>(pb).Position.x, 12.0f, 0.001f);
 }
 
 TEST(Interface_does_not_swallow_scene_objects) {
@@ -141,32 +185,57 @@ TEST(Interface_does_not_swallow_scene_objects) {
     // едет: иначе .sageui начал бы возить с собой меши и материалы, которых в
     // нём быть не должно.
     Scene scene("S");
-    const std::vector<entt::entity> roots = BuildSample(scene);
+    const entt::entity iface = SampleInterface(scene);
     GameObject box = scene.CreateObject("Ящик");   // обычный объект с мешем
-    scene.SetParent(box.Entity(), roots[0]);
+    scene.SetParent(box.Entity(), FindByName(scene, "Panel").Entity());
 
-    const Interface ui = sage::ui::Capture(scene, roots);
-    CHECK_EQ((int)ui.Roots.size(), 1);
+    const Interface ui = sage::ui::Capture(scene, iface);
+    CHECK_EQ((int)ui.Root.Children.size(), 1);
     // У панели было двое детей-элементов; ящик третьим не стал.
-    CHECK_EQ((int)ui.Roots[0].Children.size(), 2);
+    CHECK_EQ((int)ui.Root.Children[0].Children.size(), 2);
 }
 
-TEST(Interface_keeps_several_roots) {
-    // HUD и меню паузы — два независимых дерева ОДНОГО интерфейса. Заворачивать
-    // их в общий пустой узел ради одного корня значит добавить в дерево строку,
-    // которая ничего не значит.
-    Scene scene("S");
-    std::vector<entt::entity> roots;
-    for (const char* name : {"HUD", "PauseMenu"}) {
-        GameObject r = scene.CreateEmptyObject(name);
-        scene.Registry().emplace<sage::ui::Element>(r.Entity());
-        roots.push_back(r.Entity());
-    }
-    const Interface ui = sage::ui::Capture(scene, roots);
-    CHECK_EQ((int)ui.Roots.size(), 2);
+TEST(Interface_old_file_with_several_roots_opens_inside_a_main_container) {
+    // Файл первого формата: два корня. Открывается он без потерь — оба корня
+    // ложатся в главный контейнер, и на экране не меняется ничего.
+    const char* v1 = R"({"sage_interface_version":1,"name":"Old",
+        "roots":[{"name":"HUD","data":{"element":{}}},{"name":"Pause","data":{"element":{}}}]})";
+    Interface ui;
+    std::string err;
+    CHECK_TRUE(Interface::FromJsonString(v1, ui, err));
+    CHECK_EQ((int)ui.Root.Children.size(), 2);
+    CHECK_TRUE(ui.Root.Children[0].Name == "HUD");
 
-    Scene target("T");
-    CHECK_EQ((int)sage::ui::Instantiate(target, ui).size(), 2);
+    Scene scene("S");
+    const entt::entity iface = sage::ui::Instantiate(scene, ui);
+    const entt::entity main = sage::ui::MainContainer(scene, iface);
+    CHECK_TRUE(main != entt::null);
+    CHECK_EQ((int)scene.ChildrenOf(main).size(), 2);
+    const sage::ui::Element& box = scene.Registry().get<sage::ui::Element>(main);
+    CHECK_TRUE(box.Mode == sage::ui::Element::Stretch::Both);
+}
+
+TEST(Interface_main_container_stays_the_root) {
+    // Главный контейнер — область всего интерфейса: внутрь другого элемента он
+    // не переносится, а «в корень» значит в него, а не под объект-интерфейс.
+    Scene scene("S");
+    const entt::entity iface = sage::ui::Instantiate(scene, Interface{});
+    const entt::entity main = sage::ui::MainContainer(scene, iface);
+    CHECK_TRUE(sage::ui::IsMainContainer(scene, main));
+
+    GameObject panel = scene.CreateEmptyObject("Panel");
+    scene.Registry().emplace<sage::ui::Element>(panel.Entity());
+    scene.SetParent(panel.Entity(), main);
+    GameObject inner = scene.CreateEmptyObject("Inner");
+    scene.Registry().emplace<sage::ui::Element>(inner.Entity());
+    scene.SetParent(inner.Entity(), panel.Entity());
+
+    CHECK_FALSE(sage::ui::CanReparent(scene, main, panel.Entity()));
+    CHECK_FALSE(sage::ui::ReparentElement(scene, main, entt::null));
+    CHECK_TRUE(sage::ui::ReparentElement(scene, inner.Entity(), entt::null));
+    CHECK_TRUE(scene.ParentOf(inner.Entity()) == main);
+    // И главный остался единственным: корней у интерфейса не прибавилось.
+    CHECK_TRUE(sage::ui::MainContainer(scene, iface) == main);
 }
 
 TEST(Interface_a_broken_file_reports_instead_of_throwing) {
@@ -245,7 +314,7 @@ TEST(Interface_a_copied_subtree_outlives_the_original) {
     // вставлять нечего.
     Scene scene("S");
     const std::vector<entt::entity> roots = BuildSample(scene);
-    const Interface copied = sage::ui::Capture(scene, roots);
+    const sage::ui::InterfaceFragment copied = sage::ui::CaptureFragment(scene, roots);
 
     // Удаляем оригинал целиком.
     for (auto e : roots) {
@@ -255,7 +324,7 @@ TEST(Interface_a_copied_subtree_outlives_the_original) {
     CHECK_FALSE(FindByName(scene, "Panel").Valid());
 
     // И вставляем из описания.
-    const std::vector<entt::entity> pasted = sage::ui::Instantiate(scene, copied);
+    const std::vector<entt::entity> pasted = sage::ui::InstantiateFragment(scene, copied);
     CHECK_EQ((int)pasted.size(), 1);
     CHECK_TRUE(FindByName(scene, "Panel").Valid());
     CHECK_TRUE(FindByName(scene, "Caption").Valid());
@@ -266,12 +335,12 @@ TEST(Interface_pasting_into_an_element_makes_it_the_parent) {
     // то, чего ждут, и проверка сторожит именно связь родителя.
     Scene scene("S");
     const std::vector<entt::entity> roots = BuildSample(scene);
-    const Interface copied = sage::ui::Capture(scene, roots);
+    const sage::ui::InterfaceFragment copied = sage::ui::CaptureFragment(scene, roots);
 
     GameObject host = scene.CreateEmptyObject("Host");
     scene.Registry().emplace<sage::ui::Element>(host.Entity());
 
-    const std::vector<entt::entity> pasted = sage::ui::Instantiate(scene, copied, host.Entity());
+    const std::vector<entt::entity> pasted = sage::ui::InstantiateFragment(scene, copied, host.Entity());
     // Вставка под родителя не отдаёт корней наружу: корень теперь не корень.
     CHECK_TRUE(pasted.empty());
     const HierarchyComponent* h = scene.Registry().try_get<HierarchyComponent>(host.Entity());
@@ -406,25 +475,6 @@ TEST(Interface_order_between_interfaces_belongs_to_the_interface) {
     CHECK_TRUE(sage::ui::InterfaceOf(scene, rects[1].Entity) == menu);
 }
 
-TEST(Interface_resource_unfolds_into_an_interface_of_its_own) {
-    // Ресурс .sageui, развёрнутый в сцену, приносит СВОЮ границу: две копии
-    // одного окна инвентаря правятся по отдельности.
-    Scene source("S");
-    const Interface ui = sage::ui::Capture(source, BuildSample(source));
-
-    Scene target("T");
-    const std::vector<entt::entity> a = sage::ui::Instantiate(target, ui);
-    const std::vector<entt::entity> b = sage::ui::Instantiate(target, ui);
-    CHECK_EQ((int)a.size(), 1);
-    CHECK_EQ((int)b.size(), 1);
-    const entt::entity ia = sage::ui::InterfaceOf(target, a[0]);
-    const entt::entity ib = sage::ui::InterfaceOf(target, b[0]);
-    CHECK_TRUE(ia != entt::null);
-    CHECK_TRUE(ib != entt::null);
-    CHECK_TRUE(ia != ib);
-    CHECK_EQ((int)sage::ui::SortedInterfaces(target).size(), 2);
-}
-
 TEST(Interface_migration_gives_every_old_root_its_own_interface) {
     // Сцены, собранные до появления границ: два корня россыпью. Каждый обязан
     // получить свой интерфейс — иначе меню и HUD остались бы одним экраном, то
@@ -492,4 +542,131 @@ TEST(Interface_component_survives_a_scene_round_trip) {
     CHECK_NEAR(loaded.Canvas.Reference.y, 720.0f, 0.001f);
     // И элементы приехали внутрь своего интерфейса, а не в корень сцены.
     CHECK_EQ((int)sage::ui::InterfaceRoots(*back, all[0]).size(), 1);
+}
+
+// ============================================================================
+//  ИНТЕРФЕЙС ИЗ ФАЙЛА: в сцене — один объект со ссылкой на .sageui
+// ============================================================================
+
+namespace {
+
+// Файл меню во временной папке: главный контейнер с кнопкой «Play».
+std::string WriteMenuFile(const char* fileName, const char* buttonName) {
+    namespace fs = std::filesystem;
+    const fs::path dir = fs::temp_directory_path() / "sage_interface_source_test";
+    fs::create_directories(dir);
+    const std::string path = (dir / fileName).string();
+    Scene doc("Doc");
+    const entt::entity iface = sage::ui::Instantiate(doc, Interface{});
+    GameObject play = doc.CreateEmptyObject(buttonName);
+    doc.Registry().emplace<sage::ui::Element>(play.Entity());
+    doc.SetParent(play.Entity(), sage::ui::MainContainer(doc, iface));
+    Interface ui = sage::ui::Capture(doc, iface);
+    ui.Name = "MainMenu";
+    std::string err;
+    CHECK_TRUE(ui.SaveFile(path, err));
+    return path;
+}
+
+entt::entity SourcedInterface(Scene& scene, const std::string& path) {
+    GameObject obj = scene.CreateEmptyObject("MainMenu");
+    sage::ui::InterfaceComponent ic;
+    ic.Source = path;
+    scene.Registry().emplace<sage::ui::InterfaceComponent>(obj.Entity(), ic);
+    return obj.Entity();
+}
+
+} // namespace
+
+TEST(Interface_from_file_unfolds_under_one_scene_object) {
+    sage::ui::ClearInterfaceSourceCache();
+    const std::string path = WriteMenuFile("menu_a.sageui", "Play");
+    Scene scene("S");
+    const entt::entity iface = SourcedInterface(scene, path);
+    sage::ui::SyncInterfaceSources(scene);
+
+    // Кнопка из файла есть в сцене — её рисует и нажимает та же система.
+    GameObject play = FindByName(scene, "Play");
+    CHECK_TRUE(play.Valid());
+    if (!play.Valid()) return;
+    CHECK_TRUE(sage::ui::InterfaceOf(scene, play.Entity()) == iface);
+    CHECK_TRUE(sage::ui::IsInstancePart(scene, play.Entity()));
+    // Под объектом — ровно главный контейнер, без россыпи корней.
+    CHECK_TRUE(sage::ui::MainContainer(scene, iface) != entt::null);
+
+    // Повторная синхронизация ничего не разворачивает второй раз.
+    sage::ui::SyncInterfaceSources(scene);
+    CHECK_EQ((int)scene.ChildrenOf(iface).size(), 1);
+}
+
+TEST(Interface_from_file_is_not_written_into_the_scene) {
+    // Описание экрана одно — в его файле. В сцену пишется только ссылка, а
+    // развёрнутая копия появляется заново при чтении.
+    sage::ui::ClearInterfaceSourceCache();
+    const std::string path = WriteMenuFile("menu_b.sageui", "Play");
+    Scene scene("S");
+    SourcedInterface(scene, path);
+    sage::ui::SyncInterfaceSources(scene);
+
+    const std::string saved = SceneSerializer::SaveToString(scene);
+    CHECK_TRUE(saved.find("\"Play\"") == std::string::npos);
+    CHECK_TRUE(saved.find("menu_b.sageui") != std::string::npos);
+
+    std::unique_ptr<Scene> back = SceneSerializer::LoadFromString(saved);
+    CHECK_TRUE(back != nullptr);
+    if (!back) return;
+    // Сразу после чтения, без кадра отрисовки: скрипт, стартующий со сценой,
+    // ищет кнопки по имени.
+    CHECK_TRUE(FindByName(*back, "Play").Valid());
+    const std::vector<entt::entity> all = sage::ui::SortedInterfaces(*back);
+    CHECK_EQ((int)all.size(), 1);
+    if (!all.empty())
+        CHECK_TRUE(back->Registry().get<sage::ui::InterfaceComponent>(all[0]).Source == path);
+}
+
+TEST(Interface_from_file_follows_the_file) {
+    // Сохранили интерфейс в его пространстве — каждая сцена, где он стоит,
+    // показывает новый вариант сама, без пересборки сцены.
+    sage::ui::ClearInterfaceSourceCache();
+    const std::string path = WriteMenuFile("menu_c.sageui", "Play");
+    Scene scene("S");
+    SourcedInterface(scene, path);
+    sage::ui::SyncInterfaceSources(scene);
+    CHECK_TRUE(FindByName(scene, "Play").Valid());
+
+    WriteMenuFile("menu_c.sageui", "Continue");
+    sage::ui::ClearInterfaceSourceCache();   // не ждать полсекунды проверки диска
+    sage::ui::SyncInterfaceSources(scene);
+    CHECK_FALSE(FindByName(scene, "Play").Valid());
+    CHECK_TRUE(FindByName(scene, "Continue").Valid());
+}
+
+TEST(Interface_copy_of_the_object_unfolds_its_own_copy) {
+    // Дубликат объекта-интерфейса не должен ни унести чужую копию, ни показать
+    // кнопки дважды: у каждого объекта — своя развёрнутая копия файла.
+    sage::ui::ClearInterfaceSourceCache();
+    const std::string path = WriteMenuFile("menu_d.sageui", "Play");
+    Scene scene("S");
+    const entt::entity a = SourcedInterface(scene, path);
+    sage::ui::SyncInterfaceSources(scene);
+    const GameObject copy = sage::scene::CopySubtree(scene, a, scene, entt::null);
+    sage::ui::SyncInterfaceSources(scene);
+
+    int plays = 0;
+    for (auto e : scene.Registry().view<NameComponent>())
+        if (scene.Registry().get<NameComponent>(e).Name == "Play") ++plays;
+    CHECK_EQ(plays, 2);
+    CHECK_EQ((int)scene.ChildrenOf(a).size(), 1);
+    CHECK_EQ((int)scene.ChildrenOf(copy.Entity()).size(), 1);
+}
+
+TEST(Interface_cleared_source_removes_the_copy) {
+    sage::ui::ClearInterfaceSourceCache();
+    const std::string path = WriteMenuFile("menu_e.sageui", "Play");
+    Scene scene("S");
+    const entt::entity iface = SourcedInterface(scene, path);
+    sage::ui::SyncInterfaceSources(scene);
+    scene.Registry().get<sage::ui::InterfaceComponent>(iface).Source.clear();
+    sage::ui::SyncInterfaceSources(scene);
+    CHECK_FALSE(FindByName(scene, "Play").Valid());
 }

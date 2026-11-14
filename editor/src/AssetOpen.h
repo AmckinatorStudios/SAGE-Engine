@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 namespace sage::editor::assetopen {
 
-enum class OpenAs { None, Folder, Scene, Prefab, Clip, Text, AiGraph, VisualScript };
+enum class OpenAs { None, Folder, Scene, Prefab, Clip, Text, AiGraph, VisualScript, Interface };
 
 inline OpenAs Of(const std::filesystem::path& path, bool isDir) {
     if (isDir) return OpenAs::Folder;
@@ -25,6 +25,7 @@ inline OpenAs Of(const std::filesystem::path& path, bool isDir) {
     if (ext == ".sageclip" || ext == ".sageanim") return OpenAs::Clip;
     if (ext == ".aigraph") return OpenAs::AiGraph;
     if (ext == ".sgraph" || ext == ".vgraph") return OpenAs::VisualScript;
+    if (ext == ".sageui") return OpenAs::Interface;
     // Скрипт любого зарегистрированного языка (sage/scripting/Languages.h) — текст.
     if (sage::scripting::IsScriptPath(path.string()) || ext == ".vert" || ext == ".frag" || ext == ".glsl" ||
         ext == ".txt" || ext == ".md" || ext == ".json")

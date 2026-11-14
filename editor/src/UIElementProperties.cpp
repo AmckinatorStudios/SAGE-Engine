@@ -572,20 +572,6 @@ bool TypeHasPart(const ui::Preset& t, const char* id) {
 
 } // namespace
 
-void OpenInInterfaceMode(EditorHost& host, GameObject obj) {
-    Scene& scene = host.CurrentScene();
-    const entt::entity owner = sage::ui::InterfaceOf(scene, obj.Entity());
-    // Интерфейса над элементом нет — это «элементы без интерфейса» (их
-    // собирает код или скрипт), и у них в списке своя строка с номером 0.
-    int id = 0;
-    if (owner != entt::null)
-        if (const IdComponent* idc = scene.Registry().try_get<IdComponent>(owner)) id = idc->Id;
-
-    host.SetWorkspace(EditorWorkspace::Interface);
-    host.SetCurrentInterface(id);
-    host.Selection().SetPrimary(obj.Id());
-}
-
 // Кнопка «открыть в режиме интерфейса» — одна на оба компонента.
 //
 // ЗАЧЕМ ОНА. Объект интерфейса и его элементы видны и в сцене, и найдя их
@@ -594,70 +580,12 @@ void OpenInInterfaceMode(EditorHost& host, GameObject obj) {
 // имён — при том, что объект уже был под рукой.
 static void DrawOpenInInterfaceButton(EditorHost& host, GameObject obj) {
     if (host.Workspace() == EditorWorkspace::Interface) return;   // уже там
+    // Элемент без интерфейса (его собрал код или скрипт) открывать некуда.
+    if (sage::ui::InterfaceOf(host.CurrentScene(), obj.Entity()) == entt::null) return;
     if (EditorIcons::Button("ui-panel", T("Open in interface mode"),
                             T("Switch to layout and open this interface")))
         OpenInInterfaceMode(host, obj);
     ImGui::Separator();
-}
-
-void DrawInterfaceProperties(EditorHost& host, GameObject obj) {
-    namespace ui = sage::ui;
-    entt::registry& reg = host.CurrentScene().Registry();
-    ui::InterfaceComponent* info = reg.try_get<ui::InterfaceComponent>(obj.Entity());
-    if (!info) return;
-
-    DrawOpenInInterfaceButton(host, obj);
-
-    if (ImGui::Checkbox(T("Visible"), &info->Visible)) host.PushUndoSnapshot();
-    EditorTheme::Hint(T("off — the whole interface is hidden, with all its elements"));
-
-    if (ImGui::Checkbox(T("Receives input"), &info->ReceivesInput)) host.PushUndoSnapshot();
-    EditorTheme::Hint(T("off — shown but not clickable: a splash, credits, a hint over the game"));
-
-    ImGui::DragInt(T("Sort order"), &info->SortOrder, 0.1f, -100, 100);
-    host.TrackLastImGuiItem();
-    EditorTheme::Hint(T("order BETWEEN interfaces: the HUD below the pause menu"));
-
-    // --- ХОЛСТ: ПОД КАКОЙ ЭКРАН ВЕРСТАЮТ -----------------------------------
-    //
-    // Свойство ВСЕГО интерфейса, а не его первого элемента: верстают под один
-    // размер экрана весь экран. Пока это поле жило на корневом элементе, два
-    // корня одного интерфейса могли спорить о масштабе.
-    ImGui::SeparatorText(T("Canvas"));
-    const char* kModes[] = {T("Pixels"), T("Scale to reference"), T("Whole-number scale")};
-    int mode = (int)info->Canvas.Mode;
-    if (ImGui::Combo(T("Scale mode"), &mode, kModes, 3)) {
-        host.PushUndoSnapshot();
-        info->Canvas.Mode = (ui::Canvas::Scale)mode;
-    }
-    if (info->Canvas.Mode == ui::Canvas::Scale::ScaleWithSize) {
-        float ref[2] = {info->Canvas.Reference.x, info->Canvas.Reference.y};
-        if (ImGui::DragFloat2(T("Reference resolution"), ref, 1.0f, 16.0f, 8192.0f, "%.0f")) {
-            info->Canvas.Reference = {ref[0], ref[1]};
-        }
-        host.TrackLastImGuiItem();
-        ImGui::SliderFloat(T("Match width/height"), &info->Canvas.MatchWidthOrHeight, 0.0f, 1.0f);
-        host.TrackLastImGuiItem();
-        EditorTheme::Hint(T("0 — follow width, 1 — follow height"));
-    }
-    if (info->Canvas.Mode == ui::Canvas::Scale::IntegerFit) {
-        float ref[2] = {info->Canvas.Reference.x, info->Canvas.Reference.y};
-        if (ImGui::DragFloat2(T("Reference resolution"), ref, 1.0f, 16.0f, 8192.0f, "%.0f")) {
-            info->Canvas.Reference = {ref[0], ref[1]};
-        }
-        host.TrackLastImGuiItem();
-        ImGui::DragInt(T("Largest scale"), &info->Canvas.MaxScale, 0.05f, 0, 16);
-        host.TrackLastImGuiItem();
-        EditorTheme::Hint(T("The largest whole number that fits the reference screen: every source pixel stays the same size. 0 — no limit"));
-    }
-
-    // Элементы правятся у САМИХ ЭЛЕМЕНТОВ. Сказано прямо, потому что именно
-    // здесь их и искали: объект с интерфейсом выглядит как «тот самый экран».
-    ImGui::Separator();
-    const std::vector<entt::entity> roots = ui::InterfaceRoots(host.CurrentScene(), obj.Entity());
-    ImGui::Text(T("Root elements: %d"), (int)roots.size());
-    EditorTheme::Hint(T("Element properties — colour, text, layout — live on the elements "
-                        "themselves, inside this interface."));
 }
 
 void DrawUIElementProperties(EditorHost& host, GameObject obj,

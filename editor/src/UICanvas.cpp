@@ -58,6 +58,9 @@ void UICanvas::Collect(Scene& scene, EditorHost& host, int frameW, int frameH) {
                                    host.UiScope())) {
         const IdComponent* id = reg.try_get<IdComponent>(e.Entity);
         if (!id) continue;
+        // Главный контейнер — сама область интерфейса, а не элемент на ней:
+        // без рамки и ручек, иначе щелчок по пустому месту хватал бы весь экран.
+        if (sage::ui::IsMainContainer(scene, e.Entity)) continue;
         Item it;
         it.Entity = e.Entity;
         it.Id = id->Id;
@@ -543,6 +546,8 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
         // Попадание — ТОЛЬКО в текущем интерфейсе: щелчок по холсту не должен
         // выбирать элемент чужого экрана, который сюда и не рисуется.
         int hit = sage::ui::HitTest(scene, ui.x, ui.y, screenW, screenH, host.UiScope());
+        // Попадание в главный контейнер — это попадание в пустое место.
+        if (hit >= 0 && sage::ui::IsMainContainer(scene, scene.Get(hit).Entity())) hit = -1;
         // ЩЕЛЧОК ПО КНОПКЕ ВЫБИРАЕТ КНОПКУ, а не её надпись. Надпись —
         // ребёнок во весь прямоугольник кнопки и лежит поверх, поэтому
         // попадание всегда приходилось в неё: человек тянул ручки рамки,

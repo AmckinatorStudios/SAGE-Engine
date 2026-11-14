@@ -10,6 +10,7 @@
 #include "sage/render/LodGroup.h"
 #include "sage/scene/Signals.h"
 #include "sage/ui/components/InterfaceComponent.h"
+#include "sage/ui/InterfaceSource.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPart.h"
 #include "sage/vars/Refs.h"
@@ -217,7 +218,9 @@ GameObject CopySubtreeCollecting(Scene& src, entt::entity srcRoot, Scene& dst,
         // последовательности, в какой его обходят системы.
         const std::vector<entt::entity> kids = src.ChildrenOf(srcRoot);
         for (entt::entity k : kids)
-            if (src.Registry().valid(k))
+            // Развёрнутый из .sageui интерфейс не копируется: копия объекта
+            // развернёт свой из того же файла (sage/ui/InterfaceSource.h).
+            if (src.Registry().valid(k) && !src.Registry().all_of<sage::ui::InterfaceInstanceTag>(k))
                 CopySubtreeCollecting(src, k, dst, d.Entity(), idMap, made);
     }
     return d;

@@ -176,6 +176,8 @@ void EditorLayer::PaintWithMaterial(GameObject object, const std::string& name,
 
 void EditorLayer::NewScene(ProjectTemplateKind content) {
     if (InPlayMode()) StopPlay(); // нельзя подменять сцену под работающими скриптами
+    // Новый уровень встаёт на место УРОВНЯ: документ интерфейса — в сторону.
+    if (m_uiDocActive) SetWorkspace(EditorWorkspace::Scene);
     m_history.Clear();
     m_scene = std::make_unique<Scene>("Untitled");
     m_selection.SetPrimary(-1);
@@ -376,6 +378,7 @@ void EditorLayer::NewSceneForUser() {
 
 bool EditorLayer::LoadSceneFromFile(const fs::path& path) {
     if (InPlayMode()) StopPlay(); // см. NewScene
+    if (m_uiDocActive) SetWorkspace(EditorWorkspace::Scene);
     try {
         m_scene = SceneSerializer::Load(path.string());
         m_history.Clear();
@@ -669,6 +672,10 @@ void EditorLayer::ForgetPreviousProject() {
     // оказаться без сцен вовсе, и тогда «когда загрузится» не наступает.
     // NewScene, а не присваивание: он же сбрасывает историю правок, выделение,
     // путь сцены и признак изменённости — всё это тоже прошлое.
+    // Документ интерфейса — тоже. Без сохранения: проект уже сменился, и
+    // ссылка на файл разрешилась бы в НОВЫЙ проект — старый интерфейс лёг бы
+    // поверх чужого файла.
+    CloseInterfaceDocument(/*save=*/false);
     NewScene(ProjectTemplateKind::Empty);
 
     ResourceManager::Instance().ForgetProjectAssets();
@@ -733,6 +740,10 @@ bool EditorLayer::OpenProject(const std::string& path, std::string& err) {
 // по факту изменения (не дёргаем GLFW каждый кадр).
 void EditorLayer::UpdateWindowTitle() {
     std::string scene = m_scenePath.empty() ? m_scene->Name() : m_scenePath.filename().string();
+    // В пространстве «Интерфейс» на месте сцены — документ: заголовок о нём.
+    if (m_uiDocActive)
+        scene = m_uiDocPath.empty() ? m_scene->Name() + ".sageui"
+                                    : std::filesystem::path(sage::PathFromUtf8(m_uiDocPath)).filename().string();
     std::string title = "SAGE Editor — " + scene + (m_sceneDirty ? "*" : "");
     if (m_project.Loaded()) title += " — " + m_project.Name();
     if (title == m_windowTitle) return;

@@ -157,6 +157,7 @@ Kind KindOf(const fs::path& path) {
     if (ext == ".ttf" || ext == ".otf") return Kind::Font;
     if (ext == ".sagefx") return Kind::Effect;
     if (ext == ".sageuistyle") return Kind::UiStyle;
+    if (ext == ".sageui") return Kind::Interface;
     if (ext == ".aigraph") return Kind::AiGraph;
     if (ext == ".sgraph" || ext == ".vgraph") return Kind::VisualScript;   // .vgraph — старые файлы
     // Модели спрашиваются у РЕЕСТРА импортёров, а не у списка здесь: движок
@@ -185,6 +186,7 @@ const char* KindName(Kind kind) {
         case Kind::Font:     return T("font");
         case Kind::Effect:   return T("particle effect");
         case Kind::UiStyle:  return T("interface style");
+        case Kind::Interface: return T("interface");
         case Kind::AiGraph:  return T("AI graph");
         case Kind::VisualScript: return T("script graph");
         default:             return T("file");
@@ -206,6 +208,7 @@ const char* KindIcon(Kind kind) {
         case Kind::Font:     return "file";
         case Kind::Effect:   return "particles";
         case Kind::UiStyle:  return "ui-panel";
+        case Kind::Interface: return "layout";
         case Kind::AiGraph:  return "wire";
         case Kind::VisualScript: return "wire";
         default:             return "file";
@@ -226,6 +229,7 @@ std::vector<std::string> Extensions(Kind kind) {
         case Kind::Font:     return {".ttf", ".otf"};
         case Kind::Effect:   return {".sagefx"};
         case Kind::UiStyle:  return {".sageuistyle"};
+        case Kind::Interface: return {".sageui"};
         case Kind::AiGraph:  return {".aigraph"};
         case Kind::VisualScript: return {".sgraph", ".vgraph"};
         // У папки расширений нет: диалог выбирает КАТАЛОГ, а подсказка «поддер-

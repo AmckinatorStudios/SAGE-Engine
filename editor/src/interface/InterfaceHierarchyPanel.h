@@ -63,7 +63,6 @@ private:
     void DrawToolbar(EditorHost& host);
     // Строка выбора интерфейса: с каким из них сейчас работают.
     void DrawInterfacePicker(EditorHost& host);
-    void CreateInterface(EditorHost& host);
     void DrawContextMenu(EditorHost& host, Scene& scene, entt::entity e);
     void HandleShortcuts(EditorHost& host);
 

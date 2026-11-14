@@ -40,7 +40,10 @@ bool EditorLayer::SelfTestCatalogAndLiveFiles() {
             for (const catalog::Group& sub : g.Groups) collect(sub);
         };
         collect(root);
-        if (ids.size() < 25) {
+        // Порог — по нынешнему составу: интерфейс в сцене — один пункт
+        // (объект со ссылкой на .sageui), элементы и готовые экраны из каталога
+        // ушли в пространство «Интерфейс».
+        if (ids.size() < 20) {
             LOG_ERROR("Editor") << "SELFTEST: в каталоге объектов всего пунктов: " << ids.size();
             ok = false;
         }

@@ -1,4 +1,6 @@
 #include "SelfTestCommon.h"
+#include "sage/ui/Interface.h"
+#include "sage/ui/InterfaceSource.h"
 
 // --- наклейки, память, сборка игры и режим Play ----------------------------
 //
@@ -156,90 +158,77 @@ bool EditorLayer::SelfTestSceneAndPlay() {
         fs::remove(texB, rmec);
     }
 
-    // --- У КАЖДОГО ИНТЕРФЕЙСА СВОЙ КОНТЕКСТ ----------------------------------
+    // --- ИНТЕРФЕЙС ПРАВИТСЯ ФАЙЛОМ, А В СЦЕНЕ ОН — ОДИН ОБЪЕКТ ---------------
     //
-    // Жалоба: «два объекта с интерфейсом — в режиме вёрстки их элементы
-    // смешаны, и править один, не задевая другой, можно только пряча чужие
-    // объекты». Проверяем границу с обеих сторон: элементы разных интерфейсов
-    // не попадают друг к другу, и редактор умеет показать ровно один.
+    // Пространство «Интерфейс» правит документ .sageui: пока оно на экране, на
+    // месте сцены стоит документ, и уровень не получает ни одной правки
+    // вёрстки. В сцене интерфейс — объект со ссылкой на файл, его элементы
+    // разворачиваются сами и в файл сцены не пишутся.
     if (ok) {
         namespace sui = sage::ui;
-        auto build = [&](const char* name, float x) {
-            GameObject iface = m_scene->CreateEmptyObject(name);
-            m_scene->Registry().emplace<sui::InterfaceComponent>(iface.Entity());
-            GameObject root = m_scene->CreateEmptyObject(std::string(name) + "Root");
-            sui::Element box;
-            box.Anchor = UIAnchor::TopLeft;
-            box.Position = {x, 10.0f};
-            box.Size = {80.0f, 40.0f};
-            m_scene->Registry().emplace<sui::Element>(root.Entity(), box);
-            m_scene->Registry().emplace<sui::Fill>(root.Entity());
-            m_scene->SetParent(root.Entity(), iface.Entity());
-            return iface;
-        };
-        GameObject first = build("SelftestUiA", 10.0f);
-        GameObject second = build("SelftestUiB", 300.0f);
-
-        const std::vector<entt::entity> a = sui::InterfaceRoots(*m_scene, first.Entity());
-        const std::vector<entt::entity> b = sui::InterfaceRoots(*m_scene, second.Entity());
-        if (a.size() != 1 || b.size() != 1 || a[0] == b[0]) {
-            LOG_ERROR("Editor") << "SELFTEST: элементы двух интерфейсов смешались (" << a.size()
-                                << " и " << b.size() << ")";
-            ok = false;
+        const fs::path file = fs::temp_directory_path() / "sage_selftest_menu.sageui";
+        {
+            sui::Interface blank;
+            blank.Name = "SelftestMenu";
+            std::string err;
+            blank.SaveFile(sage::PathToUtf8(file), err);
         }
-
-        // Область редактора показывает ОДИН интерфейс — тот, что верстают.
-        const size_t all = sui::SolveSceneRects(*m_scene, 1280, 720, true).size();
-        const size_t one =
-            sui::SolveSceneRects(*m_scene, 1280, 720, true, sui::UIScope::Only(first.Entity()))
-                .size();
-        if (all < 2 || one != 1) {
-            LOG_ERROR("Editor") << "SELFTEST: область вёрстки не ограничивает интерфейс (всего "
-                                << all << ", в области " << one << ")";
-            ok = false;
-        }
-
-        // И редактор ВЫБИРАЕТ его сам: переключение в вёрстку с выделенным
-        // элементом обязано открыть интерфейс ЭТОГО элемента, а не первый
-        // попавшийся.
+        const std::string ref = sage::PathToUtf8(file);   // абсолютный путь — тоже ссылка
         const EditorWorkspace before = m_workspace;
-        const int beforeInterface = m_currentInterface;
-        m_selection.SetPrimary(m_scene->Registry().get<IdComponent>(b[0]).Id);
-        m_currentInterface = -1;
-        m_workspace = EditorWorkspace::Scene;
-        SetWorkspace(EditorWorkspace::Interface);
-        if (m_currentInterface != second.Id()) {
-            LOG_ERROR("Editor") << "SELFTEST: вёрстка открылась не на том интерфейсе ("
-                                << m_currentInterface << " вместо " << second.Id() << ")";
+        Scene* level = m_scene.get();
+        const size_t levelObjects = level->Registry().view<IdComponent>().size();
+        auto fail = [&](const char* why) {
+            LOG_ERROR("Editor") << "SELFTEST: документ интерфейса — " << why;
             ok = false;
-        }
-        m_workspace = before;
-        m_currentInterface = beforeInterface;
-        m_selection.Clear();
+        };
 
-        // И КНОПКА «ОТКРЫТЬ В РЕЖИМЕ ИНТЕРФЕЙСА» у компонента ведёт туда же.
-        //
-        // Порядок шагов здесь неочевиден, и проверяется именно он: переход в
-        // вёрстку СБРАСЫВАЕТ выделение, а прежний открытый интерфейс сохраняет,
-        // пока тот жив. Значит выбор интерфейса и выделение обязаны идти ПОСЛЕ
-        // перехода — иначе кнопка молча открывает не тот экран. Берём худший
-        // случай: открыт интерфейс A, а кнопку жмут на элементе интерфейса B.
-        m_workspace = EditorWorkspace::Scene;
-        m_currentInterface = first.Id();
-        sage::editor::OpenInInterfaceMode(*this, m_scene->Get(m_scene->Registry().get<IdComponent>(b[0]).Id));
-        if (m_workspace != EditorWorkspace::Interface || m_currentInterface != second.Id() ||
-            m_selection.Primary() != m_scene->Registry().get<IdComponent>(b[0]).Id) {
-            LOG_ERROR("Editor") << "SELFTEST: «открыть в режиме интерфейса» открыло не то ("
-                                << m_currentInterface << " вместо " << second.Id()
-                                << ", выделено " << m_selection.Primary() << ")";
-            ok = false;
-        }
-        m_workspace = before;
-        m_currentInterface = beforeInterface;
-        m_selection.Clear();
+        if (!OpenInterface(ref) || m_workspace != EditorWorkspace::Interface || m_scene.get() == level) {
+            fail("файл не открылся на месте сцены");
+        } else {
+            GameObject iface = m_scene->Get(m_currentInterface);
+            const entt::entity main =
+                iface.Valid() ? sui::MainContainer(*m_scene, iface.Entity()) : entt::null;
+            m_selection.Clear();
+            GameObject button = CreateUIEntity("Button");
+            if (main == entt::null || !button.Valid() || m_scene->ParentOf(button.Entity()) != main)
+                fail("новый элемент лёг не в главный контейнер");
+            if (button.Valid()) button.SetName("SelftestPlay");
 
-        m_scene->RemoveObject(first.Id());
-        m_scene->RemoveObject(second.Id());
+            // Главный контейнер не удаляется: он один на интерфейс.
+            if (main != entt::null) {
+                m_selection.SetPrimary(m_scene->Registry().get<IdComponent>(main).Id);
+                DeleteSelected();
+                if (sui::MainContainer(*m_scene, iface.Entity()) != main) fail("главный контейнер пропал");
+                m_selection.Clear();
+            }
+
+            if (!SaveInterfaceDocument() || InterfaceDocumentDirty()) fail("не сохранился");
+            SetWorkspace(EditorWorkspace::Scene);
+            if (m_scene.get() != level) fail("уровень не вернулся на место");
+            if (level->Registry().view<IdComponent>().size() != levelObjects)
+                fail("правки вёрстки попали в уровень");
+
+            // В сцене — один объект со ссылкой; кнопка из файла развёрнута под
+            // ним и в файл сцены не пишется.
+            GameObject holder = m_scene->CreateEmptyObject("SelftestMenu");
+            sui::InterfaceComponent ic;
+            ic.Source = ref;
+            m_scene->Registry().emplace<sui::InterfaceComponent>(holder.Entity(), ic);
+            sui::SyncInterfaceSources(*m_scene);
+            entt::entity play = entt::null;
+            for (entt::entity e : m_scene->Registry().view<NameComponent>())
+                if (m_scene->Registry().get<NameComponent>(e).Name == "SelftestPlay") play = e;
+            if (play == entt::null || sui::InterfaceOf(*m_scene, play) != holder.Entity() ||
+                !sui::IsInstancePart(*m_scene, play))
+                fail("кнопка из файла не развернулась под объектом");
+            if (SceneSerializer::SaveToString(*m_scene).find("SelftestPlay") != std::string::npos)
+                fail("развёрнутая копия записалась в сцену");
+            m_scene->RemoveObject(holder.Id());
+        }
+        CloseInterfaceDocument(/*save=*/false);
+        SetWorkspace(before);
+        std::error_code rmec;
+        fs::remove(file, rmec);
     }
 
     // --- ПОСТ-ОБРАБОТКА ПРИНАДЛЕЖИТ КАМЕРЕ -----------------------------------

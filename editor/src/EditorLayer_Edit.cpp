@@ -13,6 +13,7 @@
 // ---------------------------------------------------------------------------
 #include "sage/scene/CharacterFit.h"
 #include "EditorLayer.h"
+#include "sage/ui/InterfaceSource.h"
 
 #include "sage/scripting/ScriptFields.h"
 
@@ -230,6 +231,14 @@ GameObject EditorLayer::CreateUIEntity(const std::string& preset) {
             parent = iface.Entity();
         }
     }
+    // Всё содержимое интерфейса лежит в ГЛАВНОМ КОНТЕЙНЕРЕ (sage/ui/Interface.h):
+    // «в интерфейс» значит в него, а не вторым корнем рядом.
+    if (parent != entt::null && reg.all_of<sage::ui::InterfaceComponent>(parent))
+        if (const entt::entity main = sage::ui::MainContainer(*m_scene, parent); main != entt::null)
+            parent = main;
+    // Внутрь развёрнутой из файла копии не кладут: её содержимое принадлежит
+    // файлу и правится в пространстве «Интерфейс».
+    if (parent != entt::null && sage::ui::IsInstancePart(*m_scene, parent)) parent = entt::null;
     if (parent != entt::null) m_scene->SetParent(obj.Entity(), parent);
 
     // Что именно значит «кнопка» или «полоса», знает ДВИЖОК (sage/ui/UIPresets.h).
@@ -497,26 +506,13 @@ int EditorLayer::CreateCatalogObject(const std::string& id) {
     }
 
     // --- Интерфейс ---
-    // Готовые ЭКРАНЫ и готовые ЭЛЕМЕНТЫ. Голый прямоугольник — это ещё не
-    // кнопка: чтобы получить её, надо добавить подложку, надпись и реакцию на
-    // мышь. Меню отдаёт то, что человек и хотел, сразу собранным.
-    if (id.rfind("ui.screen.", 0) == 0) {
-        const std::string demo = id.substr(std::string("ui.screen.").size());
+    // В сцене интерфейс — один объект со ссылкой на файл .sageui. Файл
+    // создаётся кнопкой инспектора «Создать и открыть» (или выбирается слотом),
+    // а элементы — в пространстве «Интерфейс».
+    if (id == "ui.interface") {
         PushUndoSnapshot();
-        const int newId = sage::ui::BuildDemo(*m_scene, demo);
-        if (newId < 0) return -1;
-        m_selection.SetPrimary(newId);
-        m_sceneDirty = true;
-        // И сразу открывается редактор интерфейса: элемент, которого не видно
-        // после создания, выглядит как «кнопка не сработала».
-        SetWorkspace(EditorWorkspace::Interface);
-        return newId;
-    }
-    if (id.rfind("ui.", 0) == 0) {
-        const std::string preset = id.substr(std::string("ui.").size());
-        PushUndoSnapshot();
-        GameObject obj = CreateUIEntity(preset);
-        SetWorkspace(EditorWorkspace::Interface);
+        GameObject obj = m_scene->CreateEmptyObject("Interface");
+        reg.emplace<sage::ui::InterfaceComponent>(obj.Entity());
         return done(obj);
     }
 
@@ -569,13 +565,26 @@ GameObject EditorLayer::DuplicateEntity(GameObject src) {
     return copy;
 }
 
+namespace {
+// Что нельзя удалить и продублировать: главный контейнер интерфейса (он один
+// на интерфейс и задаёт его область) и копию интерфейса, развёрнутую из файла
+// (она принадлежит файлу — правят её в пространстве «Интерфейс»).
+bool Untouchable(Scene& scene, entt::entity e) {
+    return sage::ui::IsMainContainer(scene, e) || sage::ui::IsInstancePart(scene, e);
+}
+} // namespace
+
 void EditorLayer::DuplicateSelected() {
     if (m_selection.Empty()) return;
+    bool any = false;
+    for (int id : m_selection.All())
+        if (GameObject o = m_scene->Get(id); o.Valid() && !Untouchable(*m_scene, o.Entity())) any = true;
+    if (!any) return;
     PushUndoSnapshot();
     std::vector<int> copies;
     for (int id : m_selection.All()) {
         GameObject src = m_scene->Get(id);
-        if (!src.Valid()) continue;
+        if (!src.Valid() || Untouchable(*m_scene, src.Entity())) continue;
         entt::entity parent = m_scene->ParentOf(src.Entity()); // копия остаётся у того же родителя
         GameObject copy = DuplicateEntity(src);
         if (parent != entt::null) m_scene->SetParent(copy.Entity(), parent);
@@ -602,11 +611,13 @@ int CountDescendants(Scene& scene, entt::entity e) {
 void EditorLayer::DeleteSelected() {
     int count = 0;
     std::string firstName;
+    std::vector<int> victims;
     for (int id : m_selection.All()) {
         GameObject o = m_scene->Get(id);
-        if (!o.Valid()) continue;
+        if (!o.Valid() || Untouchable(*m_scene, o.Entity())) continue;
         if (count == 0) firstName = o.Name();
         ++count;
+        victims.push_back(id);
     }
     if (count == 0) return;
 
@@ -614,11 +625,7 @@ void EditorLayer::DeleteSelected() {
     // родителя уносит детей, и человек, выделивший одну строку в иерархии,
     // сплошь и рядом не помнит, сколько под ней.
     int withChildren = 0;
-    for (int id : m_selection.All()) {
-        GameObject o = m_scene->Get(id);
-        if (!o.Valid()) continue;
-        withChildren += 1 + CountDescendants(*m_scene, o.Entity());
-    }
+    for (int id : victims) withChildren += 1 + CountDescendants(*m_scene, m_scene->Get(id).Entity());
 
     std::string message;
     if (count == 1) {
@@ -632,9 +639,9 @@ void EditorLayer::DeleteSelected() {
     }
     message += T("\nCtrl+Z undoes this.");
 
-    m_confirm.Ask("delete-entity", T("Deleting an object"), message, [this]() {
+    m_confirm.Ask("delete-entity", T("Deleting an object"), message, [this, victims]() {
         PushUndoSnapshot();
-        for (int id : m_selection.All())
+        for (int id : victims)
             if (m_scene->Get(id).Valid()) m_scene->RemoveObject(id); // удаляет и поддерево
         m_selection.Clear();
     });
