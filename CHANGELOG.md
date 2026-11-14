@@ -12,6 +12,38 @@
 
 ## 0.5.0 → 1.0 (в работе)
 
+### 2026-11-14 (интерфейс: Container, Panel и Arrangement; без старого вида)
+
+#### Изменено
+- Контейнеров два: **Container** (невидимый) и **Panel** (с фоном). Детей
+  держат только они и главный контейнер (`ui::HoldsChildren`); бросок на
+  кнопку или надпись отклоняется. Главный контейнер — Container.
+- Ряд, столбец, сетка и перенос — режимы **Arrangement** контейнера (Manual,
+  Horizontal, Vertical, Grid, Wrap), а не типы. Типы Group, Row, Column, Grid,
+  Wrap Row, Scroll View, Clip Area, Spacer убраны. Обрезка детей и прокрутка —
+  раздел «Содержимое» инспектора (Clip Children, Scroll).
+- `Stack` → `ui::Arrangement`: Padding, Spacing, Alignment (поперёк),
+  Distribution (вдоль), размер детей по осям — Fixed / Fit Content / Fill,
+  столбцы и строки сетки, перенос столбцами. Часть в файле — `arrangement`.
+- Меню создания в дереве интерфейса — одно, по категориям: Containers,
+  Graphics, Text, Controls, Indicators.
+- Скрипты: `ui.group{}` → `ui.container{}`; у `ui.container` и `ui.panel` —
+  ключи `arrange`, `spacing`, `padding`, `align`, `distribute`,
+  `child_width`, `child_height`, `columns`, `rows`, `wrap_columns`,
+  `fit_content`, `clip`, `scroll`.
+- Пока выпускается только Windows: сборка macOS — ручным запуском.
+
+#### Удалено (старый вид интерфейса)
+- Элементы интерфейса прямо в сцене: сцены до формата 19 открываются без них
+  (объект-интерфейс остаётся, ему назначают файл); кнопка «Вынести в файл»
+  стала «Создать и открыть».
+- Файлы `.sageui` первой версии (несколько корней) не читаются.
+- Прежние имена типов (Label, Input, Screen…), деление старых элементов
+  (`NormalizeElements` → `InferMissingTypes`), старые ключи элемента
+  (`transform`, `offset`, `layer`, `stretchCross`, список `events` у кнопки),
+  разбор плоского элемента (`SceneLegacyUI`), холст на корневом элементе в
+  файлах, UI-шаги истории формата сцен.
+
 ### 2026-11-14 (интерфейс — отдельный документ .sageui)
 
 #### Изменено

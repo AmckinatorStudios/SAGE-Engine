@@ -80,10 +80,12 @@ namespace {
 
 // Тот же пример, но внутри объекта-интерфейса: так он и лежит в сцене.
 entt::entity SampleInterface(Scene& scene) {
-    GameObject iface = scene.CreateEmptyObject("Inventory");
-    scene.Registry().emplace<sage::ui::InterfaceComponent>(iface.Entity());
-    for (entt::entity r : BuildSample(scene)) scene.SetParent(r, iface.Entity());
-    return iface.Entity();
+    Interface blank;
+    blank.Name = "Inventory";
+    const entt::entity iface = sage::ui::Instantiate(scene, blank);
+    const entt::entity main = sage::ui::MainContainer(scene, iface);
+    for (entt::entity r : BuildSample(scene)) scene.SetParent(r, main);
+    return iface;
 }
 
 entt::entity ParentOf(Scene& scene, const std::string& name) {

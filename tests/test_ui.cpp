@@ -753,7 +753,7 @@ TEST(UI_presets_are_the_same_everywhere) {
 
     // Поле ввода: текст влево (по центру набирать непривычно) и подсказка.
     GameObject input = scene.CreateObject("Input");
-    CHECK_TRUE(sage::ui::ApplyPreset(reg, input.Entity(), "Input"));
+    CHECK_TRUE(sage::ui::ApplyPreset(reg, input.Entity(), "Input Field"));
     const auto* field = reg.try_get<sage::ui::TextInput>(input.Entity());
     const auto* inputLabel = reg.try_get<sage::ui::Label>(input.Entity());
     CHECK_TRUE(field != nullptr);
@@ -763,7 +763,7 @@ TEST(UI_presets_are_the_same_everywhere) {
 
     // Заготовка СНИМАЕТ чужие части: «сделать из кнопки надпись» не должно
     // оставить надпись нажимаемой и с подложкой.
-    CHECK_TRUE(sage::ui::ApplyPreset(reg, button.Entity(), "Label"));
+    CHECK_TRUE(sage::ui::ApplyPreset(reg, button.Entity(), "Text"));
     CHECK_FALSE(reg.all_of<sage::ui::Interactable>(button.Entity()));
     CHECK_FALSE(reg.all_of<sage::ui::Fill>(button.Entity()));
 

@@ -477,55 +477,6 @@ TEST(Signals_links_survive_save_and_load) {
     CHECK_FALSE(links->Links[1].Enabled);
 }
 
-// СЦЕНА СТАРОГО ФОРМАТА: связи жили списком "events" у части interactable.
-// Кнопка из такой сцены обязана делать то же, что делала: метод — связью
-// сигнала, событие по имени — переходником Broadcast.
-TEST(Signals_old_bindings_are_migrated_to_signal_links) {
-    // Сцена записывается нынешним сериализатором, а затем в неё вписывается
-    // список связей СТАРОГО вида — ровно так он лежал в файлах до сигналов.
-    Scene src("old");
-    GameObject door = src.CreateObject("Door");
-    MakeButton(src, "Btn");
-    nlohmann::json j = nlohmann::json::parse(SceneSerializer::SaveToString(src));
-    bool injected = false;
-    std::function<void(nlohmann::json&)> inject = [&](nlohmann::json& node) {
-        if (node.is_object()) {
-            if (node.value("name", std::string()) == "Btn" && node.contains("ui")) {
-                node["ui"]["interactable"]["events"] = nlohmann::json::array({
-                    {{"trigger", "click"}, {"event", "door.open"}, {"target", door.Id()}, {"method", "Open"}},
-                    {{"trigger", "hoverIn"}, {"event", "ui.hover"}},
-                    {{"trigger", "press"}, {"target", door.Id()}, {"method", "Knock"}, {"enabled", false}},
-                });
-                injected = true;
-                return;
-            }
-            for (auto& [k, v] : node.items()) inject(v);
-        } else if (node.is_array()) {
-            for (auto& v : node) inject(v);
-        }
-    };
-    inject(j);
-    CHECK_TRUE(injected);
-    std::unique_ptr<Scene> scene = SceneSerializer::LoadFromString(j.dump());
-    CHECK_TRUE(scene != nullptr);
-    if (!scene) return;
-    GameObject btn = scene->FindByName("Btn");
-    CHECK_TRUE(btn.Valid());
-    if (!btn.Valid()) return;
-    const auto* links = scene->Registry().try_get<sage::signals::SignalLinksComponent>(btn.Entity());
-    CHECK_TRUE(links != nullptr);
-    if (!links) return;
-    // click: метод + событие -> две связи; hoverIn: событие; press: метод (выключен).
-    CHECK_EQ(links->Links.size(), (size_t)4);
-    if (links->Links.size() != 4) return;
-    CHECK_EQ(links->Links[0].Signal, std::string("clicked"));
-    CHECK_EQ(links->Links[0].Method, std::string("Open"));
-    CHECK_EQ(links->Links[1].Broadcast, std::string("door.open"));
-    CHECK_EQ(links->Links[2].Signal, std::string("hovered"));
-    CHECK_EQ(links->Links[2].Broadcast, std::string("ui.hover"));
-    CHECK_EQ(links->Links[3].Signal, std::string("pressed"));
-    CHECK_FALSE(links->Links[3].Enabled);
-}
 
 // ===========================================================================
 //  ПРЕФАБЫ: СВЯЗИ ВНУТРИ ЗАГОТОВКИ ОБЯЗАНЫ ОСТАВАТЬСЯ ВНУТРИ НЕЁ

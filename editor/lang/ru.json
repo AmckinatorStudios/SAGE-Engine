@@ -3680,6 +3680,25 @@
     "The interface was not saved: ": "Интерфейс не сохранён: ",
     "The main container is the whole interface area: everything else lives inside it.": "Главный контейнер — вся область интерфейса: всё остальное лежит внутри него.",
     "interface": "интерфейс",
-    "A .sageui file shown in the scene: its elements are edited in the Interface workspace": "Файл .sageui, показанный в сцене: его элементы правятся в пространстве «Интерфейс»"
+    "A .sageui file shown in the scene: its elements are edited in the Interface workspace": "Файл .sageui, показанный в сцене: его элементы правятся в пространстве «Интерфейс»",
+    "A visible container: a background of colour or your own picture": "Видимый контейнер: фон цветом или своей картинкой",
+    "Add an element: container, picture, text, control...": "Добавить элемент: контейнер, картинку, текст, управление…",
+    "Alignment": "Выравнивание",
+    "An element built by code: its parts are shown as they are. Pick a type above to rebuild it.": "Элемент, собранный кодом: его части показаны как есть. Выберите тип выше, чтобы пересобрать его.",
+    "Arrange children": "Расставлять детей",
+    "Arrangement": "Расположение",
+    "Child height": "Высота детей",
+    "Child width": "Ширина детей",
+    "Children are cut off at the edges of this container": "Дети обрезаются по краям этого контейнера",
+    "Content": "Содержимое",
+    "Distribution": "Распределение",
+    "Fill Available Space": "Всё доступное место",
+    "Fit Content": "По содержимому",
+    "How the container places its children: by hand, row, column, grid, wrap": "Как контейнер расставляет детей: вручную, рядом, столбцом, сеткой, с переносом",
+    "Indicators": "Индикаторы",
+    "Invisible: groups and arranges its children": "Невидимый: группирует и расставляет детей",
+    "Only a Container or a Panel holds elements": "Элементы держат только Container и Panel",
+    "Rows": "Строки",
+    "Wrap into columns": "Переносить столбцами"
   }
 }

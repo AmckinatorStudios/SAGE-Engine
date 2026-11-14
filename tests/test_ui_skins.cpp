@@ -62,6 +62,8 @@ TEST(UISkin_reparent_refuses_own_descendant_and_keeps_the_interface) {
     GameObject a = MakeElement(scene, "A", hud);
     GameObject b = MakeElement(scene, "B", a.Entity());
     GameObject c = MakeElement(scene, "C", b.Entity());
+    // Детей держат только контейнеры.
+    for (GameObject* o : {&a, &b, &c}) scene.Registry().get<sage::ui::Element>(o->Entity()).Type = "Container";
 
     // В самого себя и в своего потомка — отказ, и ничего не сдвинулось.
     CHECK_FALSE(sage::ui::CanReparent(scene, a.Entity(), a.Entity()));
