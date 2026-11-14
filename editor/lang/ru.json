@@ -3736,6 +3736,20 @@
     "Make a curve": "Сделать кривой",
     "Miter": "Острый",
     "On the canvas: drag points and handles (Alt — one handle), double-click a line to add a point, right-click a point for a curve, delete or open/close. A contour inside another one cuts a hole.": "На холсте: тащите точки и ручки (Alt — одну ручку), двойной щелчок по линии добавляет точку, правая кнопка по точке — кривая, удаление, замкнуть/разомкнуть. Контур внутри другого вырезает отверстие.",
-    "Open contour": "Разомкнуть контур"
+    "Open contour": "Разомкнуть контур",
+    "Drag the content": "Тянуть содержимое",
+    "Content size": "Размер содержимого",
+    "Scrollbar": "Полоса прокрутки",
+    "Scrollbar width": "Ширина полосы",
+    "Scrollbar colour": "Цвет полосы",
+    "Scroll by dragging the content itself, like a list on a phone.": "Прокрутка перетаскиванием самого содержимого, как список на телефоне.",
+    "Size of the scrolled area. 0 — taken from the children.": "Размер прокручиваемой области. 0 — по детям.",
+    "Adaptive placement": "Адаптивное размещение",
+    "Min size": "Мин. размер",
+    "Max size": "Макс. размер",
+    "Inside the safe area": "Внутри безопасной области",
+    "Keeps a stretched element within sensible limits on any screen. 0 — no limit.": "Держит растянутый элемент в разумных пределах на любом экране. 0 — без предела.",
+    "Width divided by height: the element fits its place keeping this shape. 0 — free.": "Ширина, делённая на высоту: элемент вписывается в своё место с этими пропорциями. 0 — свободные.",
+    "Anchors and stretching count from the safe area of the screen, not its edges:\na notch or a TV frame does not cover the element.": "Якоря и растяжение считаются от безопасной области экрана, а не от краёв:\nвырез экрана или рамка телевизора не закроют элемент."
   }
 }

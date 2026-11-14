@@ -64,6 +64,16 @@ UIRect MaskWindow(const Mask& mask, const UIRect& rect);
 UIRect Intersect(const UIRect& a, const UIRect& b);
 
 // Один элемент раскладки: что положили и куда легло.
+// Ограничения элемента (MinSize, MaxSize, AspectRatio) к готовому размеру.
+glm::vec2 ConstrainSize(const Element& t, glm::vec2 size);
+
+// БЕЗОПАСНАЯ ОБЛАСТЬ экрана — доли отступа от краёв (л, в, п, н): вырез
+// экрана телефона, рамка телевизора. Её задаёт игра или платформа; элементы
+// с Element::SafeArea якорятся к ней. Редактор показывает её на холсте.
+void SetSafeArea(glm::vec4 fractions);
+glm::vec4 SafeArea();
+UIRect SafeRect(const UIRect& screen);
+
 struct LayoutSlot {
     glm::vec2 Size{0.0f, 0.0f}; // вход: желаемый размер (выход: с учётом растяжения)
     glm::vec2 Pos{0.0f, 0.0f};  // выход: левый верхний угол в экранных координатах
@@ -71,6 +81,8 @@ struct LayoutSlot {
     // Внешние поля ребёнка (л, в, п, н) — Element::Margin. Место под ребёнка в
     // раскладке — его размер плюс поля; сам он встаёт внутри.
     glm::vec4 Margin{0.0f, 0.0f, 0.0f, 0.0f};
+    // Пределы ребёнка (Element::MaxSize): рост и «во всё место» в них упираются.
+    glm::vec2 MaxSize{0.0f, 0.0f};
 };
 
 // Раскладывает детей внутри контейнера. Порядок — тот, в каком их подали

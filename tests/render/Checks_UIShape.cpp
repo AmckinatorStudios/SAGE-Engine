@@ -17,6 +17,7 @@
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/UISceneSystem.h"
+#include "sage/ui/components/Layout.h"
 #include "sage/ui/components/Visual.h"
 
 namespace sage::rendertest {
@@ -193,6 +194,36 @@ void RunUIShapeChecks() {
         Scene scene("clip");
         LongText(scene).OverflowMode = sage::ui::Label::Overflow::Clip;
         Check(!LitRightOf(Render(ui, scene), 71, 0, kShapeH), "Clip: текст обрезан по элементу");
+    }
+    {
+        // ПОЛОСА ПРОКРУТКИ: список 100x80 с содержимым 400 — у правого края
+        // светлый бегунок высотой в пятую часть окна, ниже — только дорожка.
+        // Содержимое не нарисовано вовсе (пустой ребёнок): светлое — это полоса.
+        Scene scene("scrollbar");
+        GameObject list = scene.CreateEmptyObject("List");
+        sage::ui::Element el;
+        el.Anchor = UIAnchor::TopLeft;
+        el.Position = {10, 10};
+        el.Size = {100, 80};
+        scene.Registry().emplace<sage::ui::Element>(list.Entity(), el);
+        sage::ui::Scroll sc;
+        sc.ScrollbarWidth = 8.0f;
+        sc.ScrollbarColor = {1, 1, 1, 1};
+        sc.ScrollbarTrack = {0, 0, 0, 0};
+        scene.Registry().emplace<sage::ui::Scroll>(list.Entity(), sc);
+        GameObject content = scene.CreateEmptyObject("Content");
+        sage::ui::Element ce;
+        ce.Anchor = UIAnchor::TopLeft;
+        ce.Size = {80, 400};
+        scene.Registry().emplace<sage::ui::Element>(content.Entity(), ce);
+        scene.SetParent(content.Entity(), list.Entity());
+        Render(ui, scene);                      // первый кадр узнаёт размер содержимого
+        const Image img = Render(ui, scene);
+        const float thumb = At(img, 106, 16).r, below = At(img, 106, 60).r, inside = At(img, 50, 16).r;
+        std::printf("    полоса: бегунок %.2f, ниже %.2f, содержимое %.2f\n", thumb, below, inside);
+        Check(thumb > 0.8f, "полоса прокрутки: бегунок у правого края");
+        Check(below < 0.05f, "полоса прокрутки: бегунок — часть дорожки, а не вся");
+        Check(inside < 0.05f, "полоса прокрутки: внутри списка не рисует");
     }
 }
 

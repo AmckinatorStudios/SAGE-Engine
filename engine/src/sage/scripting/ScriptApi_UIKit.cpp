@@ -696,6 +696,19 @@ void ScriptEngine::RegisterUIKitApi() {
         }
     });
 
+    // БЕЗОПАСНАЯ ОБЛАСТЬ экрана — доли отступа от краёв. Её знает платформа
+    // (вырез телефона, рамка телевизора) или настройки игры, а не вёрстка:
+    // элементы с «внутри безопасной области» якорятся к ней.
+    //
+    //   ui.safe_area{left = 0.05, top = 0.03, right = 0.05, bottom = 0.03}
+    Bind("ui", "safe_area", nullptr, [](sol::table t) {
+        const glm::vec4 cur = sage::ui::SafeArea();
+        const float all = t.get_or("all", -1.0f);
+        auto side = [&](const char* key, float was) { return t.get_or(key, all >= 0.0f ? all : was); };
+        sage::ui::SetSafeArea({side("left", cur.x), side("top", cur.y), side("right", cur.z),
+                               side("bottom", cur.w)});
+    });
+
     // Маска поддерева: "rect" | "rounded" | таблица {shape = "rect" | "rounded" |
     // "image", rounding, image, sprite, feather, invert, padding, sharp};
     // false/nil — снять. Прямоугольник режут ножницы, остальное — шейдер.

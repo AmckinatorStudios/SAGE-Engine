@@ -293,6 +293,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/UIIcons.cpp
     src/sage/ui/UISceneSystem.cpp
     src/sage/ui/UIMasks.cpp
+    src/sage/ui/UIScroll.cpp
     src/sage/ui/UIPresets.cpp
     src/sage/ui/UIStyle.cpp
     src/sage/ui/UI.cpp

@@ -384,9 +384,25 @@ const std::vector<PartField>& ScrollFields() {
          400.0f},
         {"clamp", SAGE_UI_TEXT("Stop at the edges"), PartField::Kind::Bool, offsetof(Scroll, Clamp),
          0.0f, 1.0f, "Off where the edge is deliberate: a map, an endless feed."},
+        {"drag", SAGE_UI_TEXT("Drag the content"), PartField::Kind::Bool, offsetof(Scroll, DragContent),
+         0.0f, 1.0f, "Scroll by dragging the content itself, like a list on a phone."},
+        {"content_size", SAGE_UI_TEXT("Content size"), PartField::Kind::Vec2, offsetof(Scroll, ContentSize),
+         0.0f, 100000.0f, "Size of the scrolled area. 0 — taken from the children."},
+        {"scrollbar", SAGE_UI_TEXT("Scrollbar"), PartField::Kind::Bool, offsetof(Scroll, Scrollbar)},
+        {"scrollbar_width", SAGE_UI_TEXT("Scrollbar width"), PartField::Kind::Float,
+         offsetof(Scroll, ScrollbarWidth), 1.0f, 64.0f, nullptr, nullptr, 0,
+         PartField::Widget::Auto, "scrollbar", 1},
+        {"scrollbar_color", SAGE_UI_TEXT("Scrollbar colour"), PartField::Kind::Color,
+         offsetof(Scroll, ScrollbarColor), 0.0f, 1.0f, nullptr, nullptr, 0,
+         PartField::Widget::Auto, "scrollbar", 1},
+        {"scrollbar_track", SAGE_UI_TEXT("Track colour"), PartField::Kind::Color,
+         offsetof(Scroll, ScrollbarTrack), 0.0f, 1.0f, nullptr, nullptr, 0,
+         PartField::Widget::Auto, "scrollbar", 1},
     };
     static const bool marked = [] {
-        MarkAdvanced(const_cast<std::vector<PartField>&>(f), {"offset", "speed", "clamp"});
+        MarkAdvanced(const_cast<std::vector<PartField>&>(f),
+                     {"offset", "speed", "clamp", "content_size", "scrollbar_width", "scrollbar_color",
+                      "scrollbar_track"});
         return true;
     }();
     (void)marked;

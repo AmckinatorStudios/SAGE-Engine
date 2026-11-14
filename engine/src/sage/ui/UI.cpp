@@ -20,7 +20,33 @@ glm::vec2 ResolveSize(const Element& t, const UIRect& parent) {
     // наизнанку и ловит мышь там, где его не видно.
     if (stretchX) size.x = std::max(0.0f, parent.w - t.Margin.x - t.Margin.z);
     if (stretchY) size.y = std::max(0.0f, parent.h - t.Margin.y - t.Margin.w);
+    return ConstrainSize(t, size);
+}
+
+glm::vec2 ConstrainSize(const Element& t, glm::vec2 size) {
+    // Пропорции — сначала: элемент ВПИСЫВАЕТСЯ в своё место, не выходя за него.
+    if (t.AspectRatio > 0.0f && size.x > 0.0f && size.y > 0.0f) {
+        if (size.x / size.y > t.AspectRatio) size.x = size.y * t.AspectRatio;
+        else size.y = size.x / t.AspectRatio;
+    }
+    for (int a = 0; a < 2; ++a) {
+        if (t.MaxSize[a] > 0.0f) size[a] = std::min(size[a], t.MaxSize[a]);
+        if (t.MinSize[a] > 0.0f) size[a] = std::max(size[a], t.MinSize[a]);
+    }
     return size;
+}
+
+namespace {
+glm::vec4 g_safeArea{0.0f};
+} // namespace
+
+void SetSafeArea(glm::vec4 fractions) { g_safeArea = glm::clamp(fractions, glm::vec4(0.0f), glm::vec4(0.45f)); }
+glm::vec4 SafeArea() { return g_safeArea; }
+
+UIRect SafeRect(const UIRect& screen) {
+    const glm::vec4 f = g_safeArea;
+    return UIRect{screen.x + screen.w * f.x, screen.y + screen.h * f.y,
+                  std::max(0.0f, screen.w * (1.0f - f.x - f.z)), std::max(0.0f, screen.h * (1.0f - f.y - f.w))};
 }
 
 UIRect Resolve(const Element& t, const UIRect& parent, glm::vec2 size) {
@@ -31,8 +57,12 @@ UIRect Resolve(const Element& t, const UIRect& parent, glm::vec2 size) {
 
     glm::vec2 pos = ResolveAnchored(t.Anchor, t.Position, size, parent);
     // Растянутая ось не якорится: её положение задают поля от краёв родителя.
-    if (stretchX) pos.x = parent.x + t.Margin.x;
-    if (stretchY) pos.y = parent.y + t.Margin.y;
+    // Упёрлась в предел (MaxSize, пропорции) — встаёт посередине своего места,
+    // а не прилипает к левому краю.
+    if (stretchX) pos.x = parent.x + t.Margin.x +
+                          std::max(0.0f, parent.w - t.Margin.x - t.Margin.z - size.x) * 0.5f;
+    if (stretchY) pos.y = parent.y + t.Margin.y +
+                          std::max(0.0f, parent.h - t.Margin.y - t.Margin.w - size.y) * 0.5f;
 
     // Точка привязки внутри самого элемента. Pivot (0,0) — прежнее поведение
     // (якорь держит левый верхний угол), (0.5,0.5) — центр: подпись, растущая
@@ -235,10 +265,19 @@ glm::vec2 ApplyLayout(const Arrangement& arr, const UIRect& container,
         // РОСТ: свободное место раздаётся тем, у кого Grow > 0, пропорционально.
         float free = mainSpace - content;
         if (growSum > 0.0f && free > 0.0f) {
-            for (size_t i = b; i < e; ++i)
-                mainOf(slots[i].Size) += free * std::max(slots[i].Grow, 0.0f) / growSum;
-            content += free;
-            free = 0.0f;
+            float used = 0.0f;
+            for (size_t i = b; i < e; ++i) {
+                float& m = mainOf(slots[i].Size);
+                const float before = m;
+                m += free * std::max(slots[i].Grow, 0.0f) / growSum;
+                // Рост упирается в предел ребёнка; недобранное остаётся свободным.
+                const float cap = horizontal ? slots[i].MaxSize.x : slots[i].MaxSize.y;
+                if (cap > 0.0f) m = std::min(m, cap + (horizontal ? slots[i].Margin.x + slots[i].Margin.z
+                                                                  : slots[i].Margin.y + slots[i].Margin.w));
+                used += m - before;
+            }
+            content += used;
+            free -= used;
         }
 
         float cursor = 0.0f;
@@ -270,7 +309,14 @@ glm::vec2 ApplyLayout(const Arrangement& arr, const UIRect& container,
         for (size_t i = b; i < e; ++i) {
             LayoutSlot& s = slots[i];
             float cross = crossOf(s.Size);
-            const float shift = PlaceAcross(arr.Alignment, fillCross, lineCross, cross);
+            float shift = PlaceAcross(arr.Alignment, fillCross, lineCross, cross);
+            // «Во всё место» поперёк тоже упирается в предел ребёнка — и тогда
+            // ребёнок встаёт по выравниванию, а не к началу строки.
+            const float capCross = horizontal ? s.MaxSize.y : s.MaxSize.x;
+            if (fillCross && capCross > 0.0f && cross > capCross) {
+                cross = capCross;
+                shift = PlaceAcross(arr.Alignment, false, lineCross, cross);
+            }
             crossOf(s.Size) = cross;
             if (horizontal) s.Pos = {left + cursor, top + crossCursor + shift};
             else s.Pos = {left + crossCursor + shift, top + cursor};

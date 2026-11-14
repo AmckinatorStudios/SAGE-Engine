@@ -127,6 +127,10 @@ void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
     tj["skin"] = (int)t->Skin;
     if (t->Grow != 0.0f) tj["grow"] = t->Grow;
     if (t->IgnoreLayout) tj["ignoreLayout"] = true;
+    if (t->MinSize != glm::vec2(0.0f)) tj["minSize"] = Vec2ToJson(t->MinSize);
+    if (t->MaxSize != glm::vec2(0.0f)) tj["maxSize"] = Vec2ToJson(t->MaxSize);
+    if (t->AspectRatio > 0.0f) tj["aspect"] = t->AspectRatio;
+    if (t->SafeArea) tj["safeArea"] = true;
     if (!t->Style.empty()) tj["style"] = t->Style;
     // Resolved не пишется: это след последнего кадра, а не настройка.
 
@@ -196,6 +200,10 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
         t.Skin = skin == 0 ? sage::ui::Element::SkinMode::Engine : sage::ui::Element::SkinMode::Custom;
         t.Grow = tj.value("grow", t.Grow);
         t.IgnoreLayout = tj.value("ignoreLayout", t.IgnoreLayout);
+        if (tj.contains("minSize")) t.MinSize = Vec2FromJson(tj["minSize"], t.MinSize);
+        if (tj.contains("maxSize")) t.MaxSize = Vec2FromJson(tj["maxSize"], t.MaxSize);
+        t.AspectRatio = tj.value("aspect", t.AspectRatio);
+        t.SafeArea = tj.value("safeArea", t.SafeArea);
         t.Style = tj.value("style", t.Style);
     }
     reg.emplace_or_replace<sage::ui::Element>(e, t);

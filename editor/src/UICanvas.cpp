@@ -256,6 +256,19 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     // скруглением корпуса или «overscan» телевизора. Рисуется ПОД элементами,
     // а не поверх: это разметка холста, и закрывать ею то, что верстают, — то
     // же самое, что верстать по линейке, положенной на чертёж.
+    //
+    // Предпросмотр: пока разметка включена, элементы «внутри безопасной
+    // области» встают по ней — так видно, что вырез их не закроет. Задаётся
+    // только при смене настройки: в остальное время область принадлежит игре
+    // (ui.safe_area), и редактор не перебивает её каждый кадр.
+    {
+        static float s_applied = -1.0f;
+        const float want = tools.ShowSafeArea ? std::clamp(tools.SafeAreaPercent, 0.0f, 25.0f) * 0.01f : 0.0f;
+        if (want != s_applied) {
+            sage::ui::SetSafeArea(glm::vec4(want));
+            s_applied = want;
+        }
+    }
     if (tools.ShowSafeArea) {
         const float m = std::clamp(tools.SafeAreaPercent, 0.0f, 25.0f) * 0.01f;
         const ImVec2 sa = toScreen((float)screenW * m, (float)screenH * m);
