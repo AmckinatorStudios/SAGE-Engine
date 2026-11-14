@@ -294,7 +294,7 @@ TEST(Interface_presets_build_from_elements_and_components) {
     CHECK_TRUE(panel != nullptr);
     if (panel) {
         CHECK_TRUE(panel->Container);
-        CHECK_TRUE(panel->HasFill);
+        CHECK_TRUE(panel->HasShape);
         CHECK_TRUE(panel->HasArrangement);
     }
 

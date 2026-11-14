@@ -565,7 +565,32 @@ bool TypeHasPart(const ui::Preset& t, const char* id) {
            (s == "range" && t.HasRange) || (s == "arrangement" && t.HasArrangement) ||
            // Обрезка и прокрутка — настройки контейнера («Clip Children»,
            // «Scroll»), а не добавка сверх типа.
-           ((s == "mask" || s == "scroll") && t.Container) || (s == "icon" && t.HasIcon);
+           ((s == "mask" || s == "scroll") && t.Container) || (s == "icon" && t.HasIcon) ||
+           (s == "shape" && t.HasShape) ||
+           // Оформление Panel — форма ИЛИ картинка (Appearance): обе части её.
+           ((s == "fill" || s == "shape") && t.Container && (t.HasShape || t.HasFill));
+}
+
+// APPEARANCE панели: None | Image | Shape. Режим — это набор частей, а не
+// поле: «картинка» — подложка (Fill) с её видом, «форма» — часть Shape.
+// Значения прежнего режима не держатся: части снимаются целиком, и
+// переключение — шаг отмены, который возвращает их.
+void DrawAppearanceSwitch(EditorHost& host, entt::entity e) {
+    entt::registry& reg = host.CurrentScene().Registry();
+    const bool shape = reg.all_of<ui::Shape>(e);
+    const bool fill = reg.all_of<ui::Fill>(e);
+    int mode = shape ? 2 : fill ? 1 : 0;
+    const char* kModes[] = {T("None"), T("Image"), T("Shape")};
+    if (!ImGui::Combo(T("Appearance"), &mode, kModes, 3)) return;
+    host.PushUndoSnapshot();
+    if (mode != 2) reg.remove<ui::Shape>(e);
+    if (mode != 1) reg.remove<ui::Fill>(e);
+    if (mode == 1 && !fill) {
+        ui::Fill& f = reg.emplace<ui::Fill>(e);
+        f.Color = {1.0f, 1.0f, 1.0f, 1.0f};   // картинка без оттенка
+        f.Rounding = 0.0f;
+    }
+    if (mode == 2 && !shape) reg.emplace<ui::Shape>(e);
 }
 
 // CONTENT контейнера: Arrangement — полями своей части (поля режима видны
@@ -754,7 +779,9 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     // картинка, у кнопки — её вид в каждом состоянии. Включать и выключать тут
     // нечего: это устройство типа, а не набор галок.
     auto belongs = [&](const ui::PartType& p) { return !type || TypeHasPart(*type, p.Id); };
-    // Вид есть у всего, кроме невидимого Container: у Panel — её подложка.
+    // Панель выбирает оформление первым: от него зависит, какой вид ниже.
+    if (type && type->Container && (type->HasShape || type->HasFill)) DrawAppearanceSwitch(host, e);
+    // Вид есть у всего, кроме невидимого Container: у Panel — её оформление.
     bool hasLook = false;
     for (const ui::PartType& p : ui::Parts())
         if (p.Fields && !p.Container && !p.Hidden && p.Has(reg, e) && belongs(p)) hasLook = true;

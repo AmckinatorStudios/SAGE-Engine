@@ -1,4 +1,5 @@
 #pragma once
+#include <initializer_list>
 #include <cstddef>
 #include <string>
 #include <string_view>
@@ -372,6 +373,14 @@ PartType MakePart(const char* id, const char* title, int order,
 // ряда и столбца есть, у сетки его нет: перечислять «ряд или столбец» двумя
 // условиями поле не умеет, а «не сетка» — одно.
 constexpr int ShowIfNot(int v) { return -v - 1; }
+// «Видно при любом из значений» (до 20): второй цвет — у линейного И
+// радиального градиента. Набор хранится битами над флагом kShowIfAny.
+constexpr int kShowIfAny = 1 << 24;
+constexpr int ShowIfAny(std::initializer_list<int> values) {
+    int bits = kShowIfAny;
+    for (int v : values) bits |= 1 << v;
+    return bits;
+}
 
 inline bool FieldVisible(const std::vector<PartField>& fields, const PartField& f,
                          const void* data, int depth = 0) {
@@ -388,6 +397,7 @@ inline bool FieldVisible(const std::vector<PartField>& fields, const PartField& 
         const int value = *reinterpret_cast<const int*>(at);
         // Отрицательное условие — «при любом значении, КРОМЕ» (см. ShowIfNot).
         if (f.ShowIfValue < 0) return value != -f.ShowIfValue - 1;
+        if (f.ShowIfValue & kShowIfAny) return value >= 0 && value < 20 && ((f.ShowIfValue >> value) & 1);
         return value == f.ShowIfValue;
     }
     // Ключа нет в таблице — это опечатка в объявлении части, и прятать поле

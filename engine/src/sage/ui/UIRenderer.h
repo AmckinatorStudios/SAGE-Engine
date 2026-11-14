@@ -227,6 +227,18 @@ public:
     // --- Маски (ножницы): всё между Push и Pop обрезается прямоугольником.
     // Вложенные вызовы пересекаются с текущей маской. Пары обязаны сходиться
     // до End() (незакрытые маски закрываются с предупреждением в лог).
+    // --- Контуры (формы: Shape и оформление Panel, см. ShapeGeometry.h) ---
+    //
+    // Выпуклый многоугольник веером из center: цвет задаётся в КАЖДОЙ вершине
+    // (не домноженный на альфу), поэтому градиент любого направления и
+    // радиальный ложатся сами — их считает тот, кто строит контур.
+    void FillPolygon(glm::vec2 center, glm::vec4 centerColor, const std::vector<glm::vec2>& ring,
+                     const std::vector<glm::vec4>& colors);
+    // Полоса между двумя замкнутыми контурами одной длины: обводка формы и
+    // полоса сглаживания края (внешний цвет — с нулевой альфой).
+    void StripPolygon(const std::vector<glm::vec2>& inner, const std::vector<glm::vec4>& innerColors,
+                      const std::vector<glm::vec2>& outer, const std::vector<glm::vec4>& outerColors);
+
     void PushClipRect(float x, float y, float w, float h);
     void PopClipRect();
 

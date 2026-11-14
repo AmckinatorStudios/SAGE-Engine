@@ -425,7 +425,7 @@ entt::entity main  = sage::ui::MainContainer(scene, iface);
 | Тип | Из чего собран |
 |---|---|
 | Container | `Arrangement` — невидимый |
-| Panel | `Fill` + `Arrangement` — фон цветом или картинкой |
+| Panel | `Arrangement` + оформление: **Appearance** None / Image (`Fill`) / Shape (`Shape`) |
 
 У ребёнка контейнера-раскладки в инспекторе — раздел «В контейнере»: **Grow**
 (доля свободного места: поле ввода занимает всё, что осталось от кнопки) и
@@ -440,6 +440,38 @@ entt::entity main  = sage::ui::MainContainer(scene, iface);
 Scroll View, Clip Area, Spacer и прежние имена (Label, Screen…) не
 распознаются. Тип элементу, собранному кодом, назначает
 `sage::ui::InferMissingTypes` — по набору частей.
+
+## Форма (Shape) — элемент и оформление Panel
+
+`sage::ui::Shape` (`components/Visual.h`) — один компонент на элемент **Shape**
+(раздел Graphics) и на оформление Panel (Appearance: Shape, по умолчанию).
+
+| Настройка | Значения |
+|---|---|
+| Geometry | Rectangle, Rounded Rectangle (скругление углов), Circle (вписан в меньшую сторону), Ellipse |
+| Fill | None, Solid Color, Linear Gradient (конечный цвет, угол: 0 — слева направо, 90 — сверху вниз), Radial Gradient (от центра к краю) |
+| Stroke | толщина (0 — нет), цвет, положение: Inside / Center / Outside |
+
+Инспектор показывает только поля выбранной геометрии и заливки.
+
+**Одна система отрисовки.** Форма строится КОНТУРОМ — списком точек
+(`ShapeOutline`, `sage/ui/ShapeGeometry.h`), — и рисуется веером с цветом в
+каждой вершине (`UIRenderer::FillPolygon`) и полосами (`StripPolygon`):
+обводка — полоса между контурами с разным сдвигом, сглаживание края — полоса
+в пиксель, гаснущая наружу. Градиент считается в вершинах
+(`ShapeFillColor`), поэтому линейный и радиальный работают у любой формы.
+Контуры с любым сдвигом совпадают по числу точек. Custom Shape (этап 4)
+ляжет в ту же систему — своим контуром.
+
+**Текст (Label):** кроме содержимого, шрифта и выравнивания — **Auto Size**
+(кегль уменьшается, пока текст не поместится; больше заданного не
+становится), **Line spacing** (доля высоты строки) и **Overflow**: Show all,
+Cut off (обрезать по элементу), Ellipsis (оборвать «...», строки ниже края не
+рисуются).
+
+**Картинка (Image):** Source, Display mode — Stretch, Nine-Slice, Tile,
+Aspect Fit, Aspect Fill; Tint; фильтрация и кратный масштаб — в
+дополнительных настройках.
 
 ## Оформление: стиль движка или своё
 

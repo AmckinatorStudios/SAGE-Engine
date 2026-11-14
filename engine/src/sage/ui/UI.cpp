@@ -339,9 +339,11 @@ std::vector<Preset> BuildPresets() {
         p.Category = SAGE_UI_TEXT("Containers");
         p.Container = true;
         p.Icon = "ui-panel";
-        p.Hint = SAGE_UI_TEXT("A visible container: a background of colour or your own picture");
+        p.Hint = SAGE_UI_TEXT("A visible container: a shape or a picture behind its children");
         p.Box.Size = {320.0f, 240.0f};
-        p.HasFill = true;
+        // Оформление по умолчанию — форма: скруглённый прямоугольник цветом.
+        // Картинку (Appearance: Image) выбирают в инспекторе.
+        p.HasShape = true;
         p.HasArrangement = true;
     }
 
@@ -367,6 +369,16 @@ std::vector<Preset> BuildPresets() {
         p.Hint = SAGE_UI_TEXT("A picture from the project");
         p.Box.Size = {160.0f, 160.0f};
         p.HasImage = true;
+    }
+    {
+        // ФОРМА — самостоятельный графический элемент: та же система, что у
+        // оформления Panel, только без детей.
+        Preset& p = add(SAGE_UI_TEXT("Shape"));
+        p.Category = SAGE_UI_TEXT("Graphics");
+        p.Icon = "rect";
+        p.Hint = SAGE_UI_TEXT("A rectangle, rounded rectangle, circle or ellipse with fill and stroke");
+        p.Box.Size = {120.0f, 120.0f};
+        p.HasShape = true;
     }
     {
         Preset& p = add(SAGE_UI_TEXT("Icon"));

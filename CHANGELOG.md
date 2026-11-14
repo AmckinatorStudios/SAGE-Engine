@@ -12,6 +12,26 @@
 
 ## 0.5.0 → 1.0 (в работе)
 
+### 2026-11-14 (интерфейс: Shape, оформление Panel, текст)
+
+#### Добавлено
+- Элемент **Shape** (раздел Graphics): Rectangle, Rounded Rectangle, Circle,
+  Ellipse; заливка None / Solid / Linear Gradient / Radial Gradient; обводка
+  с толщиной, цветом и положением Inside / Center / Outside.
+- У Panel — **Appearance**: None / Image / Shape (по умолчанию Shape).
+- Общая отрисовка контуров: `ui::ShapeOutline`, `ui::ShapeFillColor`
+  (`sage/ui/ShapeGeometry.h`), `UIRenderer::FillPolygon` и `StripPolygon` —
+  заливка с цветом в вершинах, сглаженный край, обводка полосой.
+- Текст: **Auto Size** (кегль уменьшается, пока текст не поместится),
+  **Line spacing**, **Overflow** — Show all / Cut off / Ellipsis.
+- Условие видимости поля «при любом из значений» (`ShowIfAny`).
+
+#### Изменено
+- Режимы картинки называются Stretch, Nine-Slice, Tile, Aspect Fit, Aspect
+  Fill; путь картинки — Source.
+- Из демо-сцены нового проекта убран HUD, собранный элементами прямо в
+  сцене (интерфейс живёт в файлах .sageui).
+
 ### 2026-11-14 (интерфейс: Container, Panel и Arrangement; без старого вида)
 
 #### Изменено

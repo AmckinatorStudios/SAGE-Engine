@@ -1923,7 +1923,7 @@ TEST(ui_parts_split_into_elements_and_containers) {
     // Arrangement; у Panel ещё и подложка. У элемента раскладки детей нет.
     for (const sage::ui::Preset& p : sage::ui::Presets()) {
         const bool visual = p.HasFill || p.HasLabel || p.HasImage || p.HasBar || p.HasRange ||
-                            p.HasInput || p.HasIcon || p.HasInteractable;
+                            p.HasInput || p.HasIcon || p.HasInteractable || p.HasShape;
         const bool layout = p.HasArrangement || p.HasMask || p.HasScroll;
         if (p.Container) {
             if (!p.HasArrangement) sagetest::ReportFail(__FILE__, __LINE__, "контейнер без Arrangement: " + p.Name);

@@ -69,9 +69,9 @@ void DrawFillBorder(const PartDrawContext& c) {
 const std::vector<PartField>& ImageFields() {
     static const std::vector<PartField> f = [] {
         std::vector<PartField> v = {
-            {"path", SAGE_UI_TEXT("File"), PartField::Kind::String, offsetof(Image, Path), 0.0f, 0.0f, nullptr,
+            {"path", SAGE_UI_TEXT("Source"), PartField::Kind::String, offsetof(Image, Path), 0.0f, 0.0f, nullptr,
              nullptr, 0, PartField::Widget::Texture},
-            {"mode", SAGE_UI_TEXT("How it fits"), PartField::Kind::Enum, offsetof(Image, Fit), 0.0f, 4.0f,
+            {"mode", SAGE_UI_TEXT("Display mode"), PartField::Kind::Enum, offsetof(Image, Fit), 0.0f, 4.0f,
              "Stretch, cut into nine pieces (corners keep their size), repeat at\n"
              "its own size, or keep the aspect ratio: show the whole picture with\n"
              "margins, or fill the element and cut off what does not fit.",
@@ -275,6 +275,8 @@ const char* const kAlign[] = {SAGE_UI_TEXT("Start"), SAGE_UI_TEXT("Center"), SAG
 const char* const kLabelFaces[] = {SAGE_UI_TEXT("Regular"), SAGE_UI_TEXT("Bold"),
                                    SAGE_UI_TEXT("Italic"), SAGE_UI_TEXT("Bold italic")};
 
+const char* const kOverflow[] = {SAGE_UI_TEXT("Show all"), SAGE_UI_TEXT("Cut off"), SAGE_UI_TEXT("Ellipsis")};
+
 const std::vector<PartField>& LabelFields() {
     static const std::vector<PartField> f = [] { std::vector<PartField> v = {
         {"text", SAGE_UI_TEXT("Text"), PartField::Kind::String, offsetof(Label, Text), 0.0f, 0.0f, nullptr,
@@ -314,6 +316,13 @@ const std::vector<PartField>& LabelFields() {
          nullptr, kAlign, 3},
         {"wrap", SAGE_UI_TEXT("Wrap"), PartField::Kind::Bool, offsetof(Label, Wrap)},
         {"autoWidth", SAGE_UI_TEXT("Width from text"), PartField::Kind::Bool, offsetof(Label, AutoWidth)},
+        {"autoSize", SAGE_UI_TEXT("Auto Size"), PartField::Kind::Bool, offsetof(Label, AutoSize), 0.0f, 1.0f,
+         "The font gets smaller until the text fits the element (never bigger than Font size)."},
+        {"lineSpacing", SAGE_UI_TEXT("Line spacing"), PartField::Kind::Float, offsetof(Label, LineSpacing), 0.5f,
+         3.0f},
+        {"overflow", SAGE_UI_TEXT("Overflow"), PartField::Kind::Enum, offsetof(Label, OverflowMode), 0.0f, 0.0f,
+         "What happens to text that does not fit: shown as is, cut at the edge, or ended with an ellipsis.",
+         kOverflow, 3},
         // БОКОВОЙ ОТСТУП — до 512. Прежние 64 хватало кнопке и не хватало
         // ничему другому: колонка текста в письме, поле с широкой рамкой,
         // отступ под значок слева — всё это десятки и сотни пикселей, и поле
@@ -342,7 +351,7 @@ const std::vector<PartField>& LabelFields() {
          "stateColors", 1},
     };
     v[0].Content = true;
-    MarkAdvanced(v, {"font", "fontPixelHeight", "fontSnapPixels", "fontFilter", "autoWidth", "padX",
+    MarkAdvanced(v, {"font", "fontPixelHeight", "fontSnapPixels", "fontFilter", "autoWidth", "autoSize", "lineSpacing", "padX",
                      "shadowOffset", "shadowColor", "outline", "outlineColor", "stateColors",
                      "hoverColor", "pressedColor", "disabledColor"});
     MarkCustomOnly(v, {"fontPixelHeight", "fontSnapPixels", "fontFilter", "shadowOffset", "shadowColor",
@@ -395,7 +404,7 @@ void DrawLabelPart(const PartDrawContext& c) {
 
     const UIRect& r = c.Rect;
     UIRenderer& ui = *c.Ui;
-    const float textScale = label.Scale * c.Scale;
+    float textScale = label.Scale * c.Scale;
     const float padX = label.PadX * c.Scale;
     const float left = r.x + padX;
     const float avail = std::max(r.w - padX * 2.0f, 1.0f);
@@ -411,17 +420,56 @@ void DrawLabelPart(const PartDrawContext& c) {
     const float alpha = AlphaOf(c, color.a);
     const UITextStyle style = StyleOf(label, ui);
 
-    std::vector<std::string> lines;
-    if (label.Wrap) lines = WrapLines(label.Text, avail, textScale, ui, &style);
-    else if (label.Text.find('\n') != std::string::npos)
-        lines = WrapLines(label.Text, 0.0f, textScale, ui, &style); // только по явным \n
-    else lines.push_back(label.Text);
+    auto layout = [&](float scale) {
+        std::vector<std::string> out;
+        if (label.Wrap) out = WrapLines(label.Text, avail, scale, ui, &style);
+        else if (label.Text.find('\n') != std::string::npos)
+            out = WrapLines(label.Text, 0.0f, scale, ui, &style); // только по явным \n
+        else out.push_back(label.Text);
+        return out;
+    };
+    std::vector<std::string> lines = layout(textScale);
+    const float spacing = std::clamp(label.LineSpacing, 0.5f, 3.0f);
+    // AUTO SIZE: кегль уменьшается шагами, пока блок не влезет и по ширине, и
+    // по высоте. Перенос пересчитывается на каждом шаге — у меньшего кегля
+    // строки длиннее.
+    if (label.AutoSize) {
+        auto fits = [&](const std::vector<std::string>& ls, float scale) {
+            if (ui.LineHeight(scale, style) * spacing * (float)ls.size() > r.h + 0.5f) return false;
+            for (const std::string& l : ls)
+                if (ui.MeasureTextInk(l, scale, style) > avail + 0.5f) return false;
+            return true;
+        };
+        for (int guard = 0; guard < 40 && textScale > 0.25f && !fits(lines, textScale); ++guard) {
+            textScale *= 0.92f;
+            lines = layout(textScale);
+        }
+    }
+    // МНОГОТОЧИЕ: последняя видимая строка обрывается «...» так, чтобы
+    // поместиться; строки ниже края элемента не рисуются.
+    if (label.OverflowMode == Label::Overflow::Ellipsis) {
+        const float step = ui.LineHeight(textScale, style) * spacing;
+        size_t visible = step > 0.0f ? (size_t)std::max(1.0f, std::floor((r.h + 0.5f) / step)) : lines.size();
+        bool cut = visible < lines.size();
+        if (cut) lines.resize(visible);
+        std::string& last = lines.back();
+        if (cut || ui.MeasureTextInk(last, textScale, style) > avail + 0.5f) {
+            const std::string dots = "...";
+            while (!last.empty() && ui.MeasureTextInk(last + dots, textScale, style) > avail + 0.5f) {
+                // Назад на целый символ UTF-8: обрезанная середина буквы — мусор.
+                size_t n = last.size() - 1;
+                while (n > 0 && ((unsigned char)last[n] & 0xC0) == 0x80) --n;
+                last.resize(n);
+            }
+            last += dots;
+        }
+    }
 
     // ВЫСОТА БЛОКА — ЦЕЛИКОМ ПО ШРИФТУ. Раньше последняя строка считалась
     // номиналом тулкита (8·scale), а остальные — высотой строки шрифта:
     // вёрстка мерила блок одним числом, а рисовала его другим, и надпись
     // съезжала вверх тем сильнее, чем крупнее кегль.
-    const float lineH = ui.LineHeight(textScale, style);
+    const float lineH = ui.LineHeight(textScale, style) * spacing;
     const float blockH = lineH * (float)lines.size();
     // ПО ЦЕНТРУ — ПО ТЕЛУ БУКВ. Строка шрифта-картинки — 9 пикселей буквы, из
     // них заглавные занимают верхние 7, а нижние два — хвосты «g», «y» и
@@ -434,7 +482,7 @@ void DrawLabelPart(const PartDrawContext& c) {
     // Перенесённый текст ОБРЕЗАЕТСЯ своим элементом: он переносился под эту
     // ширину, значит и по высоте обязан остаться внутри. Абзац, вылезший на
     // фон, выглядит хуже обрезанного — и не читается как ошибка вёрстки.
-    const bool clip = label.Wrap && blockH > r.h;
+    const bool clip = label.OverflowMode == Label::Overflow::Clip || (label.Wrap && blockH > r.h);
     if (clip) ui.PushClipRect(r.x, r.y, r.w, r.h);
     // Сдвиги тени и обводки — ЦЕЛЫМИ пикселями у шрифта с целым масштабом:
     // дробный сдвиг раскладывает пиксельную тень на два экранных пикселя

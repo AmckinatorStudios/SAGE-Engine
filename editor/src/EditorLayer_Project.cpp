@@ -281,68 +281,8 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
         spotLc.OuterConeDeg = 30.0f;
         m_scene->Registry().emplace<LightComponent>(spot.Entity(), spotLc);
 
-        // Демо-худ: панель со скруглением и рамкой + полоса здоровья ребёнком.
-        // Показывает систему интерфейса сразу в панели Game и служит стартовой
-        // точкой для своего интерфейса (правится в Inspector).
-        //
-        // Собирается ИЗ ТИПОВ, а не из частей руками: панель это тип «Panel»,
-        // полоса — тип «Bar», и ровно так их создаёт человек в окне
-        // «Элементы». Демо, собранное в обход типов, давало бы элементы без
-        // типа — то есть показывало бы новичку ровно то состояние, из которого
-        // редактор и вывели.
-        entt::registry& reg = m_scene->Registry();
-        // ИНТЕРФЕЙС — ОТДЕЛЬНЫМ ОБЪЕКТОМ, а его элементы внутри. Шаблон — ещё и
-        // образец устройства проекта: интерфейс, собранный россыпью в корне
-        // сцены, учил бы тому, из-за чего два экрана в одной сцене и
-        // перемешивались (см. sage/ui/components/InterfaceComponent.h).
-        GameObject hudInterface = m_scene->CreateEmptyObject("HUD");
-        reg.emplace<sage::ui::InterfaceComponent>(hudInterface.Entity());
-
-        GameObject hud = m_scene->CreateEmptyObject("HUD Panel");
-        sage::ui::ApplyPreset(*m_scene, hud.Entity(), "Panel");
-        m_scene->SetParent(hud.Entity(), hudInterface.Entity());
-        {
-            sage::ui::Element& xf = reg.get<sage::ui::Element>(hud.Entity());
-            xf.Anchor = UIAnchor::TopLeft;
-            xf.Position = {16.0f, 16.0f};
-            xf.Size = {230.0f, 64.0f};
-            sage::ui::Fill& fill = reg.get<sage::ui::Fill>(hud.Entity());
-            fill.Rounding = 12.0f;
-            fill.BorderThickness = 2.0f;
-        }
-        // Надпись — ОТДЕЛЬНЫМ ЭЛЕМЕНТОМ внутри панели, как её и строят: панель
-        // группирует, текст показывает текст. «Подложка со встроенной надписью»
-        // — то, от чего система типов и уходит.
-        GameObject title = m_scene->CreateEmptyObject("Title");
-        sage::ui::ApplyPreset(*m_scene, title.Entity(), "Text");
-        {
-            sage::ui::Element& xf = reg.get<sage::ui::Element>(title.Entity());
-            xf.Anchor = UIAnchor::TopLeft;
-            xf.Position = {12.0f, 8.0f};
-            xf.Size = {200.0f, 24.0f};
-            sage::ui::Label& lab = reg.get<sage::ui::Label>(title.Entity());
-            lab.Text = "SAGE UI";
-            lab.Horizontal = sage::ui::Label::Align::Start;
-            lab.AutoWidth = false;
-        }
-        m_scene->SetParent(title.Entity(), hud.Entity());
-
-        GameObject hp = m_scene->CreateEmptyObject("HP Bar");
-        sage::ui::ApplyPreset(*m_scene, hp.Entity(), "Progress Bar");
-        {
-            sage::ui::Element& xf = reg.get<sage::ui::Element>(hp.Entity());
-            xf.Anchor = UIAnchor::BottomLeft;   // внутри панели-родителя
-            xf.Position = {12.0f, 8.0f};
-            xf.Size = {206.0f, 18.0f};
-            sage::ui::Fill& fill = reg.get<sage::ui::Fill>(hp.Entity());
-            fill.Rounding = 8.0f;
-            fill.Color = {0.0f, 0.0f, 0.0f, 0.55f};
-            sage::ui::Bar& bar = reg.get<sage::ui::Bar>(hp.Entity());
-            bar.Value = 0.72f;
-            bar.SetFillColor({0.85f, 0.30f, 0.30f, 1.0f});
-            bar.Smoothing = 3.0f;
-        }
-        m_scene->SetParent(hp.Entity(), hud.Entity());
+        // Интерфейса в демо-сцене нет: он живёт в файлах .sageui и создаётся в
+        // пространстве «Интерфейс», а не россыпью элементов в сцене.
     }
 
     if (content == ProjectTemplateKind::Demo) {

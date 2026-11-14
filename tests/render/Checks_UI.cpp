@@ -837,6 +837,9 @@ void CheckEngineSkinOwnsTheShape(UIRenderer& ui) {
     Check(sage::ui::ApplyPreset(scene, e.Entity(), "Panel"), "заготовка применилась");
     PlaceTopLeft(scene, e, {200.0f, 100.0f});
     auto& reg = scene.Registry();
+    // Оформление движка — у подложки (Appearance: Image); у формы его нет.
+    reg.remove<sage::ui::Shape>(e.Entity());
+    reg.emplace_or_replace<sage::ui::Fill>(e.Entity());
     reg.get<sage::ui::Fill>(e.Entity()).Rounding = 0.0f;
     reg.get<sage::ui::Fill>(e.Entity()).ShadowSize = 0.0f;
     const double engineCorner = Covered(RenderUI(ui, scene), 0, 0, 2, 2);
