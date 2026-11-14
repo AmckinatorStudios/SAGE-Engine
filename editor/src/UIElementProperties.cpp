@@ -39,6 +39,7 @@
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISerialize.h"
+#include "sage/ui/ShapePath.h"
 #include "sage/ui/UIStyle.h"
 #include "sage/core/Paths.h"
 #include "ui/ColorPicker.h"
@@ -593,6 +594,25 @@ void DrawAppearanceSwitch(EditorHost& host, entt::entity e) {
     if (mode == 2 && !shape) reg.emplace<ui::Shape>(e);
 }
 
+// СВОЙ КОНТУР: что делать мышью — сказано рядом с полями, а новый контур
+// (форма или отверстие) добавляется кнопкой: его негде «нарисовать» без точки.
+void DrawCustomShapeTools(EditorHost& host, entt::entity e) {
+    entt::registry& reg = host.CurrentScene().Registry();
+    ui::Shape* shape = reg.try_get<ui::Shape>(e);
+    if (!shape || shape->Form != ui::Shape::Geometry::Custom) return;
+    HintWrapped("%s", T("On the canvas: drag points and handles (Alt — one handle), double-click a line to add "
+                        "a point, right-click a point for a curve, delete or open/close. A contour inside "
+                        "another one cuts a hole."));
+    if (ImGui::Button(T("Add contour"))) {
+        host.PushUndoSnapshot();
+        std::vector<ui::PathContour> c;
+        ui::ParseShapePath(shape->Path, c);
+        if (c.empty()) c.push_back({{{{0, 0}}, {{1, 0}}, {{1, 1}}, {{0, 1}}}, true});
+        c.push_back({{{{0.35f, 0.35f}}, {{0.65f, 0.35f}}, {{0.65f, 0.65f}}, {{0.35f, 0.65f}}}, true});
+        shape->Path = ui::FormatShapePath(c);
+    }
+}
+
 // CONTENT контейнера: Arrangement — полями своей части (поля режима видны
 // только в нём), Clip Children — галкой, Scroll — выбором оси. Обрезка и
 // прокрутка остаются частями (Mask, Scroll), но включаются здесь, а не
@@ -620,7 +640,9 @@ void DrawContentSection(EditorHost& host, GameObject obj, const UIPropsContext& 
     bool clip = mask && mask->Has(reg, e);
     if (mask && ImGui::Checkbox(T("Clip Children"), &clip)) {
         host.PushUndoSnapshot();
-        if (clip) mask->Add(reg, e);
+        // Источник обрезки — автоматически по оформлению контейнера: форма
+        // Panel режет её геометрией, картинка — альфой (Mask::Shape::Auto).
+        if (clip) reg.emplace_or_replace<ui::Mask>(e).Form = ui::Mask::Shape::Auto;
         else mask->Remove(reg, e);
     }
     if (ImGui::IsItemHovered())
@@ -835,6 +857,7 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
                 ImGui::SeparatorText(T(p.Title));
                 ImGui::PushID(p.Id);
                 DrawPartSection(host, obj, ctx, p, data, FieldView{}, selected);
+                if (std::string(p.Id) == "shape") DrawCustomShapeTools(host, e);
                 ImGui::PopID();
             }
             // Без подложки (ползунок, галка) у состояний только подкраска —

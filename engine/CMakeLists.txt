@@ -286,6 +286,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/InterfaceSource.cpp
     src/sage/ui/UITree.cpp
     src/sage/ui/ShapeGeometry.cpp
+    src/sage/ui/ShapePath.cpp
     src/sage/ui/UIRendererShapes.cpp
     src/sage/ui/UIParts_Shape.cpp
     src/sage/ui/UIRenderer.cpp

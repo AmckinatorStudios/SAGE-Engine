@@ -3722,6 +3722,20 @@
     "Stroke alignment": "Положение обводки",
     "Stroke color": "Цвет обводки",
     "Stroke thickness": "Толщина обводки",
-    "Cut off": "Обрезать"
+    "Cut off": "Обрезать",
+    "Add contour": "Добавить контур",
+    "Bevel": "Срез",
+    "Butt": "Плоский",
+    "Cap": "Концы",
+    "Close contour": "Замкнуть контур",
+    "Custom Shape": "Свой контур",
+    "Delete contour": "Удалить контур",
+    "Delete point": "Удалить точку",
+    "Join": "Соединение",
+    "Make a corner": "Сделать углом",
+    "Make a curve": "Сделать кривой",
+    "Miter": "Острый",
+    "On the canvas: drag points and handles (Alt — one handle), double-click a line to add a point, right-click a point for a curve, delete or open/close. A contour inside another one cuts a hole.": "На холсте: тащите точки и ручки (Alt — одну ручку), двойной щелчок по линии добавляет точку, правая кнопка по точке — кривая, удаление, замкнуть/разомкнуть. Контур внутри другого вырезает отверстие.",
+    "Open contour": "Разомкнуть контур"
   }
 }

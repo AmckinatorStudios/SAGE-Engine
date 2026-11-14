@@ -271,7 +271,8 @@ const std::vector<PartField>& InteractableFields() {
     return f;
 }
 
-const char* const kMaskShape[] = {SAGE_UI_TEXT("Rectangle"), SAGE_UI_TEXT("Rounded"), SAGE_UI_TEXT("Picture")};
+const char* const kMaskShape[] = {SAGE_UI_TEXT("Rectangle"), SAGE_UI_TEXT("Rounded"), SAGE_UI_TEXT("Picture"),
+                                  SAGE_UI_TEXT("Automatic")};
 const char* const kMaskFilter[] = {SAGE_UI_TEXT("Smooth"), SAGE_UI_TEXT("Nearest")};
 
 const std::vector<PartField>& MaskFields() {
@@ -281,9 +282,10 @@ const std::vector<PartField>& MaskFields() {
     static const std::vector<PartField> f = [] {
         std::vector<PartField> v = {
             {"form", SAGE_UI_TEXT("Shape"), PartField::Kind::Enum, offsetof(Mask, Form), 0.0f, 0.0f,
+             "Automatic — by the container's own look: its shape, its picture, or its rectangle.\n"
              "Rectangle — clip by the element; Rounded — with round corners;\n"
              "Picture — show only where the picture is opaque.",
-             kMaskShape, 3},
+             kMaskShape, 4},
             {"rounding", SAGE_UI_TEXT("Rounding"), PartField::Kind::Float, offsetof(Mask, Rounding), -1.0f,
              256.0f, "Corner radius; -1 — the same as the background."},
             {"image", SAGE_UI_TEXT("Mask picture"), PartField::Kind::String, offsetof(Mask, Image), 0.0f, 0.0f,

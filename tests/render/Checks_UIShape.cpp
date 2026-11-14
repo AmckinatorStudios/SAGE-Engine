@@ -137,6 +137,42 @@ void RunUIShapeChecks() {
         Check(At(img, 100, 17).g < 0.05f, "обводка «внутри» не вылезает наружу");
     }
 
+    {
+        // Свой контур: квадрат с квадратным отверстием, обводка на обоих.
+        Scene scene("custom");
+        sage::ui::Shape& s = Place(scene, {50, 0}, {100, 100});
+        s.Form = sage::ui::Shape::Geometry::Custom;
+        s.Path = "M 0 0 L 1 0 L 1 1 L 0 1 Z M 0.3 0.3 L 0.7 0.3 L 0.7 0.7 L 0.3 0.7 Z";
+        const Image img = Render(ui, scene);
+        Check(At(img, 60, 10).r > 0.9f, "свой контур: область закрашена");
+        Check(At(img, 100, 50).r < 0.05f, "свой контур: отверстие пусто");
+        Check(At(img, 40, 50).r < 0.05f, "свой контур: снаружи пусто");
+    }
+    {
+        // Clip to Shape: круглая Panel режет квадратного ребёнка по кругу.
+        Scene scene("clip");
+        GameObject panel = scene.CreateEmptyObject("Avatar");
+        Check(sage::ui::ApplyPreset(scene, panel.Entity(), "Panel"), "панель создана");
+        auto& reg = scene.Registry();
+        sage::ui::Element& pe = reg.get<sage::ui::Element>(panel.Entity());
+        pe.Anchor = UIAnchor::TopLeft;
+        pe.Position = {50, 0};
+        pe.Size = {100, 100};
+        sage::ui::Shape& ps = reg.get<sage::ui::Shape>(panel.Entity());
+        ps.Form = sage::ui::Shape::Geometry::Circle;
+        ps.Fill = sage::ui::Shape::FillKind::None;
+        reg.emplace<sage::ui::Mask>(panel.Entity()).Form = sage::ui::Mask::Shape::Auto;
+        sage::ui::Shape& child = Place(scene, {0, 0}, {100, 100});
+        child.Form = sage::ui::Shape::Geometry::Rectangle;
+        GameObject kid = scene.FindByName("Shape");
+        scene.SetParent(kid.Entity(), panel.Entity());
+        const Image img = Render(ui, scene);
+        const float centre = At(img, 100, 50).r, corner = At(img, 53, 3).r;
+        std::printf("    обрезка по кругу: центр %.2f, угол %.2f\n", centre, corner);
+        Check(centre > 0.9f, "Clip to Shape: внутри круга ребёнок виден");
+        Check(corner < 0.1f, "Clip to Shape: угол квадрата срезан кругом");
+    }
+
     // --- Текст: что делать с тем, что не помещается -------------------------
     {
         Scene scene("overflow");

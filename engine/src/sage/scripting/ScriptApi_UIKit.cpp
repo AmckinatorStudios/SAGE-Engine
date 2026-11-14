@@ -685,7 +685,7 @@ void ScriptEngine::RegisterUIKitApi() {
         };
         a.ChildWidth = size(t.get_or<std::string>("child_width", "fixed"));
         a.ChildHeight = size(t.get_or<std::string>("child_height", "fixed"));
-        if (t.get_or("clip", false)) reg.get_or_emplace<sage::ui::Mask>(obj.Entity());
+        if (t.get_or("clip", false)) reg.get_or_emplace<sage::ui::Mask>(obj.Entity()).Form = sage::ui::Mask::Shape::Auto;
         const std::string scroll = t.get_or<std::string>("scroll", "");
         if (!scroll.empty()) {
             if (scroll != "horizontal" && scroll != "vertical" && scroll != "both")

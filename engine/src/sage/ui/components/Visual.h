@@ -390,7 +390,9 @@ struct Icon {
 // выравниванием получаются у любой формы одинаково, а свой контур (Custom
 // Shape) ляжет в ту же систему.
 struct Shape {
-    enum class Geometry { Rectangle, RoundedRectangle, Circle, Ellipse };
+    // Custom — свой контур (Path): точки, кривые Безье, несколько контуров,
+    // отверстия. Правится мышью на холсте.
+    enum class Geometry { Rectangle, RoundedRectangle, Circle, Ellipse, Custom };
     enum class FillKind { None, Solid, LinearGradient, RadialGradient };
     // Где лежит обводка относительно края формы.
     enum class StrokeAlign { Inside, Center, Outside };
@@ -408,6 +410,24 @@ struct Shape {
     float StrokeWidth = 0.0f;                 // 0 — без обводки
     glm::vec4 StrokeColor{1.0f, 1.0f, 1.0f, 0.6f};
     StrokeAlign StrokeAlignment = StrokeAlign::Inside;
+    // Соединение отрезков и концы открытого контура — у своего контура: у
+    // прямоугольника и эллипса соединять нечего.
+    enum class Join { Miter, Round, Bevel };
+    enum class Cap { Butt, Round, Square };
+    Join StrokeJoin = Join::Miter;
+    Cap StrokeCap = Cap::Butt;
+
+    // СВОЙ КОНТУР (Geometry::Custom) — строкой пути в ДОЛЯХ прямоугольника
+    // элемента (0..1): форма тянется вместе с элементом, как любая другая.
+    //   M x y            — начать контур
+    //   L x y            — отрезок
+    //   C x1 y1 x2 y2 x y — кривая Безье (ручки и конец)
+    //   Z                — замкнуть контур
+    // Контуров сколько угодно; область — по правилу «чёт-нечет», поэтому
+    // контур внутри другого вырезает отверстие. Пусто — весь прямоугольник.
+    // Строкой, а не списком структур: так путь пишется в файл, копируется со
+    // стилем и правится руками тем же полем, что и любое другое.
+    std::string Path;
 };
 
 } // namespace sage::ui

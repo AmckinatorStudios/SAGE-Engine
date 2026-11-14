@@ -496,6 +496,14 @@ void UICanvas::Draw(EditorHost& host, ImDrawList* dl, ImVec2 imgPos, ImVec2 imgS
     // ПОСЛЕ рамок и ДО разбора щелчка: точки лежат на краях родителя, то есть
     // часто поверх соседних элементов, и щелчок по точке обязан выигрывать у
     // щелчка по тому, что под ней.
+    // Свой контур формы — раньше всего: его точки лежат на краях элемента, там
+    // же, где ручки размера, и щелчок по точке обязан править контур.
+    if (havePrimary && primaryItem && m_drag == Drag::None) {
+        const std::function<glm::vec2(ImVec2)> toUIFn = toUI;
+        if (m_shapeEditor.Draw(host, scene, dl, primaryItem->Entity, primaryItem->Rect, toScreen, toUIFn,
+                               mouse, hovered))
+            return;
+    }
     if (havePrimary && primaryItem && tools.EditAnchors && m_drag == Drag::None) {
         if (DrawAnchorHandles(host, scene, dl, *primaryItem, toScreen, mouse, hovered)) return;
     }

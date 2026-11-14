@@ -9,6 +9,7 @@
 #include <entt/entt.hpp>
 
 #include "UIToolSettings.h"
+#include "UIShapeEditor.h"
 #include "sage/ui/UILayoutTools.h"
 
 class EditorHost;
@@ -134,6 +135,7 @@ private:
     // Поворот: угол на момент нажатия и угол мыши от центра элемента тогда же.
     // Считать от них, а не накапливать покадрово, — по той же причине, что и у
     // перемещения: накопление уводит тем сильнее, чем дольше тянут.
+    UIShapeEditor m_shapeEditor;    // свой контур формы — точками на холсте
     float m_rotateStart = 0.0f;
     float m_rotateGrab = 0.0f;
 };
