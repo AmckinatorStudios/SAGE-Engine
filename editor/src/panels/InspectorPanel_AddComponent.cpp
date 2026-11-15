@@ -276,8 +276,28 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
     entt::registry& reg = host.CurrentScene().Registry();
     entt::entity e = obj.Entity();
 
-    ImGui::Separator();
-    if (ImGui::Button(T("Add Component"), ImVec2(-1, 0))) {
+    // Внизу инспектора — пунктирной рамкой со значком «+»: это место, куда
+    // добавляют, а не ещё одна строка свойств.
+    ImGui::Spacing();
+    const float h = ImGui::GetFrameHeight() + 6.0f;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    const bool add = ImGui::InvisibleButton("##add_component_btn", ImVec2(w, h));
+    {
+        const bool hovered = ImGui::IsItemHovered();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h),
+                          EditorTheme::Color32(hovered ? EditorTheme::Role::Hover : EditorTheme::Role::SurfaceAlt), 4.0f);
+        dl->AddRect(p, ImVec2(p.x + w, p.y + h),
+                    EditorTheme::Color32(hovered ? EditorTheme::Role::Accent : EditorTheme::Role::Line), 4.0f);
+        const char* text = T("Add Component");
+        const float icon = std::floor(ImGui::GetFontSize());
+        const float tw = EditorIcons::LabeledWidth(icon, text);
+        EditorIcons::DrawLabeled(dl, ImVec2(std::floor(p.x + (w - tw) * 0.5f), std::floor(p.y + (h - icon) * 0.5f)),
+                                 icon, "plus", EditorTheme::Color32(EditorTheme::Role::Accent), text,
+                                 EditorTheme::Color32(EditorTheme::Role::Text));
+    }
+    if (add) {
         ImGui::OpenPopup("##add_component");
         m_addComponentFilter[0] = '\0';
         m_addComponentFocus = true;

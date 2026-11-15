@@ -12,6 +12,7 @@
 #include "AssetSlot.h"
 #include "EditorHost.h"
 #include "InspectorControls.h"
+#include "InspectorFields.h"
 #include "EditorIcons.h"
 #include "EditorTheme.h"
 #include "Localization.h"
@@ -24,6 +25,7 @@
 namespace sage::editor {
 
 namespace ictl = sage::editor::ictl;
+namespace ifield = sage::editor::ifield;
 
 namespace ui = sage::ui;
 
@@ -59,14 +61,15 @@ void DrawInterfaceProperties(EditorHost& host, GameObject obj) {
     ImGui::Separator();
 
     // --- ПОДКЛЮЧЕНИЕ: как показывать весь интерфейс ---------------------------
-    if (ImGui::Checkbox(T("Active"), &info->Visible)) host.PushUndoSnapshot();
+    // Те же поля, что во всём инспекторе: «Подпись: [поле]», переключатель
+    // вместо галочки, число с −/+. Снимок для отката делают сами поля.
+    ifield::Check(host, T("Active"), &info->Visible);
     EditorTheme::Hint(T("off — the whole interface is hidden, with all its elements"));
 
-    ImGui::DragInt(T("Display order"), &info->SortOrder, 0.1f, -100, 100);
-    host.TrackLastImGuiItem();
+    ifield::Int(host, T("Display order"), &info->SortOrder, -100, 100);
     EditorTheme::Hint(T("order BETWEEN interfaces: the HUD below the pause menu"));
 
-    if (ImGui::Checkbox(T("Receives input"), &info->ReceivesInput)) host.PushUndoSnapshot();
+    ifield::Check(host, T("Receives input"), &info->ReceivesInput);
     EditorTheme::Hint(T("off — shown but not clickable: a splash, credits, a hint over the game"));
 
 }

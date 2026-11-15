@@ -9,6 +9,7 @@
 // только тела. Разбит потому, что дорос до двух тысяч строк, в которых рядом
 // лежали редактор материала, якоря интерфейса и список компонентов.
 // ---------------------------------------------------------------------------
+#include "InspectorFields.h"
 #include <cctype>
 #include <cstdarg>
 #include "sage/scene/CharacterFit.h"
@@ -66,6 +67,8 @@
 
 #include "InspectorPanelDetail.h"
 
+namespace ifield = sage::editor::ifield;
+
 namespace fs = std::filesystem;
 using namespace sage::editor::inspectordetail;
 
@@ -77,7 +80,7 @@ void LayerSlider(EditorHost& host, sage::physics::LayerMask& mask) {
     int layer = 1;
     for (int b = 0; b < 32; ++b)
         if (mask & (1u << b)) { layer = b + 1; break; }
-    if (ImGui::SliderInt(T("Layer"), &layer, 1, 32)) {
+    if (ifield::Int(host, T("Layer"), &layer, 1, 32)) {
         host.PushUndoSnapshot();
         mask = 1u << (layer - 1);
     }
@@ -125,8 +128,7 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
             // Порядок строго совпадает с sage::physics::BodyType.
             const char* types[] = {T("Static"), T("Dynamic"), T("Kinematic")};
             int kind = (int)rb->Type;
-            if (ImGui::Combo(T("Body Type"), &kind, types, IM_ARRAYSIZE(types))) {
-                host.PushUndoSnapshot();
+            if (ifield::Combo(host, T("Body Type"), &kind, types, IM_ARRAYSIZE(types))) {
                 rb->Type = (sage::physics::BodyType)kind;
             }
             const bool dynamic = rb->Type == sage::physics::BodyType::Dynamic;
@@ -153,27 +155,23 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
             // Трение, упругость, слой и тонкая настройка движения — нужны
             // реже, чем тип и масса.
             if (EditorTheme::BeginMore("rbMore")) {
-            ImGui::DragFloat(T("Friction"), &rb->Friction, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Restitution"), &rb->Restitution, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
+            ifield::Float(host, T("Friction"), &rb->Friction, 0.01f, 0.0f, 1.0f);
+            ifield::Float(host, T("Restitution"), &rb->Restitution, 0.01f, 0.0f, 1.0f);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("%s", T("Bounciness: 0 lands dead, 1 bounces back to the same height"));
 
             if (dynamic) {
-                ImGui::DragFloat(T("Linear Damping"), &rb->LinearDamping, 0.005f, 0.0f, 1.0f);
-                host.TrackLastImGuiItem();
+                ifield::Float(host, T("Linear Damping"), &rb->LinearDamping, 0.005f, 0.0f, 1.0f);
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("%s", T("Air or water drag: share of speed lost per second"));
-                ImGui::DragFloat(T("Angular Damping"), &rb->AngularDamping, 0.005f, 0.0f, 1.0f);
-                host.TrackLastImGuiItem();
+                ifield::Float(host, T("Angular Damping"), &rb->AngularDamping, 0.005f, 0.0f, 1.0f);
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("%s", T("Slows spinning and rolling: raise it so balls stop sooner"));
-                ImGui::DragFloat(T("Gravity Scale"), &rb->GravityScale, 0.01f, -10.0f, 10.0f);
-                host.TrackLastImGuiItem();
+                ifield::Float(host, T("Gravity Scale"), &rb->GravityScale, 0.01f, -10.0f, 10.0f);
                 if (ImGui::IsItemHovered())
                     ImGui::SetTooltip("%s", T("0 floats, 1 is normal weight, 2 falls twice as hard"));
                 bool ccd = rb->Continuous;
-                if (ImGui::Checkbox(T("Continuous Collision"), &ccd)) {
-                    host.PushUndoSnapshot();
+                if (ifield::Check(host, T("Continuous Collision"), &ccd)) {
                     rb->Continuous = ccd;
                 }
                 if (ImGui::IsItemHovered())
@@ -209,8 +207,7 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
             // OnTriggerEnter/Stay/Exit. Раньше включался только из скрипта —
             // в редакторе зону было не сделать вовсе.
             bool sensor = rb->Sensor;
-            if (ImGui::Checkbox(T("Is Trigger"), &sensor)) {
-                host.PushUndoSnapshot();
+            if (ifield::Check(host, T("Is Trigger"), &sensor)) {
                 rb->Sensor = sensor;
             }
             if (ImGui::IsItemHovered())
@@ -240,8 +237,7 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
             // Порядок строго совпадает с sage::physics::ShapeType.
             const char* shapes[] = {T("Box"), T("Sphere"), T("Capsule"), T("Convex Hull"), T("Mesh")};
             int shape = (int)col->Shape;
-            if (ImGui::Combo(T("Shape"), &shape, shapes, IM_ARRAYSIZE(shapes))) {
-                host.PushUndoSnapshot();
+            if (ifield::Combo(host, T("Shape"), &shape, shapes, IM_ARRAYSIZE(shapes))) {
                 col->Shape = (sage::physics::ShapeType)shape;
             }
             if (col->Shape == sage::physics::ShapeType::ConvexHull ||
@@ -282,13 +278,10 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
                 ImGui::DragFloat3(T("Half Extents"), &col->HalfExtents.x, 0.02f, 0.001f, 100.0f);
                 host.TrackLastImGuiItem();
             } else if (col->Shape == sage::physics::ShapeType::Sphere) {
-                ImGui::DragFloat(T("Radius"), &col->Radius, 0.02f, 0.001f, 100.0f);
-                host.TrackLastImGuiItem();
+                ifield::Float(host, T("Radius"), &col->Radius, 0.02f, 0.001f, 100.0f);
             } else { // Capsule
-                ImGui::DragFloat(T("Radius"), &col->Radius, 0.02f, 0.001f, 100.0f);
-                host.TrackLastImGuiItem();
-                ImGui::DragFloat(T("Half Height"), &col->HalfHeight, 0.02f, 0.001f, 100.0f);
-                host.TrackLastImGuiItem();
+                ifield::Float(host, T("Radius"), &col->Radius, 0.02f, 0.001f, 100.0f);
+                ifield::Float(host, T("Half Height"), &col->HalfHeight, 0.02f, 0.001f, 100.0f);
             }
             // Центр формы — в осях объекта; у форм по мешу его задаёт сам меш.
             if (col->Shape == sage::physics::ShapeType::Box || col->Shape == sage::physics::ShapeType::Sphere ||
@@ -313,19 +306,16 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
                 ImGui::PushID(pi);
                 if (ImGui::TreeNodeEx(T("part" "###part"), ImGuiTreeNodeFlags_DefaultOpen, "Part %d", pi)) {
                     int ps = (int)p.Shape;
-                    if (ImGui::Combo(T("Shape"), &ps, shapeNames, IM_ARRAYSIZE(shapeNames))) {
-                        host.PushUndoSnapshot();
+                    if (ifield::Combo(host, T("Shape"), &ps, shapeNames, IM_ARRAYSIZE(shapeNames))) {
                         p.Shape = (sage::physics::ShapeType)ps;
                     }
                     if (p.Shape == sage::physics::ShapeType::Box) {
                         ImGui::DragFloat3(T("Half Extents"), &p.HalfExtents.x, 0.02f, 0.001f, 100.0f);
                         host.TrackLastImGuiItem();
                     } else {
-                        ImGui::DragFloat(T("Radius"), &p.Radius, 0.02f, 0.001f, 100.0f);
-                        host.TrackLastImGuiItem();
+                        ifield::Float(host, T("Radius"), &p.Radius, 0.02f, 0.001f, 100.0f);
                         if (p.Shape == sage::physics::ShapeType::Capsule) {
-                            ImGui::DragFloat(T("Half Height"), &p.HalfHeight, 0.02f, 0.001f, 100.0f);
-                            host.TrackLastImGuiItem();
+                            ifield::Float(host, T("Half Height"), &p.HalfHeight, 0.02f, 0.001f, 100.0f);
                         }
                     }
                     ImGui::DragFloat3(T("Offset"), &p.Offset.x, 0.02f);
@@ -361,10 +351,8 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
         EditorTheme::SectionHeader("physics", T("Character Controller" "###Character Controller"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Character)) {
         if (CharacterControllerComponent* ch =
                 reg.try_get<CharacterControllerComponent>(obj.Entity())) {
-            ImGui::DragFloat(T("Radius"), &ch->Radius, 0.01f, 0.05f, 5.0f);
-            host.TrackLastImGuiItem();
-            ImGui::DragFloat(T("Height"), &ch->Height, 0.02f, 0.1f, 10.0f);
-            host.TrackLastImGuiItem();
+            ifield::Float(host, T("Radius"), &ch->Radius, 0.01f, 0.05f, 5.0f);
+            ifield::Float(host, T("Height"), &ch->Height, 0.02f, 0.1f, 10.0f);
             ImGui::DragFloat3(T("Center"), &ch->Center.x, 0.01f);
             host.TrackLastImGuiItem();
             if (ImGui::IsItemHovered()) {
@@ -383,8 +371,7 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
                 ImGui::SetTooltip("%s", T("Layers the character bumps into; the rest it walks through"));
             }
             bool events = ch->CollisionEvents;
-            if (ImGui::Checkbox(T("Collision Events"), &events)) {
-                host.PushUndoSnapshot();
+            if (ifield::Check(host, T("Collision Events"), &events)) {
                 ch->CollisionEvents = events;
             }
             if (ImGui::IsItemHovered()) {
@@ -396,26 +383,21 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
                 ImGui::TextDisabled(T("Touching now: %d"), (int)ch->Touching.size());
             }
             if (EditorTheme::BeginMore("charMore")) {
-            ImGui::DragFloat(T("Slope Limit"), &ch->SlopeLimit, 0.5f, 0.0f, 89.0f, "%.0f°");
-            host.TrackLastImGuiItem();
+            ifield::Float(host, T("Slope Limit"), &ch->SlopeLimit, 0.5f, 0.0f, 89.0f, "%.0f°");
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Steeper than this and the character slides"));
-            ImGui::DragFloat(T("Step Offset"), &ch->StepOffset, 0.01f, 0.0f, 2.0f);
-            host.TrackLastImGuiItem();
+            ifield::Float(host, T("Step Offset"), &ch->StepOffset, 0.01f, 0.0f, 2.0f);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", T("How tall a step the character climbs without jumping"));
             }
-            ImGui::DragFloat(T("Skin Width"), &ch->SkinWidth, 0.001f, 0.0f, 0.2f, "%.3f");
-            host.TrackLastImGuiItem();
+            ifield::Float(host, T("Skin Width"), &ch->SkinWidth, 0.001f, 0.0f, 0.2f, "%.3f");
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", T("Contact gap that keeps the character from jittering on seams"));
             }
-            ImGui::DragFloat(T("Gravity"), &ch->Gravity, 0.1f, -100.0f, 100.0f);
-            host.TrackLastImGuiItem();
+            ifield::Float(host, T("Gravity"), &ch->Gravity, 0.1f, -100.0f, 100.0f);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", T("Own gravity of this character; 0 means it does not fall"));
             }
-            ImGui::DragFloat(T("Mass"), &ch->Mass, 0.5f, 0.1f, 1000.0f);
-            host.TrackLastImGuiItem();
+            ifield::Float(host, T("Mass"), &ch->Mass, 0.5f, 0.1f, 1000.0f);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", T("How hard the character pushes dynamic bodies"));
             }
@@ -431,8 +413,7 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
             const char* types[] = {T("Fixed"), T("Point"), T("Hinge"), T("Slider"),
                                    T("Distance"), T("Cone")};
             int t = (int)jc->Type;
-            if (ImGui::Combo(T("Type"), &t, types, IM_ARRAYSIZE(types))) {
-                host.PushUndoSnapshot();
+            if (ifield::Combo(host, T("Type"), &t, types, IM_ARRAYSIZE(types))) {
                 jc->Type = (sage::physics::JointType)t;
             }
             // Второе тело — СЛОТОМ ОБЪЕКТА, а не номером: номер сущности
@@ -460,21 +441,16 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
                 host.TrackLastImGuiItem();
             }
             if (jc->Type == JT::Hinge || jc->Type == JT::Slider) {
-                ImGui::Checkbox(T("Use Limits"), &jc->UseLimits);
+                ifield::Check(host, T("Use Limits"), &jc->UseLimits);
                 if (jc->UseLimits) {
-                    ImGui::DragFloat(T("Min"), &jc->MinLimit, 0.5f);
-                    host.TrackLastImGuiItem();
-                    ImGui::DragFloat(T("Max"), &jc->MaxLimit, 0.5f);
-                    host.TrackLastImGuiItem();
+                    ifield::Float(host, T("Min"), &jc->MinLimit, 0.5f);
+                    ifield::Float(host, T("Max"), &jc->MaxLimit, 0.5f);
                 }
             } else if (jc->Type == JT::Distance) {
-                ImGui::DragFloat(T("Min Distance"), &jc->MinDistance, 0.02f, 0.0f, 100.0f);
-                host.TrackLastImGuiItem();
-                ImGui::DragFloat(T("Max Distance"), &jc->MaxDistance, 0.02f, 0.0f, 100.0f);
-                host.TrackLastImGuiItem();
+                ifield::Float(host, T("Min Distance"), &jc->MinDistance, 0.02f, 0.0f, 100.0f);
+                ifield::Float(host, T("Max Distance"), &jc->MaxDistance, 0.02f, 0.0f, 100.0f);
             } else if (jc->Type == JT::Cone) {
-                ImGui::DragFloat(T("Cone Half Angle"), &jc->ConeHalfAngle, 0.5f, 0.0f, 180.0f);
-                host.TrackLastImGuiItem();
+                ifield::Float(host, T("Cone Half Angle"), &jc->ConeHalfAngle, 0.5f, 0.0f, 180.0f);
             }
 
         }

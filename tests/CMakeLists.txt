@@ -121,6 +121,7 @@ add_executable(sage_tests
     test_sprite_editor.cpp
     test_inspector_sections.cpp
     test_canvas_toolbar.cpp
+    test_scene_layers.cpp
     test_postchainui.cpp
     ../editor/src/PathScope.cpp
     ../editor/src/HotkeyScope.cpp
@@ -141,6 +142,7 @@ add_executable(sage_tests
     ../editor/src/EditorIcons.cpp
     ../editor/src/EditorPrefs.cpp
     ../editor/src/InspectorControls.cpp
+    ../editor/src/InspectorFields.cpp
     ../editor/src/sprite/SpriteEditModel.cpp
     ../editor/src/Localization.cpp
     # Плагины редактора на Lua: шаблоны и сторож проверяются без окна.

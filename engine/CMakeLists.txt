@@ -201,6 +201,7 @@ set(SAGE_ENGINE_SOURCES
     src/physics/builtin/BuiltinWorld_Solver.cpp
     src/physics/builtin/Collide.cpp
     src/sage/scene/AiAgentComponent.cpp
+    src/sage/scene/SceneLayer.cpp
     src/sage/scene/VisualScriptComponent.cpp
     src/sage/scene/CopyName.cpp
     src/sage/scene/ScaleLock.cpp

@@ -153,6 +153,19 @@ TEST(EditorHistory_undo_returns_the_state_before_the_change) {
     CHECK_TRUE(scene.State == "B");
 }
 
+TEST(EditorHistory_same_state_twice_is_one_step) {
+    // Поле снимает «до» само, а секция по привычке — ещё раз: одно
+    // изменение — один шаг отмены, а не два (второй ничего не менял бы).
+    FakeScene scene;
+    EditorHistory history = scene.MakeHistory();
+    history.Push();
+    history.Push();
+    scene.State = "B";
+    CHECK_TRUE(history.Undo());
+    CHECK_TRUE(scene.State == "A");
+    CHECK_FALSE(history.CanUndo());
+}
+
 TEST(EditorHistory_a_new_change_cuts_the_redo_branch) {
     FakeScene scene;
     EditorHistory history = scene.MakeHistory();

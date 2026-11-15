@@ -9,6 +9,7 @@
 // только тела. Разбит потому, что дорос до двух тысяч строк, в которых рядом
 // лежали редактор материала, якоря интерфейса и список компонентов.
 // ---------------------------------------------------------------------------
+#include "InspectorFields.h"
 #include <cctype>
 #include <cstdarg>
 #include "sage/scene/CharacterFit.h"
@@ -65,6 +66,8 @@
 #include "ui/ColorPicker.h"
 
 #include "InspectorPanelDetail.h"
+
+namespace ifield = sage::editor::ifield;
 
 namespace fs = std::filesystem;
 using namespace sage::editor::inspectordetail;
@@ -173,19 +176,18 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                     }
                     ImGui::EndCombo();
                 }
-                ImGui::DragFloat(T("Blend Time"), &am->BlendTime, 0.01f, 0.0f, 2.0f);
-                host.TrackLastImGuiItem();
+                ifield::Float(host, T("Blend Time"), &am->BlendTime, 0.01f, 0.0f, 2.0f);
                 if (am->Anim.Fading())
                     ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Info), T("cross-fading %.0f%%"),
                                        am->Anim.FadeWeight() * 100.0f);
             } else if (clipCount == 0) {
                 ImGui::TextDisabled("%s", T("No animation clips (bind pose)"));
             }
-            ImGui::DragFloat(T("Speed"), &am->Speed, 0.02f, 0.0f, 8.0f); host.TrackLastImGuiItem();
-            if (ImGui::Checkbox(T("Loop"), &am->Loop)) am->Anim.Play(am->Clip, am->Loop);
+            ifield::Float(host, T("Speed"), &am->Speed, 0.02f, 0.0f, 8.0f);
+            if (ifield::Check(host, T("Loop"), &am->Loop)) am->Anim.Play(am->Clip, am->Loop);
             ImGui::SameLine();
-            ImGui::Checkbox(T("Playing"), &am->Playing);
-            ImGui::Checkbox(T("Root Motion"), &am->RootMotion);
+            ifield::Check(host, T("Playing"), &am->Playing);
+            ifield::Check(host, T("Root Motion"), &am->RootMotion);
         }
     }
 
@@ -234,11 +236,10 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                                            T("Opens this clip in the Animation tool"))) {
                 host.OpenAnimationClip(pa->ClipPath);
             }
-            ImGui::Checkbox(T("Playing"), &pa->Playing);
+            ifield::Check(host, T("Playing"), &pa->Playing);
             ImGui::SameLine();
-            ImGui::Checkbox(T("Loop"), &pa->Loop);
-            ImGui::DragFloat(T("Speed"), &pa->Speed, 0.02f, 0.0f, 8.0f);
-            host.TrackLastImGuiItem();
+            ifield::Check(host, T("Loop"), &pa->Loop);
+            ifield::Float(host, T("Speed"), &pa->Speed, 0.02f, 0.0f, 8.0f);
         }
     }
 
@@ -303,20 +304,18 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
             const int resValues[] = {32, 64, 128, 256};
             int resIdx = 2;
             for (int i = 0; i < 4; ++i) if (resValues[i] == p->Resolution) resIdx = i;
-            if (ImGui::Combo(T("Resolution"), &resIdx, resNames, 4)) p->Resolution = resValues[resIdx];
+            if (ifield::Combo(host, T("Resolution"), &resIdx, resNames, 4)) p->Resolution = resValues[resIdx];
             if (p->Resolution != prevRes) p->Dirty = true;
 
             if (ImGui::DragFloat3(T("Box Half Extents"), &p->BoxHalfExtents.x, 0.1f, 0.1f, 500.0f))
                 p->Dirty = true;
             host.TrackLastImGuiItem();
 
-            ImGui::SliderFloat(T("Intensity"), &p->Intensity, 0.0f, 3.0f);
-            host.TrackLastImGuiItem();
+            ifield::Slider(host, T("Intensity"), &p->Intensity, 0.0f, 3.0f);
             if (EditorTheme::BeginMore("probeMore")) {
-                if (ImGui::Checkbox(T("Box Parallax"), &p->BoxParallax)) p->Dirty = true;
-                if (ImGui::DragFloat(T("Far Clip"), &p->FarClip, 0.5f, 1.0f, 2000.0f)) p->Dirty = true;
-                host.TrackLastImGuiItem();
-                ImGui::Checkbox(T("Realtime (re-capture every frame)"), &p->Realtime);
+                if (ifield::Check(host, T("Box Parallax"), &p->BoxParallax)) p->Dirty = true;
+                if (ifield::Float(host, T("Far Clip"), &p->FarClip, 0.5f, 1.0f, 2000.0f)) p->Dirty = true;
+                ifield::Check(host, T("Realtime (re-capture every frame)"), &p->Realtime);
                 EditorTheme::EndMore();
             }
 
@@ -331,7 +330,7 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
     // только когда скелет уже есть.
     if (reg.all_of<IKComponent>(obj.Entity()) && EditorTheme::SectionHeader("ik", T("IK" "###IK"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Ik)) {
         if (IKComponent* ik = reg.try_get<IKComponent>(obj.Entity())) {
-            ImGui::Checkbox(T("IK Enabled"), &ik->Enabled);
+            ifield::Check(host, T("IK Enabled"), &ik->Enabled);
             const AnimationComponent* am = reg.try_get<AnimationComponent>(obj.Entity());
             if (!am) ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn),
                                         "%s", T("No Animation component - goals do nothing"));
@@ -364,42 +363,37 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                             ImGui::EndCombo();
                         }
                     }
-                    ImGui::Checkbox(T("Enabled"), &g.Enabled);
+                    ifield::Check(host, T("Enabled"), &g.Enabled);
                     ImGui::SameLine();
-                    if (ImGui::Checkbox(T("Aim (look-at)"), &g.Aim)) g.Resolved = false;
+                    if (ifield::Check(host, T("Aim (look-at)"), &g.Aim)) g.Resolved = false;
                     if (g.Aim) {
                         ImGui::DragFloat3(T("Aim Axis"), &g.AimAxis.x, 0.01f);
                         host.TrackLastImGuiItem();
-                        ImGui::SliderFloat(T("Max Angle"), &g.AimMaxAngle, 0.0f, 180.0f);
-                        host.TrackLastImGuiItem();
+                        ifield::Slider(host, T("Max Angle"), &g.AimMaxAngle, 0.0f, 180.0f);
                     } else {
-                        if (ImGui::SliderInt(T("Chain Length"), &g.ChainLength, 2, 8)) g.Resolved = false;
-                        host.TrackLastImGuiItem();
+                        if (ifield::Int(host, T("Chain Length"), &g.ChainLength, 2, 8)) g.Resolved = false;
                         EditorTheme::Hint(T("2 = analytic two-bone, more = FABRIK"));
                         // Полюс, выравнивание стопы и её фиксация — тонкая
                         // настройка ног; цель и вес — выше и ниже, на виду.
                         if (EditorTheme::BeginMore("ikMore")) {
-                        ImGui::Checkbox(T("Use Pole"), &g.UsePole);
+                        ifield::Check(host, T("Use Pole"), &g.UsePole);
                         if (g.UsePole) {
                             ImGui::DragFloat3(T("Pole"), &g.Pole.x, 0.02f);
                             host.TrackLastImGuiItem();
                         }
                         ImGui::DragFloat3(T("Align Normal"), &g.AlignNormal.x, 0.02f);
                         host.TrackLastImGuiItem();
-                        ImGui::Checkbox(T("Foot Lock"), &g.Lock);
+                        ifield::Check(host, T("Foot Lock"), &g.Lock);
                         if (g.Lock) {
-                            ImGui::DragFloat(T("Plant Height"), &g.PlantHeight, 0.005f, 0.0f, 1.0f);
-                            host.TrackLastImGuiItem();
-                            ImGui::DragFloat(T("Release Time"), &g.ReleaseTime, 0.005f, 0.0f, 1.0f);
-                            host.TrackLastImGuiItem();
+                            ifield::Float(host, T("Plant Height"), &g.PlantHeight, 0.005f, 0.0f, 1.0f);
+                            ifield::Float(host, T("Release Time"), &g.ReleaseTime, 0.005f, 0.0f, 1.0f);
                         }
                         EditorTheme::EndMore();
                         }
                     }
                     ImGui::DragFloat3(T("Target (world)"), &g.Target.x, 0.02f);
                     host.TrackLastImGuiItem();
-                    ImGui::SliderFloat(T("Weight"), &g.Weight, 0.0f, 1.0f);
-                    host.TrackLastImGuiItem();
+                    ifield::Slider(host, T("Weight"), &g.Weight, 0.0f, 1.0f);
                     if (g.Resolved && g.EndJoint < 0)
                         ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Danger), "%s",
                                            T("bone not found in skeleton"));

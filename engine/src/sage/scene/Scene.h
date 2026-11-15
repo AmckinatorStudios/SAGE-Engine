@@ -416,6 +416,10 @@ public:
     // (sage::gi::Transplant), а рендер безопасно держит ссылку на кадр.
     std::shared_ptr<sage::gi::GIState> GI;
 
+    // Слои сцены (sage/scene/SceneLayer.h): заведённые списком, в порядке
+    // показа. Назначение объекта — SceneLayerComponent.
+    std::vector<std::string> Layers;
+
 private:
     entt::entity Resolve(int id) const {
         auto it = m_idToEntity.find(id);

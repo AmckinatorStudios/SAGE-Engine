@@ -236,14 +236,15 @@ void InspectorPanel::DrawLockButton(EditorHost& host) {
     const bool locked = host.InspectorLocked();
     const float side = ImGui::GetFrameHeight();
     ImGui::SameLine(ImGui::GetContentRegionMax().x - side);
-    if (EditorIcons::IconOnlyButton(
+    ImGui::PushID("inspector_lock");
+    const bool clicked = EditorIcons::IconOnlyButton(
             "lock",
             locked ? T("Unlock: the panel will follow the selection again")
                    : T("Lock: the panel will keep showing this while you pick something else "
                        "(for drag and drop)"),
-            locked)) {
-        host.SetInspectorLocked(!locked);
-    }
+            locked);
+    ImGui::PopID();
+    if (clicked) host.SetInspectorLocked(!locked);
 }
 
 void InspectorPanel::DrawSectionHeader(EditorHost& host, const char* icon, const char* kind,
@@ -440,8 +441,7 @@ void InspectorPanel::DrawAudioPlayer(EditorHost& host) {
 
 void InspectorPanel::DrawObjectSection(EditorHost& host) {
     GameObject obj = host.InspectedObject();
-    DrawSectionHeader(host, "cube", T("scene object"), obj.Name(),
-                      T("The properties of this entity belong to it alone."));
+    DrawObjectIdentity(host, obj);
 
     // Мультивыделение: правим первичную, но подсказываем размер набора
     // (гизмо двигает все; Delete/Duplicate — по всем выбранным).

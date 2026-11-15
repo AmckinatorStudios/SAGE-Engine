@@ -4,6 +4,7 @@
 // Texture) или материал: превью персонажа, объёмная иконка предмета, экран
 // камеры наблюдения.
 // ---------------------------------------------------------------------------
+#include "InspectorFields.h"
 #include "InspectorPanel.h"
 
 #include "imgui.h"
@@ -14,6 +15,8 @@
 #include "ui/ColorPicker.h"
 
 #include "sage/scene/Components.h"
+
+namespace ifield = sage::editor::ifield;
 
 void DrawRenderTextureSection(EditorHost& host, GameObject obj, entt::registry& reg, bool* remove) {
     if (!reg.all_of<RenderTextureComponent>(obj.Entity())) return;
@@ -41,8 +44,7 @@ void DrawRenderTextureSection(EditorHost& host, GameObject obj, entt::registry& 
         changed = true;
     }
     host.TrackLastImGuiItem();
-    if (ImGui::DragFloat(T("Aspect ratio"), &rt.Aspect, 0.01f, 0.0f, 8.0f, "%.3f")) changed = true;
-    host.TrackLastImGuiItem();
+    if (ifield::Float(host, T("Aspect ratio"), &rt.Aspect, 0.01f, 0.0f, 8.0f, "%.3f")) changed = true;
     if (rt.Aspect > 0.0f) {
         char buf[64];
         std::snprintf(buf, sizeof(buf), "%d x %d", rt.Width, rt.TargetHeight());
@@ -52,8 +54,7 @@ void DrawRenderTextureSection(EditorHost& host, GameObject obj, entt::registry& 
     }
 
     bool transparent = rt.ClearColor.a < 0.5f;
-    if (ImGui::Checkbox(T("Transparent background"), &transparent)) {
-        host.PushUndoSnapshot();
+    if (ifield::Check(host, T("Transparent background"), &transparent)) {
         rt.ClearColor.a = transparent ? 0.0f : 1.0f;
         changed = true;
     }
@@ -64,8 +65,7 @@ void DrawRenderTextureSection(EditorHost& host, GameObject obj, entt::registry& 
 
     const char* kModes[] = {T("On Demand"), T("On Change"), T("Continuous")};
     int mode = rt.Continuous ? 2 : (int)rt.Mode;
-    if (ImGui::Combo(T("Update"), &mode, kModes, 3)) {
-        host.PushUndoSnapshot();
+    if (ifield::Combo(host, T("Update"), &mode, kModes, 3)) {
         rt.Mode = (RenderTextureComponent::Update)mode;
         rt.Continuous = false;
         changed = true;
@@ -74,27 +74,23 @@ void DrawRenderTextureSection(EditorHost& host, GameObject obj, entt::registry& 
                       : mode == 1 ? T("When the camera or the objects in view move")
                                   : T("Every frame — a full scene pass each time, use sparingly"));
 
-    if (ImGui::Checkbox(T("Orthographic"), &rt.Ortho)) changed = true;
+    if (ifield::Check(host, T("Orthographic"), &rt.Ortho)) changed = true;
     if (rt.Ortho) {
-        if (ImGui::DragFloat(T("Half height"), &rt.OrthoSize, 0.05f, 0.01f, 1000.0f)) changed = true;
-    } else if (ImGui::SliderFloat(T("Field of view"), &rt.Fov, 5.0f, 150.0f, "%.0f°")) {
+        if (ifield::Float(host, T("Half height"), &rt.OrthoSize, 0.05f, 0.01f, 1000.0f)) changed = true;
+    } else if (ifield::Slider(host, T("Field of view"), &rt.Fov, 5.0f, 150.0f, "%.0f°")) {
         changed = true;
     }
     host.TrackLastImGuiItem();
     if (ImGui::DragFloat3(T("Look at"), &rt.LookAt.x, 0.05f)) changed = true;
     host.TrackLastImGuiItem();
     if (EditorTheme::BeginMore("rtMore")) {
-        if (ImGui::DragFloat(T("Near"), &rt.Near, 0.01f, 0.001f, 100.0f)) changed = true;
-        host.TrackLastImGuiItem();
-        if (ImGui::DragFloat(T("Far"), &rt.Far, 1.0f, 1.0f, 100000.0f)) changed = true;
-        host.TrackLastImGuiItem();
-        if (ImGui::Checkbox(T("Studio light"), &rt.StudioLight)) changed = true;
+        if (ifield::Float(host, T("Near"), &rt.Near, 0.01f, 0.001f, 100.0f)) changed = true;
+        if (ifield::Float(host, T("Far"), &rt.Far, 1.0f, 1.0f, 100000.0f)) changed = true;
+        if (ifield::Check(host, T("Studio light"), &rt.StudioLight)) changed = true;
         EditorTheme::Hint(T("Even light of its own: an item icon looks the same at noon and at night"));
         if (rt.StudioLight) {
-            if (ImGui::SliderFloat(T("Light intensity"), &rt.LightIntensity, 0.0f, 5.0f)) changed = true;
-            host.TrackLastImGuiItem();
-            if (ImGui::SliderFloat(T("Ambient"), &rt.Ambient, 0.0f, 2.0f)) changed = true;
-            host.TrackLastImGuiItem();
+            if (ifield::Slider(host, T("Light intensity"), &rt.LightIntensity, 0.0f, 5.0f)) changed = true;
+            if (ifield::Slider(host, T("Ambient"), &rt.Ambient, 0.0f, 2.0f)) changed = true;
         }
         EditorTheme::EndMore();
     }
