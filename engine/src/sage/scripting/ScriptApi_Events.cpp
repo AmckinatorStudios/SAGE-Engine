@@ -206,7 +206,15 @@ void ScriptEngine::RegisterRenderTextureApi() {
         rt.Fov = t.get_or("fov", rt.Fov);
         rt.Near = t.get_or("near", rt.Near);
         rt.Far = t.get_or("far", rt.Far);
-        rt.Continuous = t.get_or("continuous", rt.Continuous);
+        if (t.get_or("continuous", false)) rt.Mode = RenderTextureComponent::Update::Continuous;
+        // update = "demand" | "change" | "continuous" — когда снимать заново.
+        if (sol::optional<std::string> upd = t["update"]) {
+            if (*upd == "demand") rt.Mode = RenderTextureComponent::Update::OnDemand;
+            else if (*upd == "change") rt.Mode = RenderTextureComponent::Update::OnChange;
+            else if (*upd == "continuous") rt.Mode = RenderTextureComponent::Update::Continuous;
+            else throw std::runtime_error("rt.Attach: update '" + *upd + "' — нужно demand, change или continuous");
+        }
+        rt.Aspect = t.get_or("aspect", rt.Aspect);
         rt.StudioLight = t.get_or("studio", rt.StudioLight);
         rt.LightIntensity = t.get_or("lightIntensity", rt.LightIntensity);
         rt.Ambient = t.get_or("ambient", rt.Ambient);
@@ -221,7 +229,7 @@ void ScriptEngine::RegisterRenderTextureApi() {
         // плоским значком: сам себя он не перестраивает.
         if (!rt.Target.empty())
             sage::render::RenderTextureRegistry::Instance().GetOrCreate(rt.Target, rt.Width,
-                                                                        rt.Height);
+                                                                        rt.TargetHeight());
     });
 
     // Пересобрать картинку. Разовая съёмка иначе застыла бы навсегда — а

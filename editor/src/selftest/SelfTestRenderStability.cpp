@@ -538,6 +538,42 @@ bool EditorLayer::SelfTestRenderStability() {
         m_scene->RemoveObject(e.Id());
     }
 
+    // ИНТЕРФЕЙС БЕЗ КАМЕРЫ ВИДЕН. Документ интерфейса — отдельная сцена без
+    // камеры, и кадр без камеры собирался только при непрозрачной подложке:
+    // холст пространства «Интерфейс» показывал рамки элементов, а самих
+    // элементов не было.
+    if (ok) {
+        Scene doc("selftest-ui-doc");
+        GameObject e = doc.CreateEmptyObject("SelftestNoCamera");
+        // В ПРАВОМ НИЖНЕМ углу — там, где прошлая проверка оставила чёрное:
+        // не собранный кадр иначе прочитался бы старым и прошёл.
+        sage::ui::Element el;
+        el.Anchor = UIAnchor::BottomRight;
+        el.Size = {(float)m_renderer.GameWidth() * 0.5f, (float)m_renderer.GameHeight() * 0.5f};
+        doc.Registry().emplace<sage::ui::Element>(e.Entity(), el);
+        sage::ui::Fill fill;
+        fill.Color = glm::vec4(1.0f);
+        fill.Rounding = 0.0f;
+        fill.Gradient = glm::vec4(0.0f);
+        doc.Registry().emplace<sage::ui::Fill>(e.Entity(), fill);
+        m_renderer.SetUIBackdrop(0.0f, glm::vec3(0.0f));
+        LightingEnvironment env = sage::ecs::CollectLighting(doc);
+        m_renderer.RenderGame(doc, env, cfg);
+        std::vector<unsigned char> px;
+        int fw = 0, fh = 0;
+        if (!m_renderer.ReadGamePixels(px, fw, fh) || px.empty()) {
+            LOG_ERROR("Editor") << "SELFTEST: кадр интерфейса без камеры не собран — холст пуст";
+            ok = false;
+        } else {
+            const size_t k = ((size_t)(fh / 4) * (size_t)fw + (size_t)(fw - fw / 4)) * 3u;
+            const int inside = (px[k] + px[k + 1] + px[k + 2]) / 3;
+            if (inside < 96) {
+                LOG_ERROR("Editor") << "SELFTEST: интерфейс без камеры не нарисован (яркость " << inside << ")";
+                ok = false;
+            }
+        }
+    }
+
     m_scene->RemoveObject(fx.Id());
     return ok;
 }

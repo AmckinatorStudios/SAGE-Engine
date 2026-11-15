@@ -1,4 +1,7 @@
 #include "sage/ui/SpriteSheet.h"
+#include <cstring>
+#include <cmath>
+#include <cctype>
 
 #include <algorithm>
 #include <fstream>
@@ -129,7 +132,13 @@ std::string SpriteSheet::ToJsonString() const {
     for (const SpriteRegion& r : Regions) {
         nlohmann::json e = {{"name", r.Name}, {"rect", {r.Rect.x, r.Rect.y, r.Rect.z, r.Rect.w}}};
         if (r.Slice != glm::vec4(0.0f)) e["slice"] = {r.Slice.x, r.Slice.y, r.Slice.z, r.Slice.w};
+        if (r.Pivot != glm::vec2(0.5f)) e["pivot"] = {r.Pivot.x, r.Pivot.y};
         j["sprites"].push_back(e);
+    }
+    if (!Sequences.empty()) {
+        j["sequences"] = nlohmann::json::array();
+        for (const SpriteSequence& q : Sequences)
+            j["sequences"].push_back({{"name", q.Name}, {"frames", q.Frames}, {"fps", q.Fps}, {"loop", q.Loop}});
     }
     return j.dump(2);
 }
@@ -156,8 +165,27 @@ bool SpriteSheet::FromJsonString(const std::string& text, SpriteSheet& out, std:
         const nlohmann::json slice = e.value("slice", nlohmann::json::array());
         if (slice.is_array() && slice.size() == 4)
             for (int k = 0; k < 4; ++k) r.Slice[k] = slice[k].is_number() ? slice[k].get<float>() : 0.0f;
+        const nlohmann::json pivot = e.value("pivot", nlohmann::json::array());
+        if (pivot.is_array() && pivot.size() == 2 && pivot[0].is_number() && pivot[1].is_number())
+            r.Pivot = {pivot[0].get<float>(), pivot[1].get<float>()};
         out.Set(r);
     }
+    out.Sequences.clear();
+    const nlohmann::json seqs = j.value("sequences", nlohmann::json::array());
+    if (seqs.is_array())
+        for (const nlohmann::json& e : seqs) {
+            if (!e.is_object()) continue;
+            SpriteSequence q;
+            q.Name = e.value("name", std::string());
+            if (q.Name.empty()) continue;
+            const nlohmann::json frames = e.value("frames", nlohmann::json::array());
+            if (frames.is_array())
+                for (const nlohmann::json& f : frames)
+                    if (f.is_string()) q.Frames.push_back(f.get<std::string>());
+            q.Fps = e.value("fps", q.Fps);
+            q.Loop = e.value("loop", q.Loop);
+            out.Sequences.push_back(q);
+        }
     return true;
 }
 
@@ -178,6 +206,99 @@ bool SpriteSheet::LoadFile(const std::string& path, SpriteSheet& out, std::strin
         return false;
     }
     return FromJsonString(text, out, err);
+}
+
+std::string SpriteSequence::FrameAt(float time) const {
+    if (Frames.empty()) return {};
+    const int n = (int)Frames.size();
+    int i = (int)std::floor(std::max(time, 0.0f) * std::max(Fps, 0.001f));
+    i = Loop ? i % n : std::min(i, n - 1);
+    return Frames[(size_t)i];
+}
+
+const SpriteSequence* SpriteSheet::FindSequence(const std::string& name) const {
+    for (const SpriteSequence& q : Sequences)
+        if (q.Name == name) return &q;
+    return nullptr;
+}
+
+namespace {
+// Число в конце имени («run_12» → 12); без числа — -1.
+long TrailingNumber(const std::string& s) {
+    size_t i = s.size();
+    while (i > 0 && std::isdigit((unsigned char)s[i - 1])) --i;
+    return i == s.size() ? -1 : std::stol(s.substr(i));
+}
+} // namespace
+
+int SpriteSheet::SequenceFromPrefix(const std::string& name, const std::string& prefix, float fps) {
+    std::vector<const SpriteRegion*> found;
+    for (const SpriteRegion& r : Regions)
+        if (r.Name.rfind(prefix, 0) == 0) found.push_back(&r);
+    std::stable_sort(found.begin(), found.end(), [](const SpriteRegion* a, const SpriteRegion* b) {
+        const long na = TrailingNumber(a->Name), nb = TrailingNumber(b->Name);
+        return na != nb ? na < nb : a->Name < b->Name;
+    });
+    SpriteSequence q;
+    q.Name = name;
+    q.Fps = fps;
+    for (const SpriteRegion* r : found) q.Frames.push_back(r->Name);
+    for (SpriteSequence& old : Sequences)
+        if (old.Name == name) {
+            old = q;
+            return (int)q.Frames.size();
+        }
+    Sequences.push_back(q);
+    return (int)q.Frames.size();
+}
+
+bool SpriteSheet::PackAtlas(const std::vector<AtlasInput>& images, int padding, int maxSide,
+                            std::vector<unsigned char>& rgba, int& width, int& height, SpriteSheet& sheet,
+                            std::string& err) {
+    if (images.empty()) {
+        err = "нечего упаковывать";
+        return false;
+    }
+    // Выше — раньше: полки тогда заполняются плотнее.
+    std::vector<size_t> order(images.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = i;
+    std::stable_sort(order.begin(), order.end(),
+                     [&](size_t a, size_t b) { return images[a].Height > images[b].Height; });
+    std::vector<glm::ivec2> at(images.size());
+    for (int side = 64; side <= maxSide; side *= 2) {
+        int x = padding, y = padding, shelf = 0;
+        bool fits = true;
+        for (size_t k : order) {
+            const AtlasInput& im = images[k];
+            if (im.Width + 2 * padding > side) { fits = false; break; }
+            if (x + im.Width + padding > side) {
+                x = padding;
+                y += shelf + padding;
+                shelf = 0;
+            }
+            if (y + im.Height + padding > side) { fits = false; break; }
+            at[k] = {x, y};
+            x += im.Width + padding;
+            shelf = std::max(shelf, im.Height);
+        }
+        if (!fits) continue;
+        width = height = side;
+        rgba.assign((size_t)side * (size_t)side * 4, 0);
+        sheet = SpriteSheet();
+        for (size_t k = 0; k < images.size(); ++k) {
+            const AtlasInput& im = images[k];
+            for (int row = 0; row < im.Height; ++row)
+                std::memcpy(&rgba[(((size_t)(at[k].y + row)) * (size_t)side + (size_t)at[k].x) * 4],
+                            &im.Rgba[(size_t)row * (size_t)im.Width * 4], (size_t)im.Width * 4);
+            SpriteRegion r;
+            r.Name = im.Name;
+            r.Rect = {at[k].x, at[k].y, im.Width, im.Height};
+            sheet.Set(r);
+        }
+        return true;
+    }
+    err = "картинки не помещаются в атлас " + std::to_string(maxSide) + "x" + std::to_string(maxSide);
+    return false;
 }
 
 std::string SpriteSheet::SidecarPath(const std::string& imagePath) {

@@ -1,5 +1,6 @@
 #pragma once
 #include <cmath>
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -333,8 +334,23 @@ struct RenderTextureComponent {
     // камере наблюдения нужен каждый кадр. Разница здесь принципиальна: это
     // ПОЛНЫЙ проход сцены, и делать его на каждую иконку каждый кадр значит
     // умножить стоимость кадра на число значков в сумке.
-    bool Continuous = false;
+    //
+    // РЕЖИМ ОБНОВЛЕНИЯ: по запросу (Dirty — скрипт rt.Refresh или правка
+    // настроек), при изменении (камера, настройки или объекты в кадре
+    // сдвинулись) или каждый кадр. «При изменении» — для превью модели в
+    // меню: картинка не стоит прохода сцены, пока на ней ничего не происходит.
+    enum class Update { OnDemand, OnChange, Continuous };
+    Update Mode = Update::OnDemand;
+    bool Continuous = false;  // прежняя галка «каждый кадр» (скрипты, старые сцены)
     bool Dirty = true;        // перерисовать в ближайшем кадре (рантайм)
+    // Соотношение сторон картинки (ширина/высота). 0 — как задано Width и
+    // Height; больше нуля — высота считается от ширины: превью персонажа
+    // 3:4 не надо пересчитывать руками при смене разрешения.
+    float Aspect = 0.0f;
+    size_t Signature = 0;     // рантайм: отпечаток кадра для OnChange
+
+    int TargetHeight() const { return Aspect > 0.0f ? std::max(1, (int)std::lround((float)Width / Aspect)) : Height; }
+    bool EveryFrame() const { return Continuous || Mode == Update::Continuous; }
 
     // СВОЁ освещение вместо сценического. Иконке в сумке нужен ровный свет,
     // одинаковый в полдень и ночью: с солнцем сцены половина значков к вечеру

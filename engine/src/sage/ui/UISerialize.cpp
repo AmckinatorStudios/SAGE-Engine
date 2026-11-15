@@ -132,6 +132,7 @@ void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
     if (t->AspectRatio > 0.0f) tj["aspect"] = t->AspectRatio;
     if (t->SafeArea) tj["safeArea"] = true;
     if (!t->Style.empty()) tj["style"] = t->Style;
+    if (!t->StyleOverrides.empty()) tj["styleOverrides"] = t->StyleOverrides;
     // Resolved не пишется: это след последнего кадра, а не настройка.
 
     for (const sage::ui::PartType& p : sage::ui::Parts()) {
@@ -162,6 +163,12 @@ void ResolveImageTextureImpl(sage::ui::Image& im) {
     // уже найденную съёмку белой заглушкой «файл не найден».
     if (auto rt = sage::render::RenderTextureRegistry::Resolve(im.Path)) {
         im.Tex = rt;
+    } else if (im.Path.rfind("rt:", 0) == 0) {
+        // Съёмки ещё нет (камера не сняла первый кадр): ждём её, а не ищем
+        // на диске файл «rt:…» с ошибкой в журнал на каждый кадр. TexPath не
+        // ставится — в следующем кадре спросим снова.
+        im.Tex.reset();
+        return;
     } else {
         im.Tex = im.Sharp() ? ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Nearest,
                                                                      /*mipmaps=*/false)
@@ -205,6 +212,8 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
         t.AspectRatio = tj.value("aspect", t.AspectRatio);
         t.SafeArea = tj.value("safeArea", t.SafeArea);
         t.Style = tj.value("style", t.Style);
+        if (tj.contains("styleOverrides") && tj["styleOverrides"].is_array())
+            t.StyleOverrides = tj["styleOverrides"].get<std::vector<std::string>>();
     }
     reg.emplace_or_replace<sage::ui::Element>(e, t);
 

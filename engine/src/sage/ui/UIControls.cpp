@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "sage/assets/AssetDatabase.h"
 #include "sage/scene/SceneComponents.h"
 #include "sage/scene/Signals.h"
 #include "sage/ui/UI.h"
@@ -173,7 +174,7 @@ void DrawDropdownOverlays(const entt::registry& reg, const std::vector<Solved>& 
         ui.RoundedRect(lay.List.x, lay.List.y, lay.List.w, lay.List.h, glm::vec3(d->ListColor),
                        d->ListColor.a * it.Alpha, radius);
         const Label* label = reg.try_get<Label>(it.Entity);
-        const float scale = (label ? label->Scale : 1.0f) * it.Scale;
+        const float scale = (label ? label->Scale : Label{}.Scale) * it.Scale;
         const float pad = (label ? label->PadX : 10.0f) * it.Scale;
         ui.PushClipRect(lay.List.x, lay.List.y, lay.List.w, lay.List.h);
         const int first = std::clamp(d->First, 0, std::max(0, (int)options.size() - lay.Visible));
@@ -413,6 +414,28 @@ void AnimateToggles(entt::registry& reg, const std::vector<Solved>& items, float
         }
         const float step = dt / r->AnimationTime;
         r->Shown += glm::clamp(target - r->Shown, -step, step);
+    }
+}
+
+void UpdateImageSequences(entt::registry& reg, const std::vector<Solved>& items, float dt) {
+    for (const Solved& it : items) {
+        Image* im = reg.try_get<Image>(it.Entity);
+        if (!im || im->Sequence.empty() || im->Path.empty()) continue;
+        if (im->SheetFor != im->Path) {
+            // Лист — один раз на путь: ошибка чтения не повторяется каждый кадр.
+            im->SheetFor = im->Path;
+            auto sheet = std::make_shared<SpriteSheet>();
+            std::string err;
+            const std::string real = sage::AssetDatabase::Instance().LocatePath(im->Path);
+            if (SpriteSheet::LoadFile(SpriteSheet::SidecarPath(real), *sheet, err)) im->Sheet = sheet;
+            else im->Sheet.reset();
+        }
+        if (!im->Sheet) continue;
+        const SpriteSequence* seq = im->Sheet->FindSequence(im->Sequence);
+        if (!seq) continue;
+        im->SequenceTime += dt;
+        if (const SpriteRegion* r = im->Sheet->Find(seq->FrameAt(im->SequenceTime)))
+            im->Sprite = glm::vec4(r->Rect);
     }
 }
 

@@ -167,6 +167,8 @@ public:
     // Игровое окно от первой Primary-камеры сцены (нет камеры — кадр не рисуется,
     // GameApplied() остаётся false). Всегда Shaded + пост-обработка.
     void RenderGame(Scene& scene, const LightingEnvironment& env, const sage::EngineConfig& cfg);
+    // Только съёмка в рендер-текстуры сцены (без её кадра).
+    void RenderTextures(Scene& scene, const LightingEnvironment& env);
     // Подложка редактора и интерфейс сцены одним проходом UIRenderer (см. .cpp).
     bool DrawGameUI(Scene& scene, const sage::EngineConfig& cfg, bool onlyBackdrop);
 

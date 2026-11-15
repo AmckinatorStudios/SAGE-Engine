@@ -161,6 +161,8 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
             o["far"] = rt->Far;
             o["lookAt"] = Vec3ToJson(rt->LookAt);
             o["continuous"] = rt->Continuous;
+            o["update"] = (int)rt->Mode;
+            if (rt->Aspect > 0.0f) o["aspect"] = rt->Aspect;
             o["studioLight"] = rt->StudioLight;
             o["lightDir"] = Vec3ToJson(rt->LightDir);
             o["lightIntensity"] = rt->LightIntensity;
@@ -306,6 +308,10 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             rt.Far = o.value("far", rt.Far);
             if (o.contains("lookAt")) rt.LookAt = Vec3FromJson(o["lookAt"]);
             rt.Continuous = o.value("continuous", rt.Continuous);
+            rt.Mode = (RenderTextureComponent::Update)std::clamp(o.value("update", (int)rt.Mode), 0, 2);
+            // Старая сцена: галка «каждый кадр» и есть режим Continuous.
+            if (rt.Continuous && !o.contains("update")) rt.Mode = RenderTextureComponent::Update::Continuous;
+            rt.Aspect = o.value("aspect", rt.Aspect);
             rt.StudioLight = o.value("studioLight", rt.StudioLight);
             if (o.contains("lightDir")) rt.LightDir = Vec3FromJson(o["lightDir"]);
             rt.LightIntensity = o.value("lightIntensity", rt.LightIntensity);

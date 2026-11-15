@@ -160,6 +160,7 @@ public:
     EditorWorkspace Workspace() const override { return m_workspace; }
     void SetWorkspace(EditorWorkspace workspace) override;
 
+    Scene& LevelScene() override { return m_uiDocActive && m_uiDocOther ? *m_uiDocOther : *m_scene; }
     int CurrentInterfaceId() const override { return m_currentInterface; }
     void SetCurrentInterface(int id) override { m_currentInterface = id; }
     sage::ui::UIScope UiScope() const override;
@@ -793,6 +794,10 @@ private:
     NineSlicePanel m_nineSlice;
     // Нарезка листа спрайтов (panels/SpriteSheetPanel.h) — окно из реестра.
     SpriteSheetPanel m_spriteSheet;
+    // Образцы для снимков (SAGE_EDITOR_UI_SAMPLE, selftest/UISampleShots.cpp).
+    void RunUISampleHook(const std::string& sample);
+    std::string m_focusPanelId;   // какую панель вывести вперёд (хуки снимков)
+    int m_focusPanelFrames = 0;
     // Настройки игры (название, автор, версия, иконка) — окно из реестра.
     GameSettingsPanel m_gameSettings;
 

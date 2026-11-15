@@ -52,6 +52,13 @@ RenderTexture& RenderTextureRegistry::GetOrCreate(const std::string& name, int w
     return ref;
 }
 
+std::vector<std::string> RenderTextureRegistry::Names() const {
+    std::vector<std::string> out;
+    for (const auto& [name, rt] : m_items) out.push_back(name);
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
 RenderTexture* RenderTextureRegistry::Find(const std::string& name) {
     auto it = m_items.find(name);
     return it == m_items.end() ? nullptr : it->second.get();

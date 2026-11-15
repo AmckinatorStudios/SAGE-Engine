@@ -35,6 +35,7 @@
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
+#include "sage/ui/UIButton.h"
 #include "sage/ui/UIPart.h"
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
@@ -179,7 +180,8 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
 
         case K::String: {
             std::string& v = ui::FieldAs<std::string>(data, f);
-            if (f.Editor == W::Texture) {
+            if (f.Editor == W::Texture && DrawImageSource(host, f.Key, v, changed)) {
+            } else if (f.Editor == W::Texture) {
                 // Слот ассета: обложка, приём броска из панели Assets, «где
                 // лежит», очистка. Печатать путь руками — то, ради чего слоты и
                 // заведены.
@@ -333,17 +335,18 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             break;
     }
     if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(f.Tooltip));
+    if (f.Type != K::Look) NoteStyleOverride(host, e, part, f, changed || ImGui::IsItemEdited());
     ImGui::PopID();
 
     // Картинке после смены пути нужен новый рантайм-указатель: иначе слот
     // показывает новый файл, а элемент рисует старый.
     if (changed && part.Id && std::string(part.Id) == "image") {
         if (ui::Image* im = reg.try_get<ui::Image>(e)) {
-            im->Tex = im->Path.empty()
-                          ? nullptr
-                          : (im->Sharp() ? ResourceManager::Instance().GetTexture(
-                                               im->Path, TextureFilter::Nearest, false)
-                                         : ResourceManager::Instance().GetTexture(im->Path));
+            // Тем же путём, что и кадр (он знает и про «rt:»): загрузка здесь
+            // своими правилами грузила съёмку как файл и ругалась в журнал.
+            im->Tex.reset();
+            im->TexPath.clear();
+            ui::EnsureImageTexture(*im);
         }
     }
 }
@@ -827,6 +830,18 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     auto belongs = [&](const ui::PartType& p) { return !type || TypeHasPart(*type, p.Id); };
     // Панель выбирает оформление первым: от него зависит, какой вид ниже.
     if (xf->Type == "Button") DrawButtonContent(host, obj);
+    // Вид переключателя меняет ширину значка — подпись встаёт правее него.
+    const ui::Range* toggle = reg.try_get<ui::Range>(e);
+    const int variantBefore = toggle && toggle->Toggle ? (int)toggle->ToggleVariant : -1;
+    struct ToggleWatch {
+        EditorHost& Host;
+        entt::entity E;
+        int Before;
+        ~ToggleWatch() {
+            const ui::Range* r = Host.CurrentScene().Registry().try_get<ui::Range>(E);
+            if (Before >= 0 && r && (int)r->ToggleVariant != Before) ui::PlaceToggleCaption(Host.CurrentScene(), E);
+        }
+    } toggleWatch{host, e, variantBefore};
     if (type && AppearanceSwitchable(*type)) DrawAppearanceSwitch(host, e);
     // Вид есть у всего, кроме невидимого Container: у Panel — её оформление.
     bool hasLook = false;

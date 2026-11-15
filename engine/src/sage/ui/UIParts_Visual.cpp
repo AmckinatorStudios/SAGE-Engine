@@ -79,6 +79,8 @@ const std::vector<PartField>& ImageFields() {
             {"tint", SAGE_UI_TEXT("Tint"), PartField::Kind::Color, offsetof(Image, Tint)},
             {"sprite", SAGE_UI_TEXT("Sprite (x,y,w,h)"), PartField::Kind::Vec4, offsetof(Image, Sprite), 0.0f,
              4096.0f, "A piece of the sheet in source pixels; width 0 means the whole file."},
+            {"sequence", SAGE_UI_TEXT("Sequence"), PartField::Kind::String, offsetof(Image, Sequence), 0.0f, 0.0f,
+             "A frame sequence of the picture's sprite sheet (Sprite editor): it plays in the game."},
             {"sliceBorder", SAGE_UI_TEXT("9-slice (l,t,r,b)"), PartField::Kind::Vec4,
              offsetof(Image, SliceBorder), 0.0f, 512.0f,
              "Fixed corners in source pixels. The 9-slice editor sets them by\n"
@@ -123,7 +125,7 @@ const std::vector<PartField>& ImageFields() {
         // Фильтрация — НА ВИДУ: чёткие пиксели или сглаживание решают, глядя
         // на картинку, и прятать этот выбор в «Ещё настройки» значило, что
         // его не находили.
-        MarkAdvanced(v, {"sprite", "sliceCenterFill", "sliceEdgeFill", "sliceDrawCenter", "pixelScale",
+        MarkAdvanced(v, {"sprite", "sequence", "sliceCenterFill", "sliceEdgeFill", "sliceDrawCenter", "pixelScale",
                          "snapPixels"});
         return v;
     }();

@@ -21,11 +21,15 @@ class SpriteSheetPanel {
 public:
     void Draw(EditorHost& host, bool* open);
     void ForgetProject();
+    // Открыть картинку (и её лист) и выбрать кусок/последовательность.
+    void Open(const std::string& path, int region = -1, int sequence = -1);
 
 private:
     void Load(const std::string& path);
     void DrawCanvas(float width, float height);
     void DrawRegion();
+    void DrawSequences();
+    void DrawAtlas(EditorHost& host);
 
     std::string m_path;
     std::string m_disk;                    // настоящий путь картинки на диске
@@ -40,4 +44,15 @@ private:
     char m_prefixBuf[64] = "sprite";
     std::string m_status;
     bool m_dirty = false;
+    // Рамка нового куска, которую тянут мышью по пустому месту (пиксели листа).
+    bool m_dragging = false;
+    glm::ivec2 m_dragFrom{0};
+    glm::ivec2 m_dragTo{0};
+    // Последовательности.
+    int m_seqSelected = -1;
+    char m_seqName[64] = "run";
+    char m_seqPrefix[64] = "sprite_";
+    float m_previewTime = 0.0f;
+    // Атлас: папка картинок.
+    std::string m_atlasFolder;
 };

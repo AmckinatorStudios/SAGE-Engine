@@ -1,5 +1,7 @@
 #include "sage/ui/UIButton.h"
 
+#include <algorithm>
+
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneComponents.h"
 #include "sage/ui/UI.h"
@@ -113,6 +115,26 @@ void ApplyButtonContent(Scene& scene, entt::entity button, const ButtonContent& 
         Label& l = reg.get<Label>(label);
         l.AutoWidth = true;
         l.Horizontal = Label::Align::Center;
+    }
+}
+
+void PlaceToggleCaption(Scene& scene, entt::entity toggle) {
+    entt::registry& reg = scene.Registry();
+    const Range* range = reg.try_get<Range>(toggle);
+    const Element* box = reg.try_get<Element>(toggle);
+    if (!range || !range->Toggle || !box) return;
+    // Ширина значка — та же, что рисует DrawRangePart.
+    const float h = box->Size.y;
+    const float icon = range->ToggleVariant == Range::Variant::Switch ? std::min(h, box->Size.x / 1.8f) * 1.8f
+                                                                      : std::min(h, box->Size.x);
+    for (entt::entity c : scene.ChildrenOf(toggle)) {
+        if (!reg.all_of<Label>(c)) continue;
+        Element& el = reg.get<Element>(c);
+        el.Anchor = UIAnchor::CenterLeft;
+        el.Mode = Element::Stretch::None;
+        el.Position.x = icon + 8.0f;
+        el.Size.x = std::max(10.0f, box->Size.x - el.Position.x);
+        break;
     }
 }
 

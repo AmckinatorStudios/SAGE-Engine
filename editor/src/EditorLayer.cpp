@@ -556,6 +556,13 @@ void EditorLayer::OnRender() {
     // её здесь правят, и выключенный настройкой туман там только мешал бы.
     LightingEnvironment gameEnv = env;
     sage::render::ApplyQualityToEnvironment(cfg, gameEnv);
+    // RENDER TEXTURE УРОВНЯ — и пока на месте сцены стоит документ
+    // интерфейса: картинка интерфейса с источником «rt:портрет» показывает то,
+    // что снимает камера уровня, а уровень в это время не рисуется.
+    if (m_uiDocActive && m_uiDocOther) {
+        const LightingEnvironment levelEnv = sage::ecs::CollectLighting(*m_uiDocOther);
+        m_renderer.RenderTextures(*m_uiDocOther, levelEnv);
+    }
     m_renderer.RenderGame(*m_scene, gameEnv, cfg);  // Primary-камера сцены (если есть)
 
     // Превью ВЫБРАННОЙ камеры — последним и только по запросу вьюпорта: это
@@ -712,6 +719,13 @@ void EditorLayer::OnRender() {
     if (m_focusInspectorFrames > 0) {
         --m_focusInspectorFrames;
         if (ImGuiWindow* w = ImGui::FindWindowByID(ImHashStr("Inspector"))) ImGui::FocusWindow(w);
+    }
+    // Панель для снимка (хуки образцов): вкладку в доке иначе не вывести вперёд.
+    if (m_focusPanelFrames > 0 && !m_focusPanelId.empty()) {
+        --m_focusPanelFrames;
+        if (const sage::editor::PanelSpec* spec = m_panelRegistry.Find(m_focusPanelId))
+            if (ImGuiWindow* w = ImGui::FindWindowByName(sage::editor::PanelRegistry::WindowId(*spec, m_workspace).c_str()))
+                ImGui::FocusWindow(w);
     }
 
     TakeAutoScreenshot(app);

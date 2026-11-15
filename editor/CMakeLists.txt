@@ -38,6 +38,7 @@ add_executable(SageEditor WIN32
     src/PanelRegistry.cpp
     src/EditorLayer_StatusBar.cpp
     src/selftest/SelfTestE2E.cpp
+    src/selftest/UISampleShots.cpp
     src/selftest/SelfTestFixtures.cpp
     src/selftest/SelfTestFrames.cpp
     src/selftest/SelfTestCreateDialog.cpp
@@ -115,6 +116,7 @@ add_executable(SageEditor WIN32
     src/panels/InspectorPanel_Physics.cpp
     src/panels/InspectorPanel_Animation.cpp
     src/panels/InspectorPanel_Effects.cpp
+    src/panels/InspectorPanel_RenderTexture.cpp
     src/panels/InspectorPanel_Ai.cpp
     src/aigraph/AiGraphPanel.cpp
     src/aigraph/AiGraphPanel_Sides.cpp
@@ -145,6 +147,8 @@ add_executable(SageEditor WIN32
     src/UIElementProperties.cpp
     src/InterfaceProperties.cpp
     src/UIButtonContent.cpp
+    src/UIImageSource.cpp
+    src/UIStyleOverride.cpp
     src/UIElementProperties_Layout.cpp
     src/VarsEditor.cpp
     src/SignalLinksEditor.cpp

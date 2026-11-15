@@ -36,11 +36,29 @@ json CaptureStyle(const entt::registry& reg, entt::entity e) {
 void ApplyStyle(const json& style, entt::registry& reg, entt::entity e) {
     if (!style.is_object() || !style.contains("parts") || !style["parts"].is_object()) return;
     const json& parts = style["parts"];
+    const Element* el = reg.try_get<Element>(e);
     for (const PartType& p : Parts()) {
         if (!p.Fields || !p.Id || !parts.contains(p.Id) || !p.Has || !p.Has(reg, e)) continue;
-        if (void* data = p.GetMutable(reg, e))
-            LoadPartFields(parts[p.Id], data, *p.Fields, /*styleOnly=*/true);
+        // Переопределённые у элемента поля стиль не трогает.
+        json pj = parts[p.Id];
+        if (el && !el->StyleOverrides.empty() && pj.is_object())
+            for (const PartField& f : *p.Fields)
+                if (f.Key && el->Overrides(std::string(p.Id) + "." + f.Key)) pj.erase(f.Key);
+        if (void* data = p.GetMutable(reg, e)) LoadPartFields(pj, data, *p.Fields, /*styleOnly=*/true);
     }
+}
+
+json MergeStyles(const json& base, const json& own) {
+    json out = own;
+    if (!base.is_object() || !base.contains("parts")) return out;
+    json parts = base["parts"];
+    if (own.contains("parts") && own["parts"].is_object())
+        for (auto it = own["parts"].begin(); it != own["parts"].end(); ++it) {
+            if (!parts.contains(it.key()) || !parts[it.key()].is_object()) parts[it.key()] = json::object();
+            for (auto f = it.value().begin(); f != it.value().end(); ++f) parts[it.key()][f.key()] = f.value();
+        }
+    out["parts"] = parts;
+    return out;
 }
 
 bool SaveStyleFile(const std::string& path, const json& style, std::string* err) {
@@ -106,17 +124,38 @@ CachedStyle& Refresh(const std::string& path) {
 
 } // namespace
 
+// Стиль с учётом НАСЛЕДОВАНИЯ: «base» — путь к родительскому стилю; его
+// поля — основа, свои поля стиля поверх. Версия — общая на всю цепочку:
+// правка родителя обновляет и элементы со стилем-наследником.
+bool ResolveStyle(const std::string& path, json& out, int& version, int depth = 0) {
+    CachedStyle& c = Refresh(path);
+    if (!c.Loaded) return false;
+    out = c.Data;
+    version = c.Version;
+    const std::string base = c.Data.value("base", std::string());
+    // Цепочка не длиннее восьми: стиль, ссылающийся сам на себя, не вешает кадр.
+    if (base.empty() || depth >= 8) return true;
+    json parent;
+    int parentVersion = 0;
+    if (ResolveStyle(base, parent, parentVersion, depth + 1)) {
+        out = MergeStyles(parent, c.Data);
+        version = version * 7919 + parentVersion;
+    }
+    return true;
+}
+
 void ApplyStyles(Scene& scene) {
     entt::registry& reg = scene.Registry();
     for (entt::entity e : reg.view<Element>()) {
         Element& el = reg.get<Element>(e);
         if (el.Style.empty()) continue;
-        CachedStyle& c = Refresh(el.Style);
-        if (!c.Loaded || el.StyleVersion == c.Version) continue;
-        ApplyStyle(c.Data, reg, e);
+        json style;
+        int version = 0;
+        if (!ResolveStyle(el.Style, style, version) || el.StyleVersion == version) continue;
+        ApplyStyle(style, reg, e);
         // Версия запоминается и у элемента, копия которого живёт в другом
         // реестре: у них свой StyleVersion, и каждый получит стиль сам.
-        reg.get<Element>(e).StyleVersion = c.Version;
+        reg.get<Element>(e).StyleVersion = version;
     }
 }
 

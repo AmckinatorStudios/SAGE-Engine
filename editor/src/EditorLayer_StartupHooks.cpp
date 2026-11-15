@@ -1,6 +1,11 @@
 #include "sage/core/Problems.h"
 #include "sage/app/CoreSystems.h"
 #include "EditorLayer.h"
+#include "sage/ui/UISceneSystem.h"
+
+namespace sage::editor {
+void FillUISample(Scene& scene, entt::entity root, const std::string& which);   // selftest/UISampleShots.cpp
+}
 #include "CreateAssetDialog.h"
 #include "LuaPlugins.h"
 #include "NewShader.h"
@@ -120,7 +125,7 @@ void EditorLayer::ApplyStartupHooks() {
             "SAGE_SCREENSHOT_AT_FRAME", "SAGE_EDITOR_SHOW_SETTINGS", "SAGE_EDITOR_SHOW_PROFILER",
             "SAGE_EDITOR_ICON_SHEET",   "SAGE_EDITOR_OPEN_DIALOG",   "SAGE_EDITOR_TEMPLATE",
             "SAGE_EDITOR_SHOW_ANIMATION", "SAGE_EDITOR_SHOW_INPUT", "SAGE_EDITOR_INPUT_DEMO",
-            "SAGE_EDITOR_UI_EDITOR",    "SAGE_EDITOR_UI_PREVIEW",    "SAGE_EDITOR_COLLIDER_MODE",
+            "SAGE_EDITOR_UI_EDITOR",    "SAGE_EDITOR_UI_PREVIEW",    "SAGE_EDITOR_UI_SAMPLE",    "SAGE_EDITOR_COLLIDER_MODE",
             "SAGE_EDITOR_SELECT_ENTITY",
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_SHOW_ABOUT",
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
@@ -262,6 +267,11 @@ void EditorLayer::ApplyStartupHooks() {
     if (std::getenv("SAGE_EDITOR_UI_EDITOR")) {
         m_headlessProject = true;
         SetWorkspace(EditorWorkspace::Interface);
+    }
+    // Образец со всеми элементами — для снимка (визуальная проверка вёрстки).
+    if (const std::string sample = sage::EnvString("SAGE_EDITOR_UI_SAMPLE"); !sample.empty()) {
+        m_headlessProject = true;
+        RunUISampleHook(sample);
     }
     if (const char* b = std::getenv("SAGE_EDITOR_UI_BACKDROP"))
         m_tools.UI.Backdrop = (float)std::atof(b);
@@ -425,6 +435,7 @@ void EditorLayer::ApplyStartupHooks() {
         reg.emplace_or_replace<AnimationComponent>(e);
         reg.emplace_or_replace<IKComponent>(e);
         reg.emplace_or_replace<ReflectionProbeComponent>(e);
+        reg.emplace_or_replace<RenderTextureComponent>(e).Target = "all";
         reg.emplace_or_replace<ScriptComponent>(e, ScriptComponent{"assets/scripts/spin.lua"});
         sage::ui::ApplyPreset(reg, e, "Button");
         reg.emplace_or_replace<ParticleEmitterComponent>(e);

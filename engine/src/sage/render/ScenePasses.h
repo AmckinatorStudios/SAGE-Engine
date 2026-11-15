@@ -14,6 +14,7 @@
 
 class Scene;
 struct LightingEnvironment;
+struct RenderTextureComponent;
 class Framebuffer;
 
 // ---------------------------------------------------------------------------
@@ -186,6 +187,10 @@ bool ChainNeedsVelocity(const PostChain& chain);
 //
 // Возвращает, сколько текстур обновилось: ноль — обычное дело (всё разовое уже
 // снято), и по этому числу видно, что проход не работает вхолостую.
+// Отпечаток кадра рендер-текстуры для режима «при изменении»: камера, её
+// настройки и положения рисуемых объектов. Сменился — снимать заново.
+size_t ChangeSignature(Scene& scene, entt::entity camera, const RenderTextureComponent& rt);
+
 int RenderTextureViews(Scene& scene, sage::ecs::RenderBatch& batch,
                        const LightingEnvironment& env, float time);
 
