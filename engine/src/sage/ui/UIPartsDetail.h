@@ -108,6 +108,9 @@ void DrawImagePart(const PartDrawContext& c);
 const std::vector<PartField>& BarFields();
 float BarShown(const Bar& bar);
 void DrawBarPart(const PartDrawContext& c);
+void DrawProgressSource(const PartDrawContext& c, const Bar& bar, const Look& filled, const UIRect& inner);
+void DrawProgressShaped(const PartDrawContext& c, const Bar& bar, const Look& filled, const UIRect& inner,
+                        glm::vec2 range);
 const std::vector<PartField>& IconFields();
 void DrawIconInto(UIRenderer& ui, const std::string& name, float x, float y, float size, glm::vec3 color, float alpha);
 void DrawIconPart(const PartDrawContext& c);

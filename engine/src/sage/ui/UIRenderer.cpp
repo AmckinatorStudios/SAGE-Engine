@@ -69,6 +69,9 @@ uniform float uMaskFeather;
 uniform int uMaskInvert;
 uniform sampler2D uMaskTex;
 uniform vec4 uMaskUV;
+// Картинка порядка (см. UIRenderer::Mask::Ordered): виден порядок в uMaskRange.
+uniform int uMaskOrdered;
+uniform vec2 uMaskRange;
 uniform int uMode; // 0 — сплошные квады + глифы шрифта; 1 — текстурная картинка
 // Картинка хранится в sRGB-формате (цвет, собранный кодом, текстура
 // материала): выборка отдаёт ЛИНЕЙНЫЕ значения, а интерфейс пишет в кадр как
@@ -126,7 +129,15 @@ void main() {
         m = uMaskFeather > 0.0 ? clamp(-d / uMaskFeather, 0.0, 1.0) : 1.0 - smoothstep(-soft, soft, d);
         if (uMaskMode == 2) {
             vec2 t = clamp((vScreen - uMaskRect.xy) / max(uMaskRect.zw, vec2(1e-4)), 0.0, 1.0);
-            m *= texture(uMaskTex, mix(uMaskUV.xy, uMaskUV.zw, t)).a;
+            vec4 ms = texture(uMaskTex, mix(uMaskUV.xy, uMaskUV.zw, t));
+            m *= ms.a;
+            if (uMaskOrdered == 1) {
+                // Край по порядку — сглаженный на пиксель, а не ступенькой.
+                float aa = max(fwidth(ms.r) * 0.75, 0.002);
+                float lo = uMaskRange.x <= 0.0 ? 1.0 : smoothstep(uMaskRange.x - aa, uMaskRange.x + aa, ms.r);
+                float hi = uMaskRange.y >= 1.0 ? 1.0 : 1.0 - smoothstep(uMaskRange.y - aa, uMaskRange.y + aa, ms.r);
+                m *= lo * hi;
+            }
         }
         if (uMaskInvert == 1) m = 1.0 - m;
         col.a *= m;
@@ -937,6 +948,8 @@ void UIRenderer::End() {
             m_shader.SetFloat("uMaskFeather", m.Feather);
             m_shader.SetInt("uMaskInvert", m.Invert ? 1 : 0);
             m_shader.SetVec4("uMaskUV", m.UV);
+            m_shader.SetInt("uMaskOrdered", m.Ordered ? 1 : 0);
+            m_shader.SetVec2("uMaskRange", m.Range);
             if (m.Image) {
                 m_shader.SetInt("uMaskTex", 1);
                 m.Image->Bind(1);

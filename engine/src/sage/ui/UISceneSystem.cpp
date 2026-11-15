@@ -877,16 +877,8 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     UpdateTextInputs(reg, items, keys, result, emit);
     AnimateToggles(reg, items, input.DeltaTime);
 
-    // Сглаживание полос: значение едет к цели, а не прыгает.
-    for (const Solved& it : items) {
-        if (Bar* bar = reg.try_get<Bar>(it.Entity)) {
-            if (bar->Smoothing <= 0.0f) { bar->Displayed = bar->Value; continue; }
-            if (bar->Displayed < 0.0f) bar->Displayed = bar->Value;
-            const float step = bar->Smoothing * input.DeltaTime;
-            const float diff = bar->Value - bar->Displayed;
-            bar->Displayed += glm::clamp(diff, -step, step);
-        }
-    }
+    // Шкалы: показанное значение едет к цели, неопределённые бегут.
+    UpdateProgress(reg, items, input.DeltaTime);
 
     if (scrolled.Dragging)
         for (const Solved& it : items)

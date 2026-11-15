@@ -81,6 +81,7 @@ int main(int argc, char** argv) {
         RunUIPixelChecks();
         RunUIShapeChecks();
         RunUIControlsChecks();
+        RunUIProgressChecks();
         RunTextureChecks(renderer);
         RunParticleChecks();
         RunPipelineChecks(*scene);

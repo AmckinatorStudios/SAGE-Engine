@@ -746,7 +746,7 @@ TEST(UI_presets_are_the_same_everywhere) {
     // Полоса заполнена наполовину: пустая неотличима от панели, и человек
     // решает, что элемент не создался.
     GameObject bar = scene.CreateObject("Bar");
-    CHECK_TRUE(sage::ui::ApplyPreset(reg, bar.Entity(), "Progress Bar"));
+    CHECK_TRUE(sage::ui::ApplyPreset(reg, bar.Entity(), "Progress"));
     const auto* barPart = reg.try_get<sage::ui::Bar>(bar.Entity());
     CHECK_TRUE(barPart != nullptr);
     if (barPart) CHECK_TRUE(barPart->Value > 0.0f && barPart->Value < 1.0f);

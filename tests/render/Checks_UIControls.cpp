@@ -5,6 +5,7 @@
 #include "Fixture.h"
 
 #include <cstdio>
+#include <filesystem>
 
 #include "sage/render/Framebuffer.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -13,6 +14,8 @@
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/ui/UISceneSystem.h"
+
+#include "stb_image_write.h"
 
 namespace sage::rendertest {
 namespace {
@@ -50,7 +53,96 @@ entt::entity Put(Scene& scene, const char* preset, glm::vec2 pos, glm::vec2 size
     return e.Entity();
 }
 
+// Progress без подложки (на чёрном видно только заполнение), белым.
+sage::ui::Bar& Gauge(Scene& scene, glm::vec2 pos, glm::vec2 size) {
+    const entt::entity e = Put(scene, "Progress", pos, size);
+    scene.Registry().remove<sage::ui::Fill>(e);
+    scene.Registry().get<sage::ui::Element>(e).Skin = sage::ui::Element::SkinMode::Custom;
+    sage::ui::Bar& b = scene.Registry().get<sage::ui::Bar>(e);
+    b.Padding = glm::vec4(0.0f);
+    b.Filled.Color = b.Filled.Gradient = {1, 1, 1, 1};
+    b.Filled.Rounding = 0.0f;
+    return b;
+}
+
 } // namespace
+
+void RunUIProgressChecks() {
+    std::printf("[UI progress]\n");
+    UIRenderer ui;
+    {
+        // Radial на четверть, по часовой от верха: закрашена правая верхняя
+        // четверть круга, остальные пусты.
+        Scene scene("radial");
+        sage::ui::Bar& b = Gauge(scene, {50, 0}, {100, 100});
+        b.Fill = sage::ui::Bar::Kind::Radial;
+        b.Value = 0.25f;
+        const Image img = RenderControls(ui, scene);
+        const float tr = Px(img, 125, 25).r, tl = Px(img, 75, 25).r, br = Px(img, 125, 75).r;
+        std::printf("    круг 25%%: справа сверху %.2f, слева сверху %.2f, справа снизу %.2f\n", tr, tl, br);
+        Check(tr > 0.9f, "Radial: первая четверть закрашена");
+        Check(tl < 0.05f && br < 0.05f, "Radial: остальные четверти пусты");
+        Check(Px(img, 55, 5).r < 0.05f, "Radial: угол квадрата вне круга пуст");
+    }
+    {
+        // Кольцо: середина пуста даже на 100 %.
+        Scene scene("ring");
+        sage::ui::Bar& b = Gauge(scene, {50, 0}, {100, 100});
+        b.Fill = sage::ui::Bar::Kind::Radial;
+        b.RingWidth = 15.0f;
+        b.Value = 1.0f;
+        const Image img = RenderControls(ui, scene);
+        Check(Px(img, 100, 7).r > 0.9f, "Radial-кольцо: обод закрашен");
+        Check(Px(img, 100, 50).r < 0.05f, "Radial-кольцо: середина пуста");
+    }
+    {
+        // Path по горизонтали на половину: левая половина линии есть, правой нет.
+        Scene scene("path");
+        sage::ui::Bar& b = Gauge(scene, {0, 0}, {200, 100});
+        b.Fill = sage::ui::Bar::Kind::Path;
+        b.Path = "M 0 0.5 L 1 0.5";
+        b.PathWidth = 20.0f;
+        b.Value = 0.5f;
+        const Image img = RenderControls(ui, scene);
+        Check(Px(img, 50, 50).r > 0.9f, "Path: пройденная часть закрашена");
+        Check(Px(img, 150, 50).r < 0.05f, "Path: оставшаяся часть пуста");
+        Check(Px(img, 50, 20).r < 0.05f, "Path: вне толщины пути пусто");
+    }
+    {
+        // Custom Mask: картинка порядка — тёмная слева, светлая справа; на
+        // 30 % закрашена только левая часть.
+        namespace fs = std::filesystem;
+        const fs::path dir = fs::temp_directory_path() / "sage_progress_check";
+        fs::create_directories(dir);
+        std::vector<unsigned char> px(64 * 8 * 4);
+        for (int y = 0; y < 8; ++y)
+            for (int x = 0; x < 64; ++x) {
+                unsigned char* d = &px[((size_t)y * 64 + x) * 4];
+                d[0] = d[1] = d[2] = (unsigned char)(x * 4);
+                d[3] = 255;
+            }
+        const std::string file = (dir / "order.png").string();
+        stbi_write_png(file.c_str(), 64, 8, 4, px.data(), 64 * 4);
+        Scene scene("custom");
+        sage::ui::Bar& b = Gauge(scene, {0, 0}, {200, 100});
+        b.Fill = sage::ui::Bar::Kind::CustomMask;
+        b.MaskImage = file;
+        b.Value = 0.3f;
+        const Image img = RenderControls(ui, scene);
+        Check(Px(img, 20, 50).r > 0.9f, "Custom Mask: тёмная часть картинки закрашена");
+        Check(Px(img, 160, 50).r < 0.05f, "Custom Mask: светлая часть пуста");
+    }
+    {
+        // Диапазон Min..Max: 125 из 0..250 — ровно половина полосы.
+        Scene scene("range");
+        sage::ui::Bar& b = Gauge(scene, {0, 0}, {200, 100});
+        b.Min = 0.0f;
+        b.Max = 250.0f;
+        b.Value = 125.0f;
+        const Image img = RenderControls(ui, scene);
+        Check(Px(img, 90, 50).r > 0.9f && Px(img, 110, 50).r < 0.05f, "Linear: Min..Max — половина");
+    }
+}
 
 void RunUIControlsChecks() {
     std::printf("[UI controls]\n");

@@ -416,4 +416,25 @@ void AnimateToggles(entt::registry& reg, const std::vector<Solved>& items, float
     }
 }
 
+void UpdateProgress(entt::registry& reg, const std::vector<Solved>& items, float dt) {
+    for (const Solved& it : items) {
+        Bar* bar = reg.try_get<Bar>(it.Entity);
+        if (!bar) continue;
+        // Бег отрезка: круг за 1.4 секунды — заметно, но не мельтешит.
+        if (bar->Indeterminate) bar->Phase = std::fmod(bar->Phase + dt / 1.4f, 1.0f);
+        if (!bar->HasDisplayed || (bar->Smoothing <= 0.0f && bar->Easing <= 0.0f)) {
+            bar->Displayed = bar->Value;
+            bar->HasDisplayed = true;
+            continue;
+        }
+        const float diff = bar->Value - bar->Displayed;
+        // Смягчение: за Easing секунд остаётся около 5 % пути (e^-3).
+        float step = bar->Easing > 0.0f ? diff * (1.0f - std::exp(-3.0f * dt / bar->Easing)) : diff;
+        if (bar->Smoothing > 0.0f) step = glm::clamp(step, -bar->Smoothing * dt, bar->Smoothing * dt);
+        bar->Displayed += step;
+        if (std::fabs(bar->Value - bar->Displayed) < 1e-4f * std::max(1.0f, std::fabs(bar->Max - bar->Min)))
+            bar->Displayed = bar->Value;
+    }
+}
+
 } // namespace sage::ui
