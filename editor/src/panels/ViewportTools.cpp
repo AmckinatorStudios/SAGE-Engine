@@ -69,12 +69,17 @@ float SnapFieldWidth(const std::string& label) {
 // Шаг переноса — по каждой оси (плита 2×1×0.25 ставится своим шагом), поворот
 // и масштаб — одним числом. Пределы и сохранение — прежние (SaveSnap).
 void ViewportPanel::DrawSnapMenu(EditorHost& host) {
-    Sage::UI::MenuScope menu;
     // Окно — под полем шагов, а не там, где оказалась мышь.
     ImGui::SetNextWindowPos(m_snapAnchor, ImGuiCond_Appearing);
     const float popupW = 320.0f * Sage::UI::Scale();
     ImGui::SetNextWindowSizeConstraints(ImVec2(popupW, 0.0f), ImVec2(popupW, FLT_MAX));
-    if (!ImGui::BeginPopup("##snap_menu")) return;
+    if (Sage::UI::MenuScope menu; ImGui::BeginPopup("##snap_menu")) {
+        DrawSnapSteps(host);
+        ImGui::EndPopup();
+    }
+}
+
+void ViewportPanel::DrawSnapSteps(EditorHost& host) {
     EditorTools& t = host.Tools();
     // G работает и при открытом окне: окно перекрывает вид, и хоткей вьюпорта
     // (он ждёт курсор над видом) сюда бы не дошёл.
@@ -83,10 +88,9 @@ void ViewportPanel::DrawSnapMenu(EditorHost& host) {
         t.Snap = !t.Snap;
         t.SaveSnap();
     }
-    // Привязку выключили (G) при открытом списке — шаги прячутся сразу.
+    // Привязку выключили — шаги прячутся сразу.
     if (!t.Snap) {
         ImGui::CloseCurrentPopup();
-        ImGui::EndPopup();
         return;
     }
     // Поля шагов — настройки редактора, а не правка сцены: в историю отмены
@@ -120,7 +124,6 @@ void ViewportPanel::DrawSnapMenu(EditorHost& host) {
         t.SnapScale = std::clamp(t.SnapScale, 0.001f, 10.0f);
         t.SaveSnap();
     }
-    ImGui::EndPopup();
 }
 
 // --- Редкое: «…» ------------------------------------------------------------

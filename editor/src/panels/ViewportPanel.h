@@ -113,6 +113,7 @@ private:
     void StopPilot(EditorHost& host);
     void SyncPilotCamera(EditorHost& host);   // камера редактора -> объект камеры
     void DrawSnapMenu(EditorHost& host);     // шаги привязки (только при включённой)
+    void DrawSnapSteps(EditorHost& host);    // содержимое окна шагов
     void DrawMoreMenu(EditorHost& host);     // редкие инструменты, виды, слой информации
     // Рисует один вид раскладки в текущем регионе. Возвращает true, если курсор
     // над ним (для взаимодействия).
