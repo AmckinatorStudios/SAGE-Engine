@@ -318,12 +318,14 @@ sage::physics::MeshGeometryPtr PhysicsScene::ColliderGeometry(Scene& scene, entt
     MeshRef::Type type = MeshRef::Type::Model;
     std::string path = col->MeshPath;
     int part = -1;   // своя модель коллайдера — целиком
+    sage::render::PrimitiveParams prim;   // настройки геометрии примитива объекта
     const Mesh* gpu = nullptr;
     if (path.empty()) {
         if (!mr || mr->Ref.type == MeshRef::Type::None) return nullptr;
         type = mr->Ref.type;
         path = mr->Ref.path;
         part = mr->Ref.part;
+        prim = mr->Ref.prim;
         gpu = mr->MeshPtr.get();
     }
     // НОМЕР ЧАСТИ — В КЛЮЧЕ. Модель, поставленная иерархией, — это объекты
@@ -331,18 +333,27 @@ sage::physics::MeshGeometryPtr PhysicsScene::ColliderGeometry(Scene& scene, entt
     // части отдавал ВСЕМ им геометрию того узла, что попал в кэш первым:
     // коллайдер по мешу «работал» у одного объекта, а остальные сталкивались
     // его формой в своих местах — то есть не там, где нарисованы.
-    const std::string sourceKey = std::to_string((int)type) + "|" + std::to_string(part) + "|" + path;
+    // Настройки примитива — тоже в ключе: капсула высотой 4 сталкивается
+    // своей формой, а не формой капсулы по умолчанию.
+    sage::render::PrimitiveShape primShape;
+    const bool isPrimitive = MeshRef::ShapeOf(type, primShape);
+    const std::string sourceKey = std::to_string((int)type) + "|" + std::to_string(part) + "|" + path +
+                                  (isPrimitive ? "|" + prim.Key(primShape) : std::string());
 
     std::shared_ptr<const MeshGeometry>& source = m_meshSources[sourceKey];
     if (!source) {
         std::shared_ptr<MeshGeometry> built;
         switch (type) {
-            case MeshRef::Type::Cube: { auto d = sage::render::BuildCube(); built = Weld(d.Vertices, d.Indices); break; }
-            case MeshRef::Type::Sphere: { auto d = sage::render::BuildSphere(); built = Weld(d.Vertices, d.Indices); break; }
-            case MeshRef::Type::Plane: { auto d = sage::render::BuildPlane(); built = Weld(d.Vertices, d.Indices); break; }
-            case MeshRef::Type::Cylinder: { auto d = sage::render::BuildCylinder(); built = Weld(d.Vertices, d.Indices); break; }
-            case MeshRef::Type::Cone: { auto d = sage::render::BuildCone(); built = Weld(d.Vertices, d.Indices); break; }
-            case MeshRef::Type::Capsule: { auto d = sage::render::BuildCapsule(); built = Weld(d.Vertices, d.Indices); break; }
+            case MeshRef::Type::Cube:
+            case MeshRef::Type::Sphere:
+            case MeshRef::Type::Plane:
+            case MeshRef::Type::Cylinder:
+            case MeshRef::Type::Cone:
+            case MeshRef::Type::Capsule: {
+                auto d = sage::render::BuildPrimitive(primShape, prim);
+                built = Weld(d.Vertices, d.Indices);
+                break;
+            }
             case MeshRef::Type::Model:
             default: {
                 // Копия в памяти у меша уже есть (редактор держит её для выбора

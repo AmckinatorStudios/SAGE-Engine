@@ -2,6 +2,7 @@
 #include <array>
 #include <filesystem>
 #include "ResourceManager.h"
+#include "sage/render/MeshData.h"
 #include "sage/core/EngineContext.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Quarantine.h"
@@ -724,6 +725,23 @@ void ResourceManager::StartWorker() {
     m_async->Worker = std::thread([impl = m_async.get()] { impl->Run(); });
 }
 
+std::shared_ptr<Mesh> ResourceManager::GetPrimitive(MeshRef::Type type, const sage::render::PrimitiveParams& params) {
+    sage::render::PrimitiveShape shape;
+    if (!MeshRef::ShapeOf(type, shape)) return nullptr;
+    // Настройки по умолчанию — общий меш формы (тот же, что у всех старых сцен).
+    if (params.SameAsDefault(shape)) return GetPrimitive(type);
+    const std::string key = params.Key(shape);
+    if (auto it = m_primitiveVariants.find(key); it != m_primitiveVariants.end()) return it->second;
+    // Уборка перед новым вариантом: те, что держит только кэш, больше никому
+    // не нужны (поле детализации тянули — промежуточные значения не копятся).
+    for (auto it = m_primitiveVariants.begin(); it != m_primitiveVariants.end();)
+        it = it->second.use_count() == 1 ? m_primitiveVariants.erase(it) : std::next(it);
+    const sage::render::MeshData data = sage::render::BuildPrimitive(shape, params);
+    auto mesh = std::make_shared<Mesh>(data.Vertices, data.Indices, m_keepMeshCpu);
+    m_primitiveVariants[key] = mesh;
+    return mesh;
+}
+
 void ResourceManager::Clear() {
     // Останавливаем фоновый поток ДО очистки карт: иначе он мог бы дописать
     // результат для только что удалённой записи (безвредно, но чище так).
@@ -736,6 +754,7 @@ void ResourceManager::Clear() {
     // ВСЕ формы разом: забыть одну нельзя, а забытая освобождала бы свой буфер
     // видеокарты после смерти GL-контекста — то есть падением при выходе.
     for (std::shared_ptr<Mesh>& primitive : m_primitives) primitive.reset();
+    m_primitiveVariants.clear();
     m_models.clear();
     // Штампы — вместе с записями: оставшись без своих ресурсов, они заставляли
     // ReloadChangedAssets «перечитывать» давно выгруженные файлы (а удалённые —

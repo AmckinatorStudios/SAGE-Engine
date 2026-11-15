@@ -104,6 +104,14 @@ public:
         return slot;
     }
 
+    // ПРИМИТИВ СО СВОИМИ НАСТРОЙКАМИ ГЕОМЕТРИИ (MeshRef::prim). Настройки,
+    // дающие геометрию по умолчанию, — тот же общий меш, что выше. Остальные
+    // варианты — своим мешем на ключ настроек: одинаковые шары делят один, а
+    // правка одного объекта не трогает ни общий меш, ни соседей. Вариант,
+    // который больше никто не держит, убирается при следующей сборке —
+    // перетаскивание поля детализации не копит сотню мешей в кэше.
+    std::shared_ptr<Mesh> GetPrimitive(MeshRef::Type type, const sage::render::PrimitiveParams& params);
+
     // Короткие имена — их зовут десятки мест; все ведут в GetPrimitive.
     std::shared_ptr<Mesh> GetCube()     { return GetPrimitive(MeshRef::Type::Cube); }
     std::shared_ptr<Mesh> GetSphere()   { return GetPrimitive(MeshRef::Type::Sphere); }
@@ -420,6 +428,8 @@ private:
     // чтобы новая форма не требовала править ещё и число.
     static constexpr size_t kPrimitiveСount = (size_t)MeshRef::Type::Model + 1;
     std::shared_ptr<Mesh> m_primitives[kPrimitiveСount];
+    // Примитивы со своими настройками геометрии — по ключу настроек.
+    std::unordered_map<std::string, std::shared_ptr<Mesh>> m_primitiveVariants;
     bool m_keepMeshCpu = false;   // см. SetKeepMeshCpuData
     std::unordered_map<std::string, std::shared_ptr<Mesh>> m_models;
     std::unordered_map<std::string, std::shared_ptr<Material>> m_materials;

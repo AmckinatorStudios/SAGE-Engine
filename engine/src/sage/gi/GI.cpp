@@ -41,13 +41,11 @@ struct Fnv {
 // лайтмапу, и стена из неё пропускала солнце в тёмную комнату.
 sage::render::MeshData ResolveMeshData(const MeshRef& ref) {
     using sage::render::MeshData;
+    // Примитив — с его настройками геометрии: бейк видит те же треугольники,
+    // что и рендер.
+    if (sage::render::PrimitiveShape shape; MeshRef::ShapeOf(ref.type, shape))
+        return sage::render::BuildPrimitive(shape, ref.prim);
     switch (ref.type) {
-        case MeshRef::Type::Cube:     return sage::render::BuildCube();
-        case MeshRef::Type::Sphere:   return sage::render::BuildSphere();
-        case MeshRef::Type::Plane:    return sage::render::BuildPlane();
-        case MeshRef::Type::Cylinder: return sage::render::BuildCylinder();
-        case MeshRef::Type::Cone:     return sage::render::BuildCone();
-        case MeshRef::Type::Capsule:  return sage::render::BuildCapsule();
         case MeshRef::Type::Model: {
             const std::string& p = ref.path;
             if (p.empty()) return {};

@@ -123,6 +123,7 @@ add_executable(sage_tests
     test_canvas_toolbar.cpp
     test_scene_layers.cpp
     test_editor_ui_kit.cpp
+    test_primitives.cpp
     test_postchainui.cpp
     ../editor/src/PathScope.cpp
     ../editor/src/HotkeyScope.cpp

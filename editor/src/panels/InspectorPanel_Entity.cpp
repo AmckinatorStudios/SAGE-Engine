@@ -381,6 +381,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         DrawMaterialSlot(host, mr);
         sage::editor::DrawRenderLayerField(host, mr);
     }
+    // Детализация примитива — своим разделом сразу под мешем.
+    if (reg.all_of<MeshRendererComponent>(obj.Entity())) sage::editor::DrawPrimitiveGeometry(host, obj.Renderer());
 
     // --- Камера (игровая): панель Game рендерит от первой Primary-камеры ---
     bool resetCamera = false;

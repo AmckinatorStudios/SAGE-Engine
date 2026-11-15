@@ -132,7 +132,7 @@ void EditorLayer::ApplyStartupHooks() {
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TWEEN",
             "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
             "SAGE_EDITOR_SHOW_CONSOLE",  "SAGE_EDITOR_SHOW_PROBLEMS",
-            "SAGE_EDITOR_SHOW_PLUGINS",   "SAGE_EDITOR_SHADER_DEMO",  "SAGE_EDITOR_LIGHT_COOKIE",
+            "SAGE_EDITOR_SHOW_PLUGINS",   "SAGE_EDITOR_SHADER_DEMO",  "SAGE_EDITOR_LIGHT_COOKIE", "SAGE_EDITOR_PRIMITIVES",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -303,6 +303,8 @@ void EditorLayer::ApplyStartupHooks() {
                 tc->Tweens[0].ArrangeSequence();
             }
     }
+    if (const std::string prims = sage::EnvString("SAGE_EDITOR_PRIMITIVES"); !prims.empty())
+        RunPrimitiveShowcaseHook(prims);
     if (const char* name = std::getenv("SAGE_EDITOR_SELECT_ENTITY")) {
         m_headlessProject = true;
         GameObject obj = m_scene->FindByName(name);

@@ -4032,6 +4032,19 @@
     "Give the object this tag": "Дать объекту этот тег",
     "New tag": "Новый тег",
     "Part": "Часть",
+    "Body Segments": "Пояса тела",
+    "Detail and shading of the shape. Its size is Transform → Scale": "Детализация и сглаживание формы. Её размер — Transform → Scale",
+    "Each face is split into a grid; faces stay flat and edges sharp": "Каждая грань делится сеткой; грани остаются плоскими, рёбра — острыми",
+    "Height Segments": "Пояса по высоте",
+    "Hemisphere Rings": "Кольца полусфер",
+    "Radial Segments": "Секторы по кругу",
+    "Rings": "Кольца",
+    "Segments": "Секторы",
+    "Smooth Shading": "Сглаживание",
+    "Smooth Side": "Гладкая стенка",
+    "Smooths only the side: the caps stay flat": "Сглаживает только стенку: торцы остаются плоскими",
+    "Subdivisions": "Подразделения",
+    "Total height of the capsule: only the straight middle grows, the round ends keep their shape. Not lower than the diameter (1)": "Общая высота капсулы: растёт только прямая середина, круглые торцы сохраняют форму. Не ниже диаметра (1)",
     "default": "default"
   }
 }
