@@ -4076,6 +4076,10 @@
     "view %d of %d": "вид %d из %d",
     "Local (X): the gizmo follows the object's own axes": "Локально (X): гизмо по собственным осям объекта",
     "Global (X): the gizmo follows the axes of the scene. Scale always uses the object's axes": "Глобально (X): гизмо по осям сцены. Масштаб — всегда по осям объекта",
+    "Errors: click to show them in the Console": "Ошибки: щелчок покажет их в консоли",
+    "The scene has unsaved changes (Ctrl+S saves)": "В сцене есть несохранённые изменения (Ctrl+S — сохранить)",
+    "The scene is saved": "Сцена сохранена",
+    "Warnings: click to show them in the Console": "Предупреждения: щелчок покажет их в консоли",
     "default": "default"
   }
 }
