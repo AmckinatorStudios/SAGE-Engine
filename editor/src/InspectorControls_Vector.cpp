@@ -2,11 +2,14 @@
 // EDITOR UI KIT: ВЕКТОРЫ — Vector2/3/4, пары (X/Y, W/H, Min/Max), размер со
 // связью пропорций, стороны (L/T/R/B).
 //
-// Вектор — ОДИН контрол: общая рамка, равные сегменты через тонкие
-// разделители, в сегменте — метка оси, число и компактные −/+. Не три
-// отдельных поля с зазорами: глаз читает «это одна позиция», а не «три числа
-// где-то рядом». Узко — Segmented → Compact (без −/+) → Stacked (ось на
-// строку); подпись — над полем раньше, чем сегменты начнут сжиматься.
+// ОСЬ — СВОЁ ПОЛЕ. X, Y и Z — три самостоятельных числовых поля, каждое своей
+// рамкой и фоном, с небольшим отступом между ними, одной ширины и в одну
+// строку. В поле — цветная метка оси, число и компактные −/+. Общей рамки,
+// склеивающей оси в одну длинную полосу, нет: такую полосу читали как одно
+// значение, а промахнуться мимо нужной оси на ней было легко.
+//
+// Узко — Segmented (в строку, с −/+) → Compact (в строку, без −/+) → Stacked
+// (ось на строку); подпись — над полями раньше, чем поля начнут сжиматься.
 // ---------------------------------------------------------------------------
 #include "InspectorControls.h"
 #include "InspectorControlsDetail.h"
@@ -32,10 +35,15 @@ namespace {
 
 const char* const kAxisTags[4] = {"X", "Y", "Z", "W"};
 
-// Сколько ширины нужно сегменту вида look.
+// Сколько ширины нужно полю оси вида look.
 float SegmentNeed(VecLook look, float tagW, float h) {
     if (look == VecLook::Segmented) return tagW + std::floor(h * K().StepButton) * 2.0f + 36.0f;
     return tagW + K().SegmentMin;
+}
+
+// Ширина строки из n полей вида look (с отступами между ними).
+float RowNeed(VecLook look, int n, float tagW, float h) {
+    return (float)n * SegmentNeed(look, tagW, h) + (float)std::max(0, n - 1) * K().AxisGap;
 }
 
 // Значок-переключатель связи (замок) в конце строки.
@@ -48,11 +56,17 @@ bool TagsAreAxes(const char* const* tags) { return !tags || std::strcmp(tags[0],
 
 } // namespace
 
+float VecAxisGap() { return K().AxisGap; }
+
+float VecFieldWidth(float width, int n) {
+    if (n <= 0) return width;
+    return std::floor((width - (float)(n - 1) * K().AxisGap) / (float)n);
+}
+
 VecLook FitVecLook(VecLook wanted, float width, int n, float tagW, float h) {
     if (n <= 0) return wanted;
-    const float per = width / (float)n;
-    if (wanted == VecLook::Segmented && per >= SegmentNeed(VecLook::Segmented, tagW, h)) return VecLook::Segmented;
-    if (wanted != VecLook::Stacked && per >= SegmentNeed(VecLook::Compact, tagW, h)) return VecLook::Compact;
+    if (wanted == VecLook::Segmented && width >= RowNeed(VecLook::Segmented, n, tagW, h)) return VecLook::Segmented;
+    if (wanted != VecLook::Stacked && width >= RowNeed(VecLook::Compact, n, tagW, h)) return VecLook::Compact;
     return VecLook::Stacked;
 }
 
@@ -73,8 +87,7 @@ bool DragVec(EditorHost* host, const char* label, float* v, int n, float speed, 
     const char* end = label + std::strlen(label);
     if (const char* hash = std::strstr(label, "##")) end = hash;
     ImGui::PushID(label);
-    if (end != label) Label(label, (float)n * SegmentNeed(VecLook::Compact, detail::TagWidth(kAxisTags, n),
-                                                          ImGui::GetFrameHeight()));
+    if (end != label) Label(label, RowNeed(VecLook::Compact, n, detail::TagWidth(kAxisTags, n), ImGui::GetFrameHeight()));
     const bool changed = detail::VectorImpl(host, "v", v, n, o, vo);
     ImGui::PopID();
     return changed;
@@ -86,7 +99,7 @@ bool VectorImpl(EditorHost* hostPtr, const char* id, float* v, int n, const NumO
     const char* const* tags = vo.Tags ? vo.Tags : kAxisTags;
     const float h = ImGui::GetFrameHeight();
     const float tagW = detail::TagWidth(tags, n);
-    const float width = std::max(n * (tagW + K().SegmentMin), ImGui::GetContentRegionAvail().x - vo.Trailing);
+    const float width = std::max(tagW + K().SegmentMin, ImGui::GetContentRegionAvail().x - vo.Trailing);
     const VecLook look = FitVecLook(vo.Look, width, n, tagW, h);
     const ImVec2 p = ImGui::GetCursorScreenPos();
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -110,30 +123,27 @@ bool VectorImpl(EditorHost* hostPtr, const char* id, float* v, int n, const NumO
                             K().Rounding);
         }
     } else {
-        // Одна рамка, равные сегменты; остаток ширины — последнему.
-        detail::Frame(dl, p, ImVec2(p.x + width, p.y + h), EditorTheme::State::Normal);
-        const float seg = std::floor(width / (float)n);
-        bool anyActive = false;
+        // В строку: поле на ось, своей рамкой, одной ширины, через AxisGap;
+        // остаток от округления — последнему, чтобы правый край ровно совпал
+        // с краем строки.
+        const float field = VecFieldWidth(width, n);
         for (int i = 0; i < n; ++i) {
-            const float sx = p.x + seg * (float)i;
-            const float sw = i + 1 == n ? width - seg * (float)i : seg;
-            if (i) detail::InnerSeparator(dl, sx, p.y, h);
-            detail::TagPill(dl, ImVec2(sx, p.y), tagW, h, tags[i], vo.AxisColors ? i : -1);
+            const float sx = p.x + (field + K().AxisGap) * (float)i;
+            const float sw = i + 1 == n ? p.x + width - sx : field;
+            const ImVec2 a(sx, p.y), b(sx + sw, p.y + h);
+            detail::Frame(dl, a, b, EditorTheme::State::Normal);
+            detail::TagPill(dl, a, tagW, h, tags[i], vo.AxisColors ? i : -1);
             bool active = false;
             ImGui::PushID(i);
             changed |= detail::NumberIn(hostPtr, "v", &v[i], o, ImVec2(sx + tagW, p.y), sw - tagW,
                                         look == VecLook::Segmented, ImDrawFlags_RoundCornersNone,
-                                        i + 1 == n ? ImDrawFlags_RoundCornersRight : ImDrawFlags_RoundCornersNone,
-                                        &active);
+                                        ImDrawFlags_RoundCornersRight, &active);
             ImGui::PopID();
-            anyActive |= active;
+            if (active) dl->AddRect(a, b, EditorTheme::ControlBorder(EditorTheme::State::Focused), K().Rounding);
         }
-        if (anyActive)
-            dl->AddRect(p, ImVec2(p.x + width, p.y + h), EditorTheme::ControlBorder(EditorTheme::State::Focused),
-                        K().Rounding);
     }
-    // Весь вектор — один элемент строки: значок справа (SameLine) встаёт
-    // за рамкой, а не за последним сегментом.
+    // Вся строка полей — один элемент для раскладки: значок справа (SameLine)
+    // встаёт за последним полем, сброс правым щелчком и подсказки — к строке.
     ImGui::SetCursorScreenPos(p);
     ImGui::Dummy(ImVec2(width, totalH));
     ImGui::PopID();
@@ -147,8 +157,7 @@ bool VectorN(EditorHost& host, const char* label, float* v, int n, const NumOpts
     const float h = ImGui::GetFrameHeight();
     const float tagW = detail::TagWidth(tags, n);
     // Подпись — над полем раньше, чем сегменты начнут терять −/+.
-    Label(label, (float)n * SegmentNeed(vo.Look == VecLook::Stacked ? VecLook::Compact : vo.Look, tagW, h) +
-                     vo.Trailing);
+    Label(label, RowNeed(vo.Look == VecLook::Stacked ? VecLook::Compact : vo.Look, n, tagW, h) + vo.Trailing);
     // Правый щелчок по подписи — сброс всей строки (у поля оси — одной оси).
     if (o.HasReset) {
         bool differs = false;

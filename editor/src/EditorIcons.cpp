@@ -260,13 +260,11 @@ std::string GlyphUtf8(const char* icon) {
     return utf8;
 }
 
-std::string WindowTitle(const char* icon, const char* title, const char* id) {
-    const std::string glyph = GlyphUtf8(icon);
-    std::string out;
-    // Имени без глифа быть не должно, но если оно вдруг есть — заголовок
-    // обязан остаться читаемым, а не начинаться с пустого квадрата.
-    if (!glyph.empty()) out = glyph + "  ";
-    out += title ? title : "";
+std::string WindowTitle(const char* /*icon*/, const char* title, const char* id) {
+    // Вкладка — только подпись: значок перед словом занимал место и рядом с
+    // соседними вкладками читался как украшение, а не как смысл. «###» с
+    // идентификатором — как раньше: раскладка дока его и помнит.
+    std::string out = title ? title : "";
     out += "###";
     out += id ? id : "";
     return out;
@@ -426,86 +424,31 @@ bool IconOnlyButton(const char* icon, const char* tooltip, bool active, const gl
     return pressed;
 }
 
-// Сколько пробелов освободит в подписи место шириной width. Пробел — единица
-// сдвига, доступная внутри ОДНОГО элемента ImGui, а пункт меню обязан остаться
-// одним элементом: разбей его на «значок + текст», и сломаются и клик по
-// строке, и подсветка под курсором, и переход стрелками.
-static int SpacesFor(float width) {
-    const float spaceW = ImGui::CalcTextSize(" ").x;
-    if (spaceW <= 0.0f) return 1;
-    return (int)std::ceil(width / spaceW);
+// ПУНКТЫ МЕНЮ — ТЕКСТОМ, БЕЗ ЗНАЧКОВ.
+//
+// Значок слева от каждого пункта требовал колонки под себя (пробелы перед
+// подписью), а меню из сорока пунктов со значками читалось как пёстрая
+// таблица: взгляд цеплялся за рисунки, а не за слова. Теперь пункт — обычный
+// ImGui::MenuItem: подпись с левого края, справа — сочетание клавиш, галка
+// переключателя и стрелка подменю, как их рисует ImGui. Имя значка в вызовах
+// оставлено: им пользуются палитра команд и плагины, и вызывающим не нужно
+// переписываться.
+bool MenuItem(const char* /*icon*/, const char* label, const char* shortcut, bool enabled) {
+    return ImGui::MenuItem(label, shortcut, false, enabled);
 }
 
-namespace {
-
-// Общая часть трёх форм пункта меню: пробелы под значок, сам пункт, рисунок
-// поверх. Отличаются они только тем, как передаётся галка состояния, и
-// повторять ради этого отрисовку значка трижды значит завести три места, где
-// отступ значка может разойтись.
-bool MenuItemImpl(const char* icon, const char* label, const char* shortcut, bool enabled,
-                  bool selected, bool* selectedPtr) {
-    const ImVec2 at = ImGui::GetCursorScreenPos();
-    const float size = ImGui::GetTextLineHeight();
-    const float gap = TextGap();
-    // Пробелов — РОВНО столько, сколько нужно под значок с зазором, а не пять
-    // «на глаз». Пять пробелов — это разная ширина при разном шрифте и масштабе
-    // интерфейса: в одном меню подпись прилипала к рисунку, в другом уезжала.
-    const int count = SpacesFor(size + gap);
-    const std::string padded = std::string((size_t)count, ' ') + label;
-    const bool clicked = selectedPtr ? ImGui::MenuItem(padded.c_str(), shortcut, selectedPtr, enabled)
-                                     : ImGui::MenuItem(padded.c_str(), shortcut, selected, enabled);
-
-    // Значок ПРИЖАТ К ПОДПИСИ с тем же зазором: остаток от округления пробелов
-    // уходит слева, где он никому не мешает, а не между рисунком и словом, где
-    // он и читается как кривизна.
-    const float textStart = count * ImGui::CalcTextSize(" ").x;
-    const ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
-    // Погашенный пункт и значок имеет погашенный: живой значок у мёртвой строки
-    // читается как «работает, просто не нажимается».
-    const ImU32 color = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-    DrawAt(ImGui::GetWindowDrawList(),
-           ImVec2(at.x + textStart - gap - size, std::floor(r0.y + ((r1.y - r0.y) - size) * 0.5f)),
-           size, icon, color);
-    return clicked;
-}
-
-} // namespace
-
-bool MenuItem(const char* icon, const char* label, const char* shortcut, bool enabled) {
-    return MenuItemImpl(icon, label, shortcut, enabled, /*selected=*/false, nullptr);
-}
-
-bool MenuItemToggle(const char* icon, const char* label, bool* selected, const char* shortcut,
+bool MenuItemToggle(const char* /*icon*/, const char* label, bool* selected, const char* shortcut,
                     bool enabled) {
-    return MenuItemImpl(icon, label, shortcut, enabled, /*selected=*/false, selected);
+    return ImGui::MenuItem(label, shortcut, selected, enabled);
 }
 
-bool MenuItemSelected(const char* icon, const char* label, bool selected, const char* shortcut,
+bool MenuItemSelected(const char* /*icon*/, const char* label, bool selected, const char* shortcut,
                       bool enabled) {
-    return MenuItemImpl(icon, label, shortcut, enabled, selected, nullptr);
+    return ImGui::MenuItem(label, shortcut, selected, enabled);
 }
 
-bool BeginMenu(const char* icon, const char* label, bool enabled) {
-    // Тот же отступ пробелами, что и у пунктов: подменю стоит с ними в одном
-    // столбце, и свой расчёт здесь означал бы столбец из двух разных отступов.
-    const ImVec2 at = ImGui::GetCursorScreenPos();
-    const float size = ImGui::GetTextLineHeight();
-    const float gap = TextGap();
-    const int count = SpacesFor(size + gap);
-    const std::string padded = std::string((size_t)count, ' ') + label;
-    // СПИСОК ОТРИСОВКИ ЗАПОМИНАЕТСЯ ДО BeginMenu. Раскрывшись, он делает
-    // текущим окно подменю — и значок, поданный после, ушёл бы внутрь
-    // раскрытого списка вместо его заголовка.
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    const bool open = ImGui::BeginMenu(padded.c_str(), enabled);
-
-    const float textStart = count * ImGui::CalcTextSize(" ").x;
-    const ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
-    const ImU32 color = ImGui::GetColorU32(enabled ? ImGuiCol_Text : ImGuiCol_TextDisabled);
-    DrawAt(dl, ImVec2(at.x + textStart - gap - size,
-                      std::floor(r0.y + ((r1.y - r0.y) - size) * 0.5f)),
-           size, icon, color);
-    return open;
+bool BeginMenu(const char* /*icon*/, const char* label, bool enabled) {
+    return ImGui::BeginMenu(label, enabled);
 }
 
 void Inline(const char* icon, const glm::vec3& color) {

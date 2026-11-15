@@ -100,7 +100,6 @@ struct Metrics {
     float BorderWindow = 0.0f;      // 0 — слои разделяет фон, а не линия
     float BorderFrame = 0.0f;
     float BorderPopup = 1.0f;
-    float TabOverline = 3.0f;       // полоса акцента над активной вкладкой
     float SeparatorSize = 1.0f;
 };
 
@@ -171,6 +170,7 @@ struct Kit {
     float LabelGap = 8.0f;        // подпись → поле
     float TagGap = 4.0f;          // метка оси → число; поле → значок справа
     float PairGap = 10.0f;        // между полями пары без общей рамки
+    float AxisGap = 6.0f;         // между полями осей вектора (X, Y, Z — каждое своей рамкой)
     float Indent = 14.0f;         // содержимое вложенной группы
     float GroupGap = 6.0f;        // между независимыми группами
     float SectionGap = 6.0f;      // после раздела
@@ -189,7 +189,6 @@ struct Kit {
     float TagPad = 10.0f;         // метка оси: поля вокруг буквы
     float TagInset = 3.0f;        // метка оси внутри сегмента
     float HeaderExtra = 4.0f;     // шапка раздела выше поля на столько
-    float HeaderAccent = 3.0f;    // акцентная метка шапки
     float HeaderPadX = 12.0f;     // текст шапки от левого края
     float ButtonPadX = 10.0f;     // поля кнопки с текстом
     float ButtonPadXCompact = 6.0f;

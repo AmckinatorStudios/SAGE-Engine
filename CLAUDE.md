@@ -173,8 +173,8 @@ Linux не видна. macOS пока не выпускается (см. п. 6).
 - **Инспекторы и окна редактора — на Editor UI Kit** (`ictl::`,
   `editor/src/InspectorControls.h`; поля компонентов с историей — `ifield::`).
   Одна функция — один цельный контрол: список — `ictl::Combo`/`BeginDropdown`
-  (шеврон внутри поля), вектор — `ictl::VectorN`/`Vector3`/`DragVec` (общая
-  рамка, сегменты), кнопки одной операции — `ictl::ButtonGroup`, вкл/выкл —
+  (шеврон внутри поля), вектор — `ictl::VectorN`/`Vector3`/`DragVec` (поле на
+  ось, своей рамкой, в строку), кнопки одной операции — `ictl::ButtonGroup`, вкл/выкл —
   `ictl::Switch`/`Check`, раздел — `ictl::BeginSection` или
   `EditorTheme::SectionHeader` (одна шапка), вложенная группа —
   `ictl::SubSection`. Размеры, отступы и цвета состояний — только

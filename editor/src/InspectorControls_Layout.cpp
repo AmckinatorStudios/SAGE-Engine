@@ -179,8 +179,6 @@ bool SectionHeader(const char* id, const char* icon, const char* title, bool* op
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float r = K().Rounding;
     dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), EditorTheme::Color32(hovered ? Role::Hover : Role::SurfaceAlt), r);
-    dl->AddRectFilled(ImVec2(p.x, p.y + 4.0f), ImVec2(p.x + K().HeaderAccent, p.y + h - 4.0f),
-                      EditorTheme::Color32(Role::Accent), K().HeaderAccent * 0.5f);
     float x = p.x + K().HeaderPadX;
     const float is = K().IconSize;
     if (icon && *icon) {

@@ -219,7 +219,6 @@ Theme PremiumGold() {
     m.RadiusSmall = 5.0f;
     m.BorderPopup = 1.0f;     // тонкая золотистая рамка меню и подсказок
     m.BorderFrame = 1.0f;     // и у полей: тема держится на тонких тёплых рамках
-    m.TabOverline = 2.0f;     // полоска золота над активной вкладкой — тоньше
     return t;
 }
 
@@ -303,7 +302,7 @@ bool LoadThemeFile(const fs::path& path, Theme& out) {
         num("borderWindow", out.Metric.BorderWindow);
         num("borderFrame", out.Metric.BorderFrame);
         num("borderPopup", out.Metric.BorderPopup);
-        num("tabOverline", out.Metric.TabOverline);
+        // «tabOverline» старых тем не читается: полосы над вкладкой больше нет.
         num("separatorSize", out.Metric.SeparatorSize);
     }
     return true;
@@ -473,9 +472,9 @@ const Kit& KitMetrics() { return KitRef(); }
 Kit ScaledKit(float k, float radiusFrame, float separatorSize, float fontSize) {
     // Пиксели — под масштаб интерфейса; доли высоты поля — как есть.
     Kit kit;
-    for (float* f : {&kit.LabelMin, &kit.LabelMax, &kit.LabelGap, &kit.TagGap, &kit.PairGap, &kit.Indent,
+    for (float* f : {&kit.LabelMin, &kit.LabelMax, &kit.LabelGap, &kit.TagGap, &kit.PairGap, &kit.AxisGap, &kit.Indent,
                      &kit.GroupGap, &kit.SectionGap, &kit.FieldMin, &kit.SegmentMin, &kit.NumberMin, &kit.NumberMax,
-                     &kit.SeparatorInset, &kit.TagPad, &kit.TagInset, &kit.HeaderExtra, &kit.HeaderAccent,
+                     &kit.SeparatorInset, &kit.TagPad, &kit.TagInset, &kit.HeaderExtra,
                      &kit.HeaderPadX, &kit.ButtonPadX, &kit.ButtonPadXCompact})
         *f = std::floor(*f * k);
     kit.Rounding = radiusFrame;
@@ -612,7 +611,11 @@ void Apply() {
     style.FrameBorderSize = m.BorderFrame;
     style.PopupBorderSize = m.BorderPopup;
     style.TabBarBorderSize = ui.BorderWidth;
-    style.TabBarOverlineSize = m.TabOverline;
+    // ПОЛОСЫ НАД АКТИВНОЙ ВКЛАДКОЙ НЕТ — ни в одной теме, в том числе в теме из
+    // файла: выбранная вкладка отличается фоном панели и ярким текстом, а не
+    // жёлтым штрихом. Штрих повторял акцент на каждой панели сразу и делал
+    // жёлтым то, что ничего не значит.
+    style.TabBarOverlineSize = 0.0f;
     style.SeparatorSize = ui.BorderWidth;
     style.SeparatorTextBorderSize = ui.BorderWidth;
     style.DockingSeparatorSize = ui.BorderWidth * 2.0f;
@@ -703,16 +706,16 @@ void Apply() {
     c[ImGuiCol_ResizeGripHovered] = tint(accent, 0.55f);
     c[ImGuiCol_ResizeGripActive] = accent;
 
-    // Вкладки: невыбранная сливается с фоном, выбранная — поверхность окна плюс
-    // полоса акцента сверху (TabBarOverlineSize). Так вкладка читается как
-    // продолжение панели, а не как отдельная кнопка.
+    // Вкладки: невыбранная сливается с фоном, выбранная — поверхность окна (и
+    // яркий текст). Так вкладка читается как продолжение панели, а не как
+    // отдельная кнопка; декоративной полосы сверху нет (см. TabBarOverlineSize).
     c[ImGuiCol_Tab] = bg;
     c[ImGuiCol_TabHovered] = elevated;
     c[ImGuiCol_TabSelected] = surface;
-    c[ImGuiCol_TabSelectedOverline] = accent;
+    c[ImGuiCol_TabSelectedOverline] = ImVec4(0, 0, 0, 0);
     c[ImGuiCol_TabDimmed] = bg;
     c[ImGuiCol_TabDimmedSelected] = surface;
-    c[ImGuiCol_TabDimmedSelectedOverline] = tint(lineStrong, 0.8f);
+    c[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0, 0, 0, 0);
 
     c[ImGuiCol_DockingPreview] = tint(accent, 0.45f);
     c[ImGuiCol_DockingEmptyBg] = bg;
@@ -774,7 +777,7 @@ void EndMore() { ImGui::TreePop(); }
 namespace {
 
 // ШАПКА РАЗДЕЛА — тот же вид, что у разделов инспектора интерфейса
-// (ictl::BeginSection): подложка, акцентная метка слева, значок, ЗАГЛАВНЫЕ
+// (ictl::BeginSection): нейтральная подложка без цветной метки, значок, ЗАГЛАВНЫЕ
 // буквы, стрелка; справа — сброс и корзина. Раскрытие хранится там же, где
 // его держал CollapsingHeader (хранилище окна по id подписи), — состояние и
 // «###id» прежние.
@@ -849,7 +852,6 @@ bool ExportTheme(const Theme& theme, const std::string& path) {
     metrics["borderWindow"] = m.BorderWindow;
     metrics["borderFrame"] = m.BorderFrame;
     metrics["borderPopup"] = m.BorderPopup;
-    metrics["tabOverline"] = m.TabOverline;
     metrics["separatorSize"] = m.SeparatorSize;
     root["metrics"] = metrics;
 

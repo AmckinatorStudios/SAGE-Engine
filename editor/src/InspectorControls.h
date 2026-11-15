@@ -12,8 +12,9 @@ class EditorHost;
 // одинаково везде (инспектор сцены, инспектор интерфейса, окна инструментов).
 //
 // ГЛАВНОЕ ПРАВИЛО: одна функция — один цельный контрол. Кнопки −/+, стрелка
-// списка, сегменты вектора и кнопки одной операции живут ВНУТРИ общей рамки,
-// разделённые тонкими линиями, а не стоят рядом отдельными квадратами.
+// списка и кнопки одной операции живут ВНУТРИ общей рамки, разделённые
+// тонкими линиями, а не стоят рядом отдельными квадратами. Вектор — поле на
+// ось: каждая ось правится сама по себе, и у каждой своя рамка.
 //
 // Размеры, отступы и цвета состояний — EditorTheme::Kit/State: поменял там —
 // поменялись все контролы. Вариант вида (Standard/Compact/…) выбирают при
@@ -121,12 +122,14 @@ bool PairRow(EditorHost& host, const char* label, float* a, float* b, const char
 // Оси построчно по две: подписи осей — n штук (2 или 4).
 bool Axes(EditorHost& host, const char* id, float* v, int n, const char* const* axes, const NumOpts& o);
 
-// VECTOR2/3/4 — одна рамка на все оси, равные сегменты через тонкие
-// разделители; в сегменте — цветная метка оси, число и компактные −/+.
-// Узко: Segmented → Compact (без −/+) → Stacked (ось на строку).
+// VECTOR2/3/4 — поле на ось: X, Y, Z (W) — самостоятельные числовые поля,
+// каждое своей рамкой, одной ширины, через небольшой отступ (Kit::AxisGap), в
+// одну строку; в поле — цветная метка оси, число и компактные −/+.
+// Узко: Segmented (в строку, с −/+) → Compact (в строку, без −/+) → Stacked
+// (ось на строку).
 struct VecOpts {
     VecLook Look = VecLook::Segmented;
-    const char* const* Tags = nullptr;  // подписи сегментов; nullptr — X/Y/Z/W
+    const char* const* Tags = nullptr;  // подписи полей осей; nullptr — X/Y/Z/W
     bool AxisColors = true;             // метки цветом осей (X красная…); иначе нейтральные
     float Trailing = 0.0f;              // место справа под свои кнопки (замок, сброс)
 };
@@ -140,13 +143,17 @@ bool VectorCore(EditorHost& host, const char* id, float* v, int n, const NumOpts
 // может быть nullptr), свой TrackLastImGuiItem после не нужен.
 bool DragVec(EditorHost* host, const char* label, float* v, int n, float speed, float min = 0.0f, float max = 0.0f,
              const char* format = "%.3f");
+// Раскладка строки полей (для проверок): отступ между полями и ширина поля
+// оси при ширине строки width.
+float VecAxisGap();
+float VecFieldWidth(float width, int n);
 // Какой вид встанет в ширину width (чистая функция: проверяется тестом).
 VecLook FitVecLook(VecLook wanted, float width, int n, float tagW, float h);
 
 // VECTOR3 — «Позиция: [X ..] [Y ..] [Z ..]»: метка оси цветом (X красная,
-// Y зелёная, Z синяя) — часть поля, а не отдельная кнопка; три поля одной
-// ширины в одной строке. trailing — место справа под свои кнопки (замок,
-// сброс), одинаковое у соседних строк, чтобы столбцы X/Y/Z совпадали.
+// Y зелёная, Z синяя) — часть своего поля; три поля одной ширины в строке.
+// trailing — место справа под свои кнопки (замок, сброс), одинаковое у
+// соседних строк, чтобы столбцы X/Y/Z совпадали.
 // Узко — подпись над полями.
 bool Vector3(EditorHost& host, const char* label, glm::vec3* v, const NumOpts& o, float trailing = 0.0f,
              VecLook look = VecLook::Segmented);
@@ -212,8 +219,8 @@ void EndGroup();
 // Подпись раздела ЗАГЛАВНЫМИ (и кириллицей), без «###id».
 std::string UpperTitle(const char* title);
 
-// РАЗДЕЛ: карточка со своей шапкой (акцентная метка, заглавные буквы,
-// стрелка справа). Раскрытие запоминается между запусками. true — раскрыт:
+// РАЗДЕЛ: шапка (нейтральная подложка, значок, заглавные буквы, шеврон
+// справа). Раскрытие запоминается между запусками. true — раскрыт:
 // тогда обязателен EndSection().
 bool BeginSection(const char* id, const char* title, bool defaultOpen = true, const char* icon = nullptr);
 void EndSection();
