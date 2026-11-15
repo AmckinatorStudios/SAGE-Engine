@@ -181,11 +181,13 @@ const std::vector<PartField>& BarFields() {
         std::vector<PartField> v = {
             {"value", SAGE_UI_TEXT("Value"), PartField::Kind::Float, offsetof(Bar, Value), -100000.0f,
              100000.0f},
+            {"min", SAGE_UI_TEXT("Minimum"), PartField::Kind::Float, offsetof(Bar, Min), -100000.0f, 100000.0f},
+            {"max", SAGE_UI_TEXT("Maximum"), PartField::Kind::Float, offsetof(Bar, Max), -100000.0f, 100000.0f},
             {"kind", SAGE_UI_TEXT("Fill mode"), PartField::Kind::Enum, offsetof(Bar, Fill), 0.0f, 3.0f,
              "Linear — a bar; Radial — around a circle; Path — along a path;\n"
              "Custom Mask — by a picture: dark places fill first, light ones last.",
              kBarKind, 4},
-            {"grow", SAGE_UI_TEXT("Grows"), PartField::Kind::Enum, offsetof(Bar, Grow), 0.0f, 0.0f,
+            {"grow", SAGE_UI_TEXT("Direction"), PartField::Kind::Enum, offsetof(Bar, Grow), 0.0f, 0.0f,
              "A vertical gauge (mana at the side, a volume column) needs Up or Down.", kBarGrow, 4,
              PartField::Widget::Auto, "kind", 0},
             {"clockwise", SAGE_UI_TEXT("Clockwise"), PartField::Kind::Bool, offsetof(Bar, Clockwise), 0.0f, 1.0f,
@@ -211,8 +213,6 @@ const std::vector<PartField>& BarFields() {
             {"source", SAGE_UI_TEXT("Fill source"), PartField::Kind::Enum, offsetof(Bar, FillSource), 0.0f, 1.0f,
              "Image — the Fill look (colour, gradient or picture); Shape — the element's shape in the fill colour.",
              kBarSource, 2},
-            {"min", SAGE_UI_TEXT("Minimum"), PartField::Kind::Float, offsetof(Bar, Min), -100000.0f, 100000.0f},
-            {"max", SAGE_UI_TEXT("Maximum"), PartField::Kind::Float, offsetof(Bar, Max), -100000.0f, 100000.0f},
             {"indeterminate", SAGE_UI_TEXT("Indeterminate"), PartField::Kind::Bool, offsetof(Bar, Indeterminate),
              0.0f, 1.0f, "No known percentage: a segment runs along the gauge."},
             {"easing", SAGE_UI_TEXT("Smoothing"), PartField::Kind::Float, offsetof(Bar, Easing), 0.0f, 4.0f,
@@ -233,7 +233,7 @@ const std::vector<PartField>& BarFields() {
             for (PartField& f : v)
                 if (std::string(f.Key) == key) f.Content = true;
         MarkAdvanced(v, {"fillMode", "padding", "smoothing", "easing", "ringWidth", "pathWidth", "reverse",
-                         "fillAmount", "source", "min", "max", "indeterminate"});
+                         "fillAmount", "source", "indeterminate"});
         MarkCustomOnly(v, {"fillMode", "padding"});
         return v;
     }();

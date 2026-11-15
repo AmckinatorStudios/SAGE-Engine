@@ -10,6 +10,7 @@
 #include "UIElementPropertiesDetail.h"
 
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -73,67 +74,79 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     }
     const ui::Preset* type = ui::FindPreset(xf->Type);
     const bool isContainer = type && type->Container;
-    EditorIcons::Inline(type ? type->Icon : "ui-empty");
-    ImGui::SameLine(0.0f, EditorIcons::TextGap());
-    ImGui::SetNextItemWidth(-90.0f);
-    // Имя типа ПЕРЕВОДИТСЯ; само значение хранится английским ключом.
-    //
-    // В СПИСКЕ — ТОЛЬКО СВОЙ РОД. Элемент меняется на элемент, контейнер — на
-    // контейнер: «сделать из кнопки столбец» значило бы снять с неё всё, что
-    // делает её видимой, и это уже не смена типа, а другой объект.
-    if (ImGui::BeginCombo(T("Type"), xf->Type.empty() ? T("Custom") : T(xf->Type.c_str()))) {
-        std::string category;
-        for (const ui::Preset& preset : ui::Presets()) {
-            if (type && preset.Container != type->Container) continue;
-            if (preset.Category != category) {
-                category = preset.Category;
-                ImGui::SeparatorText(T(category.c_str()));
-            }
-            // СМЕНА ТИПА ПЕРЕСОБИРАЕТ ЧАСТИ, но не трогает детей и место:
-            // человек просил сменить тип, а не переставить элемент и не
-            // потерять то, что внутри.
-            if (ImGui::Selectable(T(preset.Name.c_str()), preset.Name == xf->Type)) {
-                host.PushUndoSnapshot();
-                const ui::Element keep = *xf;
-                ui::ApplyPreset(host.CurrentScene(), e, preset.Name, /*replaceChildren=*/false);
-                if (ui::Element* now = reg.try_get<ui::Element>(e)) {
-                    const std::string newType = now->Type;
-                    const glm::vec2 presetSize = now->Size;
-                    *now = keep;
-                    now->Type = newType;
-                    if (now->Size.x <= 0.0f || now->Size.y <= 0.0f) now->Size = presetSize;
-                    now->StyleVersion = -1;
+
+    // === ELEMENT: что это, как называется, включён ли =======================
+    if (ictl::BeginSection("identity", T("Element"))) {
+        EditorIcons::Inline(type ? type->Icon : "ui-empty");
+        ImGui::SameLine(0.0f, EditorIcons::TextGap());
+        ImGui::SetNextItemWidth(-1.0f);
+        // Имя типа ПЕРЕВОДИТСЯ; само значение хранится английским ключом.
+        // В СПИСКЕ — ТОЛЬКО СВОЙ РОД: элемент меняется на элемент, контейнер —
+        // на контейнер.
+        if (ImGui::BeginCombo("##Type", xf->Type.empty() ? T("Custom") : T(xf->Type.c_str()))) {
+            std::string category;
+            for (const ui::Preset& preset : ui::Presets()) {
+                if (type && preset.Container != type->Container) continue;
+                if (preset.Category != category) {
+                    category = preset.Category;
+                    ImGui::SeparatorText(T(category.c_str()));
                 }
-                xf = reg.try_get<ui::Element>(e);
+                // СМЕНА ТИПА ПЕРЕСОБИРАЕТ ЧАСТИ, но не трогает детей и место.
+                if (ImGui::Selectable(T(preset.Name.c_str()), preset.Name == xf->Type)) {
+                    host.PushUndoSnapshot();
+                    const ui::Element keep = *xf;
+                    ui::ApplyPreset(host.CurrentScene(), e, preset.Name, /*replaceChildren=*/false);
+                    if (ui::Element* now = reg.try_get<ui::Element>(e)) {
+                        const std::string newType = now->Type;
+                        const glm::vec2 presetSize = now->Size;
+                        *now = keep;
+                        now->Type = newType;
+                        if (now->Size.x <= 0.0f || now->Size.y <= 0.0f) now->Size = presetSize;
+                        now->StyleVersion = -1;
+                    }
+                    xf = reg.try_get<ui::Element>(e);
+                }
+                if (preset.Hint && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(preset.Hint));
             }
-            if (preset.Hint && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(preset.Hint));
+            ImGui::EndCombo();
         }
-        ImGui::EndCombo();
+        if (xf) {
+            type = ui::FindPreset(xf->Type);
+            if (type && type->Hint && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(type->Hint));
+            if (!type)
+                HintWrapped("%s", T("An element built by code: its parts are shown as they are. Pick a type "
+                                    "above to rebuild it."));
+            if (ctx.ShowIdentity) {
+                char buf[128];
+                std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
+                ictl::Label(T("Name"));
+                if (ImGui::InputText("##name", buf, sizeof(buf))) obj.SetName(buf);
+                host.TrackLastImGuiItem();
+                ictl::Switch(host, T("Active"), &xf->Active);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", T("Off — the element and everything inside are left out: not drawn, no room taken"));
+            }
+            // Инструменты выделения — компактной строкой под именем.
+            if (ctx.Arrange) ctx.Arrange();
+        }
+        ictl::EndSection();
     }
     if (!xf) return;
-    type = ui::FindPreset(xf->Type);
-    if (type && type->Hint && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(type->Hint));
-    if (!type)
-        HintWrapped("%s", T("An element built by code: its parts are shown as they are. Pick a type "
-                            "above to rebuild it."));
-    if (ctx.ShowIdentity) {
-        char buf[128];
-        std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
-        if (ImGui::InputText(T("Name"), buf, sizeof(buf))) obj.SetName(buf);
-        host.TrackLastImGuiItem();
-        if (ImGui::Checkbox(T("Active"), &xf->Active)) host.PushUndoSnapshot();
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", T("Off — the element and everything inside are left out: not drawn, no room taken"));
-    }
-
-    // === ARRANGE: инструменты выделения — одной компактной строкой ==========
-    if (ctx.Arrange) ctx.Arrange();
 
     // === PLACEMENT ==========================================================
-    if (ictl::Section("placement", T("Placement"))) DrawLayoutSection(host, e, xf, selected);
+    if (ictl::BeginSection("placement", T("Placement"))) {
+        DrawLayoutSection(host, e, xf, selected);
+        ictl::EndSection();
+    }
 
-    // === APPEARANCE: источник оформления ===================================
+    // === APPEARANCE: источник оформления и вид ==============================
+    //
+    // Вид элемента — подложка (Fill) и форма (Shape): это его оформление, а
+    // не назначение. Назначение (текст, значение, режим) — своим разделом ниже.
     auto belongs = [&](const ui::PartType& p) { return !type || TypeHasPart(*type, p.Id); };
+    auto isLook = [](const ui::PartType& p) {
+        return p.Id && (std::strcmp(p.Id, "fill") == 0 || std::strcmp(p.Id, "shape") == 0);
+    };
     // Вид переключателя меняет ширину значка — подпись встаёт правее него.
     const ui::Range* toggle = reg.try_get<ui::Range>(e);
     const int variantBefore = toggle && toggle->Toggle ? (int)toggle->ToggleVariant : -1;
@@ -146,130 +159,116 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
             if (Before >= 0 && r && (int)r->ToggleVariant != Before) ui::PlaceToggleCaption(Host.CurrentScene(), E);
         }
     } toggleWatch{host, e, variantBefore};
+    auto drawPart = [&](const ui::PartType& p) {
+        void* data = p.GetMutable(reg, e);
+        if (!data) return;
+        ImGui::PushID(p.Id);
+        DrawPartSection(host, obj, ctx, p, data, FieldView{}, selected);
+        if (std::string(p.Id) == "shape") DrawCustomShapeTools(host, e);
+        ImGui::PopID();
+    };
     if (!isContainer || (type && AppearanceSwitchable(*type))) {
-        if (ictl::Section("appearance", T("Appearance"))) {
-            if (type && AppearanceSwitchable(*type)) DrawAppearanceSwitch(host, e);
+        if (ictl::BeginSection("appearance", T("Appearance"))) {
             if (!isContainer) {
-                DrawSkinSwitch(host, e, *xf);
+                DrawAppearanceSource(host, obj, ctx, *xf);
                 g_engineSkin = xf->Skin == ui::Element::SkinMode::Engine;
-                DrawStyleRow(host, obj, ctx, *xf);
             }
+            if (type && AppearanceSwitchable(*type)) DrawAppearanceSwitch(host, e);
+            for (const ui::PartType& p : ui::Parts())
+                if (p.Fields && !p.Hidden && isLook(p) && p.Has(reg, e) && belongs(p)) drawPart(p);
+            ictl::EndSection();
         }
     }
 
     // === СВОЙСТВА ТИПА: то, ради чего элемент заводили ======================
-    // Вид есть у всего, кроме невидимого Container: у Panel — её оформление.
-    bool hasLook = false;
-    for (const ui::PartType& p : ui::Parts())
-        if (p.Fields && !p.Container && !p.Hidden && p.Has(reg, e) && belongs(p)) hasLook = true;
-    if (hasLook) {
-        const std::string typeTitle =
-            xf->Type.empty() ? std::string(T("Look")) : std::string(T(xf->Type.c_str()));
-        if (ictl::Section("type", typeTitle.c_str())) {
-            // СОСТОЯНИЯ КНОПКИ — ВКЛАДКАМИ: «обычная», «при наведении»,
-            // «при нажатии»... Каждая вкладка — вид в одном состоянии, а не
-            // двадцать полей всех состояний подряд.
-            const ui::PartType* act = ui::FindPart("interactable");
-            void* actData = (act && act->Has(reg, e) && belongs(*act)) ? act->GetMutable(reg, e) : nullptr;
-            const std::vector<const char*> tabs =
-                actData ? StateTabs(host, obj, ctx, *act, actData) : std::vector<const char*>{};
-            const ui::PartType* fillPart = ui::FindPart("fill");
-            const bool fillInTabs = !tabs.empty() && fillPart && fillPart->Has(reg, e) && belongs(*fillPart);
-
-            auto stateTabs = [&](bool withNormal) {
-                if (!ImGui::BeginTabBar("##ui_states", ImGuiTabBarFlags_FittingPolicyScroll)) return;
-                if (withNormal && ImGui::BeginTabItem(T("Normal"))) {
-                    if (void* fd = fillPart->GetMutable(reg, e))
-                        DrawPartSection(host, obj, ctx, *fillPart, fd, FieldView{}, selected);
-                    ImGui::EndTabItem();
-                }
-                for (const char* tab : tabs) {
-                    if (!ImGui::BeginTabItem(T(tab))) continue;
-                    FieldView v;
-                    v.SplitContent = true;
-                    v.Tab = tab;
-                    DrawPartSection(host, obj, ctx, *act, actData, v, selected);
-                    ImGui::EndTabItem();
-                }
-                ImGui::EndTabBar();
-            };
-
-            bool statesDrawn = false;
-            for (const ui::PartType& p : ui::Parts()) {
-                if (!p.Fields || p.Container || p.Hidden || !p.Has(reg, e) || !belongs(p)) continue;
-                if (act && &p == act) continue;   // реакция — вкладками и «Поведением»
-                void* data = p.GetMutable(reg, e);
-                if (!data) continue;
-                if (fillInTabs && &p == fillPart) {
-                    stateTabs(true);
-                    statesDrawn = true;
-                    continue;
-                }
-                ImGui::SeparatorText(T(p.Title));
-                ImGui::PushID(p.Id);
-                DrawPartSection(host, obj, ctx, p, data, FieldView{}, selected);
-                if (std::string(p.Id) == "shape") DrawCustomShapeTools(host, e);
-                ImGui::PopID();
+    std::vector<const ui::PartType*> own;
+    for (const ui::PartType& p : ui::Parts()) {
+        if (!p.Fields || p.Container || p.Hidden || isLook(p) || !p.Has(reg, e) || !belongs(p)) continue;
+        if (p.Id && std::strcmp(p.Id, "interactable") == 0) continue;   // — в Interaction
+        own.push_back(&p);
+    }
+    if (!own.empty()) {
+        const std::string typeTitle = xf->Type.empty() ? std::string(T("Properties")) : std::string(T(xf->Type.c_str()));
+        if (ictl::BeginSection("type", typeTitle.c_str())) {
+            for (size_t i = 0; i < own.size(); ++i) {
+                // Несколько частей — подписью группы каждая; одна — без подписи.
+                if (own.size() > 1) ImGui::SeparatorText(T(own[i]->Title));
+                drawPart(*own[i]);
             }
-            // Без подложки (ползунок, галка) у состояний только подкраска —
-            // она и показывается своими вкладками после вида.
-            if (!statesDrawn && !tabs.empty()) {
-                ImGui::SeparatorText(T("States"));
-                stateTabs(false);
-            }
+            ictl::EndSection();
         }
     }
 
     // === ARRANGEMENT И CONTENT контейнера ===================================
-    if (isContainer && ictl::Section("content", T("Arrangement and content")))
+    if (isContainer && ictl::BeginSection("content", T("Arrangement and content"))) {
         DrawContentSection(host, obj, ctx, selected);
+        ictl::EndSection();
+    }
 
     // === INTERACTION: только у тех, кто взаимодействует =====================
+    //
+    // Включено ли, курсор, навигация, звуки — и СОСТОЯНИЯ (наведение,
+    // нажатие, фокус, недоступно) вкладками: это отклик на пользователя.
     const ui::PartType* interaction = ui::FindPart("interactable");
-    if (interaction && interaction->Has(reg, e) && ictl::Section("interaction", T("Interaction"))) {
+    if (interaction && interaction->Has(reg, e) && ictl::BeginSection("interaction", T("Interaction"))) {
         if (void* data = interaction->GetMutable(reg, e)) {
             ImGui::PushID("behaviour");
             DrawPartFields(host, obj, ctx, *interaction, data, FieldFilter::Behaviour, true, selected);
+            const std::vector<const char*> tabs = StateTabs(host, obj, ctx, *interaction, data);
+            if (!tabs.empty()) {
+                ImGui::SeparatorText(T("States"));
+                if (ImGui::BeginTabBar("##ui_states", ImGuiTabBarFlags_FittingPolicyScroll)) {
+                    for (const char* tab : tabs) {
+                        if (!ImGui::BeginTabItem(T(tab))) continue;
+                        FieldView v;
+                        v.SplitContent = true;
+                        v.Tab = tab;
+                        DrawPartSection(host, obj, ctx, *interaction, data, v, selected);
+                        ImGui::EndTabItem();
+                    }
+                    ImGui::EndTabBar();
+                }
+            }
             ImGui::PopID();
         }
+        ictl::EndSection();
     }
 
     // === ADVANCED: редкое, закрыто по умолчанию =============================
-    if (ictl::Section("advanced", T("Advanced"), /*defaultOpen=*/false)) {
+    if (ictl::BeginSection("advanced", T("Advanced"), /*defaultOpen=*/false)) {
         DrawElementAdvanced(host, e, xf);
-    // --- ЧАСТИ СВЕРХ ТИПА ------------------------------------------------------
-    //
-    // У элемента из старой сцены (или собранного кодом) бывают части, которых в
-    // его типе нет: картинка на кнопке, раскладка на панели. Они работают и
-    // показаны честно — здесь, отдельно от вида типа, с кнопкой «убрать».
-    if (type) {
-        std::vector<const ui::PartType*> extra;
-        for (const ui::PartType& p : ui::Parts())
-            if (p.Fields && !p.Hidden && p.Has(reg, e) && !TypeHasPart(*type, p.Id)) extra.push_back(&p);
-        if (!extra.empty()) {
-            ImGui::SeparatorText(T("Parts beyond the type"));
-            HintWrapped("%s", T("These parts are not part of this type. They still work; remove them "
-                                "to keep the element simple."));
-            for (const ui::PartType* p : extra) {
-                ImGui::PushID(p->Id);
-                ImGui::SeparatorText(T(p->Title));
-                if (ImGui::Button(T("Remove"))) {
-                    host.PushUndoSnapshot();
-                    p->Remove(reg, e);
+        // ЧАСТИ СВЕРХ ТИПА: у элемента из старой сцены (или собранного кодом)
+        // бывают части, которых в его типе нет. Они работают и показаны
+        // честно — здесь, с кнопкой «убрать».
+        if (type) {
+            std::vector<const ui::PartType*> extra;
+            for (const ui::PartType& p : ui::Parts())
+                if (p.Fields && !p.Hidden && p.Has(reg, e) && !TypeHasPart(*type, p.Id)) extra.push_back(&p);
+            if (!extra.empty()) {
+                ImGui::SeparatorText(T("Parts beyond the type"));
+                for (const ui::PartType* p : extra) {
+                    ImGui::PushID(p->Id);
+                    ImGui::SeparatorText(T(p->Title));
+                    if (ImGui::Button(T("Remove"))) {
+                        host.PushUndoSnapshot();
+                        p->Remove(reg, e);
+                        ImGui::PopID();
+                        break;
+                    }
+                    if (void* data = p->GetMutable(reg, e))
+                        DrawPartFields(host, obj, ctx, *p, data, FieldFilter::Look, false, selected);
                     ImGui::PopID();
-                    break;
                 }
-                if (void* data = p->GetMutable(reg, e))
-                    DrawPartFields(host, obj, ctx, *p, data, FieldFilter::Look, false, selected);
-                ImGui::PopID();
             }
         }
-    }
-
+        ictl::EndSection();
     }
 
     // --- События: та же секция, что у любого объекта (SignalLinksEditor.h).
-    if (ctx.ShowEvents && ictl::Section("events", T("Events"))) DrawSignalLinks(host, obj);
+    if (ctx.ShowEvents && ictl::BeginSection("events", T("Events"))) {
+        DrawSignalLinks(host, obj);
+        ictl::EndSection();
+    }
 }
 
 } // namespace sage::editor

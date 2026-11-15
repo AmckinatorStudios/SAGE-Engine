@@ -280,6 +280,29 @@ void CopyField(const PartField& f, const void* src, void* dst) {
 
 const std::vector<PartField>& LookFields() { return LookFieldTable(); }
 
+AppearanceSource AppearanceSourceOf(const entt::registry& reg, entt::entity e) {
+    const Element* el = reg.try_get<Element>(e);
+    if (!el) return AppearanceSource::EngineDefault;
+    if (!el->Style.empty()) return AppearanceSource::SavedStyle;
+    return el->Skin == Element::SkinMode::Engine ? AppearanceSource::EngineDefault : AppearanceSource::Custom;
+}
+
+void SetAppearanceSource(entt::registry& reg, entt::entity e, AppearanceSource source) {
+    Element* el = reg.try_get<Element>(e);
+    if (!el) return;
+    if (source == AppearanceSource::EngineDefault) {
+        el->Skin = Element::SkinMode::Engine;
+        el->Style.clear();
+    } else {
+        if (!el->CustomLook && el->Skin == Element::SkinMode::Engine) BakeEngineSkin(reg, e);
+        el = reg.try_get<Element>(e);
+        el->CustomLook = true;
+        el->Skin = Element::SkinMode::Custom;
+        if (source == AppearanceSource::Custom) el->Style.clear();
+    }
+    el->StyleVersion = -1;
+}
+
 void BakeEngineSkin(entt::registry& reg, entt::entity e) {
     // Роль подложки — тем же правилом, что при отрисовке.
     PartDrawContext c;

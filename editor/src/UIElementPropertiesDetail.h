@@ -42,6 +42,7 @@ void HintWrapped(const char* fmt, ...);
 // «(x,y,w,h)» — оси подписаны у самих полей.
 const void* DefaultPartData(const ui::PartType& p);
 std::string DisplayLabel(const char* label);
+const ui::PartField* FieldByKey(const ui::PartType& p, const char* key);
 int SelectedElements(EditorHost& host);
 int DrawFieldsOf(EditorHost& host, GameObject obj, const UIPropsContext& ctx, const ui::PartType& p, void* data,
                  const FieldView& view, int selected, bool dryRun = false);
@@ -63,5 +64,6 @@ void DrawElementAdvanced(EditorHost& host, entt::entity e, ui::Element* xf);
 void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, ui::Element& xf);
 void DrawGroupSettings(EditorHost& host, entt::entity e);
 void DrawSkinSwitch(EditorHost& host, entt::entity e, ui::Element& xf);
+void DrawAppearanceSource(EditorHost& host, GameObject obj, const UIPropsContext& ctx, ui::Element& xf);
 
 } // namespace sage::editor::uiprops_detail

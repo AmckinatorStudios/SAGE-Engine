@@ -8,6 +8,7 @@
 
 #include "imgui.h"
 
+#include "../AssetSlot.h"
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
 #include "InterfaceWidgets.h"
@@ -192,7 +193,10 @@ void InterfaceInspectorPanel::Draw(EditorHost& host, bool& open) {
         ctx.ShowEvents = true;
         ctx.ShowIdentity = true;
         ctx.Arrange = [this, &host] { DrawAlignTools(host); };
+        // Ресурсы — компактной строкой: картинка, шрифт, стиль, звук.
+        assetslot::SetCompact(true);
         sage::editor::DrawUIElementProperties(host, obj, ctx);
+        assetslot::SetCompact(false);
         ImGui::PopItemWidth();
     }
 

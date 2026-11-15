@@ -3856,6 +3856,13 @@
     "Placement": "Расположение",
     "Proportions linked: the height follows the width": "Пропорции связаны: высота следует за шириной",
     "Show width and height in one row": "Ширина и высота в одной строке",
-    "Show width and height on separate rows": "Ширина и высота отдельными строками"
+    "Show width and height on separate rows": "Ширина и высота отдельными строками",
+    "A saved style file shared by many elements": "Сохранённый файл стиля, общий для многих элементов",
+    "Engine Default": "Стандарт движка",
+    "On": "Вкл.",
+    "Save as Style...": "Сохранить как стиль…",
+    "Saved Style": "Сохранённый стиль",
+    "Settings of this element only": "Настройки только этого элемента",
+    "The standard SAGE look: only colours are yours": "Стандартный вид SAGE: ваши — только цвета"
   }
 }

@@ -133,6 +133,7 @@ void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
     if (t->SafeArea) tj["safeArea"] = true;
     if (!t->Style.empty()) tj["style"] = t->Style;
     if (!t->StyleOverrides.empty()) tj["styleOverrides"] = t->StyleOverrides;
+    if (t->CustomLook) tj["customLook"] = true;
     // Resolved не пишется: это след последнего кадра, а не настройка.
 
     for (const sage::ui::PartType& p : sage::ui::Parts()) {
@@ -212,6 +213,8 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
         t.AspectRatio = tj.value("aspect", t.AspectRatio);
         t.SafeArea = tj.value("safeArea", t.SafeArea);
         t.Style = tj.value("style", t.Style);
+        // Старый файл: элемент со своим оформлением свой вид, конечно, имеет.
+        t.CustomLook = tj.value("customLook", t.Skin == sage::ui::Element::SkinMode::Custom);
         if (tj.contains("styleOverrides") && tj["styleOverrides"].is_array())
             t.StyleOverrides = tj["styleOverrides"].get<std::vector<std::string>>();
     }

@@ -19,6 +19,8 @@
 #include <string>
 #include <system_error>
 #include <vector>
+#include <cstdint>
+#include <unordered_map>
 
 #include "imgui.h"
 
@@ -74,14 +76,64 @@ void DrawGroupSettings(EditorHost& host, entt::entity e);
 // Слот файла стиля и два действия: записать нынешний вид в файл (новый или
 // тот, что выбран) и отвязать. Правка файла доходит до всех элементов,
 // которые на него ссылаются (sage::ui::ApplyStyles), — прямо в открытой сцене.
-void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, ui::Element& xf) {
-    const assetslot::Result r =
-        assetslot::Draw(host, "##ui_style", assetslot::Kind::UiStyle, xf.Style, ctx.Preview,
-                        T("Style file: the look shared by many elements"));
-    if (r.Changed) {
+// --- APPEARANCE SOURCE: откуда у элемента вид ------------------------------
+//
+// Одно поле вместо двух больших кнопок и отдельного слота стиля:
+//   Engine Default — вид движка (свои значения хранятся, но не правятся);
+//   Saved Style    — файл стиля (компактный слот появляется ниже);
+//   Custom         — свои настройки элемента.
+// Переход в Custom впервые запекает вид движка в поля (элемент на экране не
+// меняется); дальше — возвращает свои значения, а не затирает их.
+namespace {
+// Выбран Saved Style, а файл ещё не назначен: режим держится до выбора.
+std::unordered_map<std::uint32_t, bool>& PendingStyle() {
+    static std::unordered_map<std::uint32_t, bool> s;
+    return s;
+}
+} // namespace
+
+void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, ui::Element& xf);
+
+void DrawAppearanceSource(EditorHost& host, GameObject obj, const UIPropsContext& ctx, ui::Element& xf) {
+    entt::registry& reg = host.CurrentScene().Registry();
+    const std::uint32_t key = (std::uint32_t)obj.Entity();
+    enum { kEngine, kStyle, kCustom };
+    int mode = !xf.Style.empty() || PendingStyle()[key] ? kStyle
+               : xf.Skin == ui::Element::SkinMode::Engine ? kEngine
+                                                           : kCustom;
+    const char* kModes[] = {T("Engine Default"), T("Saved Style"), T("Custom")};
+    ictl::Label(T("Source"));
+    if (ImGui::Combo("##appsrc", &mode, kModes, 3)) {
         host.PushUndoSnapshot();
-        xf.Style = r.Path;
-        xf.StyleVersion = -1;   // положить на следующем кадре
+        PendingStyle()[key] = mode == kStyle && xf.Style.empty();
+        ui::SetAppearanceSource(reg, obj.Entity(), mode == kEngine  ? ui::AppearanceSource::EngineDefault
+                                                   : mode == kStyle ? ui::AppearanceSource::SavedStyle
+                                                                    : ui::AppearanceSource::Custom);
+    }
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", mode == kEngine ? T("The standard SAGE look: only colours are yours")
+                                : mode == kStyle ? T("A saved style file shared by many elements")
+                                                 : T("Settings of this element only"));
+    if (mode == kStyle) {
+        DrawStyleRow(host, obj, ctx, xf);
+        if (!xf.Style.empty()) PendingStyle().erase(key);
+    } else if (mode == kCustom) {
+        DrawStyleRow(host, obj, ctx, xf);   // «Save as Style…» — небольшой командой
+    }
+}
+
+void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, ui::Element& xf) {
+    const bool styled = xf.Skin == ui::Element::SkinMode::Custom &&
+                        (!xf.Style.empty() || PendingStyle()[(std::uint32_t)obj.Entity()]);
+    if (styled) {
+        const assetslot::Result r =
+            assetslot::Draw(host, "##ui_style", assetslot::Kind::UiStyle, xf.Style, ctx.Preview,
+                            T("Style file: the look shared by many elements"));
+        if (r.Changed) {
+            host.PushUndoSnapshot();
+            xf.Style = r.Path;
+            xf.StyleVersion = -1;   // положить на следующем кадре
+        }
     }
     entt::registry& reg = host.CurrentScene().Registry();
     auto save = [&](const std::string& rel) {
@@ -98,7 +150,7 @@ void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, u
         return false;
     };
     if (xf.Style.empty()) {
-        if (ImGui::Button(T("Save this look as a style"))) {
+        if (ImGui::Button(T("Save as Style..."))) {
             // Имя — по объекту, в папке styles проекта; занято — с номером.
             const fs::path root = assetslot::ProjectRoot(host);
             std::string base = obj.Name().empty() ? std::string("style") : obj.Name();
@@ -134,7 +186,8 @@ void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, u
     }
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", T("Keeps the current look, but no longer follows the file."));
-    HintWrapped("%s", T("The look comes from the style file: changes made here are replaced when the file changes."));
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("The look comes from the style file: changes made here are replaced when the file changes."));
 }
 
 // --- PLACEMENT: где стоит и какого размера --------------------------------
@@ -161,7 +214,7 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
     const ui::Arrangement* parentArr = parent != entt::null ? reg.try_get<ui::Arrangement>(parent) : nullptr;
     const bool inStack = parentArr && parentArr->Arranges();
     if (inStack) {
-        if (ImGui::Checkbox(T("Place by own anchor"), &xf->IgnoreLayout)) host.PushUndoSnapshot();
+        ictl::Switch(host, T("Place by own anchor"), &xf->IgnoreLayout);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("Stand where the anchor puts it, outside the row: a badge in the\n"
                                       "corner of a list card."));
@@ -173,7 +226,7 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
                 ImGui::SetTooltip("%s", T("A share of the room left in the row or column. 0 — keep own size;\n"
                                           "two children with 1 and 2 split the rest 1:2."));
             ictl::Size(host, T("Size"), &xf->Size, size);
-            if (ImGui::Checkbox(T("Visible"), &xf->Visible)) host.PushUndoSnapshot();
+            ictl::Switch(host, T("Visible"), &xf->Visible);
             return;
         }
     }
@@ -181,7 +234,8 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
     if (DrawAnchorPicker(xf->Anchor)) host.PushUndoSnapshot();
     const char* stretchNames[] = {T("None"), T("Horizontal"), T("Vertical"), T("Both")};
     int stretch = (int)xf->Mode;
-    if (ImGui::Combo(T("Stretch"), &stretch, stretchNames, IM_ARRAYSIZE(stretchNames))) {
+    ictl::Label(T("Stretch"));
+    if (ImGui::Combo("##Stretch", &stretch, stretchNames, IM_ARRAYSIZE(stretchNames))) {
         host.PushUndoSnapshot();
         xf->Mode = (ui::Element::Stretch)stretch;
     }
@@ -192,7 +246,7 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
     const bool autoWidth = reg.all_of<ui::Label>(e) && reg.get<ui::Label>(e).AutoWidth;
     if (!autoWidth && xf->Mode != ui::Element::Stretch::Both) ictl::Size(host, T("Size"), &xf->Size, size);
     if (xf->Mode != ui::Element::Stretch::None) ictl::Sides(host, T("Margin"), &xf->Margin, px);
-    if (ImGui::Checkbox(T("Visible"), &xf->Visible)) host.PushUndoSnapshot();
+    ictl::Switch(host, T("Visible"), &xf->Visible);
 }
 
 // --- ADVANCED элемента: редкое -------------------------------------------
@@ -235,7 +289,7 @@ void DrawElementAdvanced(EditorHost& host, entt::entity e, ui::Element* xf) {
     ictl::Number(host, T("Aspect ratio"), &xf->AspectRatio, aspect);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", T("Width divided by height: the element fits its place keeping this shape. 0 — free."));
-    if (ImGui::Checkbox(T("Inside the safe area"), &xf->SafeArea)) host.PushUndoSnapshot();
+    ictl::Switch(host, T("Inside the safe area"), &xf->SafeArea);
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", T("Anchors and stretching count from the safe area of the screen, not its edges:\n"
                                   "a notch or a TV frame does not cover the element."));
@@ -287,8 +341,7 @@ void DrawGroupSettings(EditorHost& host, entt::entity e) {
         group->Alpha = alpha;
     }
     bool input = group ? group->Interactable : true;
-    if (ImGui::Checkbox(T("Catches the mouse"), &input)) {
-        host.PushUndoSnapshot();
+    if (ictl::Switch(host, T("Catches the mouse"), &input)) {
         if (!group) group = &reg.emplace<ui::Group>(e);
         group->Interactable = input;
     }
@@ -304,7 +357,8 @@ void DrawGroupSettings(EditorHost& host, entt::entity e) {
         int cur = 0;
         for (int i = 0; i < 5; ++i)
             if (modes[i] == xf->Blend) cur = i;
-        if (ImGui::BeginCombo(T("Blend"), labels[cur])) {
+        ictl::Label(T("Blend"));
+        if (ImGui::BeginCombo("##Blend", labels[cur])) {
             for (int i = 0; i < 5; ++i) {
                 if (ImGui::Selectable(labels[i], i == cur) && i != cur) {
                     host.PushUndoSnapshot();

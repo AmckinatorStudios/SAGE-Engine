@@ -288,6 +288,13 @@ sage::editor::createasset::What CreateWhat(Kind kind) {
 }
 } // namespace
 
+namespace {
+bool s_compact = false;
+} // namespace
+
+void SetCompact(bool on) { s_compact = on; }
+bool Compact() { return s_compact; }
+
 Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path,
             AssetPreview* preview, const char* emptyHint, const Actions* actions) {
     Result result;
@@ -304,7 +311,7 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
     }
 
     const ImGuiStyle& style = ImGui::GetStyle();
-    const float thumb = 56.0f;
+    const float thumb = s_compact ? ImGui::GetFrameHeight() + 6.0f : 56.0f;
     const float height = thumb + 8.0f;
     const float width = std::max(180.0f, ImGui::GetContentRegionAvail().x);
     const ImVec2 p0 = ImGui::GetCursorScreenPos();
@@ -429,14 +436,24 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
     // --- Имя и кнопки -------------------------------------------------------
     const float rightEdge = p1.x - 6.0f;
     const float btnStripW = ImGui::GetFrameHeight() * 2.0f + style.ItemSpacing.x + 8.0f;
-    ImGui::SetCursorScreenPos(ImVec2(t1.x + 8.0f, p0.y + 5.0f));
+    ImGui::SetCursorScreenPos(ImVec2(t1.x + 8.0f, s_compact ? p0.y + (height - ImGui::GetTextLineHeight()) * 0.5f : p0.y + 5.0f));
     ImGui::BeginGroup();
     // Текст переносится по границе кнопок, а не уезжает под них: подпись длиной
     // с путь иначе оказывалась наполовину под «Обзор…» и читалась как обрывок.
     ImGui::PushTextWrapPos(rightEdge - btnStripW);
-    if (path.empty()) {
+    if (path.empty() && s_compact) {
+        // Одной строкой — «перетащите сюда» без второй строки.
+        ImGui::TextDisabled("%s", T("Drag an asset here"));
+        if (emptyHint && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", emptyHint);
+    } else if (path.empty()) {
         ImGui::TextDisabled("%s", emptyHint ? emptyHint : T("Not assigned"));
         ImGui::TextDisabled("%s", T("Drag an asset here"));
+    } else if (s_compact) {
+        std::error_code ec;
+        const bool missing = !fs::exists(assetPath, ec);
+        if (missing) ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.45f, 1.0f), "%s", assetPath.filename().string().c_str());
+        else ImGui::TextUnformatted(assetPath.filename().string().c_str());
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", missing ? T("File not found") : path.c_str());
     } else {
         const std::string name = assetPath.filename().string();
         ImGui::TextUnformatted(name.c_str());
@@ -464,7 +481,7 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
     const bool canEdit = !path.empty() && ((actions && actions->Edit) || kind == Kind::Script || kind == Kind::Shader);
     const int buttons = (canCreate || canEdit) ? 3 : 2;
     ImGui::SetCursorScreenPos(ImVec2(rightEdge - btnH * (float)buttons - style.ItemSpacing.x * (float)(buttons - 1),
-                                     p0.y + height - btnH - 5.0f));
+                                     s_compact ? p0.y + (height - btnH) * 0.5f : p0.y + height - btnH - 5.0f));
     if (canCreate) {
         char tip[96];
         std::snprintf(tip, sizeof(tip), T("Create a new %s here"), KindName(kind));
