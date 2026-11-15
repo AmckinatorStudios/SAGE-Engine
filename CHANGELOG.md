@@ -12,6 +12,20 @@
 
 ## 0.5.0 → 1.0 (в работе)
 
+### 2026-11-15 (инспектор интерфейса: разделы по типу)
+
+#### Изменено
+- Поля элемента разложены по разделам концепции: у Progress — Appearance
+  (дорожка **Track** и заполнение **Fill** — больше не два «Fill»), Progress
+  (значение, пределы, режим, направление, Indeterminate) и Transition
+  (скорость и сглаживание); у Slider — Range, у Toggle — Value (дорожка, ручка,
+  квадратик и отметка — в Appearance); у Text — Content, Typography,
+  Appearance; у Image — Image Source; у Text Input — Input, у Dropdown —
+  Options.
+- Раздел поля объявляется в описании части (`PartField::Section`), главный
+  раздел и порядок — у типа (`Preset::Section`, `BackgroundTitle`,
+  `ContentFirst`).
+
 ### 2026-11-15 (исправление: зависание инспектора интерфейса)
 
 #### Исправлено

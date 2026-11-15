@@ -344,6 +344,7 @@ std::vector<Preset> BuildPresets() {
     auto TextChild = [](const char* name, const char* text) {
         Preset child;
         child.Name = name;
+        child.Type = "Text";   // имя объекта — «Текст», тип — Text
         child.Box.Anchor = UIAnchor::TopLeft;
         child.Box.Mode = Element::Stretch::Both;   // на всю подложку
         child.Box.Margin = {0.0f, 0.0f, 0.0f, 0.0f};
@@ -404,6 +405,8 @@ std::vector<Preset> BuildPresets() {
         p.Icon = "ui-text";
         p.Hint = SAGE_UI_TEXT("A line or a paragraph of text");
         p.Box.Size = {220.0f, 40.0f};
+        p.Section = SAGE_UI_TEXT("Content");
+        p.ContentFirst = true;
         p.HasLabel = true;
         p.LabelStyle.Text = "Text";
         p.LabelStyle.AutoWidth = true;
@@ -414,6 +417,8 @@ std::vector<Preset> BuildPresets() {
         p.Icon = "ui-image";
         p.Hint = SAGE_UI_TEXT("A picture from the project");
         p.Box.Size = {160.0f, 160.0f};
+        p.Section = SAGE_UI_TEXT("Image Source");
+        p.ContentFirst = true;
         p.HasImage = true;
     }
     {
@@ -461,6 +466,7 @@ std::vector<Preset> BuildPresets() {
         p.Icon = "ui-check";
         p.Hint = SAGE_UI_TEXT("On or off: a checkbox or a switch, with a caption");
         p.Box.Size = {200.0f, 36.0f};
+        p.Section = SAGE_UI_TEXT("Value");
         p.HasInteractable = true;
         p.HasRange = true;
         p.RangeValue.Toggle = true;
@@ -484,6 +490,7 @@ std::vector<Preset> BuildPresets() {
         p.Icon = "ui-slider";
         p.Hint = SAGE_UI_TEXT("A value picked by dragging: track, filled part, knob");
         p.Box.Size = {240.0f, 30.0f};
+        p.Section = SAGE_UI_TEXT("Range");
         p.HasInteractable = true;
         p.HasRange = true;
         // Дорожка — «таблетка»: скругление больше половины толщины.
@@ -496,6 +503,8 @@ std::vector<Preset> BuildPresets() {
         p.Icon = "ui-bar";
         p.Hint = SAGE_UI_TEXT("A fill level: a bar, a circle, along a path or by a picture");
         p.Box.Size = {240.0f, 26.0f};
+        p.Section = SAGE_UI_TEXT("Progress");
+        p.BackgroundTitle = SAGE_UI_TEXT("Track");
         p.HasFill = true;
         p.FillStyle.Rounding = 6.0f;
         p.HasBar = true;
@@ -507,6 +516,7 @@ std::vector<Preset> BuildPresets() {
         p.Icon = "ui-input";
         p.Hint = SAGE_UI_TEXT("A text field edited from the keyboard");
         p.Box.Size = {260.0f, 40.0f};
+        p.Section = SAGE_UI_TEXT("Input");
         p.HasFill = true;
         p.HasLabel = true;
         p.LabelStyle.Horizontal = Label::Align::Start; // по центру набирать непривычно
@@ -518,6 +528,7 @@ std::vector<Preset> BuildPresets() {
         // Выпадающий список: подложка, выбранный вариант и стрелка; раскрытый
         // список рисуется поверх всего интерфейса.
         Preset& p = add(SAGE_UI_TEXT("Dropdown"));
+        p.Section = SAGE_UI_TEXT("Options");
         p.Category = SAGE_UI_TEXT("Controls");
         p.Icon = "list";
         p.Hint = SAGE_UI_TEXT("One value from a list that opens over everything");

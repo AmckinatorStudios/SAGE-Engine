@@ -3,6 +3,8 @@
 // перенос старых сцен и перетаскивание в дереве без потерь. Всё на CPU.
 #include "TestFramework.h"
 
+#include <map>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -342,16 +344,19 @@ TEST(UISkin_each_part_shows_few_settings_up_front) {
         p.Add(reg, obj.Entity());
         const void* data = p.Get(reg, obj.Entity());
         const auto fields = sage::ui::EditableFields(*p.Fields);
-        int upFront = 0;
+        // Считается по РАЗДЕЛУ инспектора (PartField::Section): поля части
+        // разнесены по Appearance, главному разделу, Typography и Transition.
+        std::map<std::string, int> upFront;
         for (const auto& f : fields) {
             if (f.Hidden || f.Advanced || f.Tab || f.LookKey) continue;   // поля вида — внутри его группы
             if (!sage::ui::FieldVisible(fields, f, data)) continue;
-            ++upFront;
+            ++upFront[f.Section ? f.Section : ""];
         }
-        if (upFront > 8)
-            sagetest::ReportFail(__FILE__, __LINE__,
-                                 std::string("слишком много полей сразу у части ") + p.Id + ": " +
-                                     std::to_string(upFront));
+        for (const auto& [section, n] : upFront)
+            if (n > 8)
+                sagetest::ReportFail(__FILE__, __LINE__,
+                                     std::string("слишком много полей сразу у части ") + p.Id + " (" + section +
+                                         "): " + std::to_string(n));
     }
 
     auto field = [](const char* part, const char* key) -> sage::ui::PartField {

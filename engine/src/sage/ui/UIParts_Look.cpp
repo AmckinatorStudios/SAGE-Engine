@@ -275,6 +275,11 @@ void MarkAdvanced(std::vector<PartField>& v, std::initializer_list<const char*> 
         for (const char* k : keys)
             if (f.Key && std::string_view(f.Key) == k) f.Advanced = true;
 }
+void MarkSection(std::vector<PartField>& v, const char* section, std::initializer_list<const char*> keys) {
+    for (PartField& f : v)
+        for (const char* k : keys)
+            if (f.Key && std::string_view(f.Key) == k) f.Section = section;
+}
 void MarkCustomOnly(std::vector<PartField>& v, std::initializer_list<const char*> keys) {
     for (PartField& f : v)
         for (const char* k : keys)

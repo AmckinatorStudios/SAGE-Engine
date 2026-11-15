@@ -119,6 +119,7 @@ add_executable(sage_tests
     test_colorpicker.cpp
     test_inspector_controls.cpp
     test_sprite_editor.cpp
+    test_inspector_sections.cpp
     test_postchainui.cpp
     ../editor/src/PathScope.cpp
     ../editor/src/HotkeyScope.cpp

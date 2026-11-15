@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------------------
 #include "UIElementPropertiesDetail.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -167,37 +168,121 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
         if (std::string(p.Id) == "shape") DrawCustomShapeTools(host, e);
         ImGui::PopID();
     };
-    if (!isContainer || (type && AppearanceSwitchable(*type))) {
-        if (ictl::BeginSection("appearance", T("Appearance"))) {
-            if (!isContainer) {
-                DrawAppearanceSource(host, obj, ctx, *xf);
-                g_engineSkin = xf->Skin == ui::Element::SkinMode::Engine;
-            }
-            if (type && AppearanceSwitchable(*type)) DrawAppearanceSwitch(host, e);
-            for (const ui::PartType& p : ui::Parts())
-                if (p.Fields && !p.Hidden && isLook(p) && p.Has(reg, e) && belongs(p)) drawPart(p);
-            ictl::EndSection();
-        }
-    }
-
-    // === СВОЙСТВА ТИПА: то, ради чего элемент заводили ======================
+    // Части типа (кроме вида и реакции на мышь): их поля раскладываются по
+    // разделам из описания полей (PartField::Section), а не по частям.
     std::vector<const ui::PartType*> own;
     for (const ui::PartType& p : ui::Parts()) {
         if (!p.Fields || p.Container || p.Hidden || isLook(p) || !p.Has(reg, e) || !belongs(p)) continue;
         if (p.Id && std::strcmp(p.Id, "interactable") == 0) continue;   // — в Interaction
         own.push_back(&p);
     }
-    if (!own.empty()) {
-        const std::string typeTitle = xf->Type.empty() ? std::string(T("Properties")) : std::string(T(xf->Type.c_str()));
-        if (ictl::BeginSection("type", typeTitle.c_str())) {
-            for (size_t i = 0; i < own.size(); ++i) {
-                // Несколько частей — подписью группы каждая; одна — без подписи.
-                if (own.size() > 1) ImGui::SeparatorText(T(own[i]->Title));
-                drawPart(*own[i]);
-            }
-            ictl::EndSection();
+    // Часть, давшая типу имя (Text Input у поля ввода, Dropdown у списка), —
+    // первой: в главном разделе её поля важнее полей надписи внутри.
+    std::stable_partition(own.begin(), own.end(),
+                          [&](const ui::PartType* p) { return p->Title && xf->Type == p->Title; });
+    auto ownWith = [&](const char* section) {
+        std::vector<const ui::PartType*> with;
+        for (const ui::PartType* p : own) {
+            void* data = p->GetMutable(reg, e);
+            if (!data) continue;
+            FieldView v;
+            v.BySection = true;
+            v.Section = section;
+            v.Advanced = false;
+            int n = DrawFieldsOf(host, obj, ctx, *p, data, v, selected, /*dryRun=*/true);
+            v.Advanced = true;
+            n += DrawFieldsOf(host, obj, ctx, *p, data, v, selected, /*dryRun=*/true);
+            if (n > 0) with.push_back(p);
         }
+        return with;
+    };
+    auto drawOwn = [&](const std::vector<const ui::PartType*>& with, const char* section, bool titled) {
+        for (const ui::PartType* p : with) {
+            // Несколько частей в одном разделе — подписью группы каждая.
+            if (titled || with.size() > 1) ictl::GroupTitle(T(p->Title));
+            FieldView v;
+            v.BySection = true;
+            v.Section = section;
+            DrawPartSection(host, obj, ctx, *p, p->GetMutable(reg, e), v, selected);
+        }
+    };
+
+    // APPEARANCE: источник оформления, подложка и форма, оформление частей
+    // типа (заполнение шкалы, дорожка и ручка ползунка, цвет надписи).
+    auto appearance = [&] {
+        const std::vector<const ui::PartType*> looks = ownWith(ui::kSectionLook);
+        if (isContainer && !(type && AppearanceSwitchable(*type)) && looks.empty()) return;
+        if (!ictl::BeginSection("appearance", T("Appearance"))) return;
+        if (!isContainer) {
+            DrawAppearanceSource(host, obj, ctx, *xf);
+            g_engineSkin = xf->Skin == ui::Element::SkinMode::Engine;
+        }
+        if (type && AppearanceSwitchable(*type)) DrawAppearanceSwitch(host, e);
+        // ПОДПИСИ ГРУПП: если рядом с подложкой стоит цвет другой части
+        // (текст поля ввода), без подписей это две строки «Colour» подряд.
+        bool background = false;
+        for (const ui::PartType& p : ui::Parts())
+            background |= p.Fields && !p.Hidden && isLook(p) && p.Has(reg, e) && belongs(p);
+        bool titled = false;
+        for (const ui::PartType* p : looks)
+            for (const ui::PartField& f : *p->Fields)
+                titled |= background && !f.Hidden && f.Type == ui::PartField::Kind::Color && f.Section &&
+                          std::strcmp(f.Section, ui::kSectionLook) == 0;
+        const char* bgTitle = type && type->BackgroundTitle ? type->BackgroundTitle : "Background";
+        for (const ui::PartType& p : ui::Parts()) {
+            if (!p.Fields || p.Hidden || !isLook(p) || !p.Has(reg, e) || !belongs(p)) continue;
+            const bool fill = std::strcmp(p.Id, "fill") == 0;
+            if (fill && (titled || (type && type->BackgroundTitle && !g_engineSkin))) {
+                ictl::GroupTitle(T(bgTitle));
+            } else if (fill && type && type->BackgroundTitle) {
+                // Оформление движка: у подложки один цвет — строкой с её ролью
+                // («Track»), а не заголовком над строкой «Colour».
+                static std::vector<ui::PartField> renamed;
+                renamed = *p.Fields;
+                for (ui::PartField& f : renamed)
+                    if (f.Key && std::strcmp(f.Key, "color") == 0) f.Label = type->BackgroundTitle;
+                // Постоянная копия: значения «по умолчанию» для сброса
+                // запоминаются по адресу части (DefaultPartData).
+                static ui::PartType copy;
+                copy = p;
+                copy.Fields = &renamed;
+                drawPart(copy);
+                continue;
+            }
+            drawPart(p);
+        }
+        drawOwn(looks, ui::kSectionLook, titled);
+        ictl::EndSection();
+    };
+    // ГЛАВНЫЙ РАЗДЕЛ ТИПА: Progress, Range, Value, Content, Input, Options.
+    auto mainSection = [&] {
+        const std::vector<const ui::PartType*> with = ownWith(nullptr);
+        if (with.empty()) return;
+        const std::string title = type && type->Section ? std::string(T(type->Section))
+                                  : xf->Type.empty()    ? std::string(T("Properties"))
+                                                        : std::string(T(xf->Type.c_str()));
+        if (!ictl::BeginSection("type", title.c_str())) return;
+        drawOwn(with, nullptr, false);
+        ictl::EndSection();
+    };
+    auto shared = [&](const char* id, const char* title) {
+        const std::vector<const ui::PartType*> with = ownWith(id);
+        if (with.empty() || !ictl::BeginSection(id, title)) return;
+        drawOwn(with, id, false);
+        ictl::EndSection();
+    };
+    // Порядок: у надписи и картинки содержимое и есть вид — оно первым;
+    // у остальных сначала оформление, затем назначение.
+    if (type && type->ContentFirst) {
+        mainSection();
+        shared(ui::kSectionTypography, T("Typography"));
+        appearance();
+    } else {
+        appearance();
+        mainSection();
+        shared(ui::kSectionTypography, T("Typography"));
     }
+    shared(ui::kSectionTransition, T("Transition"));
 
     // === ARRANGEMENT И CONTENT контейнера ===================================
     if (isContainer && ictl::BeginSection("content", T("Arrangement and content"))) {

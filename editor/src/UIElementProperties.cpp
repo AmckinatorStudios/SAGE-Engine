@@ -523,6 +523,7 @@ bool Shows(const std::vector<ui::PartField>& fields, const ui::PartField& f, con
     if (f.Hidden || f.Type == ui::PartField::Kind::Look) return false;
     if (!Passes(f, view.Filter, view.SplitContent)) return false;
     if (!SameTab(f.Tab, view.Tab)) return false;
+    if (view.BySection && !SameTab(f.Section, view.Section)) return false;
     if (f.Advanced != view.Advanced) return false;
     if (!RequirementMet(reg, e, f)) return false;
     return ui::FieldVisible(fields, f, data);
@@ -574,6 +575,7 @@ int DrawFieldsOf(EditorHost& host, GameObject obj, const UIPropsContext& ctx, co
         if (f.Type == ui::PartField::Kind::Look) {
             const size_t end = std::min(fields.size(), i + 1 + lookSize);
             const bool show = !f.Hidden && view.Filter == FieldFilter::Look && SameTab(f.Tab, view.Tab) &&
+                              (!view.BySection || SameTab(f.Section, view.Section)) &&
                               f.Advanced == view.Advanced && RequirementMet(reg, e, f) &&
                               ui::FieldVisible(fields, f, data);
             // Вид, у которого показать нечего, кроме цвета (оформление движка),
@@ -626,14 +628,19 @@ void DrawPartSection(EditorHost& host, GameObject obj, const UIPropsContext& ctx
     // Своя область имён: «Ещё настройки» бывает у каждой части и вкладки.
     ImGui::PushID(p.Id ? p.Id : "part");
     ImGui::PushID(view.Tab ? view.Tab : "");
+    ImGui::PushID(view.Section ? view.Section : "");
     view.Advanced = false;
     DrawFieldsOf(host, obj, ctx, p, data, view, selected);
     view.Advanced = true;
     if (DrawFieldsOf(host, obj, ctx, p, data, view, selected, /*dryRun=*/true) > 0 &&
-        ictl::SubSection((std::string(p.Id ? p.Id : "part") + (view.Tab ? view.Tab : "")).c_str(), T("Advanced"))) {
+        ictl::SubSection((std::string(p.Id ? p.Id : "part") + (view.Tab ? view.Tab : "") +
+                          (view.Section ? view.Section : ""))
+                             .c_str(),
+                         T("Advanced"))) {
         DrawFieldsOf(host, obj, ctx, p, data, view, selected);
         ictl::EndSubSection();
     }
+    ImGui::PopID();
     ImGui::PopID();
     ImGui::PopID();
 }

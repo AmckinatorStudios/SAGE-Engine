@@ -178,7 +178,20 @@ struct PartField {
     // ключ вида. Нужен редактору, чтобы собрать поля вида под одним
     // заголовком; у обычных полей пусто.
     const char* LookKey = nullptr;
+
+    // РАЗДЕЛ ИНСПЕКТОРА, где поле стоит: nullptr — главный раздел типа
+    // (Progress, Range, Content…), иначе ключ общего раздела — kSectionLook
+    // («Appearance»), kSectionTypography, kSectionTransition. Цвет заполнения
+    // шкалы — оформление, а не «прогресс»: стоит в Appearance рядом с фоном,
+    // а скорость перехода — своим разделом. Объявлено ПОЛЕМ, а не списком в
+    // редакторе: у части из игры разделы раскладываются так же.
+    const char* Section = nullptr;
 };
+
+// Ключи общих разделов инспектора (PartField::Section).
+inline constexpr const char* kSectionLook = "appearance";
+inline constexpr const char* kSectionTypography = "typography";
+inline constexpr const char* kSectionTransition = "transition";
 
 // --- Что часть получает при отрисовке ---------------------------------------
 struct PartDrawContext {

@@ -10,6 +10,7 @@
 #include "sage/scene/SceneValueJson.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPart.h"
+#include "sage/ui/UIPresets.h"
 #include "sage/vars/ScriptVars.h"
 
 using json = nlohmann::json;
@@ -185,7 +186,7 @@ void LoadUIComponents(const json& uj, entt::registry& reg, entt::entity e) {
     const json* tjp = uj.contains("element") ? &uj["element"] : nullptr;
     if (tjp) {
         const json& tj = *tjp;
-        t.Type = tj.value("type", t.Type);
+        t.Type = CanonicalType(tj.value("type", t.Type));
         const int anchor = tj.value("anchor", (int)t.Anchor);
         if (anchor >= 0 && anchor <= 8) t.Anchor = (UIAnchor)anchor;
         const int stretch = tj.value("stretch", (int)t.Mode);

@@ -60,8 +60,12 @@ const std::vector<PartField>& RangeFields() {
         // именем. В файл второй раз не пишется: один вид, одно место.
         v[10].EditorOnly = true;
         v[12].Content = v[14].Content = true;
-        MarkAdvanced(v, {"trackThickness", "knobSize", "animation"});
+        MarkAdvanced(v, {"trackThickness", "knobSize"});
         MarkCustomOnly(v, {"trackThickness", "knobSize"});
+        // Значение и его пределы — главный раздел (Range / Value); дорожка,
+        // ручка, квадратик — оформление; время анимации — переход.
+        MarkSection(v, kSectionLook, {"trackThickness", "knobSize", "track", "filled", "knob", "box", "check"});
+        MarkSection(v, kSectionTransition, {"animation"});
         return v;
     }();
     return f;
@@ -196,6 +200,7 @@ const std::vector<PartField>& TextInputFields() {
         for (int i = 0; i < 6; ++i) v[(size_t)i].Content = true;
         MarkAdvanced(v, {"readOnly", "placeholderColor", "caretColor", "caretWidth"});
         MarkCustomOnly(v, {"placeholderColor", "caretColor", "caretWidth"});
+        MarkSection(v, kSectionLook, {"placeholderColor", "caretColor", "caretWidth"});
         return v;
     }();
     return f;
