@@ -3997,6 +3997,18 @@
     "Separate Window": "Отдельное окно",
     "The element has no picture yet: pick one in its inspector.": "У элемента пока нет картинки: выберите её в его инспекторе.",
     "Values of this element only: the sprite sheet and .sage9 stay as they are.": "Значения только этого элемента: лист спрайтов и .sage9 не меняются.",
-    "Window Management": "Управление окнами"
+    "Window Management": "Управление окнами",
+    "Actual size: one frame pixel is one screen pixel": "Истинный размер: пиксель кадра — пиксель экрана",
+    "Distances to the parent's edges while moving": "Расстояния до краёв родителя при перемещении",
+    "Distribute across": "Распределить по горизонтали",
+    "Distribute down": "Распределить по вертикали",
+    "Grid step: of the grid you see and of snapping to it": "Шаг сетки: и видимой, и для привязки",
+    "Outlines of all elements (the selected one is always outlined)": "Рамки всех элементов (у выбранного рамка есть всегда)",
+    "Safe area margin, percent of the frame": "Поле безопасной зоны, процент кадра",
+    "Safe area: everything outside it can be cut off (camera notch, rounded corners, TV overscan)": "Безопасная зона: всё за ней может обрезаться (вырез камеры, скруглённые углы, края телевизора)",
+    "Select elements to align them": "Выберите элементы, чтобы выровнять их",
+    "Snap distance: how close, in frame pixels, an edge has to come to stick": "Порог привязки: с какого расстояния в пикселях кадра край притягивается",
+    "Snap to edges and centers of the parent and neighbours": "Привязка к краям и центрам родителя и соседей",
+    "Width and height of the preview frame": "Ширина и высота кадра предпросмотра"
   }
 }
