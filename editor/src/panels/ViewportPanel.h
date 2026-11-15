@@ -13,6 +13,7 @@
 #include "../ViewGizmo.h"
 #include "../gizmo/ColliderHandles.h"
 #include "../gizmo/LightGizmo.h"
+#include "ViewportToolbarRules.h"
 
 
 class EditorHost;
@@ -71,9 +72,18 @@ private:
     sage::scene::ScaleLock m_scaleLockHint = sage::scene::ScaleLock::None;
 
     // Инструменты — ВИДЖЕТОМ ПОВЕРХ вьюпорта (ViewportTools.cpp): чем работаем,
-    // в каких осях, привязка с сеткой, чем показывать сцену. origin — левый
-    // верхний угол области видов в экранных координатах.
-    void DrawToolsOverlay(EditorHost& host, ImVec2 origin);
+    // в каких осях, привязка, сетка и правка коллайдера, «…». origin — левый
+    // верхний угол области видов, cellWidth — ширина вида, в которой лежит
+    // строка (узко — группы переносятся).
+    void DrawToolsOverlay(EditorHost& host, ImVec2 origin, float cellWidth);
+
+    // ИНФОРМАЦИОННЫЙ СЛОЙ вида (ViewportPanel_Info.cpp): вид, выделение,
+    // камера, статистика — пассивным текстом в левом нижнем углу, в обход
+    // превью камеры и подсказок. Возвращает занятый прямоугольник (пустой —
+    // слой не нарисован), чтобы подсказки ниже обошли его.
+    sage::editor::vptools::Box DrawInfoOverlay(EditorHost& host, int slot, ViewKind kind, ImVec2 pos, ImVec2 cell,
+                                               int viewCount);
+    sage::editor::vptools::OverlayPrefs& OverlayPrefsRef();
 
     // --- КАРТОЧКА ПРЕВЬЮ ВЫБРАННОЙ КАМЕРЫ -----------------------------------
     //
@@ -102,10 +112,8 @@ private:
     void StartPilot(EditorHost& host, int cameraId);
     void StopPilot(EditorHost& host);
     void SyncPilotCamera(EditorHost& host);   // камера редактора -> объект камеры
-    void DrawSpaceMenu(EditorHost& host);
-    void DrawSnapMenu(EditorHost& host);     // оси: мира или объекта
-    void DrawShadingMenu(EditorHost& host);   // чем показывать сцену
-    void DrawMoreMenu(EditorHost& host);      // редкие инструменты и раскладка видов
+    void DrawSnapMenu(EditorHost& host);     // шаги привязки (только при включённой)
+    void DrawMoreMenu(EditorHost& host);     // редкие инструменты, виды, слой информации
     // Рисует один вид раскладки в текущем регионе. Возвращает true, если курсор
     // над ним (для взаимодействия).
     bool DrawViewImage(EditorHost& host, int slot, ViewKind kind, ImVec2 size, ImVec2& outPos);
@@ -118,6 +126,18 @@ public:
     // EditorLayer::TickInputProbe), а чтобы щёлкнуть, надо знать куда.
     ImVec2 ViewMin() const { return m_lastViewMin; }
     ImVec2 ViewMax() const { return m_lastViewMax; }
+    // Для самопроверки строки инструментов и слоя информации.
+    ImVec2 ToolsMin() const { return m_toolsMin; }
+    ImVec2 ToolsMax() const { return m_toolsMax; }
+    bool SnapFieldShown() const { return m_snapFieldShown; }
+    bool ColliderButtonEnabled() const { return m_colliderButtonEnabled; }
+    sage::editor::vptools::OverlayPrefs& Overlay() { return OverlayPrefsRef(); }
+    // 1 — один вид, 2 — две колонки, 4 — четыре (для самопроверки раскладок).
+    void SetViewCountForTest(int n) {
+        m_layout = n >= 4 ? Layout::Quad : n == 2 ? Layout::TwoColumns : Layout::Single;
+    }
+    const sage::editor::vptools::Box& InfoRect(int slot) const { return m_infoRect[slot & 3]; }
+    const std::vector<std::string>& InfoLines(int slot) const { return m_infoLines[slot & 3]; }
 
 private:
     ImVec2 m_lastViewMin{0.0f, 0.0f};
@@ -140,6 +160,13 @@ private:
     // того, как виджет нарисован: мышь над ним не должна ни выбирать объект, ни
     // хватать гизмо, а ImGuizmo про окна ImGui ничего не знает и считает
     // попадание по голым координатам.
+    bool m_snapFieldShown = false;   // поле шагов привязки нарисовано в этом кадре
+    bool m_colliderButtonEnabled = false;   // кнопка правки коллайдера доступна в этом кадре
+    ImVec2 m_snapAnchor{0.0f, 0.0f}; // где открывать окно шагов (под полем)
+    sage::editor::vptools::OverlayPrefs m_overlay;
+    bool m_overlayLoaded = false;
+    sage::editor::vptools::Box m_infoRect[4];
+    std::vector<std::string> m_infoLines[4];
     ImVec2 m_toolsMin{0.0f, 0.0f};
     ImVec2 m_toolsMax{0.0f, 0.0f};
     bool m_toolsHovered = false;

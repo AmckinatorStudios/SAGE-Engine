@@ -151,9 +151,21 @@ void DrawAt(ImDrawList* dl, ImVec2 pos, float size, const char* icon, ImU32 colo
     // в квадрат стороной size — иначе кнопки с иконками разной плотности
     // выглядели бы разного размера. Поэтому меряем НАСТОЯЩИЙ размер глифа и
     // центрируем его в отведённом квадрате.
-    const ImVec2 measured = g_iconFont->CalcTextSizeA(size, FLT_MAX, 0.0f, utf8);
-    const ImVec2 at(pos.x + std::floor((size - measured.x) * 0.5f),
-                    pos.y + std::floor((size - measured.y) * 0.5f));
+    //
+    // ПО КОНТУРУ, А НЕ ПО КЛЕТКЕ. Рисунок глифа Tabler стоит в своей клетке
+    // не по центру (у стрелки выбора он смещён влево-вниз, у рамки — вправо),
+    // и центровка по ширине клетки давала ряд значков «вразнобой»: каждая
+    // кнопка ровная, а значки в них — кривые. Центруем видимый контур глифа.
+    ImVec2 at;
+    const ImFontGlyph* g = nullptr;
+    if (ImFontBaked* baked = g_iconFont->GetFontBaked(size)) g = baked->FindGlyph((ImWchar)code);
+    if (g && g->X1 > g->X0 && g->Y1 > g->Y0) {
+        at = ImVec2(pos.x + std::round((size - (g->X1 - g->X0)) * 0.5f - g->X0),
+                    pos.y + std::ceil((size - (g->Y1 - g->Y0)) * 0.5f - g->Y0));
+    } else {
+        const ImVec2 measured = g_iconFont->CalcTextSizeA(size, FLT_MAX, 0.0f, utf8);
+        at = ImVec2(pos.x + std::floor((size - measured.x) * 0.5f), pos.y + std::floor((size - measured.y) * 0.5f));
+    }
     dl->AddText(g_iconFont, size, at, color, utf8);
 }
 

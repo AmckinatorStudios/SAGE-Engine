@@ -78,6 +78,31 @@ bool BeginDropdown(const char* id, const char* preview, DropLook look) {
 
 void EndDropdown() { ImGui::EndCombo(); }
 
+bool DropButton(const char* id, const char* preview, bool open, const char* tooltip) {
+    // Тот же вид, что у списка (поле, значение, шеврон Tabler внутри), но
+    // окно открывает вызывающий — своё, а не список пунктов.
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float h = ImGui::GetFrameHeight();
+    const float chev = std::floor(h * K().ChevronIcon);
+    const float padX = style.FramePadding.x;
+    if (!preview) preview = "";
+    const float w = std::max(chev + padX * 2.0f, ImGui::CalcItemWidth());
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const bool clicked = ImGui::InvisibleButton(id, ImVec2(w, h));
+    const bool hovered = ImGui::IsItemHovered();
+    if (hovered && tooltip && *tooltip && !open) ImGui::SetTooltip("%s", tooltip);
+    const State st = open ? State::Focused : hovered ? State::Hover : State::Normal;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    detail::Frame(dl, p, ImVec2(p.x + w, p.y + h), st == State::Focused ? State::Normal : st);
+    dl->PushClipRect(p, ImVec2(p.x + w - chev - padX, p.y + h), true);
+    dl->AddText(ImVec2(p.x + padX, p.y + style.FramePadding.y), EditorTheme::Color32(EditorTheme::Role::Text), preview);
+    dl->PopClipRect();
+    EditorIcons::Overlay(dl, std::floor(p.x + w - padX * 0.5f - chev), std::floor(p.y + (h - chev) * 0.5f), chev,
+                         open ? "chevron-up" : "chevron-down", Vec3(EditorTheme::IconTint(st)));
+    if (open) dl->AddRect(p, ImVec2(p.x + w, p.y + h), EditorTheme::ControlBorder(State::Focused), K().Rounding);
+    return clicked;
+}
+
 bool Dropdown(const char* label, int* current, const char* const* items, int count, DropLook look) {
     ImGui::PushID(label);
     Label(label);
@@ -111,7 +136,9 @@ int ButtonGroup(const char* id, const GroupItem* items, int count, ButtonLook lo
     const float h = ImGui::GetFrameHeight();
     const int cols = columns > 0 ? std::min(columns, count) : count;
     const int rows = (count + cols - 1) / cols;
-    const float icon = std::floor(K().IconSize);
+    // Значок-кнопка — того же размера, что одиночная IconOnlyButton (доля
+    // высоты поля); с подписью — кегля текста.
+    const float icon = look == ButtonLook::IconOnly ? std::floor(h * 0.64f) : std::floor(K().IconSize);
     const float pad = look == ButtonLook::Compact ? K().ButtonPadXCompact : K().ButtonPadX;
     // Сегменты РАВНЫЕ: по самому широкому содержимому (или квадраты).
     float seg = h;
@@ -143,7 +170,10 @@ int ButtonGroup(const char* id, const GroupItem* items, int count, ButtonLook lo
         ImGui::BeginDisabled(!it.Enabled);
         if (ImGui::InvisibleButton("##b", ImVec2(sw, h))) clicked = i;
         const bool hovered = ImGui::IsItemHovered(), held = ImGui::IsItemActive();
-        if (hovered && it.Tooltip && *it.Tooltip) ImGui::SetTooltip("%s", it.Tooltip);
+        // Подсказка — и у погашенной кнопки: она объясняет, почему кнопка
+        // сейчас недоступна.
+        if (it.Tooltip && *it.Tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s", it.Tooltip);
         ImGui::EndDisabled();
         ImGui::PopID();
         const State st = !it.Enabled ? State::Disabled

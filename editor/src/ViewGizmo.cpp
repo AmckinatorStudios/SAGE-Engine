@@ -69,6 +69,8 @@ ImVec2 GizmoCenter(const ImVec2& viewMin, const ImVec2& viewMax) {
 
 } // namespace
 
+float Extent() { return 2.0f * (kRadius + kBall) + kInset; }
+
 ImVec2 AxisBall(const Camera& camera, const ImVec2& viewMin, const ImVec2& viewMax, int axis,
                 bool positive) {
     const ImVec2 center = GizmoCenter(viewMin, viewMax);

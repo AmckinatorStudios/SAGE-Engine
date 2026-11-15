@@ -37,8 +37,11 @@ bool NumberIn(EditorHost* host, const char* id, float* v, const NumOpts& o, ImVe
 
 // Ширина кнопки −/+ при высоте h и ширине поля width.
 float StepSide(float width, float h);
-// Помещаются ли −/+ в поле шириной width.
+// Помещаются ли −/+ в поле шириной width (рядом с числом DigitRoom).
 bool StepFits(float width, float h);
+// Сколько места нужно самому числу («-000.000» текущим шрифтом): меньше —
+// цифры обрезаются, и вместо «-1.600» видно «-1.60(».
+float DigitRoom();
 
 // Метка оси/стороны («X», «W», «Min») цветной плашкой в точке p высотой h.
 // axisColor < 0 — нейтральная метка.

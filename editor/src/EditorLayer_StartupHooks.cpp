@@ -310,6 +310,9 @@ void EditorLayer::ApplyStartupHooks() {
         GameObject obj = m_scene->FindByName(name);
         if (obj.Valid()) m_selection.SetPrimary(obj.Id());
         else LOG_WARN("Editor") << "SAGE_EDITOR_SELECT_ENTITY: нет сущности с именем " << name;
+        // Снимок правки коллайдера: выбранному — коробка, если формы нет.
+        if (obj.Valid() && std::getenv("SAGE_EDITOR_COLLIDER_MODE") && !obj.Registry()->all_of<ColliderComponent>(obj.Entity()))
+            obj.Registry()->emplace<ColliderComponent>(obj.Entity());
         // Снимают ИНСПЕКТОР выбранного: вкладкой поверх у него по умолчанию
         // стоит Environment, и скриншот показывал бы не то.
         m_focusInspectorFrames = 3;

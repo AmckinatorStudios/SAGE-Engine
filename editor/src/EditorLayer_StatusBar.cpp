@@ -323,3 +323,16 @@ void EditorLayer::DrawEmptyDockHint(float minX, float minY, float maxX, float ma
     }
     ImGui::End();
 }
+
+EditorHost::SceneStatsInfo EditorLayer::SceneStats() const {
+    // Те же источники, что у строки состояния выше: последний кадр рендера,
+    // счётчик кадров приложения и занятая процессом память.
+    const sage::ecs::RenderStats& rs = m_renderer.LastStats();
+    SceneStatsInfo s;
+    s.Fps = sage::Application::Get().Fps();
+    s.MemoryGb = (double)sage::profile::ResidentBytes() / (1024.0 * 1024.0 * 1024.0);
+    s.DrawCalls = rs.Batches;
+    s.Triangles = rs.Triangles;
+    s.Objects = rs.Drawn;
+    return s;
+}
