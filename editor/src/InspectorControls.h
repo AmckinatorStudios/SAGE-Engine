@@ -1,6 +1,7 @@
 #pragma once
 #include <cfloat>
 #include <functional>
+#include <string>
 
 #include <glm/glm.hpp>
 
@@ -90,6 +91,13 @@ bool PairRow(EditorHost& host, const char* label, float* a, float* b, const char
 // Оси построчно по две: подписи осей — n штук (2 или 4).
 bool Axes(EditorHost& host, const char* id, float* v, int n, const char* const* axes, const NumOpts& o);
 
+// VECTOR3 — «Позиция: [X ..] [Y ..] [Z ..]»: метка оси цветом (X красная,
+// Y зелёная, Z синяя) — часть поля, а не отдельная кнопка; три поля одной
+// ширины в одной строке. trailing — место справа под свои кнопки (замок,
+// сброс), одинаковое у соседних строк, чтобы столбцы X/Y/Z совпадали.
+// Узко — подпись над полями.
+bool Vector3(EditorHost& host, const char* label, glm::vec3* v, const NumOpts& o, float trailing = 0.0f);
+
 // Position — X и Y в одной строке.
 bool Position(EditorHost& host, const char* title, glm::vec2* v, const NumOpts& o);
 
@@ -105,6 +113,9 @@ bool Range(EditorHost& host, const char* title, float* min, float* max, const Nu
 
 // Стороны (Margin, Padding): L/T/R/B двумя строками, со связью — одно число.
 bool Sides(EditorHost& host, const char* title, glm::vec4* v, const NumOpts& o);
+
+// Подпись раздела ЗАГЛАВНЫМИ (и кириллицей), без «###id».
+std::string UpperTitle(const char* title);
 
 // РАЗДЕЛ: карточка со своей шапкой (акцентная метка, заглавные буквы,
 // стрелка справа). Раскрытие запоминается между запусками. true — раскрыт:

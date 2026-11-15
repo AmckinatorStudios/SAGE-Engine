@@ -2,6 +2,8 @@
 // Инспектор: слой отрисовки объекта и проходы камеры (sage/ecs/RenderLayers.h,
 // CameraComponent::Passes). Отдельным файлом: секции сущности и так большие.
 // ---------------------------------------------------------------------------
+#include "InspectorControls.h"
+#include "InspectorFields.h"
 #include "InspectorPassesUI.h"
 
 #include <cstdio>
@@ -15,6 +17,8 @@
 #include "../Localization.h"
 #include "sage/ecs/CameraLightComponents.h"
 #include "sage/ecs/RenderComponents.h"
+
+namespace ifield = sage::editor::ifield;
 
 namespace sage::editor {
 
@@ -44,7 +48,8 @@ std::vector<std::string> SplitLayers(const std::string& text) {
 void DrawRenderLayerField(EditorHost& host, MeshRendererComponent& mr) {
     char buf[64];
     std::snprintf(buf, sizeof(buf), "%s", mr.Layer.c_str());
-    if (ImGui::InputTextWithHint(T("Layer"), "default", buf, sizeof(buf))) {
+    sage::editor::ictl::Label(T("Render layer"));
+    if (ImGui::InputTextWithHint("##render_layer", T("default"), buf, sizeof(buf))) {
         mr.Layer = buf;
         if (mr.Layer == "default") mr.Layer.clear();
     }
@@ -65,13 +70,10 @@ void DrawCameraPasses(EditorHost& host, CameraComponent& cam) {
         std::snprintf(buf, sizeof(buf), "%s", JoinLayers(p.Layers).c_str());
         if (ImGui::InputText(T("Layers"), buf, sizeof(buf))) p.Layers = SplitLayers(buf);
         host.TrackLastImGuiItem();
-        if (ImGui::Checkbox(T("Clear depth"), &p.ClearDepth)) host.PushUndoSnapshot();
-        ImGui::DragFloat(T("Pass FOV"), &p.Fov, 0.5f, 0.0f, 140.0f, "%.1f");
-        host.TrackLastImGuiItem();
-        ImGui::DragFloat(T("Pass near"), &p.Near, 0.005f, 0.0f, 10.0f, "%.3f");
-        host.TrackLastImGuiItem();
-        ImGui::DragFloat(T("Pass far"), &p.Far, 1.0f, 0.0f, 10000.0f, "%.0f");
-        host.TrackLastImGuiItem();
+        ifield::Check(host, T("Clear depth"), &p.ClearDepth);
+        ifield::Float(host, T("Pass FOV"), &p.Fov, 0.5f, 0.0f, 140.0f, "%.1f");
+        ifield::Float(host, T("Pass near"), &p.Near, 0.005f, 0.0f, 10.0f, "%.3f");
+        ifield::Float(host, T("Pass far"), &p.Far, 1.0f, 0.0f, 10000.0f, "%.0f");
         EditorTheme::Hint(T("0 — as the camera"));
         if (ImGui::Button(T("Remove pass"))) removeAt = (int)i;
         ImGui::PopID();

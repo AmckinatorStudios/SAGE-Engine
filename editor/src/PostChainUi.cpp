@@ -10,6 +10,8 @@
 #include "EditorTheme.h"
 #include "Localization.h"
 #include "ui/ColorPicker.h"
+#include "InspectorControls.h"
+#include "InspectorFields.h"
 
 namespace sage::editor {
 
@@ -34,6 +36,67 @@ void DrawParam(EditorHost* host, sage::render::PostEffect& effect,
     // не литералом здесь. T() такую строку переводит (ключ — сам английский
     // текст), а если перевода нет — отдаёт как есть, и ключ попадает в
     // MissingKeys(): непереведённая подпись видна, а не молчит.
+    // С редактором — общие поля инспектора (подпись слева, [−|число|+],
+    // переключатель; снимок истории — внутри поля). Без него (проверки,
+    // окно без сцены) — прежние виджеты.
+    if (host && desc.Type != PostParamType::Heading) {
+        namespace ifield = sage::editor::ifield;
+        switch (desc.Type) {
+        case PostParamType::Bool: {
+            bool on = value->B;
+            if (ifield::Check(*host, label, &on)) {
+                value->B = on;
+                value->V[0] = on ? 1.0f : 0.0f;
+                changed = true;
+            }
+            break;
+        }
+        case PostParamType::Enum: {
+            std::vector<const char*> names;
+            names.reserve(desc.Options.size());
+            for (const std::string& option : desc.Options) names.push_back(T(option));
+            int choice = (int)value->V[0];
+            if (!names.empty() && ifield::Combo(*host, label, &choice, names.data(), (int)names.size())) {
+                value->V[0] = (float)choice;
+                changed = true;
+            }
+            break;
+        }
+        case PostParamType::Int: {
+            int number = (int)value->V[0];
+            if (ifield::Int(*host, label, &number, (int)desc.Min, (int)desc.Max)) {
+                value->V[0] = (float)number;
+                changed = true;
+            }
+            break;
+        }
+        case PostParamType::Vec2: {
+            sage::editor::ictl::NumOpts o = sage::editor::ictl::OptsForRange(desc.Min, desc.Max);
+            if (sage::editor::ictl::PairRow(*host, label, &value->V[0], &value->V[1], "X", "Y", o)) changed = true;
+            break;
+        }
+        case PostParamType::Color: {
+            glm::vec4 rgba(value->V[0], value->V[1], value->V[2], value->V[3]);
+            if (ifield::Color4(*host, label, &rgba)) {
+                for (int c = 0; c < 4; ++c) value->V[c] = rgba[c];
+                changed = true;
+            }
+            break;
+        }
+        default: {
+            float number = value->V[0];
+            const float span = desc.Max - desc.Min;
+            const float step = span > 0.0f ? span * 0.002f : 0.01f;
+            if (ifield::Float(*host, label, &number, step, desc.Min, desc.Max, span <= 2.0f ? "%.3f" : "%.2f")) {
+                value->V[0] = number;
+                changed = true;
+            }
+            break;
+        }
+        }
+        if (!desc.Hint.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", desc.Hint.c_str());
+        return;
+    }
     switch (desc.Type) {
     case PostParamType::Heading:
         // Подпись-разделитель: значения у неё нет, есть только место в списке.

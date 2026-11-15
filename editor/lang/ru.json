@@ -4009,6 +4009,25 @@
     "Select elements to align them": "Выберите элементы, чтобы выровнять их",
     "Snap distance: how close, in frame pixels, an edge has to come to stick": "Порог привязки: с какого расстояния в пикселях кадра край притягивается",
     "Snap to edges and centers of the parent and neighbours": "Привязка к краям и центрам родителя и соседей",
-    "Width and height of the preview frame": "Ширина и высота кадра предпросмотра"
+    "Width and height of the preview frame": "Ширина и высота кадра предпросмотра",
+    "Add the layer": "Добавить слой",
+    "Clear the tag": "Убрать тег",
+    "Empty object": "Пустой объект",
+    "Mesh object": "Объект с мешем",
+    "New layer": "Новый слой",
+    "No layers yet": "Слоёв пока нет",
+    "No tags in this scene yet: type one": "В сцене пока нет тегов: введите свой",
+    "Remove the layer: its objects stay without a layer": "Удалить слой: его объекты останутся без слоя",
+    "Render layer": "Слой рендера",
+    "Reset this row to its default": "Вернуть строку к значению по умолчанию",
+    "Right-click: reset the whole row": "Правый щелчок — сбросить всю строку",
+    "Scene Layer": "Слой сцены",
+    "Scene layer: a group of objects for sorting and filtering. It is not the render layer of a mesh.": "Слой сцены: группа объектов для сортировки и фильтрации. Это не слой рендера меша.",
+    "Scene layers": "Слои сцены",
+    "Scene layers: add, rename, remove": "Слои сцены: добавить, переименовать, удалить",
+    "Tags already used in this scene": "Теги, уже занятые в этой сцене",
+    "This layer name is empty or taken": "Имя слоя пустое или занято",
+    "This layer name is taken": "Такой слой уже есть",
+    "default": "default"
   }
 }

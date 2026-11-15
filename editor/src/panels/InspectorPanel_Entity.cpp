@@ -51,6 +51,9 @@
 #include "AssetSlot.h"
 #include "ObjectSlot.h"
 #include "EditorIcons.h"
+#include "InspectorControls.h"
+#include "InspectorFields.h"
+namespace ifield = sage::editor::ifield;
 #include "../EditorPrefs.h"
 #include "ModelMaterialImport.h"
 #include "Project.h"
@@ -121,10 +124,8 @@ void InspectorPanel::DrawSunSection(EditorHost& host, GameObject obj) {
     float azimuth = glm::degrees(std::atan2(toSun.x, toSun.z));
 
     bool changed = false;
-    changed |= ImGui::SliderFloat(T("Elevation"), &elevation, -20.0f, 90.0f, "%.0f°");
-    host.TrackLastImGuiItem();
-    changed |= ImGui::SliderFloat(T("Azimuth"), &azimuth, -180.0f, 180.0f, "%.0f°");
-    host.TrackLastImGuiItem();
+    changed |= ifield::Slider(host, T("Elevation"), &elevation, -20.0f, 90.0f, "%.0f°");
+    changed |= ifield::Slider(host, T("Azimuth"), &azimuth, -180.0f, 180.0f, "%.0f°");
     if (changed) {
         const float e = glm::radians(elevation), a = glm::radians(azimuth);
         const glm::vec3 dir(std::cos(e) * std::sin(a), std::sin(e), std::cos(e) * std::cos(a));
@@ -135,9 +136,8 @@ void InspectorPanel::DrawSunSection(EditorHost& host, GameObject obj) {
     // внешность ЭТОГО источника, а не отдельное светило.
     LightingEnvironment& env = scene.Lighting;
     ImGui::BeginDisabled(!env.Skybox.Enabled || !env.Skybox.Celestials);
-    Sage::UI::ColorField3(T("Disc Colour"), &env.Skybox.SunColor.x); host.TrackLastImGuiItem();
-    ImGui::SliderFloat(T("Disc Size"), &env.Skybox.SunSize, 0.005f, 0.2f, "%.3f");
-    host.TrackLastImGuiItem();
+    ifield::Color3(host, T("Disc Colour"), &env.Skybox.SunColor);
+    ifield::Slider(host, T("Disc Size"), &env.Skybox.SunSize, 0.005f, 0.2f, "%.3f");
     ImGui::EndDisabled();
     if (!env.Skybox.Enabled || !env.Skybox.Celestials) {
         ImGui::TextDisabled("%s", T("The sky or its celestials are off — see Environment."));
@@ -197,7 +197,7 @@ static void DrawPostProcessSection(EditorHost& host, entt::registry& reg, entt::
 
     // Общий выключатель — отдельно от удаления компонента: «посмотреть, как без
     // обработки» делают ежеминутно, и терять ради этого настройки нельзя.
-    if (ImGui::Checkbox(T("Enabled"), &component->Enabled)) host.PushUndoSnapshot();
+    ifield::Check(host, T("Enabled"), &component->Enabled);
     EditorTheme::Hint(T("off — every effect of this component is off"));
     // Где лежит — там и действует (см. PostProcessComponent.h): на камере —
     // только её кадр, на любом другом объекте — все камеры без своего.
@@ -205,8 +205,7 @@ static void DrawPostProcessSection(EditorHost& host, entt::registry& reg, entt::
         ImGui::TextDisabled("%s", T("Applies to this camera only"));
     } else {
         ImGui::TextDisabled("%s", T("Applies to every camera of the scene without its own"));
-        ImGui::DragInt(T("Priority"), &component->Priority, 0.1f, -100, 100);
-        host.TrackLastImGuiItem();
+        ifield::Int(host, T("Priority"), &component->Priority, -100, 100);
         EditorTheme::Hint(T("Of several scene-wide components the higher priority wins"));
     }
 
@@ -235,39 +234,6 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     GameObject obj = host.InspectedObject();
     entt::registry& reg = host.CurrentScene().Registry();
 
-    char buf[128];
-    std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
-    if (ImGui::InputText(T("Name"), buf, sizeof(buf))) obj.SetName(buf);
-    host.TrackLastImGuiItem();
-
-    // Тег и «переходит в следующую сцену» — свойства объекта В СЦЕНЕ, а не
-    // компоненты. Тег раньше задавался только из скрипта (а искали по нему —
-    // scene:FindByTag — именно объекты, расставленные в редакторе).
-    if (!reg.all_of<FolderComponent>(obj.Entity())) {
-        Sage::UI::BeginProperties("objectflags");
-        Sage::UI::PropertyLabel(T("Tag"), T("Group name for scripts: scene:FindByTag(\"Enemy\")"));
-        char tag[64];
-        const TagComponent* tc = reg.try_get<TagComponent>(obj.Entity());
-        std::snprintf(tag, sizeof(tag), "%s", tc ? tc->Tag.c_str() : "");
-        ImGui::SetNextItemWidth(-1.0f);
-        if (ImGui::InputTextWithHint("##tag", T("none"), tag, sizeof(tag))) {
-            if (tag[0]) reg.emplace_or_replace<TagComponent>(obj.Entity(), TagComponent{tag});
-            else reg.remove<TagComponent>(obj.Entity());
-        }
-        host.TrackLastImGuiItem();
-        Sage::UI::PropertyLabel(T("Keep on scene change"),
-                                T("When a script loads another scene (scene:Load), this object moves there "
-                                  "with its children: the player, music, a game manager."));
-        bool keep = reg.all_of<KeepOnLoadComponent>(obj.Entity());
-        if (ImGui::Checkbox("##keep", &keep)) {
-            if (keep) reg.emplace_or_replace<KeepOnLoadComponent>(obj.Entity());
-            else reg.remove<KeepOnLoadComponent>(obj.Entity());
-            host.PushUndoSnapshot();
-        }
-        Sage::UI::EndProperties();
-    }
-    ImGui::Separator();
-
     // --- ПАПКА СПИСКА: имя, цвет и всё -------------------------------------
     //
     // У папки нет ни положения, ни вида, ни компонентов — она заведена ради
@@ -276,7 +242,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     // то, чего у неё нет и не будет, — и каждый, кто это попробует, решит, что
     // настройка не работает.
     if (FolderComponent* folder = reg.try_get<FolderComponent>(obj.Entity())) {
-        if (Sage::UI::ColorField3(T("Colour"), &folder->Color.x, Sage::UI::ColorField_Compact))
+        sage::editor::ictl::Label(T("Colour"));
+        if (Sage::UI::ColorField3("##folder_colour", &folder->Color.x, Sage::UI::ColorField_Compact))
             host.PushUndoSnapshot();
         EditorTheme::Hint(T("Mark in the list. A folder is for sorting only: it does not move its "
                             "contents and is not drawn."));
@@ -305,77 +272,86 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         tr.Scale = glm::vec3(1.0f);
     }
     if (transformOpen) {
-        // СЕТКА СВОЙСТВ, а не DragFloat3 с подписью.
-        //
-        // У ImGui подпись стоит СПРАВА от поля, и инспектор читался задом
-        // наперёд: «1.500 0.500 2.200 Позиция». Хуже того, подпись съедала
-        // ширину у самих полей и в узкой панели обрезалась посреди слова, а
-        // строки соседних разделов начинались каждая со своей координаты —
-        // сетки не было вовсе.
-        //
-        // Sage::UI ставит подпись слева в колонке одной ширины, а значения —
-        // на одной координате во ВСЕХ строках и всех разделах (см. ui/UI.h).
+        // ТРИ СТРОКИ ОДНОГО ВИДА: «Подпись: [X ..] [Y ..] [Z ..] [кнопки]» —
+        // общий контрол инспектора (ictl::Vector3 на NumberCore): метки осей
+        // цветом, −/+, перетаскивание, колесо, правый щелчок по полю — сброс
+        // оси, по подписи — сброс строки. Справа у каждой строки одно и то
+        // же место под кнопки, поэтому столбцы X/Y/Z совпадают.
+        namespace ictl = sage::editor::ictl;
         Transform& tr = obj.GetTransform();
-        Sage::UI::BeginProperties("transform");
-        // Сброс одной строки — правым щелчком по её подписи (ResetDefault.h).
-        Sage::UI::PropertyLabel(T("Position"));
-        sage::editor::ResetField(&host, tr, tr.Position);
-        Sage::UI::PropertyVec3("pos", &tr.Position.x, 0.05f); host.TrackLastImGuiItem();
-        Sage::UI::PropertyLabel(T("Rotation"));
-        sage::editor::ResetField(&host, tr, tr.Rotation);
-        Sage::UI::PropertyVec3("rot", &tr.Rotation.x, 0.5f, "%.1f"); host.TrackLastImGuiItem();
-        // --- МАСШТАБ СО СВЯЗЬЮ ОСЕЙ ------------------------------------
-        //
-        // Замок справа от полей связывает X, Y и Z: тянешь одну ось — растут
-        // все три в тех же пропорциях. Без него равномерно увеличить предмет
-        // означало три одинаковых движения мышью, и после первого же промаха
-        // ящик становился слегка приплюснутым — а заметно это только с другой
-        // стороны сцены. Неравномерный масштаб тоже нужен (стена, доска), но
-        // он — исключение, и включается тем же щелчком.
-        //
-        // Состояние замка запоминается между запусками: это привычка человека,
-        // а не свойство сцены.
         if (!m_uniformScaleLoaded) {
             m_uniformScaleLoaded = true;
             m_uniformScale = sage::editor::prefs::GetBool("inspector.uniform_scale", true);
         }
-        Sage::UI::PropertyLabel(T("Scale"));
-        sage::editor::ResetField(&host, tr, tr.Scale);
-        const float lockW = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x;
-        const glm::vec3 before = tr.Scale;
-        // У камеры, света, звука масштаба нет (sage/scene/ScaleLock.h): поле
-        // видно — чтобы было понятно, ГДЕ оно и почему серое, — но не правится.
+        const float side = ImGui::GetFrameHeight();
+        const float trailing = side + 4.0f;   // одно место: сброс строки или замок
+        // Сброс строки — значком, пока значение не по умолчанию (место под
+        // него есть всегда, чтобы строки не прыгали).
+        auto rowReset = [&](const char* id, glm::vec3& v, const glm::vec3& def) {
+            ImGui::SameLine(0.0f, 4.0f);
+            if (v == def) {
+                ImGui::Dummy(ImVec2(side, side));
+                return;
+            }
+            ImGui::PushID(id);
+            if (EditorIcons::IconOnlyButton("refresh", T("Reset this row to its default"))) {
+                host.PushUndoSnapshot();
+                v = def;
+            }
+            ImGui::PopID();
+        };
+
+        ictl::NumOpts po;
+        po.Step = 0.1f;
+        po.Format = "%.3f";
+        po.HasReset = true;
+        po.Reset = 0.0f;
+        ictl::Vector3(host, T("Position"), &tr.Position, po, trailing);
+        rowReset("pos", tr.Position, glm::vec3(0.0f));
+
+        ictl::NumOpts ro;
+        ro.Step = 1.0f;
+        ro.Format = "%.1f";
+        ro.HasReset = true;
+        ro.Reset = 0.0f;
+        ictl::Vector3(host, T("Rotation"), &tr.Rotation, ro, trailing);
+        rowReset("rot", tr.Rotation, glm::vec3(0.0f));
+
+        // --- МАСШТАБ СО СВЯЗЬЮ ОСЕЙ ------------------------------------
+        //
+        // Замок в той же строке связывает X, Y и Z: тянешь одну ось — растут
+        // все три в тех же пропорциях (LinkScaleAxes). Состояние замка —
+        // привычка человека, запоминается между запусками. У камеры, света,
+        // звука, зондов и папок масштаба нет (sage/scene/ScaleLock.h): поля
+        // видны серыми, замка нет.
         const bool canScale = sage::scene::CanScale(*obj.Registry(), obj.Entity());
+        const glm::vec3 before = tr.Scale;
+        ictl::NumOpts so;
+        so.Step = 0.05f;
+        so.Format = "%.3f";
+        so.HasReset = true;
+        so.Reset = 1.0f;
         ImGui::BeginDisabled(!canScale);
-        const bool scaleChanged =
-            Sage::UI::PropertyVec3("scl", &tr.Scale.x, 0.05f, "%.3f", lockW);
-        host.TrackLastImGuiItem();
+        const bool scaleChanged = ictl::Vector3(host, T("Scale"), &tr.Scale, so, trailing);
         ImGui::EndDisabled();
         if (!canScale && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             ImGui::SetTooltip("%s", T("This object has no size, so it cannot be scaled"));
-        if (scaleChanged && m_uniformScale) tr.Scale = LinkScaleAxes(before, tr.Scale);
-        ImGui::SameLine();
-        if (EditorIcons::IconOnlyButton(
-                m_uniformScale ? "lock" : "unlock",
-                m_uniformScale ? T("Axes are linked: dragging one scales all three")
-                               : T("Axes are independent: each one scales on its own"),
-                m_uniformScale)) {
-            m_uniformScale = !m_uniformScale;
-            sage::editor::prefs::SetBool("inspector.uniform_scale", m_uniformScale);
-        }
-        // Масштаб, оставшийся от старых сцен (тогда камеру можно было
-        // растянуть), — сбросить одной кнопкой: он искажает вид камеры и всё,
-        // что положено внутрь объекта.
-        if (!canScale && tr.Scale != glm::vec3(1.0f)) {
-            ImGui::SameLine();
-            ImGui::PushID("scale_reset");
-            if (EditorIcons::IconOnlyButton("refresh", T("Reset the scale to 1: it means nothing for this object"))) {
-                host.PushUndoSnapshot();
-                tr.Scale = glm::vec3(1.0f);
+        if (scaleChanged && m_uniformScale && canScale) tr.Scale = LinkScaleAxes(before, tr.Scale);
+        // Место строки — замок; у объекта без масштаба — сброс остатка
+        // старых сцен (тогда камеру можно было растянуть, и это искажает её вид).
+        ImGui::SameLine(0.0f, 4.0f);
+        if (canScale) {
+            if (EditorIcons::IconOnlyButton(
+                    m_uniformScale ? "lock" : "unlock",
+                    m_uniformScale ? T("Axes are linked: dragging one scales all three")
+                                   : T("Axes are independent: each one scales on its own"),
+                    m_uniformScale)) {
+                m_uniformScale = !m_uniformScale;
+                sage::editor::prefs::SetBool("inspector.uniform_scale", m_uniformScale);
             }
-            ImGui::PopID();
+        } else {
+            rowReset("scl", tr.Scale, glm::vec3(1.0f));
         }
-        Sage::UI::EndProperties();
     }
 
     // --- Mesh Renderer: ОДНА секция на весь компонент -------------------------
@@ -416,13 +392,13 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                 *cam = CameraComponent{};
                 cam->Primary = primary;
             }
-            ImGui::DragFloat(T("FOV"), &cam->Fov, 0.5f, 10.0f, 140.0f); host.TrackLastImGuiItem();
+            ifield::Float(host, T("FOV"), &cam->Fov, 0.5f, 10.0f, 140.0f);
             sage::editor::ResetField(&host, *cam, cam->Fov);
-            ImGui::DragFloat(T("Near"), &cam->NearClip, 0.01f, 0.001f, 10.0f); host.TrackLastImGuiItem();
+            ifield::Float(host, T("Near"), &cam->NearClip, 0.01f, 0.001f, 10.0f);
             sage::editor::ResetField(&host, *cam, cam->NearClip);
-            ImGui::DragFloat(T("Far"), &cam->FarClip, 1.0f, 1.0f, 5000.0f); host.TrackLastImGuiItem();
+            ifield::Float(host, T("Far"), &cam->FarClip, 1.0f, 1.0f, 5000.0f);
             sage::editor::ResetField(&host, *cam, cam->FarClip);
-            if (ImGui::Checkbox(T("Primary"), &cam->Primary)) host.PushUndoSnapshot();
+            ifield::Check(host, T("Primary"), &cam->Primary);
             EditorTheme::Hint(T("Game panel renders from the first Primary camera"));
             sage::editor::DrawCameraPasses(host, *cam);
         }
@@ -445,10 +421,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             }
             const char* types[] = {T("Point"), T("Spot"), T("Directional (sun)"), T("Area (panel)")};
             int kind = (int)light->Kind;
-            if (ImGui::Combo(T("Type"), &kind, types, IM_ARRAYSIZE(types))) {
-                host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
-                light->Kind = (LightComponent::Type)kind;
-            }
+            if (ifield::Combo(host, T("Type"), &kind, types, IM_ARRAYSIZE(types)))
+                light->Kind = (LightComponent::Type)kind;   // снимок истории — внутри поля
             // Что это за свет — при наведении на тип, а не абзацем под полями.
             switch (light->Kind) {
                 case LightComponent::Type::Area:
@@ -467,23 +441,22 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                     break;
                 default: break;
             }
-            Sage::UI::ColorField3(T("Colour"), &light->Color.x); host.TrackLastImGuiItem();
+            ifield::Color3(host, T("Colour"), &light->Color);
             sage::editor::ResetField(&host, *light, light->Color);
-            ImGui::DragFloat(T("Intensity"), &light->Intensity, 0.02f, 0.0f, 10.0f); host.TrackLastImGuiItem();
+            ifield::Float(host, T("Intensity"), &light->Intensity, 0.02f, 0.0f, 10.0f);
             sage::editor::ResetField(&host, *light, light->Intensity);
             // Дальность и углы конуса у направленного света не значат ничего:
             // он светит из бесконечности. Показывать поля, которые ни на что не
             // влияют, — обманывать; поэтому их тут просто нет.
             const bool directional = light->Kind == LightComponent::Type::Directional;
             if (!directional) {
-                ImGui::DragFloat(T("Range"), &light->Range, 0.1f, 0.5f, 100.0f);
-                host.TrackLastImGuiItem();
+                ifield::Float(host, T("Range"), &light->Range, 0.1f, 0.5f, 100.0f);
                 sage::editor::ResetField(&host, *light, light->Range);
             }
             if (light->Kind == LightComponent::Type::Spot) {
-                ImGui::DragFloat(T("Inner Cone"), &light->InnerConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
+                ifield::Float(host, T("Inner Cone"), &light->InnerConeDeg, 0.5f, 1.0f, 89.0f);
                 sage::editor::ResetField(&host, *light, light->InnerConeDeg);
-                ImGui::DragFloat(T("Outer Cone"), &light->OuterConeDeg, 0.5f, 1.0f, 89.0f); host.TrackLastImGuiItem();
+                ifield::Float(host, T("Outer Cone"), &light->OuterConeDeg, 0.5f, 1.0f, 89.0f);
                 sage::editor::ResetField(&host, *light, light->OuterConeDeg);
                 // Внешний угол не должен быть уже внутреннего (иначе конус
                 // «выворачивается»): подтягиваем внешний до внутреннего.
@@ -518,13 +491,13 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
             }
             const bool area = light->Kind == LightComponent::Type::Area;
             if (area) {
-                ImGui::DragFloat(T("Width"), &light->AreaWidth, 0.02f, 0.05f, 50.0f); host.TrackLastImGuiItem();
+                ifield::Float(host, T("Width"), &light->AreaWidth, 0.02f, 0.05f, 50.0f);
                 sage::editor::ResetField(&host, *light, light->AreaWidth);
-                ImGui::DragFloat(T("Height"), &light->AreaHeight, 0.02f, 0.05f, 50.0f); host.TrackLastImGuiItem();
+                ifield::Float(host, T("Height"), &light->AreaHeight, 0.02f, 0.05f, 50.0f);
                 sage::editor::ResetField(&host, *light, light->AreaHeight);
             } else {
                 // Тени у площадного нет — и галочки нет: она бы ничего не делала.
-                if (ImGui::Checkbox(T("Casts shadows"), &light->CastShadows)) host.PushUndoSnapshot();
+                ifield::Check(host, T("Casts shadows"), &light->CastShadows);
             }
             if (directional) DrawSunSection(host, obj);
         }
@@ -540,10 +513,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
                                        T("Projection goes along -Z; Scale sets the size"))) {
         DecalComponent& dc = reg.get<DecalComponent>(obj.Entity());
         bool changed = false;
-        changed |= ImGui::DragFloat(T("Angle Limit"), &dc.AngleLimitDeg, 1.0f, 1.0f, 89.0f, "%.0f°");
-        host.TrackLastImGuiItem();
-        changed |= ImGui::DragFloat(T("Surface Offset"), &dc.Offset, 0.001f, 0.0f, 0.5f, "%.3f");
-        host.TrackLastImGuiItem();
+        changed |= ifield::Float(host, T("Angle Limit"), &dc.AngleLimitDeg, 1.0f, 1.0f, 89.0f, "%.0f°");
+        changed |= ifield::Float(host, T("Surface Offset"), &dc.Offset, 0.001f, 0.0f, 0.5f, "%.3f");
 
         // ГОВОРИМ ТОЛЬКО О БЕДЕ. Число спроецированных треугольников — счётчик
         // для того, кто пишет рендер; человеку, который ставит наклейку, от
@@ -578,10 +549,10 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         EditorTheme::SectionHeader("sun", T("GI Static" "###GIStatic"), ImGuiTreeNodeFlags_DefaultOpen,
                                    &rm.GiStatic, T("Static geometry for baked lighting"))) {
         GIStaticComponent& gs = reg.get<GIStaticComponent>(obj.Entity());
-        if (ImGui::Checkbox(T("Lightmapped"), &gs.Lightmapped)) host.PushUndoSnapshot();
+        ifield::Check(host, T("Lightmapped"), &gs.Lightmapped);
         EditorTheme::Hint(T("Off — the object only blocks and bounces light, without its own lightmap"));
         ImGui::BeginDisabled(!gs.Lightmapped);
-        if (ImGui::SliderFloat(T("Texel Scale"), &gs.TexelScale, 0.25f, 4.0f, "%.2fx")) host.TrackLastImGuiItem();
+        ifield::Slider(host, T("Texel Scale"), &gs.TexelScale, 0.25f, 4.0f, "%.2fx");
         EditorTheme::Hint(T("Lightmap density relative to the scene's: more is sharper and slower to bake"));
         ImGui::EndDisabled();
     }

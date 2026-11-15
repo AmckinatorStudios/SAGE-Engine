@@ -1,4 +1,5 @@
 #include "sage/scene/ComponentRegistry.h"
+#include "sage/scene/SceneLayer.h"
 
 #include <algorithm>
 
@@ -28,6 +29,7 @@ void EnsureBuiltins() {
     if (done) return;
     done = true;
     RegisterAiAgentComponent();
+    RegisterSceneLayerComponent();
     RegisterVisualScriptComponent();
     sage::render::RegisterObjectEffectsComponent();
 }

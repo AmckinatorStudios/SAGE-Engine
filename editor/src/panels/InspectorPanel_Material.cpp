@@ -10,6 +10,8 @@
 // только тела. Разбит потому, что дорос до двух тысяч строк, в которых рядом
 // лежали редактор материала, якоря интерфейса и список компонентов.
 // ---------------------------------------------------------------------------
+#include "InspectorFields.h"
+#include "InspectorControls.h"
 #include "../ResetDefault.h"
 #include <cstdarg>
 #include "InspectorPanel.h"
@@ -570,14 +572,11 @@ void InspectorPanel::AutoAssignModelMaterial(EditorHost& host, MeshRendererCompo
 void InspectorPanel::DrawMeshSlot(EditorHost& host, entt::entity entity,
                                   MeshRendererComponent& mr, bool animated) {
     entt::registry& reg = host.CurrentScene().Registry();
-    ImGui::SeparatorText(T("Mesh"));
-
     // Порядок строго совпадает с MeshRef::Type (индекс комбо = значение enum).
     const char* kinds[] = {T("None"),     T("Cube"), T("Sphere"),  T("Plane"),
                            T("Cylinder"), T("Cone"), T("Capsule"), T("Model")};
     int kind = (int)mr.Ref.type;
-    if (ImGui::Combo(T("Source"), &kind, kinds, IM_ARRAYSIZE(kinds))) {
-        host.PushUndoSnapshot(); // дискретное изменение — прямая запись undo
+    if (sage::editor::ifield::Combo(host, T("Mesh"), &kind, kinds, IM_ARRAYSIZE(kinds))) {
         const MeshRef::Type chosen = (MeshRef::Type)kind;
         if (chosen != MeshRef::Type::Model) {
             // Примитив вместо модели: путь и слоты её частей уходят вместе с ней.
@@ -754,7 +753,7 @@ void InspectorPanel::WriteMaterialForObject(EditorHost& host, MeshRendererCompon
 
 // --- Mesh Renderer, часть 2: ЧЕМ красим --------------------------------------
 void InspectorPanel::DrawMaterialSlot(EditorHost& host, MeshRendererComponent& mr) {
-    ImGui::SeparatorText(T("Material"));
+    sage::editor::ictl::GroupTitle(T("Material"));
 
     // Общий слот ассета: обложка (материал показывается шариком — по квадратику
     // цвета не отличить металл от диэлектрика и гладкое от матового, то есть

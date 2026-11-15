@@ -107,6 +107,10 @@ private:
     // Замок панели, прижатый к правому краю ТЕКУЩЕЙ строки.
     void DrawLockButton(EditorHost& host);
     void DrawObjectSection(EditorHost& host);
+    // Шапка объекта: значок и тип, имя, замок, тег, слой сцены, «переходит
+    // в следующую сцену» (InspectorPanel_Object.cpp).
+    void DrawObjectIdentity(EditorHost& host, GameObject obj);
+    void DrawSceneLayersPopup(EditorHost& host);
     void DrawAssetSection(EditorHost& host, AssetKind kind);
 
     Focus m_focus = Focus::Object;

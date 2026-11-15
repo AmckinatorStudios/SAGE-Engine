@@ -112,6 +112,7 @@ add_executable(SageEditor WIN32
     src/panels/InspectorPanel.cpp
     src/panels/InspectorPanel_Material.cpp
     src/panels/InspectorPanel_Entity.cpp
+    src/panels/InspectorPanel_Object.cpp
     src/panels/InspectorPanel_Passes.cpp
     src/panels/InspectorPanel_Physics.cpp
     src/panels/InspectorPanel_Animation.cpp
@@ -149,6 +150,7 @@ add_executable(SageEditor WIN32
     src/UIImageSource.cpp
     src/UIStyleOverride.cpp
     src/InspectorControls.cpp
+    src/InspectorFields.cpp
     src/UIElementProperties_Inspector.cpp
     src/UIElementProperties_Layout.cpp
     src/VarsEditor.cpp

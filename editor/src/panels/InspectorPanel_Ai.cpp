@@ -1,3 +1,4 @@
+#include "InspectorFields.h"
 #include "InspectorPanel.h"
 
 #include <cstdio>
@@ -14,6 +15,8 @@
 #include "sage/core/Paths.h"
 #include "sage/scene/AiAgentComponent.h"
 #include "sage/scene/VisualScriptComponent.h"
+
+namespace ifield = sage::editor::ifield;
 
 // ---------------------------------------------------------------------------
 // Секция «AI»: какой граф ведёт объект и с какой памятью он начинает.
@@ -50,8 +53,7 @@ void InspectorPanel::DrawAiSection(EditorHost& host, GameObject obj, entt::regis
     }
     host.TrackLastImGuiItem();
     bool autoStart = ai.AutoStart;
-    if (ImGui::Checkbox(T("Start the graph on Play"), &autoStart)) {
-        host.PushUndoSnapshot();
+    if (ifield::Check(host, T("Start the graph on Play"), &autoStart)) {
         ai.AutoStart = autoStart;
     }
     ImGui::TextUnformatted(T("Memory at start (Instance)"));

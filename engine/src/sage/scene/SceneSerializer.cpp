@@ -242,6 +242,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
     root["lighting"] = LightingToJson(scene.Lighting);
     root["reflections"] = ReflectionsToJson(scene.Reflections);
     if (scene.GI) root["gi"] = GIToJson(*scene.GI, withProbes);
+    if (!scene.Layers.empty()) root["layers"] = scene.Layers;
     return root;
 }
 
@@ -468,6 +469,9 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
     scene->Lighting = LightingFromJson(root);
     scene->Reflections = ReflectionsFromJson(root);
     if (root.contains("gi")) scene->GI = GIFromJson(root["gi"]);
+    if (root.contains("layers") && root["layers"].is_array())
+        for (const json& n : root["layers"])
+            if (n.is_string()) scene->Layers.push_back(n.get<std::string>());
 
     return scene;
 }

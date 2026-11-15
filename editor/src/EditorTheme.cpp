@@ -16,6 +16,7 @@
 #include <nlohmann/json.hpp>
 
 #include "EditorPrefs.h"
+#include "InspectorControls.h"
 #include "ui/UIStyle.h"
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
@@ -713,76 +714,107 @@ bool BeginMore(const char* id) {
 
 void EndMore() { ImGui::TreePop(); }
 
-bool SectionHeader(const char* icon, const char* label, ImGuiTreeNodeFlags flags,
-                   bool* removeClicked, const char* hint, bool* resetClicked) {
-    const std::string glyph = EditorIcons::GlyphUtf8(icon);
-    if (glyph.empty()) return SectionHeader(label, flags, removeClicked, hint, resetClicked);
-    const std::string full = glyph + "  " + label;
-    return SectionHeader(full.c_str(), flags, removeClicked, hint, resetClicked);
-}
+namespace {
 
-bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags, bool* removeClicked,
-                   const char* hint, bool* resetClicked) {
-    // AllowOverlap — чтобы кнопка в правом углу принимала нажатие, а не
-    // проваливалась в заголовок: CollapsingHeader занимает всю ширину строки, и
-    // без этого флага он перехватывал бы клик по всему, что на нём нарисовано.
+// ШАПКА РАЗДЕЛА — тот же вид, что у разделов инспектора интерфейса
+// (ictl::BeginSection): подложка, акцентная метка слева, значок, ЗАГЛАВНЫЕ
+// буквы, стрелка; справа — сброс и корзина. Раскрытие хранится там же, где
+// его держал CollapsingHeader (хранилище окна по id подписи), — состояние и
+// «###id» прежние.
+bool HeaderImpl(const char* icon, const char* label, ImGuiTreeNodeFlags flags, bool* removeClicked,
+                const char* hint, bool* resetClicked) {
     if (removeClicked) *removeClicked = false;
     if (resetClicked) *resetClicked = false;
-    if (removeClicked || resetClicked) flags |= ImGuiTreeNodeFlags_AllowOverlap;
-    ImGui::PushStyleColor(ImGuiCol_Header, Color(Role::SurfaceAlt));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, Color(Role::Elevated));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive, Color(Role::Elevated));
-    const bool open = ImGui::CollapsingHeader(label, flags);
-    ImGui::PopStyleColor(3);
-    // Подсказка вешается на ЗАГОЛОВОК — до кнопки «убрать»: после неё
-    // «последним элементом» для ImGui станет кнопка, и пояснение к секции
-    // всплывало бы над корзиной.
+    ImGuiStorage* storage = ImGui::GetStateStorage();
+    const ImGuiID id = ImGui::GetID(label);
+    bool open = storage->GetInt(id, (flags & ImGuiTreeNodeFlags_DefaultOpen) ? 1 : 0) != 0;
+
+    ImGui::Dummy(ImVec2(0.0f, 2.0f));
+    const ImGuiStyle& style = ImGui::GetStyle();
+    const float side = ImGui::GetFrameHeight();
+    const float h = side + 4.0f;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float w = ImGui::GetContentRegionAvail().x;
+    const int slots = (removeClicked ? 1 : 0) + (resetClicked ? 1 : 0);
+    const float buttons = slots > 0 ? slots * side + (slots - 1) * 2.0f + 6.0f : 0.0f;
+
+    // Шапка нажимается ВСЯ, кроме кнопок справа: они — свои элементы, и
+    // щелчок по ним не сворачивает раздел.
+    ImGui::PushID(label);
+    if (ImGui::InvisibleButton("##head", ImVec2(std::max(1.0f, w - buttons), h))) {
+        open = !open;
+        storage->SetInt(id, open ? 1 : 0);
+    }
+    const bool hovered = ImGui::IsItemHovered();
+    ImGui::PopID();
     Hint(hint);
 
-    // СБРОС — слева от корзины: действие частое и безопасное (отменяется
-    // Ctrl+Z), и прятать его в меню незачем. Сбрасывает компонент целиком;
-    // одно поле — правым щелчком по нему (ResetDefault.h).
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), Color32(hovered ? Role::Hover : Role::SurfaceAlt), 4.0f);
+    dl->AddRectFilled(ImVec2(p.x, p.y + 4.0f), ImVec2(p.x + 3.0f, p.y + h - 4.0f), Color32(Role::Accent), 1.5f);
+    float x = p.x + 12.0f;
+    if (icon && *icon) {
+        const float is = std::floor(ImGui::GetFontSize());
+        EditorIcons::Overlay(dl, x, p.y + std::floor((h - is) * 0.5f), is, icon);
+        x += is + 8.0f;
+    }
+    const std::string title = sage::editor::ictl::UpperTitle(label);
+    const float ty = p.y + (h - ImGui::GetTextLineHeight()) * 0.5f;
+    dl->AddText(ImVec2(x, ty), Color32(Role::Text), title.c_str());
+    // Стрелка — у правого края шапки, перед кнопками: ⌄ раскрыт, › свёрнут.
+    const float ax = p.x + w - buttons - 14.0f, ay = p.y + h * 0.5f, s = 4.0f;
+    const ImU32 ac = Color32(Role::TextDim);
+    if (open) dl->AddTriangleFilled(ImVec2(ax - s, ay - s * 0.5f), ImVec2(ax + s, ay - s * 0.5f), ImVec2(ax, ay + s * 0.6f), ac);
+    else dl->AddTriangleFilled(ImVec2(ax - s * 0.5f, ay - s), ImVec2(ax - s * 0.5f, ay + s), ImVec2(ax + s * 0.6f, ay), ac);
+
+    // Кнопки справа — по центру высоты шапки.
+    const float by = p.y + (h - side) * 0.5f;
+    float bx = p.x + w - buttons + 4.0f;
+    // СБРОС — слева от корзины: действие частое и безопасное (Ctrl+Z).
     if (resetClicked) {
-        const ImGuiStyle& style = ImGui::GetStyle();
-        const float side = ImGui::GetFrameHeight();
-        const float slots = removeClicked ? 2.0f : 1.0f;
-        ImGui::SameLine(ImGui::GetContentRegionMax().x - side * slots - style.FramePadding.x -
-                        (removeClicked ? style.ItemSpacing.x : 0.0f));
+        ImGui::SetCursorScreenPos(ImVec2(bx, by));
         ImGui::PushID(label);
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
         *resetClicked = EditorIcons::IconOnlyButton(
             "refresh", T("Reset to default values (a single field: right-click it)"));
         ImGui::PopStyleColor();
         ImGui::PopID();
+        bx += side + 2.0f;
     }
-
     if (removeClicked) {
-        const ImGuiStyle& style = ImGui::GetStyle();
-        const float side = ImGui::GetFrameHeight();
-        // Кнопка рисуется и у СВЁРНУТОЙ секции: убрать компонент, не раскрывая
-        // его, — обычное дело, и заставлять раскрывать ради этого незачем.
-        ImGui::SameLine(ImGui::GetContentRegionMax().x - side - style.FramePadding.x);
+        ImGui::SetCursorScreenPos(ImVec2(bx, by));
         ImGui::PushID(label);
         const ImVec4 danger = Color(Role::Danger);
-        // Сама иконка красная всегда, подложка — только под курсором: десяток
-        // залитых красным квадратов сверху вниз превратил бы инспектор в
-        // предупреждение, хотя ничего плохого не происходит.
+        // Иконка красная всегда, подложка — только под курсором: десяток
+        // красных квадратов превратил бы инспектор в предупреждение.
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
         ImGui::PushStyleColor(ImGuiCol_ButtonHovered, danger);
         ImGui::PushStyleColor(ImGuiCol_ButtonActive,
                               ImVec4(danger.x * 0.85f, danger.y * 0.85f, danger.z * 0.85f, danger.w));
-        // Под курсором подложка заливается красным — значок обязан стать
-        // светлым, иначе он сливается с ней и кнопка выглядит пустым красным
-        // квадратом ровно тогда, когда на неё навели.
         const ImVec4 onAccent = Color(Role::TextOnAccent);
         const glm::vec3 hoverTint(onAccent.x, onAccent.y, onAccent.z);
         *removeClicked = EditorIcons::IconOnlyButton("trash", T("Remove this component"), false,
-                                                     glm::vec3(danger.x, danger.y, danger.z),
-                                                     &hoverTint);
+                                                     glm::vec3(danger.x, danger.y, danger.z), &hoverTint);
         ImGui::PopStyleColor(3);
         ImGui::PopID();
     }
+    // Курсор — под шапку, с небольшим зазором до свойств раздела.
+    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + h));
+    ImGui::Dummy(ImVec2(0.0f, open ? 2.0f : 0.0f));
+    (void)style;
     return open;
+}
+
+} // namespace
+
+bool SectionHeader(const char* icon, const char* label, ImGuiTreeNodeFlags flags,
+                   bool* removeClicked, const char* hint, bool* resetClicked) {
+    return HeaderImpl(icon, label, flags, removeClicked, hint, resetClicked);
+}
+
+bool SectionHeader(const char* label, ImGuiTreeNodeFlags flags, bool* removeClicked,
+                   const char* hint, bool* resetClicked) {
+    return HeaderImpl(nullptr, label, flags, removeClicked, hint, resetClicked);
 }
 
 bool ColoredButton(const char* label, Role role, const ImVec2& size) {

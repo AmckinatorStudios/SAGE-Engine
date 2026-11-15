@@ -9,6 +9,7 @@
 // только тела. Разбит потому, что дорос до двух тысяч строк, в которых рядом
 // лежали редактор материала, якоря интерфейса и список компонентов.
 // ---------------------------------------------------------------------------
+#include "InspectorFields.h"
 #include <cctype>
 #include <cstdarg>
 #include "sage/scene/CharacterFit.h"
@@ -66,6 +67,8 @@
 
 #include "InspectorPanelDetail.h"
 
+namespace ifield = sage::editor::ifield;
+
 namespace fs = std::filesystem;
 using namespace sage::editor::inspectordetail;
 
@@ -80,8 +83,7 @@ void InspectorPanel::DrawEffectSections(EditorHost& host, GameObject obj, entt::
     if (reg.all_of<ParticleEmitterComponent>(obj.Entity()) && EditorTheme::SectionHeader("particles", T("Particle Emitter" "###Particle Emitter"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Emitter)) {
         if (ParticleEmitterComponent* em = reg.try_get<ParticleEmitterComponent>(obj.Entity())) {
             bool playing = em->Playing;
-            if (ImGui::Checkbox(T("Playing"), &playing)) {
-                host.PushUndoSnapshot();
+            if (ifield::Check(host, T("Playing"), &playing)) {
                 em->Playing = playing;
             }
             ImGui::SameLine();
@@ -203,28 +205,24 @@ void InspectorPanel::DrawEffectSections(EditorHost& host, GameObject obj, entt::
                 m_browseIsMaterial = false;
             }
 
-            ImGui::DragFloat(T("Volume"), &au->Volume, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
-            ImGui::Checkbox(T("Loop"), &au->Loop); host.TrackLastImGuiItem();
+            ifield::Float(host, T("Volume"), &au->Volume, 0.01f, 0.0f, 1.0f);
+            ifield::Check(host, T("Loop"), &au->Loop);
             ImGui::SameLine();
-            ImGui::Checkbox(T("Auto Play"), &au->AutoPlay); host.TrackLastImGuiItem();
-            ImGui::Checkbox(T("Spatial (3D)"), &au->Spatial); host.TrackLastImGuiItem();
+            ifield::Check(host, T("Auto Play"), &au->AutoPlay);
+            ifield::Check(host, T("Spatial (3D)"), &au->Spatial);
             if (au->Spatial) {
-                ImGui::DragFloat(T("Min Distance"), &au->MinDistance, 0.1f, 0.1f, 1000.0f);
-                host.TrackLastImGuiItem();
-                ImGui::DragFloat(T("Max Distance"), &au->MaxDistance, 0.5f, 0.2f, 5000.0f);
-                host.TrackLastImGuiItem();
+                ifield::Float(host, T("Min Distance"), &au->MinDistance, 0.1f, 0.1f, 1000.0f);
+                ifield::Float(host, T("Max Distance"), &au->MaxDistance, 0.5f, 0.2f, 5000.0f);
             }
             // Высота тона, спад и группа микшера — тонкая настройка.
             if (EditorTheme::BeginMore("audioMore")) {
-                ImGui::DragFloat(T("Pitch"), &au->Pitch, 0.01f, 0.25f, 4.0f); host.TrackLastImGuiItem();
+                ifield::Float(host, T("Pitch"), &au->Pitch, 0.01f, 0.25f, 4.0f);
                 if (au->Spatial) {
-                    ImGui::DragFloat(T("Rolloff"), &au->Rolloff, 0.05f, 0.0f, 10.0f);
-                    host.TrackLastImGuiItem();
+                    ifield::Float(host, T("Rolloff"), &au->Rolloff, 0.05f, 0.0f, 10.0f);
                 }
                 const char* kCategories[] = {T("Effects"), T("Music"), T("Ambience")};
                 int cat = (int)au->Category;
-                if (ImGui::Combo(T("Mix Group"), &cat, kCategories, 3)) {
-                    host.PushUndoSnapshot();
+                if (ifield::Combo(host, T("Mix Group"), &cat, kCategories, 3)) {
                     au->Category = (AudioCategory)cat;
                 }
                 EditorTheme::EndMore();

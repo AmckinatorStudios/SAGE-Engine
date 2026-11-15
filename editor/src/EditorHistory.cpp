@@ -1,9 +1,13 @@
 #include "EditorHistory.h"
 
 void EditorHistory::PushSnapshot(std::string snapshot) {
+    m_redo.clear(); // новая мутация обрывает ветку повторов
+    // Тот же снимок второй раз подряд — не новый шаг: поле сняло «до», и
+    // секция по старой привычке сняла ещё раз то же самое. Иначе Ctrl+Z
+    // тратился бы на шаг, который ничего не меняет.
+    if (!m_undo.empty() && m_undo.back() == snapshot) return;
     if (m_undo.size() >= kMaxEntries) m_undo.erase(m_undo.begin());
     m_undo.push_back(std::move(snapshot));
-    m_redo.clear(); // новая мутация обрывает ветку повторов
 }
 
 bool EditorHistory::Push() {
