@@ -23,6 +23,15 @@ public:
     void Draw(bool* open, const std::string& windowId, EditorHost* host = nullptr);
     // Открыть вкладку «Проблемы» (щелчок по счётчику в статусной строке).
     void ShowProblems() { m_showProblems = true; RequestFocus(); }
+    // То же, но с отбором по уровню: щелчок по счётчику ошибок показывает
+    // ошибки, по счётчику предупреждений — предупреждения (и в проблемах, и в
+    // журнале).
+    void ShowProblems(bool errors, bool warnings) {
+        m_problems.ShowOnly(errors, warnings);
+        m_filter.Error = errors;
+        m_filter.Warn = warnings;
+        ShowProblems();
+    }
 
     // Сколько пришло за СЕССИЮ (не уменьшается при очистке): самопроверка
     // сравнивает «до» и «после» действия.

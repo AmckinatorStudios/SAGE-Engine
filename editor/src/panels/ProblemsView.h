@@ -28,6 +28,14 @@ public:
     void Draw(EditorHost* host);
     // Ошибок и аварий среди первопричин — для подписи вкладки.
     int OpenErrors();
+    // Показать только ошибки или только предупреждения (переход из строки
+    // состояния): справки отбор прячет — пришли за конкретной бедой.
+    void ShowOnly(bool errors, bool warnings) {
+        m_filter.Errors = errors;
+        m_filter.Warnings = warnings;
+        m_filter.Info = false;
+        m_revision = 0;   // перестроить группы под новый отбор
+    }
 
 private:
     void Refresh();

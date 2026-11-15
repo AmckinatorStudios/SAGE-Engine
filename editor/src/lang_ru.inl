@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 4076.
+// Язык: Русский. Строк: 4080.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -2466,6 +2466,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Ошибка:"},
     {"Errors",
      "Ошибки"},
+    {"Errors: click to show them in the Console",
+     "Ошибки: щелчок покажет их в консоли"},
     {"Errors: show or hide",
      "Ошибки: показать или скрыть"},
     {"Errors: show or hide. Ctrl+click shows only them.",
@@ -7092,6 +7094,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Файл сцены удалён: сцена осталась открытой — сохраните её, чтобы не потерять"},
     {"The scene has no common post processing yet.",
      "У сцены пока нет общей постобработки."},
+    {"The scene has unsaved changes (Ctrl+S saves)",
+     "В сцене есть несохранённые изменения (Ctrl+S — сохранить)"},
+    {"The scene is saved",
+     "Сцена сохранена"},
     {"The scene itself: everything lives here",
      "Сама сцена: здесь живёт всё"},
     {"The script declares no methods",
@@ -7640,6 +7646,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Предупр. (%d)"},
     {"Warning",
      "Предупреждения"},
+    {"Warnings: click to show them in the Console",
+     "Предупреждения: щелчок покажет их в консоли"},
     {"Warnings: show or hide",
      "Предупреждения: показать или скрыть"},
     {"Warnings: show or hide. Ctrl+click shows only them.",
