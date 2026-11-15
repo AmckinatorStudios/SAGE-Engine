@@ -572,7 +572,8 @@ void EditorLayer::CheckUiInspectorFrame() {
             GameObject e = CreateUIEntity(preset.Name);
             if (e.Valid()) {
                 m_selection.SetPrimary(e.Id());
-                if (preset.Name == "Panel") m_uiInspectorElement = e.Id();
+                // Цель девятины — подложка кнопки (у панели фон — форма).
+                if (preset.Name == "Button") m_uiInspectorElement = e.Id();
             }
         } else if (GameObject e = m_scene->Get(m_selection.Primary()); e.Valid()) {
             entt::registry& reg = m_scene->Registry();
@@ -590,7 +591,7 @@ void EditorLayer::CheckUiInspectorFrame() {
     }
     const int after = index - 2 * (int)presets.size();
     if (after == 0) {
-        // Окно девятины на подложке панели, и сразу узким.
+        // Девятина подложки кнопки — в редакторе спрайтов, и сразу узким.
         EditorHost::NineSliceTarget t;
         t.ElementId = m_uiInspectorElement;
         t.PartId = "fill";
@@ -610,9 +611,12 @@ void EditorLayer::CheckUiInspectorFrame() {
         sage::ui::NineSlice probe;
         probe.SetBorder({3.0f, 4.0f, 5.0f, 6.0f});
         sage::editor::sprite::BoundSlice back;
-        if (!m_spriteSheet.BoundToElement() || !sage::editor::sprite::WriteBound(*this, t, probe) ||
-            !sage::editor::sprite::ReadBound(*this, t, back) || back.Slice.Border() != probe.Border())
-            LOG_ERROR("Editor") << "UI_INSPECTOR: девятина элемента не открылась в редакторе спрайтов";
+        const bool bound = m_spriteSheet.BoundToElement();
+        const bool wrote = sage::editor::sprite::WriteBound(*this, t, probe);
+        const bool read = sage::editor::sprite::ReadBound(*this, t, back);
+        if (!bound || !wrote || !read || back.Slice.Border() != probe.Border())
+            LOG_ERROR("Editor") << "UI_INSPECTOR: девятина элемента не открылась в редакторе спрайтов (привязка "
+                                << bound << ", запись " << wrote << ", чтение " << read << ")";
         ImGui::SetWindowSize("###SpriteSheet", ImVec2(420.0f, 300.0f));
         m_uiInspectorWait = 4;
         return;
