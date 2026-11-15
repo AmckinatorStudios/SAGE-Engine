@@ -3842,6 +3842,20 @@
     "Width divided by height; 0 — use the resolution as set": "Ширина, делённая на высоту; 0 — разрешение как задано",
     "A frame sequence of the picture's sprite sheet (Sprite editor): it plays in the game.": "Последовательность кадров листа этой картинки (нарезка спрайтов): проигрывается в игре.",
     "Films the scene into a picture for the interface: a character preview, an item icon": "Снимает сцену в картинку для интерфейса: превью персонажа, иконка предмета",
-    "Name##seq": "Имя##seq"
+    "Name##seq": "Имя##seq",
+    "All sides together: one value for every side": "Все стороны вместе: одно значение для всех",
+    "Arrangement and content": "Раскладка и содержимое",
+    "Distribute across: needs three elements or more": "Распределить по ширине: нужно три элемента и больше",
+    "Distribute down: needs three elements or more": "Распределить по высоте: нужно три элемента и больше",
+    "Drag, scroll or double-click to type": "Тяните, крутите колесо или дважды щёлкните для ввода",
+    "Drag, scroll or double-click to type. Right-click resets": "Тяните, крутите колесо или дважды щёлкните для ввода. Правый щелчок — сброс",
+    "Hold to repeat; after a second the step grows tenfold": "Удерживайте для повтора; через секунду шаг вырастает вдесятеро",
+    "Link proportions": "Связать пропорции",
+    "Link sides": "Связать стороны",
+    "Off — the element and everything inside are left out: not drawn, no room taken": "Выкл. — элемент и всё внутри выпадают: не рисуются и не занимают места",
+    "Placement": "Расположение",
+    "Proportions linked: the height follows the width": "Пропорции связаны: высота следует за шириной",
+    "Show width and height in one row": "Ширина и высота в одной строке",
+    "Show width and height on separate rows": "Ширина и высота отдельными строками"
   }
 }

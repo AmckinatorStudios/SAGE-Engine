@@ -1,4 +1,5 @@
 #pragma once
+#include <functional>
 #include <string>
 
 #include <entt/entt.hpp>
@@ -41,6 +42,12 @@ struct UIPropsContext {
     // Показать секцию «Events» (связи сигналов). Инспектор объекта рисует её
     // сам — для любого объекта, — редактор интерфейса просит её здесь.
     bool ShowEvents = false;
+    // Верх инспектора — Identity (имя, активность): редактор интерфейса
+    // показывает их здесь; инспектор объекта сцены рисует имя сам.
+    bool ShowIdentity = false;
+    // Компактная панель Arrange (выравнивание, распределение, быстрые
+    // действия) — инструменты выделения, их рисует панель.
+    std::function<void()> Arrange;
 };
 
 // Сетка якоря 3x3 — тоже общая: её показывают и свойства элемента, и
@@ -61,8 +68,7 @@ bool DrawImageSource(EditorHost& host, const char* id, std::string& path, bool& 
 void NoteStyleOverride(EditorHost& host, entt::entity e, const sage::ui::PartType& part,
                        const sage::ui::PartField& f, bool edited);
 
-// Content кнопки: подпись, значок, выравнивание, отступ (UIButtonContent.cpp).
-void DrawButtonContent(EditorHost& host, GameObject obj);
+
 
 // Все поля выбранного элемента: части, положение, вид, текст, поведение.
 void DrawUIElementProperties(EditorHost& host, GameObject obj, const UIPropsContext& ctx);
