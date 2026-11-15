@@ -7,6 +7,7 @@
 // источника и имени; путь файла по-прежнему выбирается слотом.
 // ---------------------------------------------------------------------------
 #include "UIElementProperties.h"
+#include "InspectorControls.h"
 
 #include <algorithm>
 #include <set>
@@ -32,7 +33,8 @@ bool DrawImageSource(EditorHost& host, const char* id, std::string& path, bool& 
     ImGui::PushID(id);
     const char* kSources[] = {T("File"), T("Render Texture")};
     int source = IsRenderTexture(path) ? 1 : 0;
-    if (ImGui::Combo(T("Source"), &source, kSources, 2)) {
+    ictl::Label(T("Source"));
+    if (ImGui::Combo("##Source", &source, kSources, 2)) {
         host.PushUndoSnapshot();
         path = source == 1 ? std::string(kRtPrefix) : std::string();
         changed = true;
@@ -48,7 +50,8 @@ bool DrawImageSource(EditorHost& host, const char* id, std::string& path, bool& 
             if (!n.empty()) names.insert(n);
         }
         const std::string current = path.substr(3);
-        if (ImGui::BeginCombo(T("Render Texture"), current.empty() ? T("(choose)") : current.c_str())) {
+        ictl::Label(T("Render Texture"));
+        if (ImGui::BeginCombo("##RenderTexture", current.empty() ? T("(choose)") : current.c_str())) {
             for (const std::string& n : names) {
                 if (ImGui::Selectable(n.c_str(), n == current)) {
                     host.PushUndoSnapshot();

@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 3856.
+// Язык: Русский. Строк: 3863.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -314,6 +314,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Поворот из углов в градусах."},
     {"A row that continues on the next line when it runs out of room",
      "Ряд, который переносится на следующую строку, когда кончается место"},
+    {"A saved style file shared by many elements",
+     "Сохранённый файл стиля, общий для многих элементов"},
     {"A screen of its own: its elements live inside it and are edited apart",
      "Свой экран: его элементы живут внутри и правятся отдельно"},
     {"A script sends it: obj:emit(\"",
@@ -2302,6 +2304,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Завершает эту ветку неудачей с причиной. На главной ветке — неудача всего поведения."},
     {"Engine API",
      "API движка"},
+    {"Engine Default",
+     "Стандарт движка"},
     {"Engine defaults for this section",
      "Значения движка для этого раздела"},
     {"Engine shaders and fonts",
@@ -4292,6 +4296,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Смещение (м)"},
     {"Old-style interface: its elements live in the scene. Moving them to a file keeps the look and makes them editable in the Interface workspace.",
      "Интерфейс старого вида: его элементы лежат в сцене. Вынос в файл сохраняет вид и даёт править их в пространстве «Интерфейс»."},
+    {"On",
+     "Вкл."},
     {"On Change",
      "При изменении"},
     {"On Click",
@@ -5550,6 +5556,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сохранить сцену как…"},
     {"Save as Prefab",
      "Сохранить как префаб"},
+    {"Save as Style...",
+     "Сохранить как стиль…"},
     {"Save as effect file...",
      "Сохранить как файл эффекта..."},
     {"Save changes to the style",
@@ -5578,6 +5586,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сохранить в проект (input.sageinput)"},
     {"Save to the project (sage.cfg): the built game starts with these settings",
      "Сохранить в проект (sage.cfg): собранная игра запустится с этими настройками"},
+    {"Saved Style",
+     "Сохранённый стиль"},
     {"Saved in the project",
      "Сохранено в проекте"},
     {"Saved next to the picture",
@@ -5808,6 +5818,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Настройки"},
     {"Settings file: %s",
      "Файл настроек: %s"},
+    {"Settings of this element only",
+     "Настройки только этого элемента"},
     {"Settings saved to plugin.json",
      "Настройки сохранены в plugin.json"},
     {"Settings saved: sage.cfg",
@@ -6752,6 +6764,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Небо выключено — окружающего света нет"},
     {"The sky or its celestials are off — see Environment.",
      "Небо или его светила выключены — см. окно «Среда»."},
+    {"The standard SAGE look: only colours are yours",
+     "Стандартный вид SAGE: ваши — только цвета"},
     {"The subtree is clipped by this element's rectangle",
      "Поддерево обрезается прямоугольником этого элемента"},
     {"The subtree is masked by this rectangle",

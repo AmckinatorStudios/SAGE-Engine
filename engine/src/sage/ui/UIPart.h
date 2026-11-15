@@ -430,6 +430,13 @@ std::vector<PartField> EditableFields(const std::vector<PartField>& fields);
 // элемент не меняется на экране, а поля теперь его и можно править дальше.
 void BakeEngineSkin(entt::registry& reg, entt::entity e);
 
+// ИСТОЧНИК ОФОРМЛЕНИЯ элемента: вид движка, сохранённый стиль или свой.
+// Своё запекается из вида движка только в первый раз (Element::CustomLook):
+// дальше смена источника своих значений не стирает.
+enum class AppearanceSource { EngineDefault, SavedStyle, Custom };
+AppearanceSource AppearanceSourceOf(const entt::registry& reg, entt::entity e);
+void SetAppearanceSource(entt::registry& reg, entt::entity e, AppearanceSource source);
+
 template <class T> T& FieldAs(void* data, const PartField& f) {
     return *reinterpret_cast<T*>(static_cast<char*>(data) + f.Offset);
 }

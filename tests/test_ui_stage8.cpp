@@ -20,6 +20,10 @@
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UIStyle.h"
+#include "sage/ui/UIPart.h"
+#include "sage/ui/UISerialize.h"
+
+#include <nlohmann/json.hpp>
 
 #include <stb_image_write.h>
 
@@ -211,4 +215,27 @@ TEST(RenderTexture_update_mode_aspect_and_change_signature) {
     const auto* lrt = loaded->Registry().try_get<RenderTextureComponent>(lc.Entity());
     CHECK_TRUE(lrt && lrt->Mode == RenderTextureComponent::Update::OnChange);
     CHECK_NEAR(lrt ? lrt->Aspect : 0.0f, 0.75f, 1e-5f);
+}
+
+TEST(UIAppearanceSource_switching_keeps_own_values) {
+    Scene scene("look");
+    GameObject b = scene.CreateEmptyObject("B");
+    sage::ui::ApplyPreset(scene, b.Entity(), "Button");
+    entt::registry& reg = scene.Registry();
+    CHECK_TRUE(sage::ui::AppearanceSourceOf(reg, b.Entity()) == sage::ui::AppearanceSource::EngineDefault);
+    // Первый раз в Custom — вид движка запекается в поля.
+    sage::ui::SetAppearanceSource(reg, b.Entity(), sage::ui::AppearanceSource::Custom);
+    CHECK_TRUE(reg.get<sage::ui::Element>(b.Entity()).CustomLook);
+    reg.get<sage::ui::Fill>(b.Entity()).Rounding = 21.0f;   // своё значение
+    // Туда и обратно: своё не стирается запеканием заново.
+    sage::ui::SetAppearanceSource(reg, b.Entity(), sage::ui::AppearanceSource::EngineDefault);
+    sage::ui::SetAppearanceSource(reg, b.Entity(), sage::ui::AppearanceSource::Custom);
+    CHECK_NEAR(reg.get<sage::ui::Fill>(b.Entity()).Rounding, 21.0f, 1e-5f);
+    // Старый файл со своим оформлением — свой вид у него уже есть.
+    nlohmann::json j;
+    reg.get<sage::ui::Element>(b.Entity()).CustomLook = false;
+    sage::ui::SaveElement(j, reg, b.Entity());
+    GameObject c = scene.CreateEmptyObject("C");
+    sage::ui::LoadElement(j, reg, c.Entity());
+    CHECK_TRUE(reg.get<sage::ui::Element>(c.Entity()).CustomLook);
 }

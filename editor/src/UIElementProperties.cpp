@@ -92,6 +92,13 @@ const void* DefaultPartData(const ui::PartType& p) {
     return p.Get && p.Has && p.Has(s_reg, it->second) ? p.Get(s_reg, it->second) : nullptr;
 }
 
+const ui::PartField* FieldByKey(const ui::PartType& p, const char* key) {
+    if (!p.Fields) return nullptr;
+    for (const ui::PartField& f : *p.Fields)
+        if (f.Key && std::strcmp(f.Key, key) == 0) return &f;
+    return nullptr;
+}
+
 std::string DisplayLabel(const char* label) {
     // «Sprite (x,y,w,h)» → «Sprite»: оси теперь подписаны у самих полей.
     std::string s = label ? label : "";
@@ -111,8 +118,13 @@ bool DrawAnchorPicker(UIAnchor& anchor) {
         "anchor-cl", "anchor-cc", "anchor-cr",
         "anchor-bl", "anchor-bc", "anchor-br",
     };
+    static const char* const kAnchorNames[9] = {
+        "Top left", "Top", "Top right", "Left", "Center", "Right", "Bottom left", "Bottom", "Bottom right",
+    };
     bool changed = false;
     const float cell = ImGui::GetFrameHeight();
+    // Подпись — над сеткой: сетка сама показывает, где элемент встанет.
+    ictl::GroupTitle(T("Anchor"));
     ImGui::BeginGroup();
     for (int row = 0; row < 3; ++row) {
         for (int col = 0; col < 3; ++col) {
@@ -131,15 +143,13 @@ bool DrawAnchorPicker(UIAnchor& anchor) {
             // прижатая к тому краю, который эта кнопка означает. Точка в углу,
             // стоявшая здесь раньше, называла МЕСТО, но не говорила главного —
             // что элемент к этому месту прижмётся, а не просто окажется рядом.
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(kAnchorNames[index]));
             EditorIcons::Overlay(p0.x, p0.y, cell, kAnchorIcons[index],
                                  EditorIcons::kThemeColor);
             ImGui::PopID();
         }
     }
     ImGui::EndGroup();
-    ImGui::SameLine();
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(T("Anchor"));
     return changed;
 }
 
@@ -181,8 +191,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
     ImGui::PushID(f.Key);
     switch (f.Type) {
         case K::Bool:
-            changed = ImGui::Checkbox(label, &ui::FieldAs<bool>(data, f));
-            if (changed) host.PushUndoSnapshot();
+            changed = ictl::Switch(host, label, &ui::FieldAs<bool>(data, f));
             break;
 
         case K::Int: {
@@ -197,7 +206,32 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             const float reset = def ? ui::FieldAs<float>(def, f) : 0.0f;
             // Небольшой ограниченный диапазон (доли 0..1) — ползунок с точным
             // полем; остальное — числовое поле с шагом по диапазону.
-            if (f.Max > f.Min && f.Max - f.Min <= 1.0001f) {
+            // ЗНАЧЕНИЕ В СВОЁМ ДИАПАЗОНЕ: у части есть поля min и max (ползунок,
+            // шкала) — значение правится ползунком именно в них.
+            const ui::PartField* fmin = FieldByKey(part, "min");
+            const ui::PartField* fmax = FieldByKey(part, "max");
+            const ui::PartField* ftoggle = FieldByKey(part, "toggle");
+            if (std::strcmp(f.Key, "value") == 0 && ftoggle && ftoggle->Type == K::Bool &&
+                ui::FieldAs<bool>(data, *ftoggle) && fmin && fmax) {
+                // Значение переключателя — вкл/выкл, а не число: концы диапазона.
+                const float lo = ui::FieldAs<float>(data, *fmin), hi = ui::FieldAs<float>(data, *fmax);
+                bool on = v >= (lo + hi) * 0.5f;
+                if (ictl::Switch(host, label, &on)) {
+                    v = on ? hi : lo;
+                    changed = true;
+                }
+            } else if (std::strcmp(f.Key, "value") == 0 && fmin && fmax && fmin->Type == K::Float &&
+                ui::FieldAs<float>(data, *fmax) > ui::FieldAs<float>(data, *fmin)) {
+                const float lo = ui::FieldAs<float>(data, *fmin), hi = ui::FieldAs<float>(data, *fmax);
+                changed = ictl::SliderNumber(host, label, &v, lo, hi, hi - lo <= 2.0f ? "%.2f" : "%.1f",
+                                             def != nullptr, reset);
+            } else if (std::strcmp(f.Key, "min") == 0 && fmax && fmax->Type == K::Float) {
+                // Min и Max — в одной строке группы Range.
+                ictl::NumOpts o = f.Max > f.Min ? ictl::OptsForRange(f.Min, f.Max) : ictl::NumOpts{};
+                changed = ictl::Range(host, T("Range"), &v, &ui::FieldAs<float>(data, *fmax), o);
+            } else if (std::strcmp(f.Key, "max") == 0 && fmin && fmin->Type == K::Float) {
+                // Нарисовано вместе с min.
+            } else if (f.Max > f.Min && f.Max - f.Min <= 1.0001f) {
                 changed = ictl::SliderNumber(host, label, &v, f.Min, f.Max, "%.2f", def != nullptr, reset);
             } else {
                 ictl::NumOpts o = f.Max > f.Min ? ictl::OptsForRange(f.Min, f.Max) : ictl::NumOpts{};
@@ -211,8 +245,12 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
 
         case K::String: {
             std::string& v = ui::FieldAs<std::string>(data, f);
+            const bool slot = f.Editor == W::Texture || f.Editor == W::Font || f.Editor == W::Sound;
+            // Ресурс: подпись группы и компактный слот под ней.
+            if (slot && f.Editor != W::Texture) ictl::GroupTitle(label);
             if (f.Editor == W::Texture && DrawImageSource(host, f.Key, v, changed)) {
             } else if (f.Editor == W::Texture) {
+                ictl::GroupTitle(label);
                 // Слот ассета: обложка, приём броска из панели Assets, «где
                 // лежит», очистка. Печатать путь руками — то, ради чего слоты и
                 // заведены.
@@ -276,7 +314,8 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             } else if (f.Editor == W::IconName) {
                 // Значки выбираются ГЛАЗАМИ: список имён без картинок — это
                 // угадывание, как выглядит «drop» и чем он отличается от «wire».
-                if (ImGui::BeginCombo(label, v.empty() ? T("(none)") : v.c_str())) {
+                ictl::Label(label);
+                if (ImGui::BeginCombo("##v", v.empty() ? T("(none)") : v.c_str())) {
                     if (ImGui::Selectable(T("(none)"), v.empty())) {
                         host.PushUndoSnapshot();
                         v.clear();
@@ -300,9 +339,13 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                 char buf[512];
                 std::snprintf(buf, sizeof(buf), "%s", v.c_str());
                 const bool multi = f.Editor == W::Multiline;
-                if (multi ? ImGui::InputTextMultiline(label, buf, sizeof(buf),
-                                                      ImVec2(0, ImGui::GetFrameHeight() * 2.2f))
-                          : ImGui::InputText(label, buf, sizeof(buf))) {
+                // Многострочное — подпись над полем во всю ширину; строка —
+                // подпись слева.
+                if (multi) ictl::GroupTitle(label);
+                else ictl::Label(label);
+                if (multi ? ImGui::InputTextMultiline("##v", buf, sizeof(buf),
+                                                      ImVec2(-1.0f, ImGui::GetFrameHeight() * 2.6f))
+                          : ImGui::InputText("##v", buf, sizeof(buf))) {
                     v = buf;
                     changed = true;
                 }
@@ -312,8 +355,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
         }
 
         case K::Color:
-            Sage::UI::ColorField4(label, &ui::FieldAs<glm::vec4>(data, f).x);
-            host.TrackLastImGuiItem();
+            changed = ictl::Color(host, label, &ui::FieldAs<glm::vec4>(data, f));
             break;
 
         case K::Vec2: {
@@ -323,9 +365,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             const std::string key = f.Key ? f.Key : "";
             const bool isSize = key.find("ize") != std::string::npos;
             ictl::GroupTitle(DisplayLabel(label).c_str());
-            const char* xy[2] = {"X", "Y"};
-            const char* wh[2] = {T("Width"), T("Height")};
-            changed = ictl::Axes(host, f.Key, &v.x, 2, isSize ? wh : xy, o);
+            changed = ictl::Pair(host, f.Key, &v.x, &v.y, isSize ? "W" : "X", isSize ? "H" : "Y", o);
             break;
         }
 
@@ -355,7 +395,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             if (std::string(label).find("(x,y,w,h)") != std::string::npos ||
                 std::string(f.Label ? f.Label : "").find("(x,y,w,h)") != std::string::npos) {
                 ictl::GroupTitle(DisplayLabel(label).c_str());
-                const char* xywh[4] = {"X", "Y", T("Width"), T("Height")};
+                const char* xywh[4] = {"X", "Y", "W", "H"};
                 changed = ictl::Axes(host, f.Key, &v.x, 4, xywh, o);
             } else {
                 changed = ictl::Sides(host, DisplayLabel(label).c_str(), &v, o);
@@ -367,7 +407,8 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             int& v = ui::FieldAs<int>(data, f);
             const char* preview =
                 (f.EnumNames && v >= 0 && v < f.EnumCount) ? T(f.EnumNames[v]) : "?";
-            if (ImGui::BeginCombo(label, preview)) {
+            ictl::Label(label);
+            if (ImGui::BeginCombo("##v", preview)) {
                 for (int i = 0; i < f.EnumCount; ++i) {
                     if (ImGui::Selectable(T(f.EnumNames[i]), i == v)) {
                         host.PushUndoSnapshot();
@@ -535,7 +576,24 @@ int DrawFieldsOf(EditorHost& host, GameObject obj, const UIPropsContext& ctx, co
             const bool show = !f.Hidden && view.Filter == FieldFilter::Look && SameTab(f.Tab, view.Tab) &&
                               f.Advanced == view.Advanced && RequirementMet(reg, e, f) &&
                               ui::FieldVisible(fields, f, data);
-            if (show) {
+            // Вид, у которого показать нечего, кроме цвета (оформление движка),
+            // — одной строкой с подписью вида, а не раскрывашкой ради поля.
+            int visibleInside = 0;
+            const ui::PartField* only = nullptr;
+            for (size_t k = i + 1; k < end; ++k) {
+                const ui::PartField& lf = fields[k];
+                if (lf.Hidden || !ui::FieldVisible(fields, lf, data) || !RequirementMet(reg, e, lf)) continue;
+                ++visibleInside;
+                only = &lf;
+            }
+            if (show && visibleInside == 1 && !view.Tab) {
+                ++drawn;
+                if (!dryRun) {
+                    ui::PartField inl = *only;
+                    inl.Label = f.Label;
+                    DrawOneField(host, obj, ctx, p, inl, data, selected);
+                }
+            } else if (show && visibleInside > 0) {
                 ++drawn;
                 if (!dryRun) {
                     ImGui::PushID(f.Key);
@@ -572,9 +630,9 @@ void DrawPartSection(EditorHost& host, GameObject obj, const UIPropsContext& ctx
     DrawFieldsOf(host, obj, ctx, p, data, view, selected);
     view.Advanced = true;
     if (DrawFieldsOf(host, obj, ctx, p, data, view, selected, /*dryRun=*/true) > 0 &&
-        ImGui::TreeNodeEx(T("More settings"), ImGuiTreeNodeFlags_SpanAvailWidth)) {
+        ictl::SubSection((std::string(p.Id ? p.Id : "part") + (view.Tab ? view.Tab : "")).c_str(), T("Advanced"))) {
         DrawFieldsOf(host, obj, ctx, p, data, view, selected);
-        ImGui::TreePop();
+        ictl::EndSubSection();
     }
     ImGui::PopID();
     ImGui::PopID();
@@ -644,7 +702,8 @@ void DrawAppearanceSwitch(EditorHost& host, entt::entity e) {
     const bool fill = reg.all_of<ui::Fill>(e);
     int mode = shape ? 2 : fill ? 1 : 0;
     const char* kModes[] = {T("None"), T("Image"), T("Shape")};
-    if (!ImGui::Combo(T("Appearance"), &mode, kModes, 3)) return;
+    ictl::Label(T("Background"));
+    if (!ImGui::Combo("##Appearance", &mode, kModes, 3)) return;
     host.PushUndoSnapshot();
     if (mode != 2) reg.remove<ui::Shape>(e);
     if (mode != 1) reg.remove<ui::Fill>(e);
@@ -700,8 +759,7 @@ void DrawContentSection(EditorHost& host, GameObject obj, const UIPropsContext& 
     ImGui::Spacing();
     const ui::PartType* mask = ui::FindPart("mask");
     bool clip = mask && mask->Has(reg, e);
-    if (mask && ImGui::Checkbox(T("Clip Children"), &clip)) {
-        host.PushUndoSnapshot();
+    if (mask && ictl::Switch(host, T("Clip Children"), &clip)) {
         // Источник обрезки — автоматически по оформлению контейнера: форма
         // Panel режет её геометрией, картинка — альфой (Mask::Shape::Auto).
         if (clip) reg.emplace_or_replace<ui::Mask>(e).Form = ui::Mask::Shape::Auto;
@@ -724,7 +782,8 @@ void DrawContentSection(EditorHost& host, GameObject obj, const UIPropsContext& 
         ui::Scroll* sc = reg.try_get<ui::Scroll>(e);
         int axis = !sc ? 0 : sc->Horizontal && sc->Vertical ? 3 : sc->Horizontal ? 1 : 2;
         const char* kAxes[] = {T("Off"), T("Horizontal"), T("Vertical"), T("Both")};
-        if (ImGui::Combo(T("Scroll"), &axis, kAxes, 4)) {
+        ictl::Label(T("Scroll"));
+        if (ImGui::Combo("##Scroll", &axis, kAxes, 4)) {
             host.PushUndoSnapshot();
             if (axis == 0) {
                 scroll->Remove(reg, e);
