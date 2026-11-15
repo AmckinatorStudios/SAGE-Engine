@@ -436,8 +436,7 @@ void FileBrowser::DrawBreadcrumbs(float width) {
         ++first;
     }
     if (first > 0) {
-        if (ImGui::Button("...")) ImGui::OpenPopup("##crumbs_more");
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Parent folders"));
+        if (EditorIcons::IconOnlyButton("dots", T("Parent folders"))) ImGui::OpenPopup("##crumbs_more");
         if (Sage::UI::MenuScope moreMenu; ImGui::BeginPopup("##crumbs_more")) {
             for (size_t i = 0; i < first; ++i) {
                 ImGui::PushID((int)i);

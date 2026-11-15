@@ -10,6 +10,7 @@
 // лежали редактор материала, якоря интерфейса и список компонентов.
 // ---------------------------------------------------------------------------
 #include "InspectorFields.h"
+#include "InspectorControls.h"
 #include <cctype>
 #include <cstdarg>
 #include "sage/scene/CharacterFit.h"
@@ -70,6 +71,8 @@
 namespace ifield = sage::editor::ifield;
 
 namespace fs = std::filesystem;
+namespace ictl = sage::editor::ictl;
+
 using namespace sage::editor::inspectordetail;
 
 // Секции анимации объекта: скелет, анимация свойств, твины, зонд отражений, IK.
@@ -164,7 +167,7 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
             if (clipCount > 0 && am->ClipPath.empty()) {
                 if (am->Clip >= clipCount) am->Clip = 0;
                 std::string preview = am->Anim.ClipName(am->Clip);
-                if (ImGui::BeginCombo("Clip", preview.c_str())) {
+                if (ictl::BeginDropdown("Clip", preview.c_str())) {
                     for (int i = 0; i < clipCount; ++i) {
                         bool sel = (am->Clip == i);
                         if (ImGui::Selectable(am->Anim.ClipName(i).c_str(), sel) && i != am->Clip) {
@@ -174,7 +177,7 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                             else am->Anim.Play(i, am->Loop);
                         }
                     }
-                    ImGui::EndCombo();
+                    ictl::EndDropdown();
                 }
                 ifield::Float(host, T("Blend Time"), &am->BlendTime, 0.01f, 0.0f, 2.0f);
                 if (am->Anim.Fading())
@@ -307,7 +310,7 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
             if (ifield::Combo(host, T("Resolution"), &resIdx, resNames, 4)) p->Resolution = resValues[resIdx];
             if (p->Resolution != prevRes) p->Dirty = true;
 
-            if (ImGui::DragFloat3(T("Box Half Extents"), &p->BoxHalfExtents.x, 0.1f, 0.1f, 500.0f))
+            if (ictl::DragVec(&host, T("Box Half Extents"), &p->BoxHalfExtents.x, 3, 0.1f, 0.1f, 500.0f))
                 p->Dirty = true;
             host.TrackLastImGuiItem();
 
@@ -341,7 +344,7 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                 ImGui::PushID(gi);
                 const std::string title = "Goal " + std::to_string(gi) +
                                           (g.Bone.empty() ? "" : " (" + g.Bone + ")");
-                if (ImGui::TreeNodeEx(title.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+                if (ictl::SubSection(("ik_goal_" + std::to_string(gi)).c_str(), title.c_str(), true)) {
                     char boneBuf[128];
                     std::snprintf(boneBuf, sizeof(boneBuf), "%s", g.Bone.c_str());
                     if (ImGui::InputText(T("Bone"), boneBuf, sizeof(boneBuf))) {
@@ -352,7 +355,7 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                     // Выбор из реального скелета — чтобы не угадывать написание.
                     if (am && am->Model) {
                         const sage::anim::Skeleton& sk = am->Model->GetSkeleton();
-                        if (sk.Count() > 0 && ImGui::BeginCombo("Pick Bone", g.Bone.c_str())) {
+                        if (sk.Count() > 0 && ictl::BeginDropdown("Pick Bone", g.Bone.c_str())) {
                             for (int b = 0; b < sk.Count(); ++b) {
                                 const std::string& n = sk.Joints[(size_t)b].Name;
                                 if (ImGui::Selectable(n.c_str(), n == g.Bone) && n != g.Bone) {
@@ -360,14 +363,14 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                                     g.Resolved = false;
                                 }
                             }
-                            ImGui::EndCombo();
+                            ictl::EndDropdown();
                         }
                     }
                     ifield::Check(host, T("Enabled"), &g.Enabled);
                     ImGui::SameLine();
                     if (ifield::Check(host, T("Aim (look-at)"), &g.Aim)) g.Resolved = false;
                     if (g.Aim) {
-                        ImGui::DragFloat3(T("Aim Axis"), &g.AimAxis.x, 0.01f);
+                        ictl::DragVec(&host, T("Aim Axis"), &g.AimAxis.x, 3, 0.01f);
                         host.TrackLastImGuiItem();
                         ifield::Slider(host, T("Max Angle"), &g.AimMaxAngle, 0.0f, 180.0f);
                     } else {
@@ -378,10 +381,10 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                         if (EditorTheme::BeginMore("ikMore")) {
                         ifield::Check(host, T("Use Pole"), &g.UsePole);
                         if (g.UsePole) {
-                            ImGui::DragFloat3(T("Pole"), &g.Pole.x, 0.02f);
+                            ictl::DragVec(&host, T("Pole"), &g.Pole.x, 3, 0.02f);
                             host.TrackLastImGuiItem();
                         }
-                        ImGui::DragFloat3(T("Align Normal"), &g.AlignNormal.x, 0.02f);
+                        ictl::DragVec(&host, T("Align Normal"), &g.AlignNormal.x, 3, 0.02f);
                         host.TrackLastImGuiItem();
                         ifield::Check(host, T("Foot Lock"), &g.Lock);
                         if (g.Lock) {
@@ -391,14 +394,14 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                         EditorTheme::EndMore();
                         }
                     }
-                    ImGui::DragFloat3(T("Target (world)"), &g.Target.x, 0.02f);
+                    ictl::DragVec(&host, T("Target (world)"), &g.Target.x, 3, 0.02f);
                     host.TrackLastImGuiItem();
                     ifield::Slider(host, T("Weight"), &g.Weight, 0.0f, 1.0f);
                     if (g.Resolved && g.EndJoint < 0)
                         ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Danger), "%s",
                                            T("bone not found in skeleton"));
                     if (ImGui::Button(T("Remove Goal"))) remove = gi;
-                    ImGui::TreePop();
+                    ictl::EndSubSection();
                 }
                 ImGui::PopID();
             }

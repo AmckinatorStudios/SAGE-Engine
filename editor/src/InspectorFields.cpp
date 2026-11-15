@@ -8,6 +8,8 @@
 #include "InspectorControls.h"
 #include "ui/ColorPicker.h"
 
+namespace ictl = sage::editor::ictl;
+
 namespace sage::editor::ifield {
 
 // Каждое поле — ГРУППОЙ: «последний элемент» для ImGui — вся строка, и
@@ -52,7 +54,7 @@ bool Combo(EditorHost& host, const char* label, int* current, const char* const 
     ImGui::PushID(label);
     ictl::Label(label);
     const int before = *current;
-    const bool changed = ImGui::Combo("##combo", current, items, count);
+    const bool changed = ictl::Combo("##combo", current, items, count);
     if (changed && *current != before) {
         // Снимок — ДО правки: вернуть старое, снять, поставить новое.
         const int now = *current;

@@ -87,46 +87,54 @@ void InspectorPanel::DrawObjectIdentity(EditorHost& host, GameObject obj) {
     const bool twoColumns = avail >= 300.0f;
     const float colW = twoColumns ? std::floor((avail - 10.0f) * 0.5f) : avail;
 
+    // Подпись над полем — рисунком, а не Text: у второй колонки (SameLine
+    // после группы с полем) ImGui сдвинул бы текст на отступ поля, и подписи
+    // «Тег» и «Слой» стояли бы на разной высоте.
     auto fieldTitle = [](const char* text) {
-        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::TextDim));
-        ImGui::TextUnformatted(text);
-        ImGui::PopStyleColor();
+        const ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddText(p, EditorTheme::Color32(EditorTheme::Role::TextDim), text);
+        ImGui::Dummy(ImVec2(ImGui::CalcTextSize(text).x, ImGui::GetTextLineHeight()));
     };
 
+    // ТЕГ И СЛОЙ — ОДИН И ТОТ ЖЕ СПИСОК kit (значение и шеврон в одном поле).
+    // Внутри списка — всё, что с ними делают: выбрать из уже занятых, завести
+    // новый, снять; у слоёв — ещё и правка списка слоёв.
     ImGui::BeginGroup();
     fieldTitle(T("Tag"));
     {
-        char tag[64];
         const TagComponent* tc = reg.try_get<TagComponent>(obj.Entity());
-        std::snprintf(tag, sizeof(tag), "%s", tc ? tc->Tag.c_str() : "");
-        ImGui::SetNextItemWidth(colW - side - 2.0f);
-        if (ImGui::InputTextWithHint("##tag", T("none"), tag, sizeof(tag))) {
-            if (tag[0]) reg.emplace_or_replace<TagComponent>(obj.Entity(), TagComponent{tag});
-            else reg.remove<TagComponent>(obj.Entity());
-        }
-        host.TrackLastImGuiItem();
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Group name for scripts: scene:FindByTag(\"Enemy\")"));
-        ImGui::SameLine(0.0f, 2.0f);
-        if (ImGui::ArrowButton("##tag_list", ImGuiDir_Down)) ImGui::OpenPopup("SceneTags###SceneTags");
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Tags already used in this scene"));
-        if (Sage::UI::MenuScope menu; ImGui::BeginPopup("SceneTags###SceneTags")) {
-            const std::vector<std::string> tags = sage::scene::SceneTags(scene);
-            if (tags.empty()) ImGui::TextDisabled("%s", T("No tags in this scene yet: type one"));
-            for (const std::string& t : tags) {
-                if (ImGui::Selectable(t.c_str(), tc && tc->Tag == t)) {
+        const std::string current = tc ? tc->Tag : std::string();
+        ImGui::SetNextItemWidth(colW);
+        const bool tagOpen = ictl::BeginDropdown("##tag", current.empty() ? T("none") : current.c_str());
+        if (tagOpen) {
+            if (ImGui::Selectable(T("none"), current.empty()) && !current.empty()) {
+                host.PushUndoSnapshot();
+                reg.remove<TagComponent>(obj.Entity());
+            }
+            for (const std::string& t : sage::scene::SceneTags(scene)) {
+                if (ImGui::Selectable(t.c_str(), t == current) && t != current) {
                     host.PushUndoSnapshot();
                     reg.emplace_or_replace<TagComponent>(obj.Entity(), TagComponent{t});
                 }
             }
-            if (tc) {
-                ImGui::Separator();
-                if (ImGui::Selectable(T("Clear the tag"))) {
-                    host.PushUndoSnapshot();
-                    reg.remove<TagComponent>(obj.Entity());
-                }
+            ImGui::Separator();
+            // Новый тег — вводом прямо в списке: Enter или «+» ставит его объекту.
+            static char fresh[64] = "";
+            ImGui::SetNextItemWidth(std::max(120.0f, colW - side - 6.0f));
+            const bool enter = ImGui::InputTextWithHint("##new_tag", T("New tag"), fresh, sizeof(fresh),
+                                                        ImGuiInputTextFlags_EnterReturnsTrue);
+            ImGui::SameLine(0.0f, 2.0f);
+            if ((EditorIcons::IconOnlyButton("plus", T("Give the object this tag")) || enter) && fresh[0]) {
+                host.PushUndoSnapshot();
+                reg.emplace_or_replace<TagComponent>(obj.Entity(), TagComponent{fresh});
+                fresh[0] = 0;
+                ImGui::CloseCurrentPopup();
             }
-            ImGui::EndPopup();
+            ictl::EndDropdown();
         }
+        // Подсказка — только у закрытого списка: иначе она ложится поверх пунктов.
+        if (!tagOpen && ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Group name for scripts: scene:FindByTag(\"Enemy\")"));
     }
     ImGui::EndGroup();
     if (twoColumns) ImGui::SameLine(0.0f, 10.0f);
@@ -135,8 +143,10 @@ void InspectorPanel::DrawObjectIdentity(EditorHost& host, GameObject obj) {
     fieldTitle(T("Scene Layer"));
     {
         const std::string current = sage::scene::LayerOf(scene, obj.Id());
-        ImGui::SetNextItemWidth(colW - side - 2.0f);
-        if (ImGui::BeginCombo("##scene_layer", current.empty() ? T("none") : current.c_str())) {
+        bool manage = false;
+        ImGui::SetNextItemWidth(colW);
+        const bool layerOpen = ictl::BeginDropdown("##scene_layer", current.empty() ? T("none") : current.c_str());
+        if (layerOpen) {
             if (ImGui::Selectable(T("none"), current.empty()) && !current.empty()) {
                 host.PushUndoSnapshot();
                 sage::scene::SetLayerOf(scene, obj.Id(), "");
@@ -147,14 +157,15 @@ void InspectorPanel::DrawObjectIdentity(EditorHost& host, GameObject obj) {
                     sage::scene::SetLayerOf(scene, obj.Id(), l);
                 }
             }
-            ImGui::EndCombo();
+            ImGui::Separator();
+            if (EditorIcons::MenuItem("pencil", T("Edit scene layers..."))) manage = true;
+            ictl::EndDropdown();
         }
-        if (ImGui::IsItemHovered())
+        if (!layerOpen && ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("Scene layer: a group of objects for sorting and filtering. "
                                       "It is not the render layer of a mesh."));
-        ImGui::SameLine(0.0f, 2.0f);
-        if (EditorIcons::IconOnlyButton("pencil", T("Scene layers: add, rename, remove")))
-            ImGui::OpenPopup("SceneLayers###SceneLayers");
+        // Правка списка — своим окном у этого же поля (открывается из списка).
+        if (manage) ImGui::OpenPopup("SceneLayers###SceneLayers");
         DrawSceneLayersPopup(host);
     }
     ImGui::EndGroup();

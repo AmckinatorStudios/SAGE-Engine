@@ -48,6 +48,8 @@
 
 namespace fs = std::filesystem;
 
+namespace ictl = sage::editor::ictl;
+
 namespace sage::editor {
 namespace {
 
@@ -103,7 +105,7 @@ void DrawAppearanceSource(EditorHost& host, GameObject obj, const UIPropsContext
                                                            : kCustom;
     const char* kModes[] = {T("Engine Default"), T("Saved Style"), T("Custom")};
     ictl::Label(T("Source"));
-    if (ImGui::Combo("##appsrc", &mode, kModes, 3)) {
+    if (ictl::Combo("##appsrc", &mode, kModes, 3)) {
         host.PushUndoSnapshot();
         PendingStyle()[key] = mode == kStyle && xf.Style.empty();
         ui::SetAppearanceSource(reg, obj.Entity(), mode == kEngine  ? ui::AppearanceSource::EngineDefault
@@ -173,19 +175,21 @@ void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, u
                                       "changes them all."));
         return;
     }
-    if (ImGui::Button(T("Save changes to the style"))) {
-        if (save(xf.Style)) xf.StyleVersion = -1;
-    }
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Every element with this style takes the new look."));
-    ImGui::SameLine();
-    if (ImGui::Button(T("Detach"))) {
+    // Два действия над связью со стилем — одной группой kit.
+    ictl::GroupItem acts[2];
+    acts[0].Icon = "save";
+    acts[0].Text = T("Save changes to the style");
+    acts[0].Tooltip = T("Every element with this style takes the new look.");
+    acts[1].Icon = "unlock";
+    acts[1].Text = T("Detach");
+    acts[1].Tooltip = T("Keeps the current look, but no longer follows the file.");
+    const int act = ictl::ButtonGroup("##style_acts", acts, 2, ictl::ButtonLook::Compact);
+    if (act == 0 && save(xf.Style)) xf.StyleVersion = -1;
+    if (act == 1) {
         host.PushUndoSnapshot();
         xf.Style.clear();
         xf.StyleVersion = -1;
     }
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Keeps the current look, but no longer follows the file."));
     if (ImGui::IsItemHovered())
         ImGui::SetTooltip("%s", T("The look comes from the style file: changes made here are replaced when the file changes."));
 }
@@ -235,7 +239,7 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
     const char* stretchNames[] = {T("None"), T("Horizontal"), T("Vertical"), T("Both")};
     int stretch = (int)xf->Mode;
     ictl::Label(T("Stretch"));
-    if (ImGui::Combo("##Stretch", &stretch, stretchNames, IM_ARRAYSIZE(stretchNames))) {
+    if (ictl::Combo("##Stretch", &stretch, stretchNames, IM_ARRAYSIZE(stretchNames))) {
         host.PushUndoSnapshot();
         xf->Mode = (ui::Element::Stretch)stretch;
     }
@@ -304,29 +308,26 @@ void DrawElementAdvanced(EditorHost& host, entt::entity e, ui::Element* xf) {
 void DrawSkinSwitch(EditorHost& host, entt::entity e, ui::Element& xf) {
     entt::registry& reg = host.CurrentScene().Registry();
     const bool engine = xf.Skin == ui::Element::SkinMode::Engine;
-    const float w = (ImGui::GetContentRegionAvail().x - ImGui::GetStyle().ItemSpacing.x) * 0.5f;
-    auto choice = [&](const char* label, bool active) {
-        if (active) ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Accent));
-        const bool pressed = ImGui::Button(label, ImVec2(w, 0.0f));
-        if (active) ImGui::PopStyleColor();
-        return pressed && !active;
-    };
-    if (choice(T("Engine style"), engine)) {
+    // Группа kit из двух сегментов во всю ширину: выбранный — подсвечен.
+    ictl::GroupItem items[2];
+    items[0].Text = T("Engine style");
+    items[0].Active = engine;
+    items[0].Tooltip = T("The engine draws the shape, border, shadow and states itself.\n"
+                         "You choose only colours — nothing else to tune.");
+    items[1].Text = T("Custom");
+    items[1].Active = !engine;
+    items[1].Tooltip = T("Your own pictures for every part and state, 9-slice, every parameter.\n"
+                         "Starts from the engine look, so nothing jumps.");
+    const int hit = ictl::ButtonGroup("##skin", items, 2, ictl::ButtonLook::Standard, 0,
+                                      ImGui::GetContentRegionAvail().x);
+    if (hit == 0 && !engine) {
         host.PushUndoSnapshot();
         xf.Skin = ui::Element::SkinMode::Engine;
-    }
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("The engine draws the shape, border, shadow and states itself.\n"
-                                  "You choose only colours — nothing else to tune."));
-    ImGui::SameLine();
-    if (choice(T("Custom"), !engine)) {
+    } else if (hit == 1 && engine) {
         host.PushUndoSnapshot();
         ui::BakeEngineSkin(reg, e);
         xf.Skin = ui::Element::SkinMode::Custom;
     }
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Your own pictures for every part and state, 9-slice, every parameter.\n"
-                                  "Starts from the engine look, so nothing jumps."));
 }
 
 // ПРОЗРАЧНОСТЬ И ВВОД ВСЕГО ПОДДЕРЕВА — общая настройка любого элемента, а не
@@ -358,14 +359,14 @@ void DrawGroupSettings(EditorHost& host, entt::entity e) {
         for (int i = 0; i < 5; ++i)
             if (modes[i] == xf->Blend) cur = i;
         ictl::Label(T("Blend"));
-        if (ImGui::BeginCombo("##Blend", labels[cur])) {
+        if (ictl::BeginDropdown("##Blend", labels[cur])) {
             for (int i = 0; i < 5; ++i) {
                 if (ImGui::Selectable(labels[i], i == cur) && i != cur) {
                     host.PushUndoSnapshot();
                     xf->Blend = modes[i];
                 }
             }
-            ImGui::EndCombo();
+            ictl::EndDropdown();
         }
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("How the element lays over what is behind it.\n"

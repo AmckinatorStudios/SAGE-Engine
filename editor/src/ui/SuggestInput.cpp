@@ -8,6 +8,7 @@
 
 #include "../Localization.h"
 #include "ui/UI.h"
+#include "../EditorIcons.h"
 
 namespace sage::editor::suggest {
 
@@ -74,8 +75,7 @@ bool Field(const char* id, std::string& value, const std::vector<Item>& items, c
     const std::string typed = ImGui::IsItemActive() ? std::string(buf) : value;
 
     ImGui::SameLine(0.0f, spacing);
-    if (ImGui::ArrowButton("##open", ImGuiDir_Down)) ImGui::OpenPopup(kListPopup);
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Pick from the list"));
+    if (EditorIcons::IconOnlyButton("chevron-down", T("Pick from the list"))) ImGui::OpenPopup(kListPopup);
 
     if (Sage::UI::MenuScope menu; ImGui::BeginPopup(kListPopup)) {
         if (items.empty()) ImGui::TextDisabled("%s", T("Nothing to suggest — type the name"));

@@ -1,19 +1,22 @@
+// ---------------------------------------------------------------------------
+// EDITOR UI KIT: число, ползунок, переключатель, цвет и общие помощники
+// (рамка, разделители, кнопки −/+, метки осей). Векторы — _Vector.cpp,
+// список и кнопки — _Choice.cpp, компоновка и разделы — _Layout.cpp.
+// ---------------------------------------------------------------------------
 #include "InspectorControls.h"
+#include "InspectorControlsDetail.h"
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <string>
-#include <vector>
 
 #include "imgui.h"
 #include "imgui_internal.h"
 
 #include "EditorHost.h"
 #include "EditorIcons.h"
-#include "EditorPrefs.h"
 #include "EditorTheme.h"
 #include "Localization.h"
 #include "ui/ColorPicker.h"
@@ -24,21 +27,6 @@ namespace {
 std::function<void()>& Sink() {
     static std::function<void()> s;
     return s;
-}
-
-// Снимок перед правкой — в историю инструмента, если он её подменил.
-void Snapshot(EditorHost& host) {
-    if (Sink()) Sink()();
-    else host.PushUndoSnapshot();
-}
-
-// Перетаскивание и ввод: один шаг истории на всё касание.
-void Track(EditorHost& host) {
-    if (Sink()) {
-        if (ImGui::IsItemActivated()) Sink()();
-    } else {
-        host.TrackLastImGuiItem();
-    }
 }
 
 // Колесо над полем: одна правка — один шаг истории, пока колесо крутят без
@@ -55,36 +43,31 @@ bool WheelGestureStart(ImGuiID id) {
 
 float Clamp(float v, const NumOpts& o) { return std::clamp(v, o.Min, o.Max); }
 
-// ЕДИНЫЕ ОТСТУПЫ ИНСПЕКТОРА — одна таблица, а не поправки по месту.
-constexpr float kLabelGap = 8.0f;   // подпись → поле
-constexpr float kTagGap = 4.0f;     // «X» → его поле; поле → значок замка
-constexpr float kPairGap = 10.0f;   // первое поле пары → подпись второго
-constexpr float kIndent = 14.0f;    // содержимое вложенной группы
-constexpr float kGroupGap = 6.0f;   // между независимыми группами
-constexpr float kFieldMin = 58.0f;  // самое узкое [−] число [+], где число ещё читается
+glm::vec3 Vec3(const ImVec4& c) { return glm::vec3(c.x, c.y, c.z); }
 
-// Кнопка −/+ числового поля: квадрат высотой с поле, значок Tabler по
-// центру, повтор при удержании; после секунды удержания шаг вдесятеро.
-bool StepButton(EditorHost& host, const char* id, const char* icon, float* v, float dir, const NumOpts& o, ImVec2 at,
+// Кнопка −/+ внутри рамки: значок Tabler по центру, повтор при удержании;
+// после секунды удержания шаг вдесятеро. Подсветка — только этого сегмента.
+bool StepButton(EditorHost* host, const char* id, const char* icon, float* v, float dir, const NumOpts& o, ImVec2 at,
                 float side, ImDrawFlags corners) {
+    using EditorTheme::State;
     const float h = ImGui::GetFrameHeight();
     ImGui::SetCursorScreenPos(at);
     ImGui::PushItemFlag(ImGuiItemFlags_ButtonRepeat, true);
     const bool hit = ImGui::InvisibleButton(id, ImVec2(side, h));
     ImGui::PopItemFlag();
     const bool hovered = ImGui::IsItemHovered(), held = ImGui::IsItemActive();
+    const State st = held ? State::Active : hovered ? State::Hover : State::Normal;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (hovered || held)
-        dl->AddRectFilled(at, ImVec2(at.x + side, at.y + h),
-                          EditorTheme::Color32(held ? EditorTheme::Role::AccentMuted : EditorTheme::Role::Hover),
-                          ImGui::GetStyle().FrameRounding, corners);
-    // Оба значка одного размера и строго по центру квадрата.
-    const float is = std::floor(h * 0.56f);
+    if (const ImU32 fill = EditorTheme::SegmentFill(st))
+        dl->AddRectFilled(at, ImVec2(at.x + side, at.y + h), fill, detail::K().Rounding,
+                          corners ? corners : ImDrawFlags_RoundCornersNone);
+    // Оба значка одного размера и строго по центру сегмента.
+    const float is = std::floor(h * detail::K().StepIcon);
     EditorIcons::Overlay(dl, std::floor(at.x + (side - is) * 0.5f), std::floor(at.y + (h - is) * 0.5f), is, icon,
-                         hovered || held ? EditorIcons::kThemeColor : glm::vec3(0.62f, 0.64f, 0.70f));
+                         Vec3(EditorTheme::IconTint(st == State::Active ? State::Hover : st)));
     if (hovered) ImGui::SetTooltip("%s", T("Hold to repeat; after a second the step grows tenfold"));
     // Снимок — один на всё удержание: на нажатии, а не на каждом повторе.
-    if (ImGui::IsItemActivated()) Snapshot(host);
+    if (ImGui::IsItemActivated()) detail::Snapshot(host);
     if (!hit) return false;
     const bool accelerate = ImGui::GetIO().MouseDownDuration[0] > 1.0f;
     const float nv = Clamp(*v + dir * o.Step * (accelerate ? 10.0f : 1.0f), o);
@@ -93,44 +76,139 @@ bool StepButton(EditorHost& host, const char* id, const char* icon, float* v, fl
     return true;
 }
 
-std::string PrefKey(const char* what, ImGuiID id) { return std::string("inspector.") + what + "." + std::to_string(id); }
+} // namespace
 
-// Небольшая подпись оси перед полем («X», «W», «Min»): колонка шириной width,
-// поле — через kTagGap.
-void Tag(const char* text, float width) {
-    ImGui::AlignTextToFramePadding();
-    ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::TextDim));
-    ImGui::TextUnformatted(text);
-    ImGui::PopStyleColor();
-    ImGui::SameLine(0.0f, kTagGap + std::max(0.0f, width - ImGui::CalcTextSize(text).x));
+// --- detail: общее для всех файлов kit ------------------------------------------
+namespace detail {
+
+void Snapshot(EditorHost* host) {
+    if (Sink()) Sink()();
+    else if (host) host->PushUndoSnapshot();
 }
 
-// Пара полей ровно в width: «X [..]  Y [..]».
-bool PairIn(EditorHost& host, float* a, float* b, const char* tagA, const char* tagB, const NumOpts& o, float width) {
-    const float tag = std::max(ImGui::CalcTextSize(tagA).x, ImGui::CalcTextSize(tagB).x);
-    const float field = std::max(kFieldMin, std::floor((width - 2.0f * (tag + kTagGap) - kPairGap) * 0.5f));
-    Tag(tagA, tag);
-    bool changed = NumberCore(host, "a", a, o, field);
-    ImGui::SameLine(0.0f, kPairGap);
-    Tag(tagB, tag);
-    changed |= NumberCore(host, "b", b, o, field);
+void Track(EditorHost* host) {
+    if (Sink()) {
+        if (ImGui::IsItemActivated()) Sink()();
+    } else if (host) {
+        host->TrackLastImGuiItem();
+    }
+}
+
+void Frame(ImDrawList* dl, ImVec2 a, ImVec2 b, EditorTheme::State s, ImDrawFlags corners) {
+    const float r = K().Rounding;
+    dl->AddRectFilled(a, b, EditorTheme::ControlFill(s == EditorTheme::State::Focused ? EditorTheme::State::Normal : s),
+                      r, corners);
+    if (const ImU32 border = EditorTheme::ControlBorder(s)) dl->AddRect(a, b, border, r, corners, 1.0f);
+}
+
+void InnerSeparator(ImDrawList* dl, float x, float y, float h) {
+    const float inset = K().SeparatorInset;
+    const float t = K().SeparatorThickness;
+    dl->AddRectFilled(ImVec2(std::floor(x), y + inset), ImVec2(std::floor(x) + t, y + h - inset),
+                      EditorTheme::Color32(EditorTheme::Role::Line));
+}
+
+void InnerSeparatorH(ImDrawList* dl, float x, float y, float w) {
+    const float inset = K().SeparatorInset;
+    const float t = K().SeparatorThickness;
+    dl->AddRectFilled(ImVec2(x + inset, std::floor(y)), ImVec2(x + w - inset, std::floor(y) + t),
+                      EditorTheme::Color32(EditorTheme::Role::Line));
+}
+
+float StepSide(float width, float h) {
+    return std::floor(std::clamp(width * 0.22f, h * K().StepButton, h * K().StepButtonWide));
+}
+
+bool StepFits(float width, float h) { return width >= std::floor(h * K().StepButton) * 2.0f + 36.0f; }
+
+bool NumberIn(EditorHost* host, const char* id, float* v, const NumOpts& o, ImVec2 p, float width, bool buttons,
+              ImDrawFlags leftCorners, ImDrawFlags rightCorners, bool* active) {
+    ImGui::PushID(id);
+    const float h = ImGui::GetFrameHeight();
+    buttons = buttons && StepFits(width, h);
+    const float side = buttons ? StepSide(width, h) : 0.0f;
+    bool changed = buttons && StepButton(host, "##dec", "minus", v, -1.0f, o, p, side, leftCorners);
+    ImGui::SetCursorScreenPos(ImVec2(p.x + side, p.y));
+    ImGui::SetNextItemWidth(std::max(8.0f, width - 2.0f * side));
+    // Поле прозрачное: заливку даёт общая рамка контрола; при наведении —
+    // подсветка сегмента тем же цветом, что у кнопок.
+    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered, EditorTheme::Color(EditorTheme::Role::Hover));
+    ImGui::PushStyleColor(ImGuiCol_FrameBgActive, EditorTheme::Color(EditorTheme::Role::Hover));
+    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0.0f);
+    // Поля у числа узкие: кнопки по бокам уже отделяют его от рамки, и
+    // обычный отступ кадра только обрезал бы цифры в узкой колонке.
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.0f, ImGui::GetStyle().FramePadding.y));
+    // Перетаскивание — по полю, двойной щелчок (или Ctrl+щелчок) — ввод числа.
+    if (ImGui::DragFloat("##v", v, std::max(o.Step * 0.25f, 0.001f), o.Min, o.Max, o.Format,
+                         ImGuiSliderFlags_AlwaysClamp))
+        changed = true;
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor(3);
+    Track(host);
+    const ImGuiID fieldId = ImGui::GetItemID();
+    const bool fieldHovered = ImGui::IsItemHovered();
+    // Колесо над полем меняет значение, а не листает инспектор.
+    if (fieldHovered && ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY)) {
+        const float wheel = ImGui::GetIO().MouseWheel;
+        if (wheel != 0.0f) {
+            if (WheelGestureStart(fieldId)) Snapshot(host);
+            const float nv =
+                Clamp(*v + (wheel > 0.0f ? 1.0f : -1.0f) * o.Step * (ImGui::GetIO().KeyShift ? 10.0f : 1.0f), o);
+            if (nv != *v) {
+                *v = nv;
+                changed = true;
+            }
+        }
+    }
+    if (o.HasReset && ImGui::IsItemClicked(ImGuiMouseButton_Right) && *v != o.Reset) {
+        Snapshot(host);
+        *v = o.Reset;
+        changed = true;
+    }
+    if (fieldHovered && !ImGui::IsItemActive())
+        ImGui::SetTooltip("%s", o.HasReset ? T("Drag, scroll or double-click to type. Right-click resets")
+                                           : T("Drag, scroll or double-click to type"));
+    if (active) *active = ImGui::IsItemActive() || ImGui::GetActiveID() == fieldId;
+    if (buttons) {
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        InnerSeparator(dl, p.x + side, p.y, h);
+        InnerSeparator(dl, p.x + width - side - 1.0f, p.y, h);
+        changed |= StepButton(host, "##inc", "plus", v, 1.0f, o, ImVec2(p.x + width - side, p.y), side, rightCorners);
+    }
+    // Курсор — за поле: следующий элемент строки встаёт после рамки.
+    ImGui::SetCursorScreenPos(p);
+    ImGui::Dummy(ImVec2(width, h));
+    ImGui::PopID();
     return changed;
 }
 
-// Значок-переключатель связи (замок) в конце строки.
-bool LinkIcon(bool linked, const char* onTip, const char* offTip) {
-    ImGui::SameLine(0.0f, kTagGap);
-    return EditorIcons::IconOnlyButton(linked ? "lock" : "unlock", linked ? onTip : offTip, linked);
+float TagWidth(const char* const* tags, int n) {
+    float w = 0.0f;
+    for (int i = 0; i < n; ++i) w = std::max(w, ImGui::CalcTextSize(tags[i]).x);
+    return std::floor(w + K().TagPad);
 }
 
-
-// Ширина пары, ниже которой поля сжались бы: тогда подпись — над ними.
-float PairNeed(const char* tagA, const char* tagB) {
-    const float tag = std::max(ImGui::CalcTextSize(tagA).x, ImGui::CalcTextSize(tagB).x);
-    return 2.0f * (tag + kTagGap + kFieldMin) + kPairGap;
+void TagPill(ImDrawList* dl, ImVec2 p, float w, float h, const char* text, int axisColor) {
+    const float in = K().TagInset;
+    const ImVec2 a(p.x + in, p.y + in), b(p.x + w - 1.0f, p.y + h - in);
+    const bool axis = axisColor >= 0;
+    dl->AddRectFilled(a, b,
+                      axis ? ImGui::GetColorU32(EditorTheme::AxisColor(axisColor))
+                           : EditorTheme::Color32(EditorTheme::Role::SurfaceAlt),
+                      std::max(2.0f, K().Rounding - 2.0f));
+    const ImVec2 ts = ImGui::CalcTextSize(text);
+    dl->AddText(ImVec2(std::floor((a.x + b.x - ts.x) * 0.5f), std::floor(p.y + (h - ts.y) * 0.5f)),
+                axis ? IM_COL32(255, 255, 255, 240) : EditorTheme::Color32(EditorTheme::Role::TextDim), text);
 }
 
-} // namespace
+std::string PrefKey(const char* what, ImGuiID id) {
+    return std::string("inspector.") + what + "." + std::to_string(id);
+}
+
+} // namespace detail
+
+using detail::K;
 
 UndoScope::UndoScope(std::function<void()> push) : m_prev(std::move(Sink())) { Sink() = std::move(push); }
 UndoScope::~UndoScope() { Sink() = std::move(m_prev); }
@@ -158,108 +236,33 @@ NumOpts OptsForRange(float min, float max) {
     return o;
 }
 
-float LabelWidth() {
-    // Колонка подписей — доля ширины панели: одинаковая у всех строк уровня.
-    return std::clamp(ImGui::GetContentRegionAvail().x * 0.42f, 92.0f, 180.0f);
-}
+float NumberWidth() { return std::clamp(ImGui::GetContentRegionAvail().x, K().NumberMin, K().NumberMax); }
 
-void Label(const char* text, float minField) {
-    const float x0 = ImGui::GetCursorPosX();
-    const float avail = ImGui::GetContentRegionAvail().x;
-    const float w = LabelWidth();
-    // «Имя:» — подпись свойства с двоеточием; часть после «##» — не подпись.
-    const char* end = text + std::strlen(text);
-    if (const char* hash = std::strstr(text, "##")) end = hash;
-    std::string shown(text, end);
-    if (!shown.empty() && shown.back() != ':') shown += ':';
-    // Длинная подпись (или узкое поле) — НАД полем, целиком: обрезанная
-    // посередине подпись не читается, а подсказку никто не ищет.
-    if (ImGui::CalcTextSize(shown.c_str()).x > w - kLabelGap || avail - w < std::max(60.0f, minField)) {
-        ImGui::TextUnformatted(shown.c_str());
-        ImGui::SetNextItemWidth(avail);
-        return;
-    }
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(shown.c_str());
-    ImGui::SameLine(x0 + w);
-    ImGui::SetNextItemWidth(std::max(60.0f, ImGui::GetContentRegionAvail().x));
-}
-
-float NumberWidth() { return std::clamp(ImGui::GetContentRegionAvail().x, 110.0f, 170.0f); }
-
-bool NumberCore(EditorHost& host, const char* id, float* v, const NumOpts& o, float width) {
+bool NumberCore(EditorHost& host, const char* id, float* v, const NumOpts& o, float width, NumLook look) {
     ImGui::PushID(id);
     if (width <= 0.0f) width = NumberWidth();
     // ОДИН КОНТРОЛ: [−|значение|+] общей рамкой высотой с поле; кнопки —
-    // квадраты со значками Tabler, отделены тонкими линиями.
+    // сегменты со значками Tabler, отделены тонкими линиями.
     const float h = ImGui::GetFrameHeight();
-    // Кнопка чуть уже высоты: числу в узкой паре нужно место больше, чем
-    // квадратной кнопке.
-    // Совсем узкое поле (три оси в узкой панели) — без кнопок: цифрам нужно
-    // место больше, чем кнопкам, а перетаскивание, колесо и ввод остаются.
-    const bool buttons = width >= std::floor(h * 0.62f) * 2.0f + 36.0f;
-    const float side = buttons ? std::floor(std::clamp(width * 0.22f, h * 0.62f, h * 0.8f)) : 0.0f;
-    width = std::max(width, buttons ? side * 2.0f + 28.0f : 24.0f);
+    const bool buttons = look == NumLook::Standard && detail::StepFits(width, h);
+    width = std::max(width, buttons ? detail::StepSide(width, h) * 2.0f + 28.0f : 24.0f);
     const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float rounding = ImGui::GetStyle().FrameRounding;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(p, ImVec2(p.x + width, p.y + h), ImGui::GetColorU32(ImGuiCol_FrameBg), rounding);
-    bool changed = buttons && StepButton(host, "##dec", "minus", v, -1.0f, o, p, side, ImDrawFlags_RoundCornersLeft);
-    const float gap = buttons ? 1.0f : 0.0f;
-    ImGui::SetCursorScreenPos(ImVec2(p.x + side + gap, p.y));
-    ImGui::SetNextItemWidth(width - 2.0f * (side + gap));
-    ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 0.0f);
-    // Поля у числа узкие: кнопки по бокам уже отделяют его от рамки, и
-    // обычный отступ кадра только обрезал бы цифры в узкой колонке.
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2.0f, ImGui::GetStyle().FramePadding.y));
-    // Перетаскивание — по полю, двойной щелчок (или Ctrl+щелчок) — ввод числа.
-    if (ImGui::DragFloat("##v", v, std::max(o.Step * 0.25f, 0.001f), o.Min, o.Max, o.Format,
-                         ImGuiSliderFlags_AlwaysClamp)) {
-        changed = true;
-    }
-    ImGui::PopStyleVar(2);
-    ImGui::PopStyleColor();
-    Track(host);
-    const ImGuiID fieldId = ImGui::GetItemID();
-    const bool fieldHovered = ImGui::IsItemHovered();
-    // Колесо над полем меняет значение, а не листает инспектор.
-    if (fieldHovered && ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY)) {
-        const float wheel = ImGui::GetIO().MouseWheel;
-        if (wheel != 0.0f) {
-            if (WheelGestureStart(fieldId)) Snapshot(host);
-            const float nv = Clamp(*v + (wheel > 0.0f ? 1.0f : -1.0f) * o.Step * (ImGui::GetIO().KeyShift ? 10.0f : 1.0f), o);
-            if (nv != *v) {
-                *v = nv;
-                changed = true;
-            }
-        }
-    }
-    if (o.HasReset && ImGui::IsItemClicked(ImGuiMouseButton_Right) && *v != o.Reset) {
-        Snapshot(host);
-        *v = o.Reset;
-        changed = true;
-    }
-    if (fieldHovered && !ImGui::IsItemActive())
-        ImGui::SetTooltip("%s", o.HasReset ? T("Drag, scroll or double-click to type. Right-click resets")
-                                           : T("Drag, scroll or double-click to type"));
-    if (buttons) {
-        const ImU32 line = EditorTheme::Color32(EditorTheme::Role::Line);
-        dl->AddLine(ImVec2(p.x + side + 0.5f, p.y + 3.0f), ImVec2(p.x + side + 0.5f, p.y + h - 3.0f), line);
-        dl->AddLine(ImVec2(p.x + width - side - 0.5f, p.y + 3.0f), ImVec2(p.x + width - side - 0.5f, p.y + h - 3.0f), line);
-        changed |= StepButton(host, "##inc", "plus", v, 1.0f, o, ImVec2(p.x + width - side, p.y), side,
-                              ImDrawFlags_RoundCornersRight);
-    }
-    if (ImGui::IsItemActive() || ImGui::GetActiveID() == fieldId)
-        dl->AddRect(p, ImVec2(p.x + width, p.y + h), EditorTheme::Color32(EditorTheme::Role::Accent), rounding);
+    detail::Frame(dl, p, ImVec2(p.x + width, p.y + h), EditorTheme::State::Normal);
+    bool active = false;
+    const bool changed = detail::NumberIn(&host, "n", v, o, p, width, buttons, ImDrawFlags_RoundCornersLeft,
+                                          ImDrawFlags_RoundCornersRight, &active);
+    if (active)
+        dl->AddRect(p, ImVec2(p.x + width, p.y + h), EditorTheme::ControlBorder(EditorTheme::State::Focused),
+                    K().Rounding);
     ImGui::PopID();
     return changed;
 }
 
-bool Number(EditorHost& host, const char* label, float* v, const NumOpts& o) {
+bool Number(EditorHost& host, const char* label, float* v, const NumOpts& o, NumLook look) {
     ImGui::PushID(label);
     Label(label);
-    const bool changed = NumberCore(host, "n", v, o);
+    const bool changed = NumberCore(host, "n", v, o, 0.0f, look);
     ImGui::PopID();
     return changed;
 }
@@ -280,64 +283,91 @@ bool SliderNumber(EditorHost& host, const char* label, float* v, float min, floa
                   bool hasReset, float reset) {
     ImGui::PushID(label);
     Label(label);
-    const float numW = 58.0f;
+    const float numW = std::floor(K().FieldMin);
     const float w = ImGui::GetContentRegionAvail().x;
-    ImGui::SetNextItemWidth(std::max(40.0f, w - numW - 4.0f));
+    ImGui::SetNextItemWidth(std::max(40.0f, w - numW - K().TagGap));
     bool changed = ImGui::SliderFloat("##s", v, min, max, "", ImGuiSliderFlags_AlwaysClamp);
-    Track(host);
+    detail::Track(&host);
     if (hasReset && ImGui::IsItemClicked(ImGuiMouseButton_Right) && *v != reset) {
-        Snapshot(host);
+        detail::Snapshot(&host);
         *v = reset;
         changed = true;
     }
-    ImGui::SameLine(0.0f, 4.0f);
+    ImGui::SameLine(0.0f, K().TagGap);
     ImGui::SetNextItemWidth(numW);
     if (ImGui::InputFloat("##n", v, 0.0f, 0.0f, format)) {
         *v = std::clamp(*v, min, max);
         changed = true;
     }
-    Track(host);
+    detail::Track(&host);
     ImGui::PopID();
     return changed;
 }
 
-bool Switch(EditorHost& host, const char* label, bool* v) {
+namespace {
+// «Таблетка» переключателя; true — нажали (значение меняет вызывающий:
+// Switch сперва снимает историю, Check — нет).
+bool SwitchCore(const char* label, bool v0, SwitchLook look) {
+    bool* v = &v0;
     ImGui::PushID(label);
-    Label(label);
-    const float h = ImGui::GetFrameHeight() * 0.8f;
-    const float w = h * 1.9f;
+    if (look == SwitchLook::Standard) Label(label);
+    const float fh = ImGui::GetFrameHeight();
+    const float h = std::floor(fh * K().SwitchHeight);
+    const float w = std::floor(h * K().SwitchWidth);
     const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float y = p.y + (ImGui::GetFrameHeight() - h) * 0.5f;
-    const bool hit = ImGui::InvisibleButton("##sw", ImVec2(w + 34.0f, ImGui::GetFrameHeight()));
-    if (hit) {
-        Snapshot(host);
-        *v = !*v;
-    }
+    const float y = p.y + (fh - h) * 0.5f;
+    // Inline — подпись справа от «таблетки»; Standard — «Вкл/Выкл».
+    const char* end = label + std::strlen(label);
+    if (const char* hash = std::strstr(label, "##")) end = hash;
+    const std::string inlineText(label, end);
+    const char* text = look == SwitchLook::Inline ? inlineText.c_str() : (*v ? T("On") : T("Off"));
+    const float textW = ImGui::CalcTextSize(text).x;
+    const bool hit = ImGui::InvisibleButton("##sw", ImVec2(w + K().LabelGap + textW, fh));
+    const bool hovered = ImGui::IsItemHovered();
+    if (hit) *v = !*v;
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const ImVec4 on = EditorTheme::Color(EditorTheme::Role::Accent);
-    const ImVec4 off = EditorTheme::Color(EditorTheme::Role::Input);
-    dl->AddRectFilled(ImVec2(p.x, y), ImVec2(p.x + w, y + h), ImGui::GetColorU32(*v ? on : off), h * 0.5f);
+    const ImU32 track = *v ? EditorTheme::Color32(hovered ? EditorTheme::Role::AccentHover : EditorTheme::Role::Accent)
+                           : EditorTheme::ControlFill(hovered ? EditorTheme::State::Hover : EditorTheme::State::Normal);
+    dl->AddRectFilled(ImVec2(p.x, y), ImVec2(p.x + w, y + h), track, h * 0.5f);
     const float k = h - 4.0f;
     const float kx = *v ? p.x + w - 2.0f - k : p.x + 2.0f;
     dl->AddCircleFilled(ImVec2(kx + k * 0.5f, y + h * 0.5f), k * 0.5f,
-                        ImGui::GetColorU32(*v ? EditorTheme::Color(EditorTheme::Role::TextOnAccent)
-                                              : EditorTheme::Color(EditorTheme::Role::TextDim)));
-    dl->AddText(ImVec2(p.x + w + 8.0f, p.y + ImGui::GetStyle().FramePadding.y),
-                ImGui::GetColorU32(EditorTheme::Color(*v ? EditorTheme::Role::Text : EditorTheme::Role::TextDim)),
-                *v ? T("On") : T("Off"));
+                        EditorTheme::Color32(*v ? EditorTheme::Role::TextOnAccent : EditorTheme::Role::TextDim));
+    dl->AddText(ImVec2(p.x + w + K().LabelGap, p.y + ImGui::GetStyle().FramePadding.y),
+                EditorTheme::Color32(*v || look == SwitchLook::Inline ? EditorTheme::Role::Text
+                                                                      : EditorTheme::Role::TextDim),
+                text);
     ImGui::PopID();
     return hit;
 }
+} // namespace
 
-bool Color(EditorHost& host, const char* label, glm::vec4* rgba) {
+bool Switch(EditorHost& host, const char* label, bool* v, SwitchLook look) {
+    if (!SwitchCore(label, *v, look)) return false;
+    detail::Snapshot(&host);
+    *v = !*v;
+    return true;
+}
+
+bool Check(const char* label, bool* v) {
+    if (!SwitchCore(label, *v, SwitchLook::Inline)) return false;
+    *v = !*v;
+    return true;
+}
+
+bool Color(EditorHost& host, const char* label, glm::vec4* rgba, ColorLook look) {
     ImGui::PushID(label);
     // [■][#HEX][%] целиком: уже — подпись над строкой, а не обрезанный процент.
-    Label(label, 176.0f);
+    Label(label, look == ColorLook::Standard ? 176.0f : 0.0f);
     bool changed = false;
     // Образец — тот же, что во всём редакторе: щелчок открывает палитру.
     if (Sage::UI::ColorField4("##sw", &rgba->x, Sage::UI::ColorField_Compact)) changed = true;
-    Track(host);
-    ImGui::SameLine(0.0f, 4.0f);
+    detail::Track(&host);
+    if (look == ColorLook::Compact) {
+        ImGui::PopID();
+        return changed;
+    }
+    ImGui::SameLine(0.0f, K().TagGap);
     char hex[16];
     std::snprintf(hex, sizeof(hex), "%s", Sage::UI::color::ToHex(&rgba->x).c_str());
     ImGui::SetNextItemWidth(std::max(70.0f, ImGui::GetContentRegionAvail().x - 70.0f));
@@ -350,8 +380,8 @@ bool Color(EditorHost& host, const char* label, glm::vec4* rgba) {
             changed = true;
         }
     }
-    Track(host);
-    ImGui::SameLine(0.0f, 4.0f);
+    detail::Track(&host);
+    ImGui::SameLine(0.0f, K().TagGap);
     // Прозрачность — процентами, тем же числом, что и альфа цвета (одна
     // величина, а не Alpha и Opacity порознь).
     float pct = rgba->a * 100.0f;
@@ -360,318 +390,33 @@ bool Color(EditorHost& host, const char* label, glm::vec4* rgba) {
         rgba->a = pct / 100.0f;
         changed = true;
     }
-    Track(host);
+    detail::Track(&host);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Opacity"));
     ImGui::PopID();
     return changed;
 }
 
-void GroupTitle(const char* title) {
-    // Подпись группы над её строками: «Картинка:», «Фон:». Небольшой отступ
-    // сверху отделяет группу от предыдущей; до содержимого — обычный шаг.
-    ImGui::Dummy(ImVec2(0.0f, 2.0f));
-    std::string shown = title;
-    if (!shown.empty() && shown.back() != ':') shown += ':';
-    ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::TextDim));
-    ImGui::TextUnformatted(shown.c_str());
-    ImGui::PopStyleColor();
-}
-
-bool Pair(EditorHost& host, const char* id, float* a, float* b, const char* tagA, const char* tagB,
-          const NumOpts& o) {
-    ImGui::PushID(id);
-    const bool changed = PairIn(host, a, b, tagA, tagB, o, ImGui::GetContentRegionAvail().x);
-    ImGui::PopID();
-    return changed;
-}
-
-bool PairRow(EditorHost& host, const char* label, float* a, float* b, const char* tagA, const char* tagB,
-             const NumOpts& o) {
+bool Color3(EditorHost& host, const char* label, glm::vec3* rgb, ColorLook look) {
     ImGui::PushID(label);
-    Label(label, PairNeed(tagA, tagB));
-    const bool changed = PairIn(host, a, b, tagA, tagB, o, ImGui::GetContentRegionAvail().x);
-    ImGui::PopID();
-    return changed;
-}
-
-bool Axes(EditorHost& host, const char* id, float* v, int n, const char* const* axes, const NumOpts& o) {
-    ImGui::PushID(id);
-    bool changed = false;
-    for (int i = 0; i + 1 < n; i += 2) {
-        ImGui::PushID(i);
-        changed |= PairIn(host, &v[i], &v[i + 1], axes[i], axes[i + 1], o, ImGui::GetContentRegionAvail().x);
-        ImGui::PopID();
-    }
-    if (n % 2) {
-        Tag(axes[n - 1], ImGui::CalcTextSize(axes[n - 1]).x);
-        changed |= NumberCore(host, "last", &v[n - 1], o);
-    }
-    ImGui::PopID();
-    return changed;
-}
-
-bool Vector3(EditorHost& host, const char* label, glm::vec3* v, const NumOpts& o, float trailing) {
-    ImGui::PushID(label);
-    const float tag = std::floor(ImGui::CalcTextSize("X").x + 9.0f);
-    constexpr float kAxisGap = 6.0f;
-    Label(label, 3.0f * (tag + kFieldMin) + 2.0f * kAxisGap + trailing);
-    // Правый щелчок по подписи — сброс всей строки (у поля оси — одной оси).
-    if (o.HasReset && ImGui::IsItemClicked(ImGuiMouseButton_Right) && *v != glm::vec3(o.Reset)) {
-        Snapshot(host);
-        *v = glm::vec3(o.Reset);
-    }
-    if (o.HasReset && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Right-click: reset the whole row"));
-    const float avail = ImGui::GetContentRegionAvail().x - trailing;
-    const float per = std::max(tag + kFieldMin, std::floor((avail - 2.0f * kAxisGap) / 3.0f));
-    const float h = ImGui::GetFrameHeight();
-    static const char* const kAxes[3] = {"X", "Y", "Z"};
-    bool changed = false;
-    for (int i = 0; i < 3; ++i) {
-        if (i) ImGui::SameLine(0.0f, kAxisGap);
-        // Метка оси — цветной язычок слева от поля, вплотную к нему.
-        const ImVec2 p = ImGui::GetCursorScreenPos();
-        const ImVec4 c = EditorTheme::AxisColor(i);
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->AddRectFilled(p, ImVec2(p.x + tag, p.y + h), ImGui::GetColorU32(c), ImGui::GetStyle().FrameRounding,
-                          ImDrawFlags_RoundCornersLeft);
-        const ImVec2 ts = ImGui::CalcTextSize(kAxes[i]);
-        dl->AddText(ImVec2(std::floor(p.x + (tag - ts.x) * 0.5f), std::floor(p.y + (h - ts.y) * 0.5f)),
-                    IM_COL32(255, 255, 255, 235), kAxes[i]);
-        ImGui::SetCursorScreenPos(ImVec2(p.x + tag, p.y));
-        ImGui::PushID(i);
-        changed |= NumberCore(host, "v", &(*v)[i], o, per - tag);
-        ImGui::PopID();
-    }
-    ImGui::PopID();
-    return changed;
-}
-
-bool Position(EditorHost& host, const char* title, glm::vec2* v, const NumOpts& o) {
-    return PairRow(host, title, &v->x, &v->y, "X", "Y", o);
-}
-
-glm::vec2 LinkedSize(glm::vec2 before, glm::vec2 now, const NumOpts& o) {
-    if (before.x <= 0.0f || before.y <= 0.0f) return now;
-    const float ratio = before.y / before.x;
-    if (now.x != before.x) now.y = std::clamp(now.x * ratio, o.Min, o.Max);
-    else if (now.y != before.y) now.x = std::clamp(now.y / ratio, o.Min, o.Max);
-    return now;
-}
-
-bool Size(EditorHost& host, const char* title, glm::vec2* v, const NumOpts& o) {
-    ImGui::PushID(title);
-    const ImGuiID id = ImGui::GetID("size");
-    bool linked = prefs::GetBool(PrefKey("link", id), false);
-    const float lock = ImGui::GetFrameHeight();
-    // «Размер: W [..] H [..] [замок]» — замок в той же строке, справа.
-    Label(title, PairNeed("W", "H") + lock + kTagGap);
-    const float width = ImGui::GetContentRegionAvail().x - lock - kTagGap;
-    const glm::vec2 before = *v;
-    bool changed = false;
-    if (!linked) {
-        changed = PairIn(host, &v->x, &v->y, "W", "H", o, width);
-    } else {
-        // Связаны: одно составное поле «W 220 × 56 H» — оба числа правятся,
-        // второе следует за первым в прежнем соотношении.
-        const float h = ImGui::GetFrameHeight();
-        const ImVec2 p = ImGui::GetCursorScreenPos();
-        ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->AddRectFilled(p, ImVec2(p.x + width, p.y + h), ImGui::GetColorU32(ImGuiCol_FrameBg),
-                          ImGui::GetStyle().FrameRounding);
-        const float tagW = ImGui::CalcTextSize("W").x + 8.0f;
-        const float crossW = ImGui::CalcTextSize("\xc3\x97").x + 12.0f;
-        const float field = std::max(30.0f, (width - 2.0f * tagW - crossW) * 0.5f);
-        const ImU32 dim = EditorTheme::Color32(EditorTheme::Role::TextDim);
-        const float ty = p.y + ImGui::GetStyle().FramePadding.y;
-        dl->AddText(ImVec2(p.x + 6.0f, ty), dim, "W");
-        dl->AddText(ImVec2(p.x + tagW + field + (crossW - ImGui::CalcTextSize("\xc3\x97").x) * 0.5f, ty), dim,
-                    "\xc3\x97");
-        dl->AddText(ImVec2(p.x + width - tagW + 2.0f, ty), dim, "H");
-        ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0, 0, 0, 0));
-        const float speed = std::max(o.Step * 0.25f, 0.001f);
-        ImGui::SetCursorScreenPos(ImVec2(p.x + tagW, p.y));
-        ImGui::SetNextItemWidth(field);
-        changed |= ImGui::DragFloat("##w", &v->x, speed, o.Min, o.Max, o.Format, ImGuiSliderFlags_AlwaysClamp);
-        Track(host);
-        ImGui::SetCursorScreenPos(ImVec2(p.x + tagW + field + crossW, p.y));
-        ImGui::SetNextItemWidth(field);
-        changed |= ImGui::DragFloat("##h", &v->y, speed, o.Min, o.Max, o.Format, ImGuiSliderFlags_AlwaysClamp);
-        Track(host);
-        ImGui::PopStyleColor();
-        if (changed) *v = LinkedSize(before, *v, o);
-        // Строка занята составным полем целиком: замок встаёт после «H».
-        ImGui::SetCursorScreenPos(p);
-        ImGui::Dummy(ImVec2(width, h));
-    }
-    if (LinkIcon(linked, T("Proportions linked: the height follows the width"), T("Link proportions"))) {
-        linked = !linked;
-        prefs::SetBool(PrefKey("link", id), linked);
-    }
-    // Связь пропорций: правили одну сторону — вторая следует за ней.
-    if (changed && linked && !(before == *v)) *v = LinkedSize(before, *v, o);
-    ImGui::PopID();
-    return changed;
-}
-
-bool Range(EditorHost& host, const char* title, float* min, float* max, const NumOpts& o) {
-    // Min и Max — короткими подписями оси, как X и Y: длинные «Минимум /
-    // Максимум» съедали половину ширины полей.
-    return PairRow(host, title, min, max, "Min", "Max", o);
-}
-
-bool Sides(EditorHost& host, const char* title, glm::vec4* v, const NumOpts& o) {
-    ImGui::PushID(title);
-    const ImGuiID id = ImGui::GetID("sides");
-    bool linked = prefs::GetBool(PrefKey("link", id), false);
-    const float lock = ImGui::GetFrameHeight();
-    Label(title, PairNeed("L", "R") + lock + kTagGap);
-    const float x = ImGui::GetCursorPosX();
-    const float width = ImGui::GetContentRegionAvail().x - lock - kTagGap;
-    bool changed = false;
-    bool toggle = false;
-    if (linked) {
-        float all = v->x;
-        Tag("=", ImGui::CalcTextSize("=").x);
-        if (NumberCore(host, "all", &all, o, width - ImGui::CalcTextSize("=").x - kTagGap)) {
-            *v = glm::vec4(all);
-            changed = true;
+    Label(label, look == ColorLook::Standard ? 150.0f : 0.0f);
+    bool changed = Sage::UI::ColorField3("##sw", &rgb->x, Sage::UI::ColorField_Compact);
+    detail::Track(&host);
+    if (look == ColorLook::Standard) {
+        ImGui::SameLine(0.0f, K().TagGap);
+        char hex[16];
+        std::snprintf(hex, sizeof(hex), "%s", Sage::UI::color::ToHex(&rgb->x).c_str());
+        ImGui::SetNextItemWidth(std::max(70.0f, ImGui::GetContentRegionAvail().x));
+        if (ImGui::InputText("##hex", hex, sizeof(hex), ImGuiInputTextFlags_CharsUppercase)) {
+            float c[3];
+            if (Sage::UI::color::ParseHex(hex, c)) {
+                *rgb = glm::vec3(c[0], c[1], c[2]);
+                changed = true;
+            }
         }
-        toggle = LinkIcon(true, T("All sides together: one value for every side"), T("Link sides"));
-    } else {
-        // Лево и право — в строке, верх и низ — в строке под ними.
-        ImGui::PushID("lr");
-        changed |= PairIn(host, &v->x, &v->z, "L", "R", o, width);
-        ImGui::PopID();
-        toggle = LinkIcon(false, T("All sides together: one value for every side"), T("Link sides"));
-        ImGui::SetCursorPosX(x);
-        ImGui::PushID("tb");
-        changed |= PairIn(host, &v->y, &v->w, "T", "B", o, width);
-        ImGui::PopID();
-    }
-    if (toggle) {
-        linked = !linked;
-        prefs::SetBool(PrefKey("link", id), linked);
-        if (linked) *v = glm::vec4(v->x);
+        detail::Track(&host);
     }
     ImGui::PopID();
     return changed;
-}
-
-std::string UpperTitle(const char* title) {
-    std::string upper;
-    for (const char* c = title; *c; ++c) {
-        if (c[0] == '#' && c[1] == '#') break;   // «###id» — не подпись
-        upper += (*c >= 'a' && *c <= 'z') ? (char)(*c - 32) : *c;
-    }
-    // Кириллица — ЗАГЛАВНЫМИ тоже: строчные из UTF-8 по двум байтам.
-    for (size_t i = 0; i + 1 < upper.size(); ++i) {
-        unsigned char a = (unsigned char)upper[i], b = (unsigned char)upper[i + 1];
-        if (a == 0xD0 && b >= 0xB0 && b <= 0xBF) { upper[i + 1] = (char)(b - 0x20); ++i; }
-        else if (a == 0xD1 && b >= 0x80 && b <= 0x8F) { upper[i] = (char)0xD0; upper[i + 1] = (char)(b + 0x20); ++i; }
-        else if (a == 0xD1 && b == 0x91) { upper[i] = (char)0xD0; upper[i + 1] = (char)0x81; ++i; }
-        else if (a >= 0xC0) ++i;
-    }
-    return upper;
-}
-
-bool BeginSection(const char* id, const char* title, bool defaultOpen) {
-    const std::string key = std::string("inspector.section.") + id;
-    bool open = prefs::GetBool(key, defaultOpen);
-    ImGui::Spacing();
-    ImGui::PushID(id);
-    // ШАПКА РАЗДЕЛА: акцентная метка слева, ЗАГЛАВНЫЕ буквы, стрелка справа —
-    // разделы отличаются от групп и полей видом, а не только текстом.
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float w = ImGui::GetContentRegionAvail().x;
-    const float h = ImGui::GetFrameHeight() + 4.0f;
-    if (ImGui::InvisibleButton("##head", ImVec2(w, h))) {
-        open = !open;
-        prefs::SetBool(key, open);
-    }
-    const bool hovered = ImGui::IsItemHovered();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h),
-                      ImGui::GetColorU32(EditorTheme::Color(hovered ? EditorTheme::Role::Hover
-                                                                    : EditorTheme::Role::SurfaceAlt)),
-                      4.0f, open ? ImDrawFlags_RoundCornersTop : ImDrawFlags_RoundCornersAll);
-    dl->AddRectFilled(ImVec2(p.x, p.y + 4.0f), ImVec2(p.x + 3.0f, p.y + h - 4.0f),
-                      ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::Accent)), 1.5f);
-    const std::string upper = UpperTitle(title);
-    const float ty = p.y + (h - ImGui::GetTextLineHeight()) * 0.5f;
-    dl->AddText(ImVec2(p.x + 12.0f, ty), ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::Text)), upper.c_str());
-    // Стрелка: ⌄ раскрыт, › свёрнут.
-    const float ax = p.x + w - 16.0f, ay = p.y + h * 0.5f, s = 4.0f;
-    const ImU32 ac = ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::TextDim));
-    if (open) dl->AddTriangleFilled(ImVec2(ax - s, ay - s * 0.5f), ImVec2(ax + s, ay - s * 0.5f), ImVec2(ax, ay + s * 0.6f), ac);
-    else dl->AddTriangleFilled(ImVec2(ax - s * 0.5f, ay - s), ImVec2(ax - s * 0.5f, ay + s), ImVec2(ax + s * 0.6f, ay), ac);
-    ImGui::PopID();
-    if (!open) return false;
-    // ТЕЛО — карточкой: фон чуть светлее панели, поля с отступом.
-    ImGui::PushStyleColor(ImGuiCol_ChildBg, EditorTheme::Color(EditorTheme::Role::Surface));
-    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 4.0f);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10.0f, 8.0f));
-    ImGui::SetCursorPosY(ImGui::GetCursorPosY() - ImGui::GetStyle().ItemSpacing.y);
-    ImGui::BeginChild((std::string("##sec_") + id).c_str(), ImVec2(0.0f, 0.0f),
-                      ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_AlwaysUseWindowPadding);
-    return true;
-}
-
-void EndSection() {
-    ImGui::EndChild();
-    ImGui::PopStyleVar(2);
-    ImGui::PopStyleColor();
-}
-
-// Вложенная группа: строка-заголовок (стрелка и подпись) и содержимое с
-// отступом kIndent и тонкой линией слева — дочерние поля явно ВНУТРИ группы.
-namespace {
-struct GroupMark {
-    ImVec2 Start;
-};
-std::vector<GroupMark>& Groups() {
-    static std::vector<GroupMark> s;
-    return s;
-}
-} // namespace
-
-bool SubSection(const char* id, const char* title, bool defaultOpen) {
-    const std::string key = std::string("inspector.sub.") + id;
-    bool open = prefs::GetBool(key, defaultOpen);
-    ImGui::PushID(id);
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float h = ImGui::GetFrameHeight();
-    const float w = ImGui::GetContentRegionAvail().x;
-    if (ImGui::InvisibleButton("##grp", ImVec2(w, h))) {
-        open = !open;
-        prefs::SetBool(key, open);
-    }
-    const bool hovered = ImGui::IsItemHovered();
-    ImGui::PopID();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (hovered) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), EditorTheme::Color32(EditorTheme::Role::Hover), 3.0f);
-    const ImU32 c = EditorTheme::Color32(hovered ? EditorTheme::Role::Text : EditorTheme::Role::TextDim);
-    // Стрелка в квадрате шириной kIndent: подпись группы начинается там же,
-    // где начнётся её содержимое.
-    const float ax = p.x + kIndent * 0.5f, ay = p.y + h * 0.5f, s = 3.5f;
-    if (open) dl->AddTriangleFilled(ImVec2(ax - s, ay - s * 0.5f), ImVec2(ax + s, ay - s * 0.5f), ImVec2(ax, ay + s * 0.6f), c);
-    else dl->AddTriangleFilled(ImVec2(ax - s * 0.5f, ay - s), ImVec2(ax - s * 0.5f, ay + s), ImVec2(ax + s * 0.6f, ay), c);
-    dl->AddText(ImVec2(p.x + kIndent + 2.0f, p.y + ImGui::GetStyle().FramePadding.y), c, title);
-    if (!open) return false;
-    Groups().push_back({ImVec2(p.x + kIndent * 0.5f, p.y + h)});
-    ImGui::Indent(kIndent);
-    ImGui::Dummy(ImVec2(0.0f, 1.0f));
-    return true;
-}
-
-void EndSubSection() {
-    ImGui::Unindent(kIndent);
-    if (Groups().empty()) return;
-    const GroupMark m = Groups().back();
-    Groups().pop_back();
-    const float bottom = ImGui::GetCursorScreenPos().y - ImGui::GetStyle().ItemSpacing.y;
-    ImGui::GetWindowDrawList()->AddLine(ImVec2(m.Start.x, m.Start.y + 2.0f), ImVec2(m.Start.x, bottom),
-                                        EditorTheme::Color32(EditorTheme::Role::Line), 1.0f);
-    ImGui::Dummy(ImVec2(0.0f, kGroupGap * 0.5f));
 }
 
 } // namespace sage::editor::ictl

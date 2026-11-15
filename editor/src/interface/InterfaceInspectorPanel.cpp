@@ -30,7 +30,6 @@ namespace {
 
 namespace ui = sage::ui;
 
-using sage::editor::interfacewidgets::AlignButton;
 
 // Приглушённое пояснение с переносом: колонки узкие, а обычный TextDisabled не
 // переносит и обрезает строку посередине слова.
@@ -71,46 +70,55 @@ void GameFrameSize(EditorHost& host, int& outW, int& outH) {
 // чтобы не занимать половину инспектора.
 void InterfaceInspectorPanel::DrawAlignTools(EditorHost& host) {
     const int count = SelectedUICount(host);
-    struct AlignDef { const char* Id; ui::AlignEdge Edge; const char* Tip; };
+    namespace ictl = sage::editor::ictl;
+    // Две группы кнопок kit (по горизонтали, по вертикали) и распределение —
+    // каждая одной рамкой с разделителями, а не ряд отдельных квадратов.
+    struct AlignDef { const char* Icon; ui::AlignEdge Edge; const char* Tip; };
     const AlignDef aligns[6] = {
-        {"al", ui::AlignEdge::Left, T("Left edges")},
-        {"ac", ui::AlignEdge::CenterX, T("Centers horizontally")},
-        {"ar", ui::AlignEdge::Right, T("Right edges")},
-        {"at", ui::AlignEdge::Top, T("Top edges")},
-        {"am", ui::AlignEdge::CenterY, T("Centers vertically")},
-        {"ab", ui::AlignEdge::Bottom, T("Bottom edges")},
+        {"align-left", ui::AlignEdge::Left, T("Left edges")},
+        {"align-center-x", ui::AlignEdge::CenterX, T("Centers horizontally")},
+        {"align-right", ui::AlignEdge::Right, T("Right edges")},
+        {"align-top", ui::AlignEdge::Top, T("Top edges")},
+        {"align-center-y", ui::AlignEdge::CenterY, T("Centers vertically")},
+        {"align-bottom", ui::AlignEdge::Bottom, T("Bottom edges")},
     };
-    // Одинаковые квадратные кнопки с одним шагом; между группами
-    // (по горизонтали, по вертикали, распределение) — двойной шаг.
-    const float step = 3.0f, groupGap = 10.0f;
     ImGui::Spacing();
-    for (int i = 0; i < 6; ++i) {
-        if (i == 3) ImGui::SameLine(0.0f, groupGap);
-        else if (i > 0) ImGui::SameLine(0.0f, step);
-        if (AlignButton(aligns[i].Id, aligns[i].Edge, aligns[i].Tip, count >= 1))
-            uiops::Align(host, aligns[i].Edge);
+    for (int g = 0; g < 2; ++g) {
+        ictl::GroupItem items[3];
+        for (int i = 0; i < 3; ++i) {
+            items[i].Icon = aligns[g * 3 + i].Icon;
+            items[i].Tooltip = aligns[g * 3 + i].Tip;
+            items[i].Enabled = count >= 1;
+        }
+        if (g) ImGui::SameLine(0.0f, EditorTheme::KitMetrics().PairGap);
+        const int hit = ictl::ButtonGroup(g ? "##align_v" : "##align_h", items, 3);
+        if (hit >= 0) uiops::Align(host, aligns[g * 3 + hit].Edge);
     }
     // Распределение — той же строкой, если помещается; иначе следующей, а не
     // за краем панели.
     const float btn = ImGui::GetFrameHeight();
+    const float gap = EditorTheme::KitMetrics().PairGap;
     const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
-    if (right - ImGui::GetItemRectMax().x >= groupGap + 2.0f * btn + step) ImGui::SameLine(0.0f, groupGap);
-    ImGui::BeginDisabled(count < 3);
-    if (EditorIcons::IconOnlyButton("distribute-x", T("Distribute across: needs three elements or more")))
-        uiops::Distribute(host, true, false);
-    ImGui::SameLine(0.0f, step);
-    if (EditorIcons::IconOnlyButton("distribute-y", T("Distribute down: needs three elements or more")))
-        uiops::Distribute(host, false, false);
-    ImGui::EndDisabled();
+    if (right - ImGui::GetItemRectMax().x >= gap + 2.0f * btn) ImGui::SameLine(0.0f, gap);
+    {
+        ictl::GroupItem items[2];
+        items[0].Icon = "distribute-x";
+        items[0].Tooltip = T("Distribute across: needs three elements or more");
+        items[1].Icon = "distribute-y";
+        items[1].Tooltip = T("Distribute down: needs three elements or more");
+        items[0].Enabled = items[1].Enabled = count >= 3;
+        const int hit = ictl::ButtonGroup("##distribute", items, 2);
+        if (hit >= 0) uiops::Distribute(host, hit == 0, false);
+    }
     ImGui::SetNextItemWidth(-1.0f);
     ImGui::BeginDisabled(count == 0);
-    if (ImGui::BeginCombo("##quick", T("Quick actions"))) {
+    if (sage::editor::ictl::BeginDropdown("##quick", T("Quick actions"))) {
         if (ImGui::Selectable(T("Fill the parent"))) uiops::StretchToParent(host, 0.0f);
         if (ImGui::Selectable(T("Fill with a margin"))) uiops::StretchToParent(host, 16.0f);
         if (ImGui::Selectable(T("Round to the grid"))) uiops::SnapSelectionToGrid(host);
         if (ImGui::Selectable(T("Bring back on screen"))) uiops::BringIntoView(host);
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Pushes the selected elements back inside the screen."));
-        ImGui::EndCombo();
+        sage::editor::ictl::EndDropdown();
     }
     ImGui::EndDisabled();
 }

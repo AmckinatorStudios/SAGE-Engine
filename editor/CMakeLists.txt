@@ -150,6 +150,9 @@ add_executable(SageEditor WIN32
     src/UIImageSource.cpp
     src/UIStyleOverride.cpp
     src/InspectorControls.cpp
+    src/InspectorControls_Vector.cpp
+    src/InspectorControls_Choice.cpp
+    src/InspectorControls_Layout.cpp
     src/InspectorFields.cpp
     src/UIElementProperties_Inspector.cpp
     src/UIElementProperties_Layout.cpp

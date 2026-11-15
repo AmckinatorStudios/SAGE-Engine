@@ -4028,6 +4028,10 @@
     "Tags already used in this scene": "Теги, уже занятые в этой сцене",
     "This layer name is empty or taken": "Имя слоя пустое или занято",
     "This layer name is taken": "Такой слой уже есть",
+    "Edit scene layers...": "Править слои сцены...",
+    "Give the object this tag": "Дать объекту этот тег",
+    "New tag": "Новый тег",
+    "Part": "Часть",
     "default": "default"
   }
 }

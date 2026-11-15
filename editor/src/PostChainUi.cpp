@@ -13,6 +13,8 @@
 #include "InspectorControls.h"
 #include "InspectorFields.h"
 
+namespace ictl = sage::editor::ictl;
+
 namespace sage::editor {
 
 namespace {
@@ -100,11 +102,11 @@ void DrawParam(EditorHost* host, sage::render::PostEffect& effect,
     switch (desc.Type) {
     case PostParamType::Heading:
         // Подпись-разделитель: значения у неё нет, есть только место в списке.
-        ImGui::SeparatorText(label);
+        ictl::SeparatorText(label);
         return;
     case PostParamType::Bool: {
         bool on = value->B;
-        if (ImGui::Checkbox(label, &on)) {
+        if (ictl::Check(label, &on)) {
             if (host) host->PushUndoSnapshot();
             value->B = on;
             value->V[0] = on ? 1.0f : 0.0f;
@@ -121,7 +123,7 @@ void DrawParam(EditorHost* host, sage::render::PostEffect& effect,
         for (const std::string& option : desc.Options) names.push_back(T(option));
         int choice = (int)value->V[0];
         if (!names.empty() &&
-            ImGui::Combo(label, &choice, names.data(), (int)names.size())) {
+            ictl::Combo(label, &choice, names.data(), (int)names.size())) {
             if (host) host->PushUndoSnapshot();
             value->V[0] = (float)choice;
             changed = true;
@@ -139,7 +141,7 @@ void DrawParam(EditorHost* host, sage::render::PostEffect& effect,
     }
     case PostParamType::Vec2: {
         float pair[2] = {value->V[0], value->V[1]};
-        if (ImGui::DragFloat2(label, pair, 0.01f, desc.Min, desc.Max)) {
+        if (ictl::DragVec(host, label, pair, 2, 0.01f, desc.Min, desc.Max)) {
             value->V[0] = pair[0];
             value->V[1] = pair[1];
             changed = true;
@@ -221,7 +223,7 @@ bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const
                 kinds.push_back(kind);
         if (kinds.empty()) continue;
 
-        ImGui::SeparatorText(T(PostStageLabel(stage)));
+        ictl::SeparatorText(T(PostStageLabel(stage)));
         for (const PostEffectKind* kind : kinds) {
             ImGui::PushID(kind->Id.c_str());
 
@@ -240,7 +242,7 @@ bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const
             bool on = false;
             for (const PostEffect& e : chain.Effects)
                 if (e.Kind == kind->Id && e.Enabled) on = true;
-            if (ImGui::Checkbox(T(kind->Label), &on)) {
+            if (ictl::Check(T(kind->Label), &on)) {
                 if (host) host->PushUndoSnapshot();
                 if (index >= 0) {
                     for (PostEffect& e : chain.Effects)
@@ -289,7 +291,7 @@ bool DrawPostChainEditor(EditorHost* host, sage::render::PostChain& chain, const
     for (size_t i = 0; i < chain.Effects.size(); ++i) {
         if (catalog.Find(chain.Effects[i].Kind)) continue;
         ImGui::PushID((int)i);
-        ImGui::SeparatorText(T("Unknown effect"));
+        ictl::SeparatorText(T("Unknown effect"));
         ImGui::TextDisabled("%s", chain.Effects[i].Kind.c_str());
         ImGui::SameLine();
         if (ImGui::Button(T("Remove"))) removeAt = (int)i;

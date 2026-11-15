@@ -14,6 +14,7 @@
 #include "../Localization.h"
 #include "SpriteEditorDetail.h"
 #include "sage/render/Texture.h"
+#include "../InspectorControls.h"
 
 using sage::editor::T;
 namespace sp = sage::editor::sprite;
@@ -226,17 +227,18 @@ void SpriteEditor::DrawCanvasToolbar(ImVec2 a, ImVec2 size) {
     }
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Zoom 100%: one texture pixel is one screen pixel"));
     ImGui::SameLine();
-    if (ImGui::Button("-", ImVec2(btn, btn))) {
-        zoom = std::max(0.05f, (zoom > 0 ? zoom : 1.0f) / 1.25f);
-        m_userView = true;
+    {
+        // Приближение — одна группа kit: [−|+] значками Tabler.
+        sage::editor::ictl::GroupItem z[2];
+        z[0].Icon = "minus";
+        z[0].Tooltip = T("Zoom out (mouse wheel)");
+        z[1].Icon = "plus";
+        z[1].Tooltip = T("Zoom in (mouse wheel)");
+        const int hit = sage::editor::ictl::ButtonGroup("##zoom", z, 2);
+        if (hit == 0) zoom = std::max(0.05f, (zoom > 0 ? zoom : 1.0f) / 1.25f);
+        if (hit == 1) zoom = std::min(64.0f, (zoom > 0 ? zoom : 1.0f) * 1.25f);
+        if (hit >= 0) m_userView = true;
     }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Zoom out (mouse wheel)"));
-    ImGui::SameLine();
-    if (ImGui::Button("+", ImVec2(btn, btn))) {
-        zoom = std::min(64.0f, (zoom > 0 ? zoom : 1.0f) * 1.25f);
-        m_userView = true;
-    }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Zoom in (mouse wheel)"));
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("grid", T("Pixel grid: shown from 8x zoom"), m_pixelGrid))
         m_pixelGrid = !m_pixelGrid;

@@ -461,6 +461,62 @@ void LoadFont() {
 //
 // Те же три цвета, что у гизмо осей в углу (ViewGizmo.cpp) и у осей объекта в
 // сцене (DebugDraw::Axes): «красное — X» человек запоминает один раз.
+namespace {
+Kit& KitRef() {
+    static Kit k;
+    return k;
+}
+} // namespace
+
+const Kit& KitMetrics() { return KitRef(); }
+
+Kit ScaledKit(float k, float radiusFrame, float separatorSize, float fontSize) {
+    // Пиксели — под масштаб интерфейса; доли высоты поля — как есть.
+    Kit kit;
+    for (float* f : {&kit.LabelMin, &kit.LabelMax, &kit.LabelGap, &kit.TagGap, &kit.PairGap, &kit.Indent,
+                     &kit.GroupGap, &kit.SectionGap, &kit.FieldMin, &kit.SegmentMin, &kit.NumberMin, &kit.NumberMax,
+                     &kit.SeparatorInset, &kit.TagPad, &kit.TagInset, &kit.HeaderExtra, &kit.HeaderAccent,
+                     &kit.HeaderPadX, &kit.ButtonPadX, &kit.ButtonPadXCompact})
+        *f = std::floor(*f * k);
+    kit.Rounding = radiusFrame;
+    kit.SeparatorThickness = std::max(1.0f, std::floor(separatorSize * k));
+    kit.IconSize = std::floor(fontSize * k);
+    return kit;
+}
+
+ImU32 ControlFill(State s) {
+    switch (s) {
+        case State::Hover: return ImGui::GetColorU32(ImGuiCol_FrameBgHovered);
+        case State::Focused:
+        case State::Active: return ImGui::GetColorU32(ImGuiCol_FrameBgActive);
+        case State::Disabled: return ImGui::GetColorU32(ImGuiCol_FrameBg, 0.5f);
+        default: return ImGui::GetColorU32(ImGuiCol_FrameBg);
+    }
+}
+
+ImU32 SegmentFill(State s) {
+    switch (s) {
+        case State::Hover: return Color32(Role::Hover);
+        case State::Active: return Color32(Role::AccentMuted);
+        case State::Focused: return Color32Alpha(Role::Accent, 0.12f);
+        default: return 0;
+    }
+}
+
+ImU32 ControlBorder(State s) {
+    return (s == State::Focused || s == State::Active) ? Color32(Role::Accent) : 0;
+}
+
+ImVec4 IconTint(State s) {
+    switch (s) {
+        case State::Hover: return Color(Role::Text);
+        case State::Focused:
+        case State::Active: return Color(Role::Accent);
+        case State::Disabled: return Color(Role::TextFaint);
+        default: return Color(Role::TextDim);
+    }
+}
+
 ImVec4 AxisColor(int axis) {
     static const ImVec4 kAxisColors[3] = {
         ImVec4(1.00f, 0.22f, 0.22f, 1.00f),  // X — красный
@@ -515,6 +571,7 @@ void Apply() {
     // динамически, поэтому размер меняется в любом кадре и без мыла.
     style.FontSizeBase = m.FontSize;
     style.FontScaleMain = EffectiveScale();
+    KitRef() = ScaledKit(EffectiveScale(), m.RadiusFrame, m.SeparatorSize, m.FontSize);
 
     // --- метрики: ТОЛЬКО из токенов --------------------------------------
     //
@@ -723,85 +780,17 @@ namespace {
 // «###id» прежние.
 bool HeaderImpl(const char* icon, const char* label, ImGuiTreeNodeFlags flags, bool* removeClicked,
                 const char* hint, bool* resetClicked) {
-    if (removeClicked) *removeClicked = false;
-    if (resetClicked) *resetClicked = false;
+    // Шапка — общая шапка Editor UI Kit (та же, что у разделов инспектора
+    // интерфейса); здесь — только где помнить раскрытие: в хранилище окна,
+    // по подписи раздела.
     ImGuiStorage* storage = ImGui::GetStateStorage();
     const ImGuiID id = ImGui::GetID(label);
     bool open = storage->GetInt(id, (flags & ImGuiTreeNodeFlags_DefaultOpen) ? 1 : 0) != 0;
-
-    ImGui::Dummy(ImVec2(0.0f, 2.0f));
-    const ImGuiStyle& style = ImGui::GetStyle();
-    const float side = ImGui::GetFrameHeight();
-    const float h = side + 4.0f;
-    const ImVec2 p = ImGui::GetCursorScreenPos();
-    const float w = ImGui::GetContentRegionAvail().x;
-    const int slots = (removeClicked ? 1 : 0) + (resetClicked ? 1 : 0);
-    const float buttons = slots > 0 ? slots * side + (slots - 1) * 2.0f + 6.0f : 0.0f;
-
-    // Шапка нажимается ВСЯ, кроме кнопок справа: они — свои элементы, и
-    // щелчок по ним не сворачивает раздел.
-    ImGui::PushID(label);
-    if (ImGui::InvisibleButton("##head", ImVec2(std::max(1.0f, w - buttons), h))) {
-        open = !open;
-        storage->SetInt(id, open ? 1 : 0);
-    }
-    const bool hovered = ImGui::IsItemHovered();
-    ImGui::PopID();
-    Hint(hint);
-
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), Color32(hovered ? Role::Hover : Role::SurfaceAlt), 4.0f);
-    dl->AddRectFilled(ImVec2(p.x, p.y + 4.0f), ImVec2(p.x + 3.0f, p.y + h - 4.0f), Color32(Role::Accent), 1.5f);
-    float x = p.x + 12.0f;
-    if (icon && *icon) {
-        const float is = std::floor(ImGui::GetFontSize());
-        EditorIcons::Overlay(dl, x, p.y + std::floor((h - is) * 0.5f), is, icon);
-        x += is + 8.0f;
-    }
-    const std::string title = sage::editor::ictl::UpperTitle(label);
-    const float ty = p.y + (h - ImGui::GetTextLineHeight()) * 0.5f;
-    dl->AddText(ImVec2(x, ty), Color32(Role::Text), title.c_str());
-    // Стрелка — у правого края шапки, перед кнопками: ⌄ раскрыт, › свёрнут.
-    const float ax = p.x + w - buttons - 14.0f, ay = p.y + h * 0.5f, s = 4.0f;
-    const ImU32 ac = Color32(Role::TextDim);
-    if (open) dl->AddTriangleFilled(ImVec2(ax - s, ay - s * 0.5f), ImVec2(ax + s, ay - s * 0.5f), ImVec2(ax, ay + s * 0.6f), ac);
-    else dl->AddTriangleFilled(ImVec2(ax - s * 0.5f, ay - s), ImVec2(ax - s * 0.5f, ay + s), ImVec2(ax + s * 0.6f, ay), ac);
-
-    // Кнопки справа — по центру высоты шапки.
-    const float by = p.y + (h - side) * 0.5f;
-    float bx = p.x + w - buttons + 4.0f;
-    // СБРОС — слева от корзины: действие частое и безопасное (Ctrl+Z).
-    if (resetClicked) {
-        ImGui::SetCursorScreenPos(ImVec2(bx, by));
-        ImGui::PushID(label);
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-        *resetClicked = EditorIcons::IconOnlyButton(
-            "refresh", T("Reset to default values (a single field: right-click it)"));
-        ImGui::PopStyleColor();
-        ImGui::PopID();
-        bx += side + 2.0f;
-    }
-    if (removeClicked) {
-        ImGui::SetCursorScreenPos(ImVec2(bx, by));
-        ImGui::PushID(label);
-        const ImVec4 danger = Color(Role::Danger);
-        // Иконка красная всегда, подложка — только под курсором: десяток
-        // красных квадратов превратил бы инспектор в предупреждение.
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, danger);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive,
-                              ImVec4(danger.x * 0.85f, danger.y * 0.85f, danger.z * 0.85f, danger.w));
-        const ImVec4 onAccent = Color(Role::TextOnAccent);
-        const glm::vec3 hoverTint(onAccent.x, onAccent.y, onAccent.z);
-        *removeClicked = EditorIcons::IconOnlyButton("trash", T("Remove this component"), false,
-                                                     glm::vec3(danger.x, danger.y, danger.z), &hoverTint);
-        ImGui::PopStyleColor(3);
-        ImGui::PopID();
-    }
-    // Курсор — под шапку, с небольшим зазором до свойств раздела.
-    ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + h));
-    ImGui::Dummy(ImVec2(0.0f, open ? 2.0f : 0.0f));
-    (void)style;
+    sage::editor::ictl::HeaderActions act;
+    act.Reset = resetClicked;
+    act.Remove = removeClicked;
+    act.Hint = hint;
+    if (sage::editor::ictl::SectionHeader(label, icon, label, &open, act)) storage->SetInt(id, open ? 1 : 0);
     return open;
 }
 

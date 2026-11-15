@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 4028.
+// Язык: Русский. Строк: 4032.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -2290,6 +2290,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Править материал"},
     {"Edit on the picture…",
      "Править по картинке…"},
+    {"Edit scene layers...",
+     "Править слои сцены..."},
     {"Edit the anchor on the canvas",
      "Править якорь на холсте"},
     {"Edit the clip",
@@ -2964,6 +2966,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Шаг призраков"},
     {"Ghosts",
      "Призраки"},
+    {"Give the object this tag",
+     "Дать объекту этот тег"},
     {"Give this object the AI Graph behavior",
      "Назначить объекту поведение AI Graph"},
     {"Gizmo axes",
@@ -4146,6 +4150,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Новый скрипт"},
     {"New shader",
      "Новый шейдер"},
+    {"New tag",
+     "Новый тег"},
     {"New task graph",
      "Новый граф задачи"},
     {"New text file",
@@ -4798,6 +4804,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Параметров: %d (правятся в файле .sagemat)"},
     {"Parent folders",
      "Папки выше"},
+    {"Part",
+     "Часть"},
     {"Part ",
      "Часть "},
     {"Particle Emitter",

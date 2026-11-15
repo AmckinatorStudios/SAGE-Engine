@@ -1,5 +1,8 @@
 #include "VarsEditor.h"
+#include "InspectorFields.h"
+#include "InspectorControls.h"
 
+#include <climits>
 #include <algorithm>
 
 #include "ObjectSlot.h"
@@ -15,6 +18,10 @@
 #include "Localization.h"
 #include "sage/scene/Scene.h"
 #include "ui/ColorPicker.h"
+
+namespace ifield = sage::editor::ifield;
+
+namespace ictl = sage::editor::ictl;
 
 namespace varsui {
 
@@ -76,7 +83,7 @@ bool DrawValue(EditorHost& host, const char* id, Value& value, const Var* meta,
     switch (value.Type()) {
         case Kind::Bool: {
             bool v = value.AsBool();
-            if (ImGui::Checkbox("##v", &v)) {
+            if (ictl::Check("##v", &v)) {
                 // Галка меняется одним щелчком, «размазанной» правки у неё нет:
                 // снимок берётся сразу, ДО присваивания.
                 host.PushUndoSnapshot();
@@ -90,15 +97,15 @@ bool DrawValue(EditorHost& host, const char* id, Value& value, const Var* meta,
             // Границы из объявления скрипта дают ПОЛЗУНОК: «здоровье от 0 до
             // 100» настраивается перетаскиванием, а не набором числа вслепую.
             const bool edited = ranged
-                ? ImGui::SliderInt("##v", &v, (int)meta->Min, (int)meta->Max)
-                : ImGui::DragInt("##v", &v);
+                ? ifield::Int(host, "##v", &v, (int)meta->Min, (int)meta->Max)
+                : ifield::Int(host, "##v", &v, INT_MIN, INT_MAX);
             if (edited) { value = Value(v); changed = true; }
             break;
         }
         case Kind::Float: {
             float v = value.AsFloat();
-            const bool edited = ranged ? ImGui::SliderFloat("##v", &v, meta->Min, meta->Max)
-                                       : ImGui::DragFloat("##v", &v, 0.01f);
+            const bool edited = ranged ? ifield::Slider(host, "##v", &v, meta->Min, meta->Max)
+                                       : ifield::Float(host, "##v", &v, 0.01f);
             if (edited) { value = Value(v); changed = true; }
             break;
         }
@@ -109,12 +116,12 @@ bool DrawValue(EditorHost& host, const char* id, Value& value, const Var* meta,
         }
         case Kind::Vec2: {
             glm::vec2 v = value.AsVec2();
-            if (ImGui::DragFloat2("##v", &v.x, 0.01f)) { value = Value(v); changed = true; }
+            if (ictl::DragVec(&host, "##v", &v.x, 2, 0.01f)) { value = Value(v); changed = true; }
             break;
         }
         case Kind::Vec3: {
             glm::vec3 v = value.AsVec3();
-            if (ImGui::DragFloat3("##v", &v.x, 0.01f)) { value = Value(v); changed = true; }
+            if (ictl::DragVec(&host, "##v", &v.x, 3, 0.01f)) { value = Value(v); changed = true; }
             break;
         }
         case Kind::Color: {
@@ -159,7 +166,7 @@ bool DrawValue(EditorHost& host, const char* id, Value& value, const Var* meta,
         case Kind::Rotation: {
             // Углами в градусах: кватернион человеку не прочесть и не набрать.
             glm::vec3 e = value.AsVec3();
-            if (ImGui::DragFloat3("##v", &e.x, 0.5f)) { value = Value(glm::quat(glm::radians(e))); changed = true; }
+            if (ictl::DragVec(&host, "##v", &e.x, 3, 0.5f)) { value = Value(glm::quat(glm::radians(e))); changed = true; }
             break;
         }
         case Kind::Array:
@@ -240,7 +247,7 @@ bool DrawTable(EditorHost& host, GameObject obj, Table& table, AssetPreview* pre
                 int current = (int)var.Data.Type();
                 std::vector<const char*> names;
                 for (Kind k : sage::vars::AllKinds()) names.push_back(KindTitle(k));
-                if (ImGui::Combo("##kind", &current, names.data(), (int)names.size())) {
+                if (ictl::Combo("##kind", &current, names.data(), (int)names.size())) {
                     // Смена вида СОХРАНЯЕТ введённое, насколько возможно:
                     // обнулять — терять набранное из-за одного щелчка.
                     var.Data = Value::Convert(var.Data, (Kind)current);

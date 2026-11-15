@@ -177,6 +177,7 @@ const char* const kNames[] = {
     "magnet",
     "warn", "error", "info", "debug",
     "trash", "copy", "paste", "save", "open", "plus", "minus", "eye", "eye-off", "lock", "unlock",
+    "chevron-down", "chevron-right", "chevron-up",
     "align-left", "align-center-x", "align-right",
     "align-top", "align-center-y", "align-bottom",
     "distribute-x", "distribute-y", "ruler",

@@ -1,4 +1,5 @@
 #include "ParticleUi.h"
+#include "InspectorControls.h"
 
 #include <algorithm>
 #include <cctype>
@@ -10,6 +11,8 @@
 
 #include "Localization.h"
 #include "ui/ColorPicker.h"
+
+namespace ictl = sage::editor::ictl;
 
 using namespace sage::fx;
 
@@ -37,9 +40,9 @@ bool DragI(const char* label, int* v, float speed, int lo, int hi, const Particl
     return c;
 }
 bool Drag3(const char* label, glm::vec3& v, float speed, const ParticleUiHooks& h) {
-    const bool c = ImGui::DragFloat3(label, &v.x, speed);
-    Track(h);
-    return c;
+    // Вектор kit; снимок для отмены — на начале правки (UndoScope).
+    ictl::UndoScope undo([&h] { if (h.BeforeEdit) h.BeforeEdit(); });
+    return ictl::DragVec(nullptr, label, &v.x, 3, speed);
 }
 bool RangeF(const char* label, Range& r, float speed, float lo, float hi, const char* fmt,
             const ParticleUiHooks& h) {
@@ -50,7 +53,7 @@ bool RangeF(const char* label, Range& r, float speed, float lo, float hi, const 
 // Дискретные правки: снимок ДО изменения.
 bool Check(const char* label, bool& v, const ParticleUiHooks& h) {
     bool tmp = v;
-    if (!ImGui::Checkbox(label, &tmp)) return false;
+    if (!ictl::Check(label, &tmp)) return false;
     Before(h);
     v = tmp;
     return true;
@@ -58,7 +61,7 @@ bool Check(const char* label, bool& v, const ParticleUiHooks& h) {
 template <typename E>
 bool Combo(const char* label, E& v, const char* const* items, int count, const ParticleUiHooks& h) {
     int i = (int)v;
-    if (!ImGui::Combo(label, &i, items, count)) return false;
+    if (!ictl::Combo(label, &i, items, count)) return false;
     Before(h);
     v = (E)i;
     return true;
@@ -79,7 +82,7 @@ bool Section(const char* label, bool* enabled, bool& changed, const ParticleUiHo
     if (enabled) {
         ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - ImGui::GetFrameHeight() - 4.0f);
         bool on = *enabled;
-        if (ImGui::Checkbox("##on", &on)) {
+        if (ictl::Check("##on", &on)) {
             Before(h);
             *enabled = on;
             changed = true;
@@ -225,7 +228,8 @@ bool DrawCurve(const char* label, Curve& curve, float lo, float hi, const Partic
     if (sel >= 0 && sel < (int)curve.Keys.size()) {
         glm::vec2 k = curve.Keys[(size_t)sel];
         ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
-        if (ImGui::DragFloat2(T("Key (time, value)"), &k.x, 0.01f)) {
+        ictl::UndoScope undo([&h] { if (h.BeforeEdit) h.BeforeEdit(); });
+        if (ictl::DragVec(nullptr, T("Key (time, value)"), &k.x, 2, 0.01f)) {
             k.x = std::clamp(k.x, 0.0f, 1.0f);
             curve.Keys[(size_t)sel] = k;
             changed = true;
@@ -236,7 +240,7 @@ bool DrawCurve(const char* label, Curve& curve, float lo, float hi, const Partic
     const char* shapes[] = {T("Flat"), T("Rise"), T("Fall"), T("Hump"), T("Flash"), T("Swell")};
     int shape = -1;
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x * 0.6f);
-    if (ImGui::Combo(T("Start from"), &shape, shapes, 6) && shape >= 0) {
+    if (ictl::Combo(T("Start from"), &shape, shapes, 6) && shape >= 0) {
         Before(h);
         CurveShape(curve, shape);
         changed = true;

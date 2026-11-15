@@ -1,5 +1,6 @@
 #include <cstdarg>
 #include "../PanelWindows.h"
+#include "InspectorControls.h"
 #include "InspectorPanel.h"
 #include "../EditorTheme.h"
 #include "sage/render/ParticleEffectIO.h"
@@ -34,6 +35,8 @@
 #include "sage/ui/UIIcons.h"
 #include "sage/ui/UIPresets.h"
 #include "../Localization.h"
+
+namespace ictl = sage::editor::ictl;
 
 namespace fs = std::filesystem;
 
@@ -371,7 +374,7 @@ void InspectorPanel::DrawAudioPlayer(EditorHost& host) {
         }
     }
     ImGui::SameLine();
-    if (ImGui::Checkbox(T("Loop##audioplayer"), &m_audioLoop) && alive) {
+    if (ictl::Check(T("Loop##audioplayer"), &m_audioLoop) && alive) {
         // Смена зацикленности на лету: перезапускать звук ради галочки — значит
         // терять место, до которого дослушали.
         StopAudioPreview(host);

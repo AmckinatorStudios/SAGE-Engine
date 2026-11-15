@@ -1,0 +1,218 @@
+// ===========================================================================
+//  EDITOR UI KIT (editor/src/InspectorControls*.cpp) — настоящими кадрами
+//  ImGui без окна.
+//
+//  Главное правило kit: одна функция — один цельный контрол. Проверяем то,
+//  что видно снаружи: вектор — одна строка ровно во всю ширину, сегменты без
+//  чужих идентификаторов; список открывается щелчком по любому месту поля, в
+//  том числе там, где раньше была отдельная кнопка-стрелка; группа кнопок
+//  отдаёт номер нажатого сегмента; узкая панель переводит вектор в Compact,
+//  а потом в Stacked, а не сжимает числа до нечитаемых.
+// ===========================================================================
+#include "TestFramework.h"
+
+#include <cstdio>
+#include <functional>
+
+#include "imgui.h"
+#include "imgui_internal.h"
+
+#include "../editor/src/EditorTheme.h"
+#include "../editor/src/InspectorControls.h"
+
+using namespace sage::editor;
+
+namespace {
+
+// Кадр ImGui с окном w×h в левом верхнем углу; draw — содержимое окна.
+struct KitFrame {
+    ImGuiContext* Ctx = nullptr;
+    KitFrame() {
+        Ctx = ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO();
+        io.IniFilename = nullptr;
+        io.LogFilename = nullptr;
+        io.DisplaySize = ImVec2(800, 600);
+        io.DeltaTime = 1.0f / 60.0f;
+        io.ConfigInputTrickleEventQueue = false;
+        unsigned char* px = nullptr;
+        int w = 0, h = 0;
+        io.Fonts->GetTexDataAsRGBA32(&px, &w, &h);
+    }
+    ~KitFrame() { ImGui::DestroyContext(Ctx); }
+    void Run(float width, const std::function<void()>& draw) {
+        ImGui::NewFrame();
+        ImGui::SetNextWindowPos(ImVec2(0, 0));
+        ImGui::SetNextWindowSize(ImVec2(width, 500));
+        ImGui::Begin("Kit", nullptr, ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoDecoration);
+        draw();
+        ImGui::End();
+        ImGui::Render();
+    }
+    void Click(float x, float y, float width, const std::function<void()>& draw) {
+        ImGuiIO& io = ImGui::GetIO();
+        io.AddMousePosEvent(x, y);
+        Run(width, draw);
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+        Run(width, draw);
+        io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+        Run(width, draw);
+    }
+};
+
+} // namespace
+
+TEST(UiKit_vector_look_follows_the_width) {
+    const float h = 24.0f, tag = 18.0f;
+    // Широко — сегменты с −/+; уже — без кнопок; совсем узко — ось на строку.
+    CHECK_TRUE(ictl::FitVecLook(ictl::VecLook::Segmented, 600.0f, 3, tag, h) == ictl::VecLook::Segmented);
+    CHECK_TRUE(ictl::FitVecLook(ictl::VecLook::Segmented, 200.0f, 3, tag, h) == ictl::VecLook::Compact);
+    CHECK_TRUE(ictl::FitVecLook(ictl::VecLook::Segmented, 90.0f, 3, tag, h) == ictl::VecLook::Stacked);
+    // Заказанный вид не «повышается»: Compact в широкой панели остаётся Compact,
+    // Stacked — Stacked.
+    CHECK_TRUE(ictl::FitVecLook(ictl::VecLook::Compact, 600.0f, 3, tag, h) == ictl::VecLook::Compact);
+    CHECK_TRUE(ictl::FitVecLook(ictl::VecLook::Stacked, 600.0f, 3, tag, h) == ictl::VecLook::Stacked);
+    // Четыре оси требуют больше места, чем две.
+    CHECK_TRUE(ictl::FitVecLook(ictl::VecLook::Segmented, 300.0f, 2, tag, h) == ictl::VecLook::Segmented);
+    CHECK_TRUE(ictl::FitVecLook(ictl::VecLook::Segmented, 300.0f, 4, tag, h) != ictl::VecLook::Segmented);
+}
+
+TEST(UiKit_vector_is_one_row_without_id_clashes) {
+    KitFrame f;
+    float v[3] = {1.0f, 2.0f, 3.0f};
+    ImVec2 rect(0, 0);
+    int worst = 0;
+    auto draw = [&] {
+        ictl::DragVec(nullptr, "##vec", v, 3, 0.1f);
+        rect = ImGui::GetItemRectSize();
+    };
+    for (float x = 4.0f; x < 590.0f; x += 7.0f) {
+        ImGui::GetIO().AddMousePosEvent(x, 18.0f);
+        f.Run(600.0f, draw);
+        f.Run(600.0f, draw);
+        worst = std::max(worst, f.Ctx->HoveredIdPreviousFrameItemCount);
+    }
+    // Вектор — один элемент строки во всю ширину (значок справа встаёт за
+    // рамкой), высотой в одно поле.
+    const float avail = 600.0f - 2.0f * ImGui::GetStyle().WindowPadding.x;
+    CHECK_NEAR(rect.x, avail, 1.0f);
+    CHECK_NEAR(rect.y, ImGui::GetFrameHeight(), 0.5f);
+    CHECK_TRUE(worst <= 1);
+}
+
+TEST(UiKit_dropdown_opens_from_the_whole_field) {
+    // Щелчок у правого края — там, где у ImGui была отдельная кнопка со
+    // стрелкой, — и посередине: оба открывают список.
+    for (const float x : {20.0f, 150.0f, 290.0f}) {
+        KitFrame f;
+        int current = 0;
+        const char* items[3] = {"One", "Two", "Three"};
+        bool opened = false;
+        auto draw = [&] {
+            ImGui::SetNextItemWidth(300.0f);
+            if (ictl::BeginDropdown("##dd", items[current])) {
+                opened = true;
+                ictl::EndDropdown();
+            }
+        };
+        f.Run(400.0f, draw);
+        const float y = ImGui::GetStyle().WindowPadding.y + ImGui::GetFrameHeight() * 0.5f;
+        f.Click(ImGui::GetStyle().WindowPadding.x + x, y, 400.0f, draw);
+        f.Run(400.0f, draw);
+        CHECK_TRUE(opened);
+        // Окно списка на экране: есть, видно, ненулевого размера.
+        const ImGuiWindow* popup = nullptr;
+        for (ImGuiWindow* w : f.Ctx->Windows)
+            if ((w->Flags & ImGuiWindowFlags_Popup) && w->Active) popup = w;
+        CHECK_TRUE(popup != nullptr);
+        if (popup) {
+            CHECK_TRUE(popup->Size.x > 10.0f && popup->Size.y > 10.0f);
+        }
+    }
+}
+
+TEST(UiKit_button_group_reports_the_pressed_segment) {
+    KitFrame f;
+    ictl::GroupItem items[3];
+    items[0].Text = "Left";
+    items[1].Text = "Middle";
+    items[2].Text = "Right";
+    int last = -1;
+    auto draw = [&] {
+        const int hit = ictl::ButtonGroup("##grp", items, 3, ictl::ButtonLook::Standard, 0, 300.0f);
+        if (hit >= 0) last = hit;
+    };
+    f.Run(400.0f, draw);
+    const ImVec2 pad = ImGui::GetStyle().WindowPadding;
+    const float y = pad.y + ImGui::GetFrameHeight() * 0.5f;
+    // Равные сегменты по 100: центр каждого — его номер.
+    for (int i = 0; i < 3; ++i) {
+        f.Click(pad.x + 50.0f + 100.0f * (float)i, y, 400.0f, draw);
+        CHECK_EQ(last, i);
+    }
+    // Выключенный сегмент не нажимается.
+    items[1].Enabled = false;
+    last = -1;
+    f.Click(pad.x + 150.0f, y, 400.0f, draw);
+    CHECK_EQ(last, -1);
+}
+
+TEST(UiKit_grid_group_maps_rows_and_columns) {
+    KitFrame f;
+    ictl::GroupItem items[9];
+    int last = -1;
+    auto draw = [&] {
+        const int hit = ictl::ButtonGroup("##grid", items, 9, ictl::ButtonLook::IconOnly, 3);
+        if (hit >= 0) last = hit;
+    };
+    f.Run(400.0f, draw);
+    const ImVec2 pad = ImGui::GetStyle().WindowPadding;
+    const float cell = ImGui::GetFrameHeight();
+    // Нижняя правая ячейка сетки 3×3 — восьмая.
+    f.Click(pad.x + cell * 2.5f, pad.y + cell * 2.5f, 400.0f, draw);
+    CHECK_EQ(last, 8);
+    f.Click(pad.x + cell * 1.5f, pad.y + cell * 0.5f, 400.0f, draw);
+    CHECK_EQ(last, 1);
+}
+
+TEST(UiKit_metrics_follow_the_ui_scale) {
+    // Один параметр kit — и все контролы растут вместе с интерфейсом.
+    const EditorTheme::Kit one = EditorTheme::ScaledKit(1.0f, 6.0f, 1.0f, 16.0f);
+    const EditorTheme::Kit two = EditorTheme::ScaledKit(2.0f, 6.0f, 1.0f, 16.0f);
+    CHECK_NEAR(two.LabelMin, one.LabelMin * 2.0f, 1.0f);
+    CHECK_NEAR(two.FieldMin, one.FieldMin * 2.0f, 1.0f);
+    CHECK_NEAR(two.IconSize, 32.0f, 0.5f);
+    CHECK_NEAR(two.SeparatorThickness, 2.0f, 0.5f);
+    // Доли высоты поля от масштаба не зависят: поле растёт вместе с кеглем.
+    CHECK_NEAR(two.StepButton, one.StepButton, 1e-6f);
+    CHECK_NEAR(two.Rounding, 6.0f, 1e-6f);
+}
+
+TEST(UiKit_dropdown_with_input_stays_open) {
+    KitFrame f;
+    bool opened = false;
+    static char buf[64] = "";
+    auto draw = [&] {
+        ImGui::SetNextItemWidth(200.0f);
+        opened = false;
+        if (ictl::BeginDropdown("##tag", "none")) {
+            opened = true;
+            ImGui::Selectable("none", true);
+            ImGui::Separator();
+            ImGui::SetNextItemWidth(150.0f);
+            ImGui::InputTextWithHint("##new_tag", "New tag", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue);
+            ictl::EndDropdown();
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("tip");
+    };
+    f.Run(400.0f, draw);
+    const float y = ImGui::GetStyle().WindowPadding.y + ImGui::GetFrameHeight() * 0.5f;
+    f.Click(ImGui::GetStyle().WindowPadding.x + 50.0f, y, 400.0f, draw);
+    for (int i = 0; i < 5; ++i) f.Run(400.0f, draw);
+    CHECK_TRUE(opened);
+    const ImGuiWindow* popup = nullptr;
+    for (ImGuiWindow* w : f.Ctx->Windows)
+        if ((w->Flags & ImGuiWindowFlags_Popup) && w->Active) popup = w;
+    CHECK_TRUE(popup != nullptr);
+    CHECK_TRUE(popup && popup->Size.y > 30.0f);
+}
