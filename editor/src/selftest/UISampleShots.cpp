@@ -197,6 +197,31 @@ void EditorLayer::RunUISampleHook(const std::string& sample) {
                     el->Skin = ui::Element::SkinMode::Custom;
                 }
             }
+            // Девятина подложки из инспектора — в редакторе спрайтов: рамка
+            // 32 x 32 с углами по 6 пикселей картинкой подложки.
+            if (std::getenv("SAGE_EDITOR_UI_NINESLICE")) {
+                const std::filesystem::path dir = m_project.AssetsDir() / "ui";
+                std::error_code ec;
+                std::filesystem::create_directories(dir, ec);
+                std::vector<unsigned char> px(32 * 32 * 4, 0);
+                for (int y = 0; y < 32; ++y)
+                    for (int x = 0; x < 32; ++x) {
+                        const bool border = x < 6 || x > 25 || y < 6 || y > 25;
+                        unsigned char* p = &px[((size_t)y * 32 + (size_t)x) * 4];
+                        p[0] = border ? 240 : 40; p[1] = border ? 170 : 50; p[2] = border ? 60 : 80; p[3] = 255;
+                    }
+                stbi_write_png(sage::PathToUtf8(dir / "frame.png").c_str(), 32, 32, 4, px.data(), 32 * 4);
+                if (ui::Fill* fill = m_scene->Registry().try_get<ui::Fill>(o.Entity())) {
+                    fill->Texture = m_project.AssetRef(dir / "frame.png");
+                    fill->SliceBorder = glm::vec4(6.0f);
+                    fill->Fit = 1;   // девятина
+                }
+                EditorHost::NineSliceTarget t;
+                t.ElementId = o.Id();
+                t.PartId = "fill";
+                t.BorderKey = "sliceBorder";
+                OpenNineSliceEditor(t);
+            }
             m_focusPanelId = "InterfaceInspector";
             m_focusPanelFrames = 60;
         }

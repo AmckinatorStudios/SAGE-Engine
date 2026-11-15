@@ -193,13 +193,13 @@ add_executable(SageEditor WIN32
     src/TweenUi.cpp
     src/panels/TweenPanel_Cards.cpp
     src/panels/TweenPanel_Menus.cpp
-    src/panels/NineSlicePanel.cpp
     src/sprite/SpriteEditModel.cpp
+    src/sprite/SpriteEditorBinding.cpp
     src/sprite/SpriteEditor.cpp
     src/sprite/SpriteEditor_Canvas.cpp
     src/sprite/SpriteEditor_Inspector.cpp
     src/sprite/SpriteEditor_NineSlice.cpp
-    src/panels/GameSettingsPanel.cpp
+    src/panels/settings/BuildSettingsPage.cpp
     src/AssetPreview.cpp
 )
 

@@ -401,53 +401,44 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // пятнадцати.
             // Пункты — из реестра панелей (PanelRegistry.h): панель, которую
             // зарегистрировали, появляется здесь сама, в своём разделе.
+            // КАЖДЫЙ РАЗДЕЛ — СВОИМ ПОДМЕНЮ. Длинный столбец с заголовками
+            // читался целиком; подменю показывает четыре строки нужного
+            // раздела. Пункты — из реестра: новая панель появляется сама, в
+            // своём разделе; раздел без пунктов (Plugins без плагинов) не
+            // рисуется вовсе.
             namespace pe = sage::editor;
-            Sage::UI::MenuSection(T("Scene"), true);
-            m_panelRegistry.DrawMenuSection(pe::PanelSection::Scene);
-            Sage::UI::MenuSection(T("Interface"));
-            m_panelRegistry.DrawMenuSection(pe::PanelSection::Interface);
-            // Общие стоят в ОБОИХ рабочих местах — потому и отдельным разделом.
-            Sage::UI::MenuSection(T("Shared"));
-            m_panelRegistry.DrawMenuSection(pe::PanelSection::Shared);
-            // Инструменты открывают ПОД ЗАДАЧУ и закрывают: они не участвуют в
-            // раскладке по умолчанию и не живут на экране постоянно.
-            Sage::UI::MenuSection(T("Tools"));
-            m_panelRegistry.DrawMenuSection(pe::PanelSection::Tools);
-            EditorIcons::MenuItemToggle("nineslice", T("9-slice editor"), &m_showNineSlice);
-            // Окна плагинов — своим разделом, только если они есть.
-            {
-                bool any = false;
-                for (const pe::PanelSpec* spec : m_panelRegistry.All())
-                    any = any || spec->Section == pe::PanelSection::Plugins;
-                if (any) {
-                    Sage::UI::MenuSection(T("Plugins"));
-                    m_panelRegistry.DrawMenuSection(pe::PanelSection::Plugins);
+            struct SectionDef { pe::PanelSection Section; const char* Icon; const char* Title; };
+            const SectionDef sections[] = {
+                {pe::PanelSection::Scene, "scene", T("Scene")},
+                {pe::PanelSection::Interface, "ui-screen", T("Interface")},
+                // Общие стоят в ОБОИХ рабочих местах — потому и отдельным разделом.
+                {pe::PanelSection::Shared, "folder", T("Shared")},
+                // Инструменты открывают ПОД ЗАДАЧУ и закрывают.
+                {pe::PanelSection::Tools, "build", T("Tools")},
+                {pe::PanelSection::Plugins, "code", T("Plugins")},
+            };
+            for (const SectionDef& sec : sections) {
+                if (!m_panelRegistry.HasMenuItems(sec.Section)) continue;
+                if (EditorIcons::BeginMenu(sec.Icon, sec.Title)) {
+                    m_panelRegistry.DrawMenuSection(sec.Section);
+                    ImGui::EndMenu();
                 }
             }
-            // --- РАСКЛАДКА: то, что относится к самому окну редактора -------
+            // --- УПРАВЛЕНИЕ ОКНАМИ: раскладка и отдельные окна -------------
             //
-            // Внизу, а не первой строкой, как было: «сбросить раскладку»
-            // нажимают раз в месяц, а стояло оно там, куда взгляд падает
-            // первым, — перед списком окон, ради которого меню и открывают.
-            Sage::UI::MenuSection(T("Layout"));
+            // Сетки здесь больше нет: она — инструмент рабочей области
+            // (вьюпорт сцены, холст интерфейса), там её и переключают.
+            Sage::UI::MenuSection(T("Window Management"));
             // Сброс раскладки возвращает и сами панели: закрытая вкладка иначе
             // не восстанавливалась «сбросом», хотя именно этого от него ждут.
             if (EditorIcons::MenuItem("refresh", T("Reset Layout"))) {
                 m_panelRegistry.Restore();
                 m_rebuildDockLayout = true;
             }
-            EditorIcons::MenuItemToggle("grid", T("Show Grid"), &m_tools.ShowGrid);
-
-            // --- Панель ОТДЕЛЬНЫМ ОКНОМ СИСТЕМЫ -----------------------------
-            //
-            // Меню, а не только перетаскивание мышью: вытащить панель в своё
-            // окно раньше можно было единственным жестом — дотащить её за
-            // вкладку за край главного окна, — а вернуть обратно нечем, кроме
-            // сброса всей раскладки. И главное, вытащенное окно слипалось с
-            // главным обратно, стоило его туда надвинуть (см. PanelWindows.h).
-            if (EditorIcons::BeginMenu("window", T("Separate window"))) {
+            // Панель ОТДЕЛЬНЫМ ОКНОМ СИСТЕМЫ — меню, а не только перетаскивание
+            // мышью: вернуть вытащенное было нечем, кроме сброса раскладки.
+            if (EditorIcons::BeginMenu("window", T("Separate Window"))) {
                 ImGui::TextDisabled("%s", T("Panel becomes a window of the system"));
-                ImGui::Separator();
                 m_panelRegistry.DrawDetachMenu(m_workspace);
                 ImGui::Separator();
                 // Путь назад для случая «окно уехало на второй монитор, а
@@ -544,7 +535,6 @@ void EditorLayer::DrawDockspaceAndMenu() {
     DrawUnsavedPrompt();
     m_settingsPanel.Draw(*this, m_panels[EditorPanel::Settings]);
     m_assets.Tick(*this);           // пакетная конвертация идёт по кадрам, а не одним куском
-    m_nineSlice.Draw(*this, m_showNineSlice);
     // Анимация, Tween и профилировщик рисуются вместе с остальными панелями —
     // из реестра (EditorLayer_Panels.cpp).
     // Лист значков — только для скриншот-проверки (SAGE_EDITOR_ICON_SHEET), в

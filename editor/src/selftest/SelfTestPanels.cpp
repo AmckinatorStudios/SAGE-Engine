@@ -61,7 +61,8 @@ bool EditorLayer::SelfTestPanelRegistry() {
     // Окно «Настройки»: управление и оформление — его разделы, а лишних
     // (постобработка — компонент камеры, среда — своё окно, шрифт) нет.
     {
-        for (const char* key : {"screen", "quality", "lighting", "controls", "advanced", "general", "appearance"})
+        for (const char* key :
+             {"screen", "quality", "lighting", "controls", "advanced", "build", "general", "appearance"})
             if (!m_settingsPanel.SelectByKey(key)) fail(std::string("в настройках нет раздела ") + key);
         for (const char* key : {"post", "environment", "interface", "shadows"})
             if (m_settingsPanel.SelectByKey(key)) fail(std::string("в настройках остался лишний раздел ") + key);
@@ -71,6 +72,16 @@ bool EditorLayer::SelfTestPanelRegistry() {
         m_commands.Run("window.controls");
         if (!m_panels[EditorPanel::Settings] || m_settingsPanel.Current() != SettingsPanel::Category::Controls)
             fail("«Управление» не открыло раздел окна настроек");
+        // Сведения об игре — страница настроек, а не своё окно; девятина —
+        // режим редактора спрайтов, а не отдельное окно.
+        if (m_panelRegistry.Find("GameSettings")) fail("«Game Settings» осталось отдельным окном");
+        if (m_panelRegistry.Find("NineSlice")) fail("старое окно девятины осталось в реестре");
+        if (!m_commands.Find("window.buildSettings")) fail("нет команды «Build Settings» в палитре");
+        m_commands.Run("window.buildSettings");
+        if (!m_panels[EditorPanel::Settings] || m_settingsPanel.Current() != SettingsPanel::Category::BuildSettings)
+            fail("«Build Settings» не открыло раздел окна настроек");
+        if (const pe::PanelSpec* dbg = m_panelRegistry.Find("AiDebugger"); dbg && dbg->InMenu)
+            fail("отладчик ИИ остался в меню Window");
         m_panels[EditorPanel::Settings] = false;
         m_settingsPanel.Select(SettingsPanel::Category::Screen);
     }

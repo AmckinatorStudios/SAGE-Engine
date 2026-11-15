@@ -1,4 +1,5 @@
 #include "SelfTestCommon.h"
+#include "../sprite/SpriteEditorBinding.h"
 
 // ---------------------------------------------------------------------------
 // МНОГООКОННОСТЬ В ЖИВОМ КАДРЕ (SAGE_EDITOR_SELFTEST=1).
@@ -540,7 +541,7 @@ void EditorLayer::CheckUiInspectorFrame() {
     const std::vector<sage::ui::Preset>& presets = sage::ui::Presets();
     auto finish = [this]() {
         m_uiInspectorChecked = true;
-        m_showNineSlice = false;
+        m_panelRegistry.SetVisible("SpriteSheet", false);
         SetWorkspace(EditorWorkspace::Scene);
         const int added = m_console.ErrorCount() - m_uiInspectorErrors;
         if (added == 0)
@@ -599,12 +600,25 @@ void EditorLayer::CheckUiInspectorFrame() {
         return;
     }
     if (after == 1) {
-        ImGui::SetWindowSize("###NineSlice", ImVec2(420.0f, 300.0f));
+        // Девятина из инспектора — в редакторе спрайтов, привязанной к виду
+        // элемента: правка доходит до САМОГО элемента (его свои значения),
+        // а не до листа или .sage9.
+        EditorHost::NineSliceTarget t;
+        t.ElementId = m_uiInspectorElement;
+        t.PartId = "fill";
+        t.BorderKey = "sliceBorder";
+        sage::ui::NineSlice probe;
+        probe.SetBorder({3.0f, 4.0f, 5.0f, 6.0f});
+        sage::editor::sprite::BoundSlice back;
+        if (!m_spriteSheet.BoundToElement() || !sage::editor::sprite::WriteBound(*this, t, probe) ||
+            !sage::editor::sprite::ReadBound(*this, t, back) || back.Slice.Border() != probe.Border())
+            LOG_ERROR("Editor") << "UI_INSPECTOR: девятина элемента не открылась в редакторе спрайтов";
+        ImGui::SetWindowSize("###SpriteSheet", ImVec2(420.0f, 300.0f));
         m_uiInspectorWait = 4;
         return;
     }
     if (after == 2) {
-        ImGui::SetWindowSize("###NineSlice", ImVec2(1100.0f, 700.0f));
+        ImGui::SetWindowSize("###SpriteSheet", ImVec2(1100.0f, 700.0f));
         m_uiInspectorWait = 3;
         return;
     }

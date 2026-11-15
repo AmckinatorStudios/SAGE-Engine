@@ -3,6 +3,7 @@
 #include <vector>
 
 #include "InputPanel.h"
+#include "settings/BuildSettingsPage.h"
 #include "sage/core/Config.h"
 #include "sage/core/Display.h"
 
@@ -37,7 +38,7 @@ struct Ctx;
 class SettingsPanel {
 public:
     // Порядок — порядок списка слева; General — первый раздел редактора.
-    enum class Category { Screen, Quality, Lighting, Controls, Advanced, General, Appearance, Count };
+    enum class Category { Screen, Quality, Lighting, Controls, Advanced, BuildSettings, General, Appearance, Count };
     // Раздел редактора (профиль человека, применяется сразу), а не игры.
     static bool IsEditorCategory(Category c) { return c == Category::General || c == Category::Appearance; }
 
@@ -50,7 +51,7 @@ public:
     // Размер окна при следующем открытии — для скриншот-проверки узкого окна.
     void ForceSize(float w, float h) { m_forceW = w; m_forceH = h; }
     // Раздел по ключу ("screen", "quality", "lighting", "controls", "advanced",
-    // "general", "appearance"); false — нет такого.
+    // "build", "general", "appearance"); false — нет такого.
     bool SelectByKey(const char* key);
     bool HasUnsavedChanges(const EditorHost& host) const;
     // Записать в проект (как кнопка «Применить»).
@@ -87,5 +88,6 @@ private:
     std::vector<sage::display::Monitor> m_monitors;
     double m_monitorsAt = -100.0;
     InputPanel m_controls;             // раздел «Управление» (input.sageinput)
+    BuildSettingsPage m_build;         // раздел «Build Settings» (project.sageproj)
     float m_forceW = 0.0f, m_forceH = 0.0f;
 };

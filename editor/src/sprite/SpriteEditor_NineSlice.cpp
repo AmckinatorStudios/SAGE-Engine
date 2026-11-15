@@ -37,18 +37,31 @@ constexpr ImU32 kGuides[4] = {IM_COL32(255, 120, 120, 235), IM_COL32(120, 220, 2
 } // namespace
 
 glm::ivec4 SpriteEditor::NineSource() const {
+    if (m_bound) {
+        // Кусок, который показывает элемент (w <= 0 — вся картинка).
+        const glm::ivec4 r = glm::ivec4(m_boundSlice.Sprite);
+        if (r.z > 0 && r.w > 0) return r;
+        return {0, 0, m_w, m_h};
+    }
     const int i = Primary();
     if (i >= 0 && i < (int)m_doc.Sheet.Regions.size()) return m_doc.Sheet.Regions[(size_t)i].Rect;
     return {0, 0, m_w, m_h};
 }
 
 NineSlice SpriteEditor::NineGet() const {
+    if (m_bound) return m_boundSlice.Slice;
     const int i = Primary();
     if (i >= 0 && i < (int)m_doc.Sheet.Regions.size()) return m_doc.Sheet.Regions[(size_t)i].NineSliceOf();
     return m_doc.Texture;
 }
 
 void SpriteEditor::NineSet(const NineSlice& n) {
+    if (m_bound && m_host) {
+        // Свои значения элемента — в сам элемент; лист и .sage9 не меняются.
+        sp::WriteBound(*m_host, m_bind, n);
+        m_boundSlice.Slice = n;
+        return;
+    }
     const int i = Primary();
     if (i >= 0 && i < (int)m_doc.Sheet.Regions.size()) {
         sage::ui::SpriteRegion& r = m_doc.Sheet.Regions[(size_t)i];
@@ -162,7 +175,8 @@ void SpriteEditor::DrawNineCanvas(ImVec2 a, ImVec2 size) {
     // Что режется — подписью снизу: кусок или вся картинка.
     char what[160];
     const int i = Primary();
-    if (i >= 0) std::snprintf(what, sizeof(what), "%s %s", T("Sprite:"), m_doc.Sheet.Regions[(size_t)i].Name.c_str());
+    if (m_bound) std::snprintf(what, sizeof(what), "%s %s", T("Element:"), m_boundSlice.Title.c_str());
+    else if (i >= 0) std::snprintf(what, sizeof(what), "%s %s", T("Sprite:"), m_doc.Sheet.Regions[(size_t)i].Name.c_str());
     else std::snprintf(what, sizeof(what), "%s", T("Whole texture (saved as .sage9)"));
     const ImVec2 ts = ImGui::CalcTextSize(what);
     dl->AddText(ImVec2(a.x + (size.x - ts.x) * 0.5f, a.y + size.y - ts.y - 10.0f),
@@ -262,29 +276,43 @@ void SpriteEditor::DrawNineResult(ImVec2 a, ImVec2 size) {
 
 void SpriteEditor::DrawNineInspector(EditorHost& host) {
     if (!m_tex || !m_pixels) {
-        ImGui::TextDisabled("%s", T("Open a texture first."));
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextDisabled("%s", m_bound ? T("The element has no picture yet: pick one in its inspector.")
+                                          : T("Open a texture first."));
+        ImGui::PopTextWrapPos();
         return;
     }
     const auto& regions = m_doc.Sheet.Regions;
     if (ictl::BeginSection("sprite.nine.target", T("Target"))) {
-        // Что режется: кусок листа или вся картинка (без кусков — .sage9).
+        // Что режется: вид элемента (его свои значения), кусок листа или вся
+        // картинка (без кусков — .sage9).
         const int cur = Primary();
-        const std::string shown = cur >= 0 ? regions[(size_t)cur].Name : std::string(T("Whole texture"));
+        const std::string shown = m_bound   ? m_boundSlice.Title
+                                  : cur >= 0 ? regions[(size_t)cur].Name
+                                             : std::string(T("Whole texture"));
         ictl::Label(T("Sprite"));
         if (ImGui::BeginCombo("##nine_target", shown.c_str())) {
-            if (ImGui::Selectable(T("Whole texture"), cur < 0)) {
+            if (m_bound) ImGui::Selectable(m_boundSlice.Title.c_str(), true);
+            if (ImGui::Selectable(T("Whole texture"), !m_bound && cur < 0)) {
+                m_bound = false;
                 m_sel.clear();
                 m_nineZoom = 0.0f;
             }
             for (int i = 0; i < (int)regions.size(); ++i) {
                 ImGui::PushID(i);
-                if (ImGui::Selectable(regions[(size_t)i].Name.c_str(), i == cur)) {
+                if (ImGui::Selectable(regions[(size_t)i].Name.c_str(), !m_bound && i == cur)) {
+                    m_bound = false;
                     SelectOnly(i);
                     m_nineZoom = 0.0f;
                 }
                 ImGui::PopID();
             }
             ImGui::EndCombo();
+        }
+        if (m_bound) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextDisabled("%s", T("Values of this element only: the sprite sheet and .sage9 stay as they are."));
+            ImGui::PopTextWrapPos();
         }
         const glm::ivec4 s = NineSource();
         char size[64];

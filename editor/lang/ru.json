@@ -3988,6 +3988,15 @@
     "Pixel grid: shown from 8x zoom": "Сетка пикселей: видна с увеличения 8x",
     "Typography": "Типографика",
     "Transition": "Переход",
-    "Image Source": "Источник картинки"
+    "Image Source": "Источник картинки",
+    "Build Settings": "Параметры сборки",
+    "Build Settings...": "Параметры сборки...",
+    "Element:": "Элемент:",
+    "How the built game presents itself: name, version, icon, file properties and player folders. Saved in project.sageproj.": "Чем представляется собранная игра: название, версия, иконка, сведения о файле и папки игрока. Хранится в project.sageproj.",
+    "Saved to project.sageproj after each edit": "Сохраняется в project.sageproj после каждой правки",
+    "Separate Window": "Отдельное окно",
+    "The element has no picture yet: pick one in its inspector.": "У элемента пока нет картинки: выберите её в его инспекторе.",
+    "Values of this element only: the sprite sheet and .sage9 stay as they are.": "Значения только этого элемента: лист спрайтов и .sage9 не меняются.",
+    "Window Management": "Управление окнами"
   }
 }

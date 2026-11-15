@@ -71,9 +71,7 @@ namespace sage { class Application; }
 #include "panels/InputPanel.h"
 #include "panels/AnimationPanel.h"
 #include "panels/TweenPanel.h"
-#include "panels/NineSlicePanel.h"
 #include "sprite/SpriteEditor.h"
-#include "panels/GameSettingsPanel.h"
 #include "ui/CommandPalette.h"
 #include "ui/Commands.h"
 #include "panels/DialogsPanel.h"
@@ -202,8 +200,12 @@ public:
                                                       : TweenPanel::Action::None);
     }
     void OpenNineSliceEditor(const NineSliceTarget& target) override {
-        m_showNineSlice = true;
-        m_nineSlice.OpenFor(target);
+        // Девятина — в редакторе спрайтов, режим Nine-Slice: отдельного окна
+        // девятины больше нет.
+        m_panelRegistry.SetVisible("SpriteSheet", true);
+        m_spriteSheet.OpenFor(*this, target);
+        m_focusPanelId = "SpriteSheet";
+        m_focusPanelFrames = 3;
     }
 
     // --- EditorHost: undo/redo ---
@@ -795,17 +797,12 @@ private:
     int m_currentInterface = -1;
     TopBarPanel m_topBar;
     SettingsPanel m_settingsPanel; // окно гибких настроек движка (host.Settings())
-    // Редактор девятины (см. panels/NineSlicePanel.h) — отдельный инструмент:
-    // нарезку подбирают подолгу и по самой картинке, а не по числам вслепую.
-    NineSlicePanel m_nineSlice;
     // Редактор спрайтов (sprite/SpriteEditor.h) — окно из реестра.
     SpriteEditor m_spriteSheet;
     // Образцы для снимков (SAGE_EDITOR_UI_SAMPLE, selftest/UISampleShots.cpp).
     void RunUISampleHook(const std::string& sample);
     std::string m_focusPanelId;   // какую панель вывести вперёд (хуки снимков)
     int m_focusPanelFrames = 0;
-    // Настройки игры (название, автор, версия, иконка) — окно из реестра.
-    GameSettingsPanel m_gameSettings;
 
     // Инструмент анимации (см. panels/AnimationPanel.h). Панель раскладки, а не
     // инструмент под задачу: анимацию правят рядом со сценой и рядом с
@@ -817,7 +814,6 @@ private:
     // графов и узлы, папка assets/visual).
     AiGraphPanel m_visualScript{GraphEditorMode::Visual()};
     TweenPanel m_tween;
-    bool m_showNineSlice = false;
 
     // Реестр команд и палитра (Ctrl+K). Реестр наполняется один раз в
     // OnAttach: команда описывается ОДИН раз, а меню, тулбар, палитра и

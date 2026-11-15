@@ -1,4 +1,4 @@
-#include "panels/GameSettingsPanel.h"
+#include "panels/settings/BuildSettingsPage.h"
 
 #include <imgui.h>
 #include <misc/cpp/imgui_stdlib.h>
@@ -9,14 +9,14 @@
 
 #include "sage/assets/UserContent.h"
 
-void GameSettingsPanel::Load(const std::filesystem::path& dir) {
+void BuildSettingsPage::Load(const std::filesystem::path& dir) {
     m_dir = dir;
     m_info = sage::assets::GameInfo{};
     if (!sage::assets::LoadGameInfo(dir, m_info)) m_info.Name.clear();
     m_status.clear();
 }
 
-void GameSettingsPanel::Save() {
+void BuildSettingsPage::Save() {
     std::string error;
     if (sage::assets::SaveGameInfo(m_dir, m_info, &error)) {
         m_status = T("Saved to project.sageproj");
@@ -27,21 +27,13 @@ void GameSettingsPanel::Save() {
     }
 }
 
-void GameSettingsPanel::Draw(EditorHost& host, bool* open) {
-    if (!ImGui::Begin((std::string(T("Game Settings")) + "###GameSettings").c_str(), open)) {
-        ImGui::End();
-        return;
-    }
+void BuildSettingsPage::DrawBody(EditorHost& host) {
     Project& project = host.CurrentProject();
     if (!project.Loaded()) {
         ImGui::TextDisabled("%s", T("Open a project first."));
-        ImGui::End();
         return;
     }
     if (m_dir != project.Dir()) Load(project.Dir());
-
-    ImGui::TextWrapped("%s", T("How the built game presents itself: window title, file name, icon and file properties."));
-    ImGui::Separator();
 
     // Поле пишет файл, когда правку закончили (Enter или уход из поля), а не на
     // каждую букву: файл проекта не переписывается сотни раз за слово.
@@ -90,12 +82,11 @@ void GameSettingsPanel::Draw(EditorHost& host, bool* open) {
         if (m_statusError) ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s", m_status.c_str());
         else ImGui::TextDisabled("%s", m_status.c_str());
     }
-    ImGui::End();
 }
 
 // Пользовательские папки: открытые папки для файлов игрока (скины, музыка,
 // моды) — рядом с собранной игрой или в папке её данных. Возвращает «правили».
-bool GameSettingsPanel::DrawUserFolders() {
+bool BuildSettingsPage::DrawUserFolders() {
     namespace uc = sage::assets::usercontent;
     bool changed = false;
     ImGui::Spacing();

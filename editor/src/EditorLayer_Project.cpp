@@ -625,7 +625,6 @@ void EditorLayer::ForgetPreviousProject() {
     m_assets.ForgetProject();
     m_inspector.ForgetProject();
     m_uiInspector.ForgetProject();
-    m_nineSlice.ForgetProject();
     m_spriteSheet.ForgetProject();
     // Ссылки на сущности прошлой сцены: их номера в новой сцене принадлежат
     // другим объектам, и «выделен объект 7» после смены проекта значит

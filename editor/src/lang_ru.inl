@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 3988.
+// Язык: Русский. Строк: 3997.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1114,6 +1114,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сборка игры"},
     {"Build Game...",
      "Собрать игру…"},
+    {"Build Settings",
+     "Параметры сборки"},
+    {"Build Settings...",
+     "Параметры сборки..."},
     {"Build cancelled",
      "Сборка отменена"},
     {"Build failed",
@@ -2312,6 +2316,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Свойства элементов — цвет, текст, раскладка — живут у самих элементов внутри этого интерфейса."},
     {"Element size",
      "Размер элемента"},
+    {"Element:",
+     "Элемент:"},
     {"Elements",
      "Элементы"},
     {"Elevation",
@@ -3198,6 +3204,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сколько света неба рассеивает дымка — даже в тени"},
     {"How tall a step the character climbs without jumping",
      "На какую ступеньку персонаж взбирается без прыжка"},
+    {"How the built game presents itself: name, version, icon, file properties and player folders. Saved in project.sageproj.",
+     "Чем представляется собранная игра: название, версия, иконка, сведения о файле и папки игрока. Хранится в project.sageproj."},
     {"How the built game presents itself: window title, file name, icon and file properties.",
      "Как собранная игра представляется: заголовок окна, имя файла, иконка и свойства файла."},
     {"How the container places its children: by hand, row, column, grid, wrap",
@@ -5756,6 +5764,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сохранено рядом с текстурой"},
     {"Saved to project.sageproj",
      "Сохранено в project.sageproj"},
+    {"Saved to project.sageproj after each edit",
+     "Сохраняется в project.sageproj после каждой правки"},
     {"Saved: ",
      "Сохранено: "},
     {"Saving editor.lua reloads the plugin by itself.",
@@ -5956,6 +5966,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Чувствительность"},
     {"Sent by project scripts",
      "Шлют скрипты проекта"},
+    {"Separate Window",
+     "Отдельное окно"},
     {"Separate window",
      "В отдельном окне"},
     {"Sequence",
@@ -6784,6 +6796,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Описание лежит рядом с картинкой, поэтому одна нарезка\nслужит всем элементам, которые ею пользуются."},
     {"The editor did not close normally last time. Below is the full report written at that moment — it is what a developer needs to find the cause.",
      "В прошлый раз редактор закрылся не сам. Ниже — полный отчёт, записанный в тот момент: именно он нужен разработчику, чтобы найти причину."},
+    {"The element has no picture yet: pick one in its inspector.",
+     "У элемента пока нет картинки: выберите её в его инспекторе."},
     {"The element stays where it is — only Offset is recomputed.",
      "Элемент остаётся на месте — пересчитывается только Offset."},
     {"The engine draws the shape, border, shadow and states itself.\nYou choose only colours — nothing else to tune.",
@@ -7346,6 +7360,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Список значений"},
     {"Value picked by dragging",
      "Значение, которое выбирают перетаскиванием"},
+    {"Values of this element only: the sprite sheet and .sage9 stay as they are.",
+     "Значения только этого элемента: лист спрайтов и .sage9 не меняются."},
     {"Variable",
      "Переменная"},
     {"Variables",
@@ -7642,6 +7658,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "С замахом"},
     {"Window",
      "Окно"},
+    {"Window Management",
+     "Управление окнами"},
     {"Window mode",
      "Режим окна"},
     {"Window mode, monitor, resolution and frame rate of the game.",
