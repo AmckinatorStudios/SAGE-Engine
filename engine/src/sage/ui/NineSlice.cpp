@@ -1,6 +1,8 @@
 #include "sage/assets/Pack.h"
 #include "sage/ui/NineSlice.h"
 
+#include "sage/core/AtomicFile.h"
+
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -195,13 +197,7 @@ bool NineSlice::FromJsonString(const std::string& text, NineSlice& out, std::str
 }
 
 bool NineSlice::SaveFile(const std::string& path, std::string& err) const {
-    std::ofstream file(sage::PathFromUtf8(path), std::ios::binary);
-    if (!file) {
-        err = "не удалось открыть на запись: " + path;
-        return false;
-    }
-    file << ToJsonString();
-    return true;
+    return sage::WriteFileAtomic(path, ToJsonString(), err);   // прежний файл цел при обрыве
 }
 
 bool NineSlice::LoadFile(const std::string& path, NineSlice& out, std::string& err) {

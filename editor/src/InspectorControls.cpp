@@ -19,6 +19,26 @@
 namespace sage::editor::ictl {
 namespace {
 
+std::function<void()>& Sink() {
+    static std::function<void()> s;
+    return s;
+}
+
+// Снимок перед правкой — в историю инструмента, если он её подменил.
+void Snapshot(EditorHost& host) {
+    if (Sink()) Sink()();
+    else Snapshot(host);
+}
+
+// Перетаскивание и ввод: один шаг истории на всё касание.
+void Track(EditorHost& host) {
+    if (Sink()) {
+        if (ImGui::IsItemActivated()) Sink()();
+    } else {
+        Track(host);
+    }
+}
+
 // Колесо над полем: одна правка — один шаг истории, пока колесо крутят без
 // пауз (иначе каждый щелчок колеса стал бы отдельной отменой).
 bool WheelGestureStart(ImGuiID id) {
@@ -42,7 +62,7 @@ bool StepButton(EditorHost& host, const char* text, float* v, float dir, const N
     ImGui::PopStyleVar();
     ImGui::PopItemFlag();
     // Снимок — один на всё удержание: на нажатии, а не на каждом повторе.
-    if (ImGui::IsItemActivated()) host.PushUndoSnapshot();
+    if (ImGui::IsItemActivated()) Snapshot(host);
     if (!hit) return false;
     const bool accelerate = ImGui::GetIO().MouseDownDuration[0] > 1.0f;
     const float nv = Clamp(*v + dir * o.Step * (accelerate ? 10.0f : 1.0f), o);
@@ -69,6 +89,9 @@ bool TitleIcon(const char* icon, const char* tip, bool active) {
 }
 
 } // namespace
+
+UndoScope::UndoScope(std::function<void()> push) : m_prev(std::move(Sink())) { Sink() = std::move(push); }
+UndoScope::~UndoScope() { Sink() = std::move(m_prev); }
 
 NumOpts OptsForRange(float min, float max) {
     NumOpts o;
@@ -136,13 +159,13 @@ bool NumberCore(EditorHost& host, const char* id, float* v, const NumOpts& o, fl
                          ImGuiSliderFlags_AlwaysClamp)) {
         changed = true;
     }
-    host.TrackLastImGuiItem();
+    Track(host);
     const ImGuiID fieldId = ImGui::GetItemID();
     // Колесо над полем меняет значение, а не листает инспектор.
     if (ImGui::IsItemHovered() && ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY)) {
         const float wheel = ImGui::GetIO().MouseWheel;
         if (wheel != 0.0f) {
-            if (WheelGestureStart(fieldId)) host.PushUndoSnapshot();
+            if (WheelGestureStart(fieldId)) Snapshot(host);
             const float nv = Clamp(*v + (wheel > 0.0f ? 1.0f : -1.0f) * o.Step * (ImGui::GetIO().KeyShift ? 10.0f : 1.0f), o);
             if (nv != *v) {
                 *v = nv;
@@ -151,7 +174,7 @@ bool NumberCore(EditorHost& host, const char* id, float* v, const NumOpts& o, fl
         }
     }
     if (o.HasReset && ImGui::IsItemClicked(ImGuiMouseButton_Right) && *v != o.Reset) {
-        host.PushUndoSnapshot();
+        Snapshot(host);
         *v = o.Reset;
         changed = true;
     }
@@ -193,9 +216,9 @@ bool SliderNumber(EditorHost& host, const char* label, float* v, float min, floa
     const float w = ImGui::GetContentRegionAvail().x;
     ImGui::SetNextItemWidth(std::max(40.0f, w - numW - 4.0f));
     bool changed = ImGui::SliderFloat("##s", v, min, max, "", ImGuiSliderFlags_AlwaysClamp);
-    host.TrackLastImGuiItem();
+    Track(host);
     if (hasReset && ImGui::IsItemClicked(ImGuiMouseButton_Right) && *v != reset) {
-        host.PushUndoSnapshot();
+        Snapshot(host);
         *v = reset;
         changed = true;
     }
@@ -205,7 +228,7 @@ bool SliderNumber(EditorHost& host, const char* label, float* v, float min, floa
         *v = std::clamp(*v, min, max);
         changed = true;
     }
-    host.TrackLastImGuiItem();
+    Track(host);
     ImGui::PopID();
     return changed;
 }
@@ -219,7 +242,7 @@ bool Switch(EditorHost& host, const char* label, bool* v) {
     const float y = p.y + (ImGui::GetFrameHeight() - h) * 0.5f;
     const bool hit = ImGui::InvisibleButton("##sw", ImVec2(w + 34.0f, ImGui::GetFrameHeight()));
     if (hit) {
-        host.PushUndoSnapshot();
+        Snapshot(host);
         *v = !*v;
     }
     ImDrawList* dl = ImGui::GetWindowDrawList();
@@ -244,7 +267,7 @@ bool Color(EditorHost& host, const char* label, glm::vec4* rgba) {
     bool changed = false;
     // Образец — тот же, что во всём редакторе: щелчок открывает палитру.
     if (Sage::UI::ColorField4("##sw", &rgba->x, Sage::UI::ColorField_Compact)) changed = true;
-    host.TrackLastImGuiItem();
+    Track(host);
     ImGui::SameLine(0.0f, 4.0f);
     char hex[16];
     std::snprintf(hex, sizeof(hex), "%s", Sage::UI::color::ToHex(&rgba->x).c_str());
@@ -258,7 +281,7 @@ bool Color(EditorHost& host, const char* label, glm::vec4* rgba) {
             changed = true;
         }
     }
-    host.TrackLastImGuiItem();
+    Track(host);
     ImGui::SameLine(0.0f, 4.0f);
     // Прозрачность — процентами, тем же числом, что и альфа цвета (одна
     // величина, а не Alpha и Opacity порознь).
@@ -268,7 +291,7 @@ bool Color(EditorHost& host, const char* label, glm::vec4* rgba) {
         rgba->a = pct / 100.0f;
         changed = true;
     }
-    host.TrackLastImGuiItem();
+    Track(host);
     if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Opacity"));
     ImGui::PopID();
     return changed;

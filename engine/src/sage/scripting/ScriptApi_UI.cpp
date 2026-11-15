@@ -799,9 +799,8 @@ end
         }
         im.Sprite = glm::vec4(r->Rect);
         if (r->Slice != glm::vec4(0.0f)) {
-            sage::ui::NineSlice slice;
-            slice.SetBorder(r->Slice);
-            im.SetSlice(slice);
+            // Девятина — СВОЯ у куска: поля, заливки и середина из листа.
+            im.SetSlice(r->NineSliceOf());
             im.Fit = sage::ui::Image::Mode::NineSlice;   // кусок-рамка тянется девятиной
         } else if (im.Fit == sage::ui::Image::Mode::NineSlice) {
             im.Fit = sage::ui::Image::Mode::Normal;      // прежняя рамка не держит новый кусок

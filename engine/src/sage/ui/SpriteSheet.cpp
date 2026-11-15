@@ -1,9 +1,12 @@
 #include "sage/ui/SpriteSheet.h"
+
+#include "sage/core/AtomicFile.h"
 #include <cstring>
 #include <cmath>
 #include <cctype>
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 
 #include <nlohmann/json.hpp>
@@ -47,47 +50,44 @@ bool SpriteSheet::Rename(const std::string& from, const std::string& to) {
     return true;
 }
 
-namespace {
-unsigned char AlphaAt(const unsigned char* rgba, int w, int h, bool bottomUp, int x, int y) {
-    const int row = bottomUp ? (h - 1 - y) : y;
-    return rgba[((size_t)row * w + x) * 4 + 3];
-}
-} // namespace
 
-int SpriteSheet::SliceGrid(int width, int height, const SpriteGrid& g, const unsigned char* rgba,
-                           bool rowsBottomUp) {
-    if (g.CellW <= 0 || g.CellH <= 0 || width <= 0 || height <= 0) return 0;
-    int made = 0, index = 0;
-    for (int y = g.OffY; y + g.CellH <= height; y += g.CellH + g.PadY) {
-        for (int x = g.OffX; x + g.CellW <= width; x += g.CellW + g.PadX) {
-            bool empty = false;
-            if (g.SkipEmpty && rgba) {
-                empty = true;
-                for (int yy = y; yy < y + g.CellH && empty; ++yy)
+std::vector<GridCell> GridCells(int width, int height, const SpriteGrid& g, const unsigned char* rgba) {
+    std::vector<GridCell> out;
+    if (g.CellW <= 0 || g.CellH <= 0 || width <= 0 || height <= 0) return out;
+    // Область нарезки — картинка за вычетом полей; сдвиг двигает сетку в ней.
+    const int x0 = g.Margin.x + g.OffX, y0 = g.Margin.y + g.OffY;
+    const int x1 = width - g.Margin.z, y1 = height - g.Margin.w;
+    const int stepX = g.CellW + std::max(0, g.PadX), stepY = g.CellH + std::max(0, g.PadY);
+    // Предел на число клеток: сетка 1x1 по картинке 4096 — шестнадцать
+    // миллионов рамок, и редактор встал бы.
+    for (int y = y0; y < y1 && out.size() < 20000; y += stepY) {
+        for (int x = x0; x < x1 && out.size() < 20000; x += stepX) {
+            GridCell c;
+            c.Rect = {x, y, g.CellW, g.CellH};
+            c.Inside = x >= 0 && y >= 0 && x + g.CellW <= x1 && y + g.CellH <= y1;
+            if (c.Inside && rgba) {
+                c.Empty = true;
+                for (int yy = y; yy < y + g.CellH && c.Empty; ++yy)
                     for (int xx = x; xx < x + g.CellW; ++xx)
-                        if (AlphaAt(rgba, width, height, rowsBottomUp, xx, yy) > 0) { empty = false; break; }
+                        if (rgba[((size_t)yy * width + xx) * 4 + 3] > 0) { c.Empty = false; break; }
             }
-            if (!empty) {
-                Set({g.Prefix + "_" + std::to_string(index), {x, y, g.CellW, g.CellH}, glm::vec4(0.0f)});
-                ++made;
-            }
-            ++index;
+            out.push_back(c);
         }
     }
-    return made;
+    return out;
 }
 
-int SpriteSheet::SliceAuto(const unsigned char* rgba, int width, int height, bool rowsBottomUp,
-                           float alphaCutoff, int minSize, const std::string& prefix) {
-    if (!rgba || width <= 0 || height <= 0) return 0;
-    const unsigned char cut = (unsigned char)std::clamp(alphaCutoff * 255.0f, 1.0f, 255.0f);
-    std::vector<unsigned char> seen((size_t)width * height, 0);
+std::vector<glm::ivec4> FindIslands(const unsigned char* rgba, int width, int height, const SpriteAuto& p) {
     std::vector<glm::ivec4> boxes;
+    if (!rgba || width <= 0 || height <= 0) return boxes;
+    const unsigned char cut = (unsigned char)std::clamp(p.AlphaCutoff * 255.0f, 1.0f, 255.0f);
+    std::vector<unsigned char> seen((size_t)width * height, 0);
     std::vector<int> stack;
+    auto alpha = [&](int x, int y) { return rgba[((size_t)y * width + x) * 4 + 3]; };
     for (int y = 0; y < height; ++y) {
         for (int x = 0; x < width; ++x) {
             const size_t i = (size_t)y * width + x;
-            if (seen[i] || AlphaAt(rgba, width, height, rowsBottomUp, x, y) < cut) continue;
+            if (seen[i] || alpha(x, y) < cut) continue;
             // Заливка острова: стек, а не рекурсия — остров бывает во весь лист.
             int x0 = x, y0 = y, x1 = x, y1 = y;
             seen[i] = 1;
@@ -103,36 +103,119 @@ int SpriteSheet::SliceAuto(const unsigned char* rgba, int width, int height, boo
                 for (int k = 0; k < 4; ++k) {
                     if (nx[k] < 0 || ny[k] < 0 || nx[k] >= width || ny[k] >= height) continue;
                     const size_t j = (size_t)ny[k] * width + nx[k];
-                    if (seen[j] || AlphaAt(rgba, width, height, rowsBottomUp, nx[k], ny[k]) < cut) continue;
+                    if (seen[j] || alpha(nx[k], ny[k]) < cut) continue;
                     seen[j] = 1;
                     stack.push_back((int)j);
                 }
             }
             const int w = x1 - x0 + 1, h = y1 - y0 + 1;
-            if (w < minSize && h < minSize) continue;
-            boxes.push_back({x0, y0, w, h});
+            if (w < p.MinW || h < p.MinH) continue;
+            const int pad = std::max(0, p.Padding);
+            const int bx = std::max(0, x0 - pad), by = std::max(0, y0 - pad);
+            boxes.push_back({bx, by, std::min(width, x1 + 1 + pad) - bx, std::min(height, y1 + 1 + pad) - by});
         }
     }
     // Сверху вниз, слева направо.
     std::sort(boxes.begin(), boxes.end(), [](const glm::ivec4& a, const glm::ivec4& b) {
         return a.y != b.y ? a.y < b.y : a.x < b.x;
     });
-    int index = 0;
-    for (const glm::ivec4& b : boxes) {
-        std::string name;
-        do { name = prefix + "_" + std::to_string(index++); } while (Find(name));
-        Regions.push_back({name, b, glm::vec4(0.0f)});
-    }
-    return (int)boxes.size();
+    return boxes;
 }
 
+std::string SpriteSheet::FreeName(const std::string& prefix) const {
+    for (int i = (int)Regions.size();; ++i) {
+        std::string name = prefix + "_" + std::to_string(i);
+        if (!Find(name)) {
+            // Первый свободный номер — с нуля, если он свободен.
+            for (int k = 0; k < i; ++k) {
+                const std::string low = prefix + "_" + std::to_string(k);
+                if (!Find(low)) return low;
+            }
+            return name;
+        }
+    }
+}
+
+namespace {
+// Строки снизу вверх (картинка из текстуры) — в строки сверху вниз.
+std::vector<unsigned char> TopDown(const unsigned char* rgba, int w, int h, bool bottomUp) {
+    std::vector<unsigned char> out(rgba, rgba + (size_t)w * h * 4);
+    if (bottomUp)
+        for (int y = 0; y < h; ++y)
+            std::memcpy(&out[(size_t)y * w * 4], &rgba[(size_t)(h - 1 - y) * w * 4], (size_t)w * 4);
+    return out;
+}
+} // namespace
+
+int SpriteSheet::SliceGrid(int width, int height, const SpriteGrid& g, const unsigned char* rgba,
+                           bool rowsBottomUp) {
+    std::vector<unsigned char> td;
+    if (rgba) td = TopDown(rgba, width, height, rowsBottomUp);
+    int made = 0, index = 0;
+    for (const GridCell& c : GridCells(width, height, g, rgba ? td.data() : nullptr)) {
+        if (!c.Inside) continue;
+        if (!(g.SkipEmpty && c.Empty)) {
+            SpriteRegion r;
+            r.Name = g.Prefix + "_" + std::to_string(index);
+            r.Rect = c.Rect;
+            Set(r);
+            ++made;
+        }
+        ++index;
+    }
+    return made;
+}
+
+int SpriteSheet::SliceAuto(const unsigned char* rgba, int width, int height, bool rowsBottomUp,
+                           float alphaCutoff, int minSize, const std::string& prefix) {
+    if (!rgba || width <= 0 || height <= 0) return 0;
+    const std::vector<unsigned char> td = TopDown(rgba, width, height, rowsBottomUp);
+    SpriteAuto p;
+    p.AlphaCutoff = alphaCutoff;
+    p.MinW = p.MinH = 1;
+    int added = 0;
+    for (const glm::ivec4& b : FindIslands(td.data(), width, height, p)) {
+        if (b.z < minSize && b.w < minSize) continue;
+        SpriteRegion r;
+        r.Name = FreeName(prefix);
+        r.Rect = b;
+        Regions.push_back(r);
+        ++added;
+    }
+    return added;
+}
+
+namespace {
+const char* FillName(SliceFill f) { return f == SliceFill::Tile ? "tile" : "stretch"; }
+SliceFill FillFrom(const nlohmann::json& j, const char* key) {
+    return j.value(key, std::string("stretch")) == "tile" ? SliceFill::Tile : SliceFill::Stretch;
+}
+const char* const kModes[] = {"grid", "auto", "manual"};
+} // namespace
+
+// ВЕРСИЯ 2: у куска — точка опоры и девятина целиком; у листа — чем резали.
 std::string SpriteSheet::ToJsonString() const {
     nlohmann::json j;
+    j["version"] = 2;
+    const SpriteGrid& g = Slicing.Grid;
+    const SpriteAuto& a = Slicing.Auto;
+    j["slicing"] = {{"mode", kModes[(int)Slicing.Method]},
+                    {"cellSize", {g.CellW, g.CellH}},
+                    {"offset", {g.OffX, g.OffY}},
+                    {"spacing", {g.PadX, g.PadY}},
+                    {"margin", {g.Margin.x, g.Margin.y, g.Margin.z, g.Margin.w}},
+                    {"prefix", g.Prefix},
+                    {"skipEmpty", g.SkipEmpty},
+                    {"auto", {{"alpha", a.AlphaCutoff}, {"minSize", {a.MinW, a.MinH}}, {"padding", a.Padding},
+                              {"prefix", a.Prefix}}}};
     j["sprites"] = nlohmann::json::array();
     for (const SpriteRegion& r : Regions) {
         nlohmann::json e = {{"name", r.Name}, {"rect", {r.Rect.x, r.Rect.y, r.Rect.z, r.Rect.w}}};
-        if (r.Slice != glm::vec4(0.0f)) e["slice"] = {r.Slice.x, r.Slice.y, r.Slice.z, r.Slice.w};
-        if (r.Pivot != glm::vec2(0.5f)) e["pivot"] = {r.Pivot.x, r.Pivot.y};
+        e["pivot"] = {r.Pivot.x, r.Pivot.y};
+        e["nineSlice"] = {{"border", {r.Slice.x, r.Slice.y, r.Slice.z, r.Slice.w}},
+                          {"edgeFill", FillName(r.EdgeFill)},
+                          {"centerFill", FillName(r.CenterFill)},
+                          {"drawCenter", r.DrawCenter}};
         j["sprites"].push_back(e);
     }
     if (!Sequences.empty()) {
@@ -165,10 +248,57 @@ bool SpriteSheet::FromJsonString(const std::string& text, SpriteSheet& out, std:
         const nlohmann::json slice = e.value("slice", nlohmann::json::array());
         if (slice.is_array() && slice.size() == 4)
             for (int k = 0; k < 4; ++k) r.Slice[k] = slice[k].is_number() ? slice[k].get<float>() : 0.0f;
+        // Версия 2: девятина целиком; версия 1 — только «slice» (миграция:
+        // заливки и середина — по умолчанию).
+        if (e.contains("nineSlice") && e["nineSlice"].is_object()) {
+            const nlohmann::json& n = e["nineSlice"];
+            const nlohmann::json b = n.value("border", nlohmann::json::array());
+            if (b.is_array() && b.size() == 4)
+                for (int k = 0; k < 4; ++k) r.Slice[k] = b[k].is_number() ? b[k].get<float>() : 0.0f;
+            r.EdgeFill = FillFrom(n, "edgeFill");
+            r.CenterFill = FillFrom(n, "centerFill");
+            r.DrawCenter = n.value("drawCenter", true);
+        }
         const nlohmann::json pivot = e.value("pivot", nlohmann::json::array());
         if (pivot.is_array() && pivot.size() == 2 && pivot[0].is_number() && pivot[1].is_number())
             r.Pivot = {pivot[0].get<float>(), pivot[1].get<float>()};
         out.Set(r);
+    }
+    out.Slicing = SpriteSlicing();
+    if (j.contains("slicing") && j["slicing"].is_object()) {
+        const nlohmann::json& sl = j["slicing"];
+        const std::string mode = sl.value("mode", std::string("grid"));
+        out.Slicing.Method = mode == "auto" ? SpriteSlicing::Mode::Automatic
+                             : mode == "manual" ? SpriteSlicing::Mode::Manual
+                                                : SpriteSlicing::Mode::Grid;
+        SpriteGrid& g = out.Slicing.Grid;
+        auto pair = [&](const char* key, int& a, int& b) {
+            const nlohmann::json v = sl.value(key, nlohmann::json::array());
+            if (v.is_array() && v.size() == 2 && v[0].is_number() && v[1].is_number()) {
+                a = v[0].get<int>();
+                b = v[1].get<int>();
+            }
+        };
+        pair("cellSize", g.CellW, g.CellH);
+        pair("offset", g.OffX, g.OffY);
+        pair("spacing", g.PadX, g.PadY);
+        const nlohmann::json m = sl.value("margin", nlohmann::json::array());
+        if (m.is_array() && m.size() == 4)
+            for (int k = 0; k < 4; ++k) g.Margin[k] = m[k].is_number() ? m[k].get<int>() : 0;
+        g.Prefix = sl.value("prefix", g.Prefix);
+        g.SkipEmpty = sl.value("skipEmpty", g.SkipEmpty);
+        if (sl.contains("auto") && sl["auto"].is_object()) {
+            const nlohmann::json& au = sl["auto"];
+            SpriteAuto& a = out.Slicing.Auto;
+            a.AlphaCutoff = au.value("alpha", a.AlphaCutoff);
+            const nlohmann::json ms = au.value("minSize", nlohmann::json::array());
+            if (ms.is_array() && ms.size() == 2 && ms[0].is_number() && ms[1].is_number()) {
+                a.MinW = ms[0].get<int>();
+                a.MinH = ms[1].get<int>();
+            }
+            a.Padding = au.value("padding", a.Padding);
+            a.Prefix = au.value("prefix", a.Prefix);
+        }
     }
     out.Sequences.clear();
     const nlohmann::json seqs = j.value("sequences", nlohmann::json::array());
@@ -190,13 +320,7 @@ bool SpriteSheet::FromJsonString(const std::string& text, SpriteSheet& out, std:
 }
 
 bool SpriteSheet::SaveFile(const std::string& path, std::string& err) const {
-    std::ofstream file(sage::PathFromUtf8(path), std::ios::binary);
-    if (!file) {
-        err = "не удалось открыть на запись: " + path;
-        return false;
-    }
-    file << ToJsonString();
-    return true;
+    return sage::WriteFileAtomic(path, ToJsonString(), err);
 }
 
 bool SpriteSheet::LoadFile(const std::string& path, SpriteSheet& out, std::string& err) {

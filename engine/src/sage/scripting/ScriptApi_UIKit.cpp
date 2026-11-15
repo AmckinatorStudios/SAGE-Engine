@@ -137,6 +137,9 @@ void ApplyLook(sage::ui::Look& look, const sol::table& t) {
             // Кусок-рамка из листа ложится девятиной, если её не задали явно.
             if (r->Slice != glm::vec4(0.0f) && !t["slice"].valid()) {
                 look.SliceBorder = r->Slice;
+                look.SliceEdgeFill = r->EdgeFill;
+                look.SliceCenterFill = r->CenterFill;
+                look.SliceDrawCenter = r->DrawCenter;
                 if (!t["fit"].valid()) look.Fit = 1;
             }
         } else {

@@ -64,6 +64,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/JobSystem.cpp
     src/sage/core/Log.cpp
     src/sage/core/Paths.cpp
+    src/sage/core/AtomicFile.cpp
     src/sage/core/ChildProcess.cpp
     src/sage/core/FormatVersion.cpp
     src/sage/core/Stats.cpp

@@ -115,34 +115,60 @@ void EditorLayer::RunUISampleHook(const std::string& sample) {
             return;
         }
     }
-    if (sample == "sprite") {
-        // Лист 4 x 1 кадра: монетка разной ширины — видно, что кадры листаются.
+    if (sample.rfind("sprite", 0) == 0) {
+        // Лист 160 x 32: четыре кадра монетки разной ширины (видно, что кадры
+        // листаются) и рамка-панель 32 x 32 с уголками по 8 пикселей — её
+        // девятину показывает режим Nine-Slice.
         const std::filesystem::path dir = m_project.AssetsDir() / "ui";
         std::error_code ec;
         std::filesystem::create_directories(dir, ec);
-        std::vector<unsigned char> px(128 * 32 * 4, 0);
+        const int W = 160, H = 32;
+        std::vector<unsigned char> px((size_t)W * H * 4, 0);
         for (int f = 0; f < 4; ++f)
             for (int y = 0; y < 32; ++y)
                 for (int x = 0; x < 32; ++x) {
                     const float rx = 4.0f + 10.0f * (float)(f == 0 || f == 2 ? 1 : (f == 1 ? 0.5f : 0.2f));
                     const float dx = (float)x - 15.5f, dy = (float)y - 15.5f;
                     if (dx * dx / (rx * rx) + dy * dy / 196.0f > 1.0f) continue;
-                    unsigned char* p = &px[((size_t)y * 128 + (size_t)(f * 32 + x)) * 4];
+                    unsigned char* p = &px[((size_t)y * W + (size_t)(f * 32 + x)) * 4];
                     p[0] = 250; p[1] = 200; p[2] = 60; p[3] = 255;
                 }
+        for (int y = 0; y < 32; ++y)
+            for (int x = 0; x < 32; ++x) {
+                const bool corner = (x < 3 || x > 28) && (y < 3 || y > 28);
+                if (corner) continue;
+                const bool border = x < 4 || x > 27 || y < 4 || y > 27;
+                unsigned char* p = &px[((size_t)y * W + (size_t)(128 + x)) * 4];
+                p[0] = border ? 90 : 40; p[1] = border ? 170 : 60; p[2] = border ? 255 : 110; p[3] = 255;
+            }
         const std::string file = sage::PathToUtf8(dir / "coin.png");
-        stbi_write_png(file.c_str(), 128, 32, 4, px.data(), 128 * 4);
+        stbi_write_png(file.c_str(), W, H, 4, px.data(), W * 4);
         ui::SpriteSheet sheet;
         ui::SpriteGrid grid;
         grid.CellW = grid.CellH = 32;
         grid.Prefix = "coin";
-        sheet.SliceGrid(128, 32, grid, px.data());
-        sheet.Regions[0].Pivot = {0.5f, 1.0f};
-        sheet.SequenceFromPrefix("spin", "coin_", 8.0f);
+        if (sample == "sprite-grid") {
+            // Без кусков, клетка 48 x 32: последняя клетка в строке выходит
+            // за картинку — живой предпросмотр красит её красным.
+            grid.CellW = 48;
+            sheet.Slicing.Grid = grid;
+        } else if (sample != "sprite-empty") {
+            sheet.Slicing.Grid = grid;
+            sheet.SliceGrid(W, H, grid, px.data());
+            sheet.Regions[0].Pivot = {0.5f, 1.0f};
+            sheet.Rename("coin_4", "panel");
+            if (ui::SpriteRegion* panel = sheet.Find("panel")) panel->Slice = glm::vec4(8.0f);
+            sheet.SequenceFromPrefix("spin", "coin_", 8.0f);
+        }
         std::string err;
-        sheet.SaveFile(ui::SpriteSheet::SidecarPath(file), err);
+        if (sample != "sprite-empty") sheet.SaveFile(ui::SpriteSheet::SidecarPath(file), err);
         m_panelRegistry.SetVisible("SpriteSheet", true);
-        m_spriteSheet.Open(m_project.AssetRef(dir / "coin.png"), 0, 0);
+        if (sample == "sprite-empty") return;
+        const bool nine = sample == "sprite-nine" || sample == "sprite-result";
+        m_spriteSheet.Open(m_project.AssetRef(dir / "coin.png"), nine ? 4 : (sample == "sprite-grid" ? -1 : 0), 0);
+        m_spriteSheet.ShowNineSlice(nine);
+        m_spriteSheet.ShowNineResult(sample == "sprite-result");
+        if (sample == "sprite-replace") m_spriteSheet.CreateSpritesNow();
         return;
     }
     SetWorkspace(EditorWorkspace::Interface);
