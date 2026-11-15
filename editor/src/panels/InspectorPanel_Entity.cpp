@@ -341,11 +341,15 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         // старых сцен (тогда камеру можно было растянуть, и это искажает её вид).
         ImGui::SameLine(0.0f, 4.0f);
         if (canScale) {
-            if (EditorIcons::IconOnlyButton(
+            // Свой ID: в шапке того же окна — замок инспектора с тем же значком.
+            ImGui::PushID("scale_lock");
+            const bool toggled = EditorIcons::IconOnlyButton(
                     m_uniformScale ? "lock" : "unlock",
                     m_uniformScale ? T("Axes are linked: dragging one scales all three")
                                    : T("Axes are independent: each one scales on its own"),
-                    m_uniformScale)) {
+                    m_uniformScale);
+            ImGui::PopID();
+            if (toggled) {
                 m_uniformScale = !m_uniformScale;
                 sage::editor::prefs::SetBool("inspector.uniform_scale", m_uniformScale);
             }
