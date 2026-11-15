@@ -73,6 +73,9 @@ struct PanelSpec {
 
     bool InLayout = false;       // часть постоянной раскладки: её возвращает «Сбросить раскладку»
     bool Detachable = true;      // есть в меню «Отдельным окном»
+    // Есть в меню Window. Нет — у окна, которое открывает другой инструмент
+    // (отладчик ИИ — кнопкой окна AI Graph): в общем списке оно лишнее.
+    bool InMenu = true;
     // Обёртка panelwindows::Before/After (своё окно системы). Выключают те,
     // кто делает это сам или открывает окно с другим именем.
     bool WrapWindow = true;
@@ -120,6 +123,8 @@ public:
     void DrawPanels(EditorHost& host, EditorWorkspace workspace);
     // Пункты меню «Окно» одного раздела (переключатели видимости).
     void DrawMenuSection(PanelSection section);
+    // Есть ли в разделе пункты меню (пустой раздел — без подменю).
+    bool HasMenuItems(PanelSection section) const;
     // Пункты меню «Отдельным окном».
     void DrawDetachMenu(EditorWorkspace workspace);
     // Раскладка по умолчанию: dock(windowId, slot) для каждой панели

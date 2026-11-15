@@ -10,6 +10,7 @@
 #include "PanelWindowId.h"
 #include "PanelWindows.h"
 #include "ui/Commands.h"
+#include "ui/UI.h"
 
 namespace sage::editor {
 
@@ -136,26 +137,46 @@ void PanelRegistry::DrawPanels(EditorHost& host, EditorWorkspace workspace) {
     }
 }
 
+bool PanelRegistry::HasMenuItems(PanelSection section) const {
+    for (const auto& e : m_entries)
+        if (e->Spec.Section == section && e->Spec.InMenu) return true;
+    return false;
+}
+
 void PanelRegistry::DrawMenuSection(PanelSection section) {
     for (const PanelSpec* s : All()) {
-        if (s->Section != section) continue;
+        if (s->Section != section || !s->InMenu) continue;
         Entry* e = FindEntry(s->Id);
         EditorIcons::MenuItemToggle(s->Icon.c_str(), T(s->Title.c_str()), e->Flag());
     }
 }
 
 void PanelRegistry::DrawDetachMenu(EditorWorkspace workspace) {
-    for (const PanelSpec* s : All()) {
-        if (!s->Detachable) continue;
-        // Имя окна — ТЕКУЩЕГО пространства: у общих панелей их два, и галочка
-        // обязана относиться к тому окну, которое человек сейчас видит.
-        const std::string id = WindowId(*s, workspace);
-        const bool detached = panelwindows::Detached(id.c_str());
-        if (EditorIcons::MenuItemSelected("window", T(s->Title.c_str()), detached)) {
-            panelwindows::SetDetached(id.c_str(), !detached);
-            // Вытащенная закрытая панель обязана появиться — иначе галочка
-            // ничего не меняет на экране.
-            if (!detached) *FindEntry(s->Id)->Flag() = true;
+    // По разделам, как в самом меню Window: два десятка окон одним столбцом
+    // читаются только целиком.
+    static const PanelSection kOrder[] = {PanelSection::Scene, PanelSection::Interface, PanelSection::Shared,
+                                          PanelSection::Tools, PanelSection::Plugins};
+    static const char* const kTitles[] = {"Scene", "Interface", "Shared", "Tools", "Plugins"};
+    bool first = true;
+    for (int k = 0; k < 5; ++k) {
+        bool header = false;
+        for (const PanelSpec* s : All()) {
+            if (!s->Detachable || !s->InMenu || s->Section != kOrder[k]) continue;
+            if (!header) {
+                Sage::UI::MenuSection(T(kTitles[k]), first);
+                header = true;
+                first = false;
+            }
+            // Имя окна — ТЕКУЩЕГО пространства: у общих панелей их два, и
+            // галочка обязана относиться к тому окну, которое человек видит.
+            const std::string id = WindowId(*s, workspace);
+            const bool detached = panelwindows::Detached(id.c_str());
+            if (EditorIcons::MenuItemSelected("window", T(s->Title.c_str()), detached)) {
+                panelwindows::SetDetached(id.c_str(), !detached);
+                // Вытащенная закрытая панель обязана появиться — иначе галочка
+                // ничего не меняет на экране.
+                if (!detached) *FindEntry(s->Id)->Flag() = true;
+            }
         }
     }
 }

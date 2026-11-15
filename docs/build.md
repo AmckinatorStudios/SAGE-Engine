@@ -99,7 +99,8 @@ DLL не требуются).
 
 ## Настройки игры: название, автор, версия, иконка
 
-Окно **Window → Game Settings** (или раздел `"game"` в `project.sageproj`,
+Страница **Settings → Build Settings** (группа «Игра» окна настроек; команда
+палитры «Build Settings…») или раздел `"game"` в `project.sageproj`,
 `sage/assets/GameInfo.h`):
 
 ```json
@@ -121,7 +122,7 @@ DLL не требуются).
 
 Собранная игра прячет ресурсы в зашифрованный `game.sagepak` — положить туда
 свой скин или трек нельзя. Для этого игра объявляет **открытые папки**:
-окно **Game Settings → User folders** или раздел `"game"` проекта
+страница **Settings → Build Settings → User folders** или раздел `"game"` проекта
 (`sage/assets/UserContent.h`):
 
 ```json

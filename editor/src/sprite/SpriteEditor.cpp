@@ -124,6 +124,7 @@ ImU32 PreviewColor() { return IM_COL32(150, 255, 170, 150); }
 // --- Документ ----------------------------------------------------------------
 
 void SpriteEditor::ForgetProject() {
+    m_bound = false;
     if (m_autoJob.valid()) m_autoJob.wait();
     m_path.clear();
     m_disk.clear();
@@ -147,6 +148,9 @@ void SpriteEditor::Open(const std::string& path, int region, int sequence) {
 
 void SpriteEditor::Load(const std::string& path) {
     if (m_autoJob.valid()) m_autoJob.wait();
+    // Другая картинка — привязка к элементу кончилась (OpenFor и
+    // RefreshBound ставят её заново после загрузки).
+    m_bound = false;
     m_path = path;
     m_doc = sp::SpriteDoc();
     m_history.Clear();
@@ -193,11 +197,65 @@ void SpriteEditor::Load(const std::string& path) {
 }
 
 void SpriteEditor::Snapshot() {
+    // Девятина элемента — данные сцены: её правки — в историю сцены, иначе
+    // Ctrl+Z в редакторе не вернул бы элемент, а сцена не знала бы о правке.
+    if (BoundNine() && m_host) {
+        m_host->PushUndoSnapshot();
+        return;
+    }
     m_history.Push(m_doc);
     m_touched = true;
 }
 
+void SpriteEditor::OpenFor(EditorHost& host, const EditorHost::NineSliceTarget& target) {
+    m_host = &host;
+    m_bound = false;
+    if (target.ElementId == 0) {
+        // Картинка без элемента — её .sage9 (или выбранный кусок листа).
+        if (target.ImagePath != m_path) Load(target.ImagePath);
+        m_sel.clear();
+        m_mode = Mode::NineSlice;
+        m_nineZoom = 0.0f;
+        return;
+    }
+    sp::BoundSlice b;
+    if (!sp::ReadBound(host, target, b)) return;
+    if (b.Path != m_path) Load(b.Path);
+    m_bind = target;
+    m_bound = true;
+    m_boundSlice = b;
+    m_mode = Mode::NineSlice;
+    m_nineResult = false;
+    m_nineZoom = 0.0f;
+    if (b.ElementSize.x > 0.0f && b.ElementSize.y > 0.0f) m_previewSize = b.ElementSize;
+    // Кусок листа, который показывает элемент, — выбран и в листе: видно,
+    // какой это спрайт. Девятина при этом — значения элемента, не куска.
+    m_sel.clear();
+    const glm::ivec4 r = glm::ivec4(b.Sprite);
+    for (int i = 0; i < (int)m_doc.Sheet.Regions.size(); ++i)
+        if (r.z > 0 && m_doc.Sheet.Regions[(size_t)i].Rect == r) SelectOnly(i);
+}
+
+void SpriteEditor::RefreshBound() {
+    if (!m_bound || !m_host) return;
+    sp::BoundSlice b;
+    // Элемент удалили или сменили тип — остаётся картинка, работа не
+    // прерывается.
+    if (!sp::ReadBound(*m_host, m_bind, b)) {
+        m_bound = false;
+        return;
+    }
+    // Картинку элемента сменили в инспекторе — показать новую.
+    if (b.Path != m_path && !m_dirty) Load(b.Path);
+    m_bound = true;
+    m_boundSlice = b;
+}
+
 void SpriteEditor::Undo() {
+    if (BoundNine() && m_host) {
+        m_host->Undo();
+        return;
+    }
     if (!m_history.Undo(m_doc)) return;
     m_sel.erase(std::remove_if(m_sel.begin(), m_sel.end(),
                                [&](int i) { return i >= (int)m_doc.Sheet.Regions.size(); }),
@@ -207,6 +265,10 @@ void SpriteEditor::Undo() {
 }
 
 void SpriteEditor::Redo() {
+    if (BoundNine() && m_host) {
+        m_host->Redo();
+        return;
+    }
     if (!m_history.Redo(m_doc)) return;
     m_sel.erase(std::remove_if(m_sel.begin(), m_sel.end(),
                                [&](int i) { return i >= (int)m_doc.Sheet.Regions.size(); }),
@@ -255,6 +317,8 @@ void SpriteEditor::DeleteSelected() {
 // --- Окно --------------------------------------------------------------------
 
 void SpriteEditor::Draw(EditorHost& host, bool* open) {
+    m_host = &host;
+    RefreshBound();
     if (!m_inspectorLoaded) {
         m_inspectorVisible = sage::editor::prefs::GetBool(kPrefInspector, true);
         m_inspectorLoaded = true;
@@ -330,11 +394,11 @@ void SpriteEditor::DrawTopBar(EditorHost& host, bool* open) {
     const float saveW = ImGui::CalcTextSize(T("Save")).x + st.FramePadding.x * 2.0f + btn;
     const float right = btn * 5.0f + saveW + st.ItemSpacing.x * 6.0f + 12.0f;
     ImGui::SameLine(std::max(ImGui::GetCursorPosX() + 8.0f, ImGui::GetWindowContentRegionMax().x - right));
-    ImGui::BeginDisabled(!m_history.CanUndo());
+    ImGui::BeginDisabled(!m_history.CanUndo() && !BoundNine());
     if (EditorIcons::IconOnlyButton("undo", T("Undo (Ctrl+Z)"))) Undo();
     ImGui::EndDisabled();
     ImGui::SameLine();
-    ImGui::BeginDisabled(!m_history.CanRedo());
+    ImGui::BeginDisabled(!m_history.CanRedo() && !BoundNine());
     if (EditorIcons::IconOnlyButton("redo", T("Redo (Ctrl+Y)"))) Redo();
     ImGui::EndDisabled();
     ImGui::SameLine();

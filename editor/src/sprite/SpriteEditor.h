@@ -8,9 +8,10 @@
 
 #include "imgui.h"
 
+#include "../EditorHost.h"
 #include "SpriteEditModel.h"
+#include "SpriteEditorBinding.h"
 
-class EditorHost;
 class Texture;
 
 // ---------------------------------------------------------------------------
@@ -40,6 +41,11 @@ public:
     // Режим «Nine-Slice» — для самопроверки и кнопки инспектора.
     void ShowNineSlice(bool on) { m_mode = on ? Mode::NineSlice : Mode::Sheet; }
     void ShowNineResult(bool on) { m_nineResult = on; }
+    // Девятина из инспектора: вид элемента (свои значения элемента, правка
+    // вживую через историю сцены) или картинка без элемента. Открывает
+    // режим Nine-Slice на нужной текстуре и куске.
+    void OpenFor(EditorHost& host, const EditorHost::NineSliceTarget& target);
+    bool BoundToElement() const { return m_bound; }
     // «Create Sprites» без мыши — для снимка вопроса «Add / Replace».
     void CreateSpritesNow() { CreateSprites(); }
 
@@ -173,6 +179,15 @@ private:
     char m_nameBuf[128] = {};
     int m_nameFor = -1;
     bool m_nameBad = false;
+
+    // Девятина вида элемента (OpenFor): пока привязка жива, линии и числа
+    // правят элемент, а не лист и не .sage9.
+    EditorHost* m_host = nullptr;
+    bool m_bound = false;
+    EditorHost::NineSliceTarget m_bind;
+    sage::editor::sprite::BoundSlice m_boundSlice;
+    bool BoundNine() const { return m_bound && m_mode == Mode::NineSlice; }
+    void RefreshBound();
 
     // Девятина.
     int m_guide = -1;                      // 0..3 — какую линию тянут

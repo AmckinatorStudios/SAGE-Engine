@@ -42,6 +42,10 @@ CategoryInfo Info(SettingsPanel::Category c) {
             return {"keyboard", T("Game controls"), T("Game actions and the keys, buttons and sticks they are bound to.")};
         case SettingsPanel::Category::Advanced:
             return {"chart", T("Advanced"), T("Graphics API of the game and information about this machine.")};
+        case SettingsPanel::Category::BuildSettings:
+            return {"build", T("Build Settings"),
+                    T("How the built game presents itself: name, version, icon, file properties and player folders. "
+                      "Saved in project.sageproj.")};
         case SettingsPanel::Category::General:
             return {"gear", T("General"),
                     T("Language of the editor and the program that opens code. Stored for you, not in the project.")};
@@ -99,8 +103,8 @@ void SettingsPanel::SetSearch(const char* text) {
 }
 
 bool SettingsPanel::SelectByKey(const char* key) {
-    static const char* const kKeys[] = {"screen",   "quality", "lighting",  "controls",
-                                        "advanced", "general", "appearance"};
+    static const char* const kKeys[] = {"screen",   "quality", "lighting", "controls",
+                                        "advanced", "build",   "general",  "appearance"};
     static_assert(sizeof(kKeys) / sizeof(kKeys[0]) == (size_t)Category::Count, "ключ на каждый раздел");
     for (int i = 0; i < (int)Category::Count; ++i) {
         if (key && std::strcmp(key, kKeys[i]) == 0) {
@@ -236,12 +240,13 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         ImGui::EndGroup();
         ImGui::Dummy(ImVec2(0.0f, st.SpacingMD));
         if (m_cat == Category::Controls) m_controls.DrawBody(host);
+        else if (m_cat == Category::BuildSettings) m_build.DrawBody(host);
         else DrawCategory(host, m_cat, ctx);
     } else {
         // Поиск — по всем разделам сразу, с названием раздела над находками.
         for (int i = 0; i < (int)Category::Count; ++i) {
             // Управление — свой редактор со своим поиском, не строки.
-            if ((Category)i == Category::Controls) continue;
+            if ((Category)i == Category::Controls || (Category)i == Category::BuildSettings) continue;
             const int before = ctx.Shown;
             ImGui::PushID(i);
             const ImVec2 at = ImGui::GetCursorPos();
@@ -297,6 +302,13 @@ void SettingsPanel::DrawFooter(EditorHost& host) {
     if (IsEditorCategory(cat)) {
         ImGui::AlignTextToFramePadding();
         Sage::UI::TextSecondary("%s", T("Applied at once and stored in your editor profile"));
+        return;
+    }
+    // Сведения об игре пишутся сами после каждой правки — кнопки окна
+    // (Применить, Отмена, По умолчанию) про sage.cfg их не касаются.
+    if (cat == Category::BuildSettings) {
+        ImGui::AlignTextToFramePadding();
+        Sage::UI::TextSecondary("%s", T("Saved to project.sageproj after each edit"));
         return;
     }
     const bool controls = cat == Category::Controls;

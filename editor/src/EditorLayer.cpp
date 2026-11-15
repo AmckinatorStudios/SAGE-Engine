@@ -154,6 +154,9 @@ void EditorLayer::RegisterCommands() {
                     [this] { m_panels[EditorPanel::Settings] = true; }});
     m_commands.Add({"window.controls", T("Controls..."), window, "", "keyboard", {},
                     [this] { OpenSettings(SettingsPanel::Category::Controls); }});
+    // Сведения о собранной игре — страница окна настроек, а не своё окно.
+    m_commands.Add({"window.buildSettings", T("Build Settings..."), window, "", "build", {},
+                    [this] { OpenSettings(SettingsPanel::Category::BuildSettings); }});
     m_commands.Add({"window.reset", T("Reset Layout"), window, "", "grid", {},
                     [this] { m_panelRegistry.Restore(); m_rebuildDockLayout = true; }});
 
