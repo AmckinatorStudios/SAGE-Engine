@@ -12,6 +12,7 @@
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
 #include "../EditorPrefs.h"
+#include "CanvasToolbarRules.h"
 #include "InterfaceWidgets.h"
 #include "../Localization.h"
 #include "../PanelWindows.h"
@@ -68,20 +69,26 @@ void GameFrameSize(EditorHost& host, int& outW, int& outH) {
     outH = std::max(64, cfg.Height);
 }
 
-// Готовые разрешения. Вертикальное стоит рядом с горизонтальными нарочно:
-// телефон держат вертикально, и худ, собранный под 16:9, разъезжается на нём
-// первым делом.
-struct PreviewPreset { const char* Label; int W, H; };
-const PreviewPreset kPreviewPresets[] = {
-    {"1920 x 1080", 1920, 1080},
-    {"1280 x 720", 1280, 720},
-    {"1080 x 1920", 1080, 1920},
-};
+// РАЗДЕЛИТЕЛЬ ГРУПП: тонкая спокойная линия по центру строки с равными
+// отступами слева и справа. Только между смысловыми группами, не между
+// кнопками: панель — одна строка инструментов, а не набор карточек.
+constexpr float kSepGap = 8.0f;   // отступ по обе стороны линии
+constexpr float kStep = 3.0f;     // между кнопками одной группы
+
+void GroupSeparator() {
+    const float h = ImGui::GetFrameHeight();
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float x = std::floor(p.x) + 0.5f;
+    ImGui::GetWindowDrawList()->AddLine(ImVec2(x, p.y + h * 0.2f), ImVec2(x, p.y + h * 0.8f),
+                                        EditorTheme::Color32(EditorTheme::Role::Line), 1.0f);
+    ImGui::Dummy(ImVec2(1.0f, h));
+}
 
 } // namespace
 
 void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
     UIToolSettings& tools = host.Tools().UI;
+    namespace bar = sage::editor::canvasbar;
 
     namespace prefs = sage::editor::prefs;
     if (!m_backdropLoaded) {
@@ -92,8 +99,7 @@ void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
         tools.BackdropColor.b = std::clamp(prefs::GetFloat("ui.backdrop_b", tools.BackdropColor.b), 0.0f, 1.0f);
     }
     // Запись — ПО ОКОНЧАНИИ правки, а не на каждый кадр перетаскивания: файл
-    // настроек переписывается целиком, и делать это шестьдесят раз в секунду,
-    // пока тянут ползунок, значит молотить по диску ради одного числа.
+    // настроек переписывается целиком.
     auto save = [&tools]() {
         prefs::SetFloat("ui.backdrop", tools.Backdrop);
         prefs::SetFloat("ui.backdrop_r", tools.BackdropColor.r);
@@ -101,200 +107,240 @@ void InterfaceViewportPanel::DrawToolbar(EditorHost& host) {
         prefs::SetFloat("ui.backdrop_b", tools.BackdropColor.b);
     };
 
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
+    const float h = ImGui::GetFrameHeight();
+    const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
 
-    // Масштаб показа. Проценты, а не доли: «120%» читается сразу, «1.2» надо
-    // домножать в уме.
-    ImGui::SetNextItemWidth(110.0f);
-    float zoomPercent = m_zoom * 100.0f;
-    if (ImGui::DragFloat("##zoom", &zoomPercent, 1.0f, 10.0f, 400.0f, "%.0f%%")) {
-        m_zoom = std::clamp(zoomPercent / 100.0f, 0.10f, 4.0f);
-        m_autoFit = false;   // попросили масштаб числом — вписывать больше нечего
-    }
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Canvas zoom (wheel over the canvas)"));
-    ImGui::SameLine();
-    if (ImGui::Button(T("1:1"))) { m_zoom = 1.0f; m_pan = ImVec2(0, 0); m_autoFit = false; }
-    ImGui::SameLine();
-    // Кнопка нажата — режим ВКЛЮЧЁН: она и показывает, вписан ли кадр сейчас.
-    if (EditorIcons::IconOnlyButton("fit", T("Fit the frame into the panel"), m_autoFit))
-        RequestFit();
-
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-
-    // Фон под интерфейсом: сцена или ровная заливка. Ползунком, а не галкой,
-    // потому что худ правят ПОВЕРХ игры — там нужна полупрозрачная плёнка.
-    ImGui::SetNextItemWidth(110.0f);
-    ImGui::SliderFloat("##backdrop", &tools.Backdrop, 0.0f, 1.0f, "%.2f");
-    if (ImGui::IsItemDeactivatedAfterEdit()) save();
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", T("Backdrop under the interface.\n"
-                                  "1 — a flat fill instead of the game frame;\n"
-                                  "0 — design the HUD over the game."));
-    }
-    ImGui::SameLine();
-    // ЦВЕТ ПОДЛОЖКИ ВЫБИРАЮТ. Прошитый тёмно-серый годится ровно до первого
-    // тёмного интерфейса: чёрное меню на чёрной подложке — это пустой экран, на
-    // котором не видно даже того, что элемент вообще есть.
-    if (EditorIcons::IconOnlyButton("color", T("Backdrop color")))
-        ImGui::OpenPopup("BackdropColor###BackdropColor");
-    if (Sage::UI::MenuScope backdropMenu; ImGui::BeginPopup("BackdropColor###BackdropColor")) {
-        ImGui::TextDisabled("%s", T("Backdrop color"));
-        ImGui::Separator();
-        Sage::UI::ColorPickerInline("##backdrop_color", &tools.BackdropColor.x);
-        if (ImGui::IsItemDeactivatedAfterEdit()) save();
-        // Готовые крайности: тёмный интерфейс смотрят на светлом, светлый — на
-        // тёмном, и чаще всего нужен именно такой щелчок, а не подбор оттенка.
-        bool preset = false;
-        if (ImGui::Button(T("Dark"))) {
-            tools.BackdropColor = glm::vec3(0.10f, 0.11f, 0.13f);
-            preset = true;
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(T("Grey"))) {
-            tools.BackdropColor = glm::vec3(0.50f, 0.50f, 0.52f);
-            preset = true;
-        }
-        ImGui::SameLine();
-        if (ImGui::Button(T("Light"))) {
-            tools.BackdropColor = glm::vec3(0.92f, 0.93f, 0.95f);
-            preset = true;
-        }
-        if (preset) save();
-        ImGui::EndPopup();
-    }
-
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-
-    if (EditorIcons::IconOnlyButton("grid", T("Show the grid"), tools.ShowGrid))
-        tools.ShowGrid = !tools.ShowGrid;
-    ImGui::SameLine();
-    if (EditorIcons::IconOnlyButton("magnet", T("Snap to the grid"), tools.Snap.ToGrid))
-        tools.Snap.ToGrid = !tools.Snap.ToGrid;
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(84.0f);
-    ImGui::DragFloat("##cell", &tools.Snap.GridStep, 1.0f, 1.0f, 256.0f, "%.0f px");
-    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Grid cell"));
-    ImGui::SameLine();
-    if (EditorIcons::IconOnlyButton("align", T("Snap to edges and centers of neighbours"),
-                                    tools.Snap.ToEdges))
-        tools.Snap.ToEdges = !tools.Snap.ToEdges;
-    ImGui::SameLine();
-    if (EditorIcons::IconOnlyButton("wire", T("Outlines of all elements"), tools.ShowAllOutlines))
-        tools.ShowAllOutlines = !tools.ShowAllOutlines;
-
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-
-    // ВЫРАВНИВАНИЕ — НА ХОЛСТЕ, а не только в инспекторе. Поставить пять кнопок
-    // в ряд — действие над тем, что видно, и ходить за ним в другую панель
-    // значит каждый раз отрывать взгляд от того, что равняешь. Меню, а не
-    // восемь кнопок в строке: строка инструментов и так полна.
-    if (EditorIcons::IconOnlyButton("align-left", T("Align and distribute")))
-        ImGui::OpenPopup("AlignTools###AlignTools");
-    if (Sage::UI::MenuScope alignMenu; ImGui::BeginPopup("AlignTools###AlignTools")) {
-        const int count = SelectedUICount(host);
-        ImGui::TextDisabled("%s", count == 1 ? T("One element — aligned to its parent")
-                                             : T("Aligned to the last clicked element"));
-        ImGui::Separator();
-        struct AlignDef { const char* Id; sage::ui::AlignEdge Edge; const char* Tip; };
-        const AlignDef aligns[6] = {
-            {"al", sage::ui::AlignEdge::Left, T("Left edges")},
-            {"ac", sage::ui::AlignEdge::CenterX, T("Centers horizontally")},
-            {"ar", sage::ui::AlignEdge::Right, T("Right edges")},
-            {"at", sage::ui::AlignEdge::Top, T("Top edges")},
-            {"am", sage::ui::AlignEdge::CenterY, T("Centers vertically")},
-            {"ab", sage::ui::AlignEdge::Bottom, T("Bottom edges")},
-        };
-        for (int i = 0; i < 6; ++i) {
-            if (i == 3) ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-            else if (i > 0) ImGui::SameLine();
-            if (AlignButton(aligns[i].Id, aligns[i].Edge, aligns[i].Tip, count >= 1))
-                uiops::Align(host, aligns[i].Edge);
-        }
-        ImGui::Separator();
-        ImGui::TextDisabled("%s", T("Distribute"));
-        ImGui::BeginDisabled(count < 3);
-        if (ImGui::Button(T("Across"))) uiops::Distribute(host, true, false);
-        ImGui::SameLine();
-        if (ImGui::Button(T("Down"))) uiops::Distribute(host, false, false);
-        ImGui::EndDisabled();
-        if (count < 3) ImGui::TextDisabled("%s", T("Needs three elements or more."));
-        ImGui::EndPopup();
-    }
-    ImGui::SameLine();
-    // Ручки якоря на холсте. Выключаются: когда экран собран, девять точек у
-    // каждого выбранного элемента мешают смотреть на сам интерфейс.
-    if (EditorIcons::IconOnlyButton("anchor-tl", T("Edit the anchor on the canvas"),
-                                    tools.EditAnchors))
-        tools.EditAnchors = !tools.EditAnchors;
-    ImGui::SameLine();
-    if (EditorIcons::IconOnlyButton("rect", T("Safe area"), tools.ShowSafeArea))
-        ImGui::OpenPopup("SafeArea###SafeArea");
-    if (Sage::UI::MenuScope safeMenu; ImGui::BeginPopup("SafeArea###SafeArea")) {
-        ImGui::Checkbox(T("Safe area"), &tools.ShowSafeArea);
-        EditorTheme::Hint(T("Everything outside it can be cut off: a camera\n"
-                            "notch, rounded corners, TV overscan."));
-        ImGui::SetNextItemWidth(140.0f);
-        ImGui::SliderFloat("##safe", &tools.SafeAreaPercent, 0.0f, 20.0f, "%.1f%%");
-        ImGui::EndPopup();
-    }
-
-    // Справа — разрешение, в котором всё это увидит игрок. Не украшение:
-    // именно от него считается вся раскладка, и человек должен видеть, подо
-    // что верстает.
+    // --- Разрешение — компактно справа, первой строкой ----------------------
+    //
+    // Рисуется ПЕРВЫМ: группы инструментов знают, сколько места справа занято,
+    // и уходят на следующую строку, а не наезжают на него.
     int gw = 0, gh = 0;
     GameFrameSize(host, gw, gh);
+    const bar::PreviewMode mode = bar::ModeOf(tools);
     char res[64];
     std::snprintf(res, sizeof(res), "%d x %d", gw, gh);
-    const bool custom = tools.PreviewSize.x > 0 && tools.PreviewSize.y > 0;
-    const float w = ImGui::CalcTextSize(res).x + 110.0f;
-    ImGui::SameLine(std::max(ImGui::GetCursorPosX() + 8.0f, ImGui::GetWindowWidth() - w));
-    // РАЗРЕШЕНИЕ СТАЛО КНОПКОЙ, а не подписью. Подпись отвечала на «подо что
-    // верстаю», но не давала сделать главного — посмотреть, что будет на
-    // другом экране, а якоря и растяжения затем и нужны.
-    ImGui::SetNextItemWidth(w - 20.0f);
+    const float resW = ImGui::CalcTextSize(res).x + ImGui::GetStyle().FramePadding.x * 2.0f + h + 8.0f;
+    const ImVec2 rowStart = ImGui::GetCursorScreenPos();
+    ImGui::SetCursorScreenPos(ImVec2(std::max(rowStart.x, right - resW), rowStart.y));
+    ImGui::SetNextItemWidth(resW);
     if (ImGui::BeginCombo("##preview_res", res)) {
-        if (ImGui::Selectable(T("As in the game"), !custom)) tools.PreviewSize = glm::ivec2(0);
+        if (ImGui::Selectable(T("As in the game"), mode == bar::PreviewMode::Game)) {
+            tools.PreviewSize = glm::ivec2(0);
+            tools.PreviewCustom = false;
+            RequestFit();
+        }
         ImGui::Separator();
-        for (const PreviewPreset& p : kPreviewPresets) {
-            const bool on = custom && tools.PreviewSize.x == p.W && tools.PreviewSize.y == p.H;
+        for (const bar::PreviewPreset& p : bar::kPreviewPresets) {
+            const bool on = mode == bar::PreviewMode::Preset && tools.PreviewSize.x == p.W && tools.PreviewSize.y == p.H;
             if (ImGui::Selectable(p.Label, on)) {
                 tools.PreviewSize = glm::ivec2(p.W, p.H);
+                tools.PreviewCustom = false;
                 RequestFit();
             }
         }
         ImGui::Separator();
-        ImGui::TextDisabled("%s", T("Custom"));
-        int wh[2] = {custom ? tools.PreviewSize.x : gw, custom ? tools.PreviewSize.y : gh};
-        ImGui::SetNextItemWidth(160.0f);
-        if (ImGui::DragInt2("##custom_res", wh, 1.0f, 64, 8192)) {
-            tools.PreviewSize = glm::ivec2(std::max(64, wh[0]), std::max(64, wh[1]));
-            RequestFit();
+        // СВОЁ — явным выбором: поля и «Повернуть» появляются только у него.
+        if (ImGui::Selectable(T("Custom"), mode == bar::PreviewMode::Custom, ImGuiSelectableFlags_NoAutoClosePopups)) {
+            if (mode != bar::PreviewMode::Custom) tools.PreviewSize = glm::ivec2(gw, gh);
+            tools.PreviewCustom = true;
         }
-        // ПОВЕРНУТЬ — ОДНОЙ КНОПКОЙ. Проверка «как это на телефоне боком»
-        // делается постоянно, а руками это два поля, которые надо поменять
-        // местами, не перепутав.
-        if (ImGui::Button(T("Rotate the screen"))) {
-            tools.PreviewSize = glm::ivec2(gh, gw);
-            RequestFit();
+        if (bar::ShowCustomResolution(tools)) {
+            int wh[2] = {tools.PreviewSize.x, tools.PreviewSize.y};
+            ImGui::SetNextItemWidth(160.0f);
+            if (ImGui::DragInt2("##custom_res", wh, 1.0f, 64, 8192)) {
+                tools.PreviewSize = glm::ivec2(std::max(64, wh[0]), std::max(64, wh[1]));
+                RequestFit();
+            }
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Width and height of the preview frame"));
+            // ПОВЕРНУТЬ — ОДНОЙ КНОПКОЙ: «как это на телефоне боком» руками —
+            // два поля, которые надо поменять местами, не перепутав.
+            if (EditorIcons::Button("refresh", T("Rotate the screen"))) {
+                tools.PreviewSize = glm::ivec2(tools.PreviewSize.y, tools.PreviewSize.x);
+                RequestFit();
+            }
         }
         ImGui::EndCombo();
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", custom
+        ImGui::SetTooltip("%s", mode != bar::PreviewMode::Game
             ? T("Preview resolution. The layout is computed in it, and the game\n"
                 "settings are not touched — this is a look, not a change.")
             : T("Game resolution from Game Settings.\n"
                 "The layout is computed in it, so this is exactly\n"
                 "what the player will see."));
     }
+    const float rowLimit = right - resW - kSepGap;   // первая строка — до разрешения
+    ImGui::SetCursorScreenPos(rowStart);
+
+    // --- Группы: строка с разделителями, перенос по ширине -------------------
+    int row = 0;
+    auto group = [&](int i, const auto& body) {
+        if (i > 0) {
+            const float prevEnd = ImGui::GetItemRectMax().x;
+            const float limit = row == 0 ? rowLimit : right;
+            // Встаёт в строку — с разделителем; нет — на следующую строку, без
+            // него (линия в начале строки ничего не разделяет).
+            if (prevEnd + 2.0f * kSepGap + 1.0f + m_groupW[i] <= limit) {
+                ImGui::SameLine(0.0f, kSepGap);
+                GroupSeparator();
+                ImGui::SameLine(0.0f, kSepGap);
+            } else {
+                ++row;
+            }
+        }
+        ImGui::BeginGroup();
+        body();
+        ImGui::EndGroup();
+        m_groupW[i] = ImGui::GetItemRectSize().x;
+    };
+
+    // 1. ПРОСМОТР: масштаб, 1:1, вписать.
+    group(0, [&] {
+        // Проценты, а не доли: «120%» читается сразу.
+        ImGui::SetNextItemWidth(72.0f);
+        float zoomPercent = m_zoom * 100.0f;
+        if (ImGui::DragFloat("##zoom", &zoomPercent, 1.0f, 10.0f, 400.0f, "%.0f%%")) {
+            m_zoom = std::clamp(zoomPercent / 100.0f, 0.10f, 4.0f);
+            m_autoFit = false;   // попросили масштаб числом — вписывать больше нечего
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Canvas zoom (wheel over the canvas)"));
+        ImGui::SameLine(0.0f, kStep);
+        if (ImGui::Button("1:1", ImVec2(0.0f, h))) { m_zoom = 1.0f; m_pan = ImVec2(0, 0); m_autoFit = false; }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Actual size: one frame pixel is one screen pixel"));
+        ImGui::SameLine(0.0f, kStep);
+        // Кнопка нажата — режим ВКЛЮЧЁН: она и показывает, вписан ли кадр.
+        if (EditorIcons::IconOnlyButton("fit", T("Fit the frame into the panel"), m_autoFit)) RequestFit();
+    });
+
+    // 2. СЕТКА И ПРИВЯЗКА. Показ сетки и притяжка к ней — независимы; шаг
+    // общий, порог — общий у сетки и краёв (алгоритм ui::Snap не меняется).
+    group(1, [&] {
+        if (EditorIcons::IconOnlyButton("grid", T("Show the grid"), tools.ShowGrid)) tools.ShowGrid = !tools.ShowGrid;
+        ImGui::SameLine(0.0f, kStep);
+        if (EditorIcons::IconOnlyButton("magnet", T("Snap to the grid"), tools.Snap.ToGrid))
+            tools.Snap.ToGrid = !tools.Snap.ToGrid;
+        if (bar::ShowGridStep(tools)) {
+            ImGui::SameLine(0.0f, kStep);
+            ImGui::SetNextItemWidth(64.0f);
+            ImGui::DragFloat("##cell", &tools.Snap.GridStep, 1.0f, 1.0f, 256.0f, "%.0f px");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Grid step: of the grid you see and of snapping to it"));
+        }
+        ImGui::SameLine(0.0f, kStep);
+        if (EditorIcons::IconOnlyButton("align", T("Snap to edges and centers of the parent and neighbours"),
+                                        tools.Snap.ToEdges))
+            tools.Snap.ToEdges = !tools.Snap.ToEdges;
+        if (bar::ShowSnapThreshold(tools)) {
+            ImGui::SameLine(0.0f, kStep);
+            ImGui::SetNextItemWidth(56.0f);
+            ImGui::DragFloat("##snap_threshold", &tools.Snap.Threshold, 0.25f, 1.0f, 32.0f, "%.0f px");
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", T("Snap distance: how close, in frame pixels, an edge has to come to stick"));
+        }
+    });
+
+    // 3. РЕДАКТИРОВАНИЕ: выравнивание и якоря.
+    group(2, [&] {
+        // ВЫРАВНИВАНИЕ — НА ХОЛСТЕ, а не только в инспекторе: действие над тем,
+        // что видно. Меню, а не восемь кнопок в строке.
+        if (EditorIcons::IconOnlyButton("align-left", T("Align and distribute")))
+            ImGui::OpenPopup("AlignTools###AlignTools");
+        if (Sage::UI::MenuScope alignMenu; ImGui::BeginPopup("AlignTools###AlignTools")) {
+            const int count = SelectedUICount(host);
+            ImGui::TextDisabled("%s", count == 0   ? T("Select elements to align them")
+                                      : count == 1 ? T("One element — aligned to its parent")
+                                                   : T("Aligned to the last clicked element"));
+            ImGui::Separator();
+            struct AlignDef { const char* Id; sage::ui::AlignEdge Edge; const char* Tip; };
+            const AlignDef aligns[6] = {
+                {"al", sage::ui::AlignEdge::Left, T("Left edges")},
+                {"ac", sage::ui::AlignEdge::CenterX, T("Centers horizontally")},
+                {"ar", sage::ui::AlignEdge::Right, T("Right edges")},
+                {"at", sage::ui::AlignEdge::Top, T("Top edges")},
+                {"am", sage::ui::AlignEdge::CenterY, T("Centers vertically")},
+                {"ab", sage::ui::AlignEdge::Bottom, T("Bottom edges")},
+            };
+            for (int i = 0; i < 6; ++i) {
+                if (i == 3) ImGui::SameLine(0.0f, 10.0f);
+                else if (i > 0) ImGui::SameLine(0.0f, kStep);
+                if (AlignButton(aligns[i].Id, aligns[i].Edge, aligns[i].Tip, count >= 1))
+                    uiops::Align(host, aligns[i].Edge);
+            }
+            // Распределение — только у трёх и больше: с двумя распределять
+            // нечего, и пункты без смысла не показываются вовсе.
+            if (count >= 3) {
+                ImGui::Separator();
+                ImGui::TextDisabled("%s", T("Distribute"));
+                if (EditorIcons::IconOnlyButton("distribute-x", T("Distribute across"))) uiops::Distribute(host, true, false);
+                ImGui::SameLine(0.0f, kStep);
+                if (EditorIcons::IconOnlyButton("distribute-y", T("Distribute down"))) uiops::Distribute(host, false, false);
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::SameLine(0.0f, kStep);
+        // Ручки якоря на холсте: собранный экран удобнее смотреть без них.
+        if (EditorIcons::IconOnlyButton("anchor-tl", T("Edit the anchor on the canvas"), tools.EditAnchors))
+            tools.EditAnchors = !tools.EditAnchors;
+    });
+
+    // 4. ОТОБРАЖЕНИЕ: подложка, её цвет, рамки всех элементов.
+    group(3, [&] {
+        // Ползунком, а не галкой: худ правят ПОВЕРХ игры — там нужна
+        // полупрозрачная плёнка.
+        ImGui::SetNextItemWidth(80.0f);
+        ImGui::SliderFloat("##backdrop", &tools.Backdrop, 0.0f, 1.0f, "%.2f");
+        if (ImGui::IsItemDeactivatedAfterEdit()) save();
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", T("Backdrop under the interface.\n"
+                                      "1 — a flat fill instead of the game frame;\n"
+                                      "0 — design the HUD over the game."));
+        }
+        // Цвет — образцом, и только когда подложка есть: при нуле он ни на
+        // что не влияет.
+        if (bar::ShowBackdropColor(tools)) {
+            ImGui::SameLine(0.0f, kStep);
+            const ImVec4 c(tools.BackdropColor.r, tools.BackdropColor.g, tools.BackdropColor.b, 1.0f);
+            if (ImGui::ColorButton("##backdrop_swatch", c, ImGuiColorEditFlags_NoTooltip, ImVec2(h, h)))
+                ImGui::OpenPopup("BackdropColor###BackdropColor");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Backdrop color"));
+        }
+        if (Sage::UI::MenuScope backdropMenu; ImGui::BeginPopup("BackdropColor###BackdropColor")) {
+            ImGui::TextDisabled("%s", T("Backdrop color"));
+            ImGui::Separator();
+            Sage::UI::ColorPickerInline("##backdrop_color", &tools.BackdropColor.x);
+            if (ImGui::IsItemDeactivatedAfterEdit()) save();
+            // Готовые крайности: тёмный интерфейс смотрят на светлом, светлый —
+            // на тёмном.
+            bool preset = false;
+            if (ImGui::Button(T("Dark"))) { tools.BackdropColor = glm::vec3(0.10f, 0.11f, 0.13f); preset = true; }
+            ImGui::SameLine();
+            if (ImGui::Button(T("Grey"))) { tools.BackdropColor = glm::vec3(0.50f, 0.50f, 0.52f); preset = true; }
+            ImGui::SameLine();
+            if (ImGui::Button(T("Light"))) { tools.BackdropColor = glm::vec3(0.92f, 0.93f, 0.95f); preset = true; }
+            if (preset) save();
+            ImGui::EndPopup();
+        }
+        ImGui::SameLine(0.0f, kStep);
+        if (EditorIcons::IconOnlyButton("wire", T("Outlines of all elements (the selected one is always outlined)"),
+                                        tools.ShowAllOutlines))
+            tools.ShowAllOutlines = !tools.ShowAllOutlines;
+    });
+
+    // 5. НАПРАВЛЯЮЩИЕ: расстояния при перемещении, безопасная зона.
+    group(4, [&] {
+        if (EditorIcons::IconOnlyButton("ruler", T("Distances to the parent's edges while moving"), tools.ShowDistances))
+            tools.ShowDistances = !tools.ShowDistances;
+        ImGui::SameLine(0.0f, kStep);
+        if (EditorIcons::IconOnlyButton("focus", T("Safe area: everything outside it can be cut off (camera notch, "
+                                                   "rounded corners, TV overscan)"),
+                                        tools.ShowSafeArea))
+            tools.ShowSafeArea = !tools.ShowSafeArea;
+        if (bar::ShowSafeAreaPercent(tools)) {
+            ImGui::SameLine(0.0f, kStep);
+            ImGui::SetNextItemWidth(60.0f);
+            ImGui::DragFloat("##safe", &tools.SafeAreaPercent, 0.1f, 0.0f, 20.0f, "%.1f%%");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Safe area margin, percent of the frame"));
+        }
+    });
 }
 
 // ============================================================================

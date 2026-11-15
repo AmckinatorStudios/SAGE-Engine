@@ -100,6 +100,7 @@ ICONS = {
     "align-center-y": "layout-align-middle", "align-bottom": "layout-align-bottom",
     # Распределение — значком, а не словами «По горизонтали»: в строке
     # выравнивания слова не помещались в инспектор.
+    "ruler": "ruler-measure",
     "distribute-x": "layout-distribute-vertical", "distribute-y": "layout-distribute-horizontal",
     # Цвет подложки — образец краски: кнопка открывает выбор цвета, а не
     # материал (тот уже занял «palette»).
