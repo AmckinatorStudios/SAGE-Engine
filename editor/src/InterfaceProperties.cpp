@@ -11,6 +11,7 @@
 
 #include "AssetSlot.h"
 #include "EditorHost.h"
+#include "InspectorControls.h"
 #include "EditorIcons.h"
 #include "EditorTheme.h"
 #include "Localization.h"
@@ -21,6 +22,8 @@
 #include "sage/ui/UISceneSystem.h"
 
 namespace sage::editor {
+
+namespace ictl = sage::editor::ictl;
 
 namespace ui = sage::ui;
 
@@ -77,22 +80,23 @@ void DrawInterfaceCanvas(EditorHost& host, GameObject interfaceObject) {
     // экрана весь экран.
     const char* kModes[] = {T("Pixels"), T("Scale to reference"), T("Whole-number scale")};
     int mode = (int)info->Canvas.Mode;
-    if (ImGui::Combo(T("Scale mode"), &mode, kModes, 3)) {
+    // Те же контролы, что у элемента: «Подпись: [поле]», пара W/H в строке.
+    ictl::Label(T("Scale mode"));
+    if (ImGui::Combo("##scale_mode", &mode, kModes, 3)) {
         host.PushUndoSnapshot();
         info->Canvas.Mode = (ui::Canvas::Scale)mode;
     }
     if (info->Canvas.Mode == ui::Canvas::Scale::Pixels) return;
-    float ref[2] = {info->Canvas.Reference.x, info->Canvas.Reference.y};
-    if (ImGui::DragFloat2(T("Reference resolution"), ref, 1.0f, 16.0f, 8192.0f, "%.0f"))
-        info->Canvas.Reference = {ref[0], ref[1]};
-    host.TrackLastImGuiItem();
+    ictl::NumOpts ro;
+    ro.Min = 16.0f;
+    ro.Max = 8192.0f;
+    ictl::PairRow(host, T("Reference resolution"), &info->Canvas.Reference.x, &info->Canvas.Reference.y, "W", "H",
+                  ro);
     if (info->Canvas.Mode == ui::Canvas::Scale::ScaleWithSize) {
-        ImGui::SliderFloat(T("Match width/height"), &info->Canvas.MatchWidthOrHeight, 0.0f, 1.0f);
-        host.TrackLastImGuiItem();
+        ictl::SliderNumber(host, T("Match width/height"), &info->Canvas.MatchWidthOrHeight, 0.0f, 1.0f);
         EditorTheme::Hint(T("0 — follow width, 1 — follow height"));
     } else {
-        ImGui::DragInt(T("Largest scale"), &info->Canvas.MaxScale, 0.05f, 0, 16);
-        host.TrackLastImGuiItem();
+        ictl::Integer(host, T("Largest scale"), &info->Canvas.MaxScale, 0, 16);
         EditorTheme::Hint(T("The largest whole number that fits the reference screen: every source pixel stays the same size. 0 — no limit"));
     }
 }

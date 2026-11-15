@@ -6,6 +6,7 @@
 // (раскрытый список, выключатель, круговая шкала…). Только через переменную
 // окружения: в меню и окнах редактора этого нет.
 // ---------------------------------------------------------------------------
+#include <cstdlib>
 #include <string>
 
 #include <entt/entt.hpp>
@@ -15,6 +16,7 @@
 #include "sage/core/Paths.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/SpriteSheet.h"
+#include "sage/ui/UIPart.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UIStyle.h"
 
@@ -186,6 +188,15 @@ void EditorLayer::RunUISampleHook(const std::string& sample) {
     if (const std::string pick = sage::EnvString("SAGE_EDITOR_UI_SELECT"); !pick.empty()) {
         if (GameObject o = m_scene->FindByName(pick); o.Valid()) {
             m_selection.SetPrimary(o.Id());
+            // Своё оформление — снять вложенные группы вида (квадратик,
+            // источник картинки, скругление), которых у оформления движка нет.
+            if (std::getenv("SAGE_EDITOR_UI_CUSTOM")) {
+                entt::registry& reg = m_scene->Registry();
+                if (ui::Element* el = reg.try_get<ui::Element>(o.Entity())) {
+                    ui::BakeEngineSkin(reg, o.Entity());
+                    el->Skin = ui::Element::SkinMode::Custom;
+                }
+            }
             m_focusPanelId = "InterfaceInspector";
             m_focusPanelFrames = 60;
         }

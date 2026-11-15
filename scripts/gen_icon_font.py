@@ -83,7 +83,7 @@ ICONS = {
     "trash": "trash", "copy": "copy", "save": "device-floppy", "open": "folder-open",
     # Перечёркнутый глаз — «не видно». Пара к «eye» у переключателя видимости:
     # замок там означал бы «нельзя трогать», а это другое свойство.
-    "plus": "plus", "eye": "eye", "eye-off": "eye-off", "lock": "lock",
+    "plus": "plus", "minus": "minus", "eye": "eye", "eye-off": "eye-off", "lock": "lock",
     # Открытый замок — пара к закрытому: связь осей включают и выключают одной
     # кнопкой, и состояние читается по рисунку, а не по цвету.
     "unlock": "lock-open",
@@ -98,6 +98,9 @@ ICONS = {
     "align-left": "layout-align-left", "align-center-x": "layout-align-center",
     "align-right": "layout-align-right", "align-top": "layout-align-top",
     "align-center-y": "layout-align-middle", "align-bottom": "layout-align-bottom",
+    # Распределение — значком, а не словами «По горизонтали»: в строке
+    # выравнивания слова не помещались в инспектор.
+    "distribute-x": "layout-distribute-vertical", "distribute-y": "layout-distribute-horizontal",
     # Цвет подложки — образец краски: кнопка открывает выбор цвета, а не
     # материал (тот уже занял «palette»).
     "color": "color-swatch",

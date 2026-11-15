@@ -199,7 +199,15 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
     auto drawOwn = [&](const std::vector<const ui::PartType*>& with, const char* section, bool titled) {
         for (const ui::PartType* p : with) {
             // Несколько частей в одном разделе — подписью группы каждая.
-            if (titled || with.size() > 1) ictl::GroupTitle(T(p->Title));
+            // Подпись части не повторяет подпись её первого поля («Текст:
+            // Текст:» у поля ввода).
+            const char* first = nullptr;
+            for (const ui::PartField& f : *p->Fields) {
+                const bool here = section ? (f.Section && std::strcmp(f.Section, section) == 0) : !f.Section;
+                if (!f.Hidden && here) { first = f.Label; break; }
+            }
+            const bool echo = first && p->Title && std::strcmp(first, p->Title) == 0;
+            if ((titled || with.size() > 1) && !echo) ictl::GroupTitle(T(p->Title));
             FieldView v;
             v.BySection = true;
             v.Section = section;
