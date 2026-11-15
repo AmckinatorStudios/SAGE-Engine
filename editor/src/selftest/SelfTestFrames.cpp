@@ -550,6 +550,11 @@ void EditorLayer::CheckUiInspectorFrame() {
             LOG_ERROR("Editor") << "UI_INSPECTOR: FAIL — новых ошибок в консоли: " << added;
     };
 
+    // Инспектор интерфейса — вперёд своей вкладки на всю проверку: панель за
+    // другой вкладкой не рисуется, и проверка «каждого типа» проходила, не
+    // показав ни одного поля (так в main попало зависание контролов).
+    m_focusPanelId = "InterfaceInspector";
+    m_focusPanelFrames = 2;
     const int step = m_uiInspectorStep++;
     if (step == 0) {
         m_uiInspectorErrors = m_console.ErrorCount();

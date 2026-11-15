@@ -27,7 +27,7 @@ std::function<void()>& Sink() {
 // Снимок перед правкой — в историю инструмента, если он её подменил.
 void Snapshot(EditorHost& host) {
     if (Sink()) Sink()();
-    else Snapshot(host);
+    else host.PushUndoSnapshot();
 }
 
 // Перетаскивание и ввод: один шаг истории на всё касание.
@@ -35,7 +35,7 @@ void Track(EditorHost& host) {
     if (Sink()) {
         if (ImGui::IsItemActivated()) Sink()();
     } else {
-        Track(host);
+        host.TrackLastImGuiItem();
     }
 }
 
