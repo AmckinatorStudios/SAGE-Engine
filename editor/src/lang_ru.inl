@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 4031.
+// Язык: Русский. Строк: 4032.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -4804,6 +4804,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Параметров: %d (правятся в файле .sagemat)"},
     {"Parent folders",
      "Папки выше"},
+    {"Part",
+     "Часть"},
     {"Part ",
      "Часть "},
     {"Particle Emitter",

@@ -11,6 +11,7 @@
 // ===========================================================================
 #include "TestFramework.h"
 
+#include <cstdio>
 #include <functional>
 
 #include "imgui.h"
@@ -119,6 +120,14 @@ TEST(UiKit_dropdown_opens_from_the_whole_field) {
         f.Click(ImGui::GetStyle().WindowPadding.x + x, y, 400.0f, draw);
         f.Run(400.0f, draw);
         CHECK_TRUE(opened);
+        // Окно списка на экране: есть, видно, ненулевого размера.
+        const ImGuiWindow* popup = nullptr;
+        for (ImGuiWindow* w : f.Ctx->Windows)
+            if ((w->Flags & ImGuiWindowFlags_Popup) && w->Active) popup = w;
+        CHECK_TRUE(popup != nullptr);
+        if (popup) {
+            CHECK_TRUE(popup->Size.x > 10.0f && popup->Size.y > 10.0f);
+        }
     }
 }
 
@@ -177,4 +186,33 @@ TEST(UiKit_metrics_follow_the_ui_scale) {
     // Доли высоты поля от масштаба не зависят: поле растёт вместе с кеглем.
     CHECK_NEAR(two.StepButton, one.StepButton, 1e-6f);
     CHECK_NEAR(two.Rounding, 6.0f, 1e-6f);
+}
+
+TEST(UiKit_dropdown_with_input_stays_open) {
+    KitFrame f;
+    bool opened = false;
+    static char buf[64] = "";
+    auto draw = [&] {
+        ImGui::SetNextItemWidth(200.0f);
+        opened = false;
+        if (ictl::BeginDropdown("##tag", "none")) {
+            opened = true;
+            ImGui::Selectable("none", true);
+            ImGui::Separator();
+            ImGui::SetNextItemWidth(150.0f);
+            ImGui::InputTextWithHint("##new_tag", "New tag", buf, sizeof(buf), ImGuiInputTextFlags_EnterReturnsTrue);
+            ictl::EndDropdown();
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("tip");
+    };
+    f.Run(400.0f, draw);
+    const float y = ImGui::GetStyle().WindowPadding.y + ImGui::GetFrameHeight() * 0.5f;
+    f.Click(ImGui::GetStyle().WindowPadding.x + 50.0f, y, 400.0f, draw);
+    for (int i = 0; i < 5; ++i) f.Run(400.0f, draw);
+    CHECK_TRUE(opened);
+    const ImGuiWindow* popup = nullptr;
+    for (ImGuiWindow* w : f.Ctx->Windows)
+        if ((w->Flags & ImGuiWindowFlags_Popup) && w->Active) popup = w;
+    CHECK_TRUE(popup != nullptr);
+    CHECK_TRUE(popup && popup->Size.y > 30.0f);
 }

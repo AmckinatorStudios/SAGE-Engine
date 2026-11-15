@@ -34,8 +34,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 SOURCES = sorted(p for d in ("editor/src", "engine/src") for p in (ROOT / d).rglob("*.cpp"))
 
-BEGIN_COMBO = re.compile(r'ImGui::BeginCombo\s*\(')
-END_COMBO = re.compile(r'ImGui::EndCombo\s*\(')
+# Список kit (ictl::BeginDropdown/EndDropdown) — та же пара: внутри него
+# BeginCombo/EndCombo, и закрывать его EndPopup так же нельзя.
+BEGIN_COMBO = re.compile(r'(ImGui::BeginCombo|\bBeginDropdown)\s*\(')
+END_COMBO = re.compile(r'(ImGui::EndCombo|\bEndDropdown)\s*\(')
+# Сама обёртка kit: BeginCombo в BeginDropdown, EndCombo — в EndDropdown.
+KIT_WRAPPER = "editor/src/InspectorControls_Choice.cpp"
 END_POPUP = re.compile(r'ImGui::EndPopup\s*\(')
 # EditorIcons::Button("значок", "##подпись" — подпись скрывать нечем.
 ICON_BUTTON_HIDDEN = re.compile(r'EditorIcons::Button\s*\(\s*"[^"]*"\s*,\s*"##')
@@ -62,6 +66,10 @@ def main():
                                 f"она будет напечатана и растянет кнопку; "
                                 f"нужен EditorIcons::IconOnlyButton")
             if not BEGIN_COMBO.search(line):
+                continue
+            # Объявление/определение обёртки и сама обёртка — не список.
+            if re.search(r'\bbool\s+BeginDropdown\s*\(', line) or (
+                    str(rel).replace("\\", "/") == KIT_WRAPPER and "ImGui::BeginCombo" in line):
                 continue
             combos += 1
             # Тело списка: от строки с BeginCombo до закрытия её блока.

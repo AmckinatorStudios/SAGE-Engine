@@ -105,7 +105,8 @@ void InspectorPanel::DrawObjectIdentity(EditorHost& host, GameObject obj) {
         const TagComponent* tc = reg.try_get<TagComponent>(obj.Entity());
         const std::string current = tc ? tc->Tag : std::string();
         ImGui::SetNextItemWidth(colW);
-        if (ictl::BeginDropdown("##tag", current.empty() ? T("none") : current.c_str())) {
+        const bool tagOpen = ictl::BeginDropdown("##tag", current.empty() ? T("none") : current.c_str());
+        if (tagOpen) {
             if (ImGui::Selectable(T("none"), current.empty()) && !current.empty()) {
                 host.PushUndoSnapshot();
                 reg.remove<TagComponent>(obj.Entity());
@@ -131,7 +132,8 @@ void InspectorPanel::DrawObjectIdentity(EditorHost& host, GameObject obj) {
             }
             ictl::EndDropdown();
         }
-        if (ImGui::IsItemHovered())
+        // Подсказка — только у закрытого списка: иначе она ложится поверх пунктов.
+        if (!tagOpen && ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("Group name for scripts: scene:FindByTag(\"Enemy\")"));
     }
     ImGui::EndGroup();
@@ -143,7 +145,8 @@ void InspectorPanel::DrawObjectIdentity(EditorHost& host, GameObject obj) {
         const std::string current = sage::scene::LayerOf(scene, obj.Id());
         bool manage = false;
         ImGui::SetNextItemWidth(colW);
-        if (ictl::BeginDropdown("##scene_layer", current.empty() ? T("none") : current.c_str())) {
+        const bool layerOpen = ictl::BeginDropdown("##scene_layer", current.empty() ? T("none") : current.c_str());
+        if (layerOpen) {
             if (ImGui::Selectable(T("none"), current.empty()) && !current.empty()) {
                 host.PushUndoSnapshot();
                 sage::scene::SetLayerOf(scene, obj.Id(), "");
@@ -158,7 +161,7 @@ void InspectorPanel::DrawObjectIdentity(EditorHost& host, GameObject obj) {
             if (EditorIcons::MenuItem("pencil", T("Edit scene layers..."))) manage = true;
             ictl::EndDropdown();
         }
-        if (ImGui::IsItemHovered())
+        if (!layerOpen && ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("Scene layer: a group of objects for sorting and filtering. "
                                       "It is not the render layer of a mesh."));
         // Правка списка — своим окном у этого же поля (открывается из списка).
