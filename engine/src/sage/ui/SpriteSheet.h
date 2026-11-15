@@ -4,6 +4,8 @@
 
 #include <glm/glm.hpp>
 
+#include "sage/ui/NineSlice.h"
+
 // ---------------------------------------------------------------------------
 // ЛИСТ СПРАЙТОВ — картинка, нарезанная на именованные куски.
 //
@@ -27,9 +29,24 @@ struct SpriteRegion {
     std::string Name;
     glm::ivec4 Rect{0};          // x, y, w, h
     glm::vec4 Slice{0.0f};       // девятина: лево, верх, право, низ (нули — нет)
+    // Девятина куска целиком — СВОЯ у каждого куска: заливка краёв и середины,
+    // рисовать ли середину. Общая на всю текстуру (.sage9) к куску не
+    // относится — иначе рамка и кнопка одного листа тянулись бы одинаково.
+    SliceFill EdgeFill = SliceFill::Stretch;
+    SliceFill CenterFill = SliceFill::Stretch;
+    bool DrawCenter = true;
     // Точка опоры в долях куска (0,0 — левый верх): вокруг неё кусок
     // поворачивается и ею ставится — у меча это рукоять, а не середина.
     glm::vec2 Pivot{0.5f, 0.5f};
+
+    NineSlice NineSliceOf() const {
+        NineSlice n;
+        n.SetBorder(Slice);
+        n.EdgeFill = EdgeFill;
+        n.CenterFill = CenterFill;
+        n.DrawCenter = DrawCenter;
+        return n;
+    }
 };
 
 // ПОСЛЕДОВАНИЕ КАДРОВ — куски листа по порядку и скорость: бег персонажа,
@@ -53,16 +70,51 @@ struct AtlasInput {
 
 struct SpriteGrid {
     int CellW = 16, CellH = 16;  // размер клетки
-    int PadX = 0, PadY = 0;      // промежуток между клетками
-    int OffX = 0, OffY = 0;      // поле от левого верхнего угла
+    int PadX = 0, PadY = 0;      // промежуток между клетками (Spacing)
+    int OffX = 0, OffY = 0;      // сдвиг первой клетки (Offset)
+    // Поля от краёв картинки (Margin): лево, верх, право, низ — область нарезки.
+    glm::ivec4 Margin{0};
     std::string Prefix = "sprite";
     bool SkipEmpty = true;       // пустые (прозрачные) клетки не заводить
 };
+
+// Автоматическая нарезка по островам непрозрачных пикселей.
+struct SpriteAuto {
+    float AlphaCutoff = 0.05f;   // с какой непрозрачности пиксель — часть куска
+    int MinW = 2, MinH = 2;      // меньшие острова пропускаются
+    int Padding = 0;             // запас вокруг найденного куска
+    std::string Prefix = "sprite";
+};
+
+// Чем резали последний раз — чтобы, открыв лист снова, продолжить с теми же
+// настройками. Описывает СПОСОБ, а не куски: куски — в Regions.
+struct SpriteSlicing {
+    enum class Mode { Grid, Automatic, Manual };
+    Mode Method = Mode::Grid;
+    SpriteGrid Grid;
+    SpriteAuto Auto;
+};
+
+// Клетка сетки для предпросмотра: где и годится ли (целиком внутри картинки).
+struct GridCell {
+    glm::ivec4 Rect{0};
+    bool Inside = true;          // false — выходит за картинку или поля
+    bool Empty = false;          // целиком прозрачная (rgba дан)
+};
+// Клетки сетки — не создавая кусков (живой предпросмотр). rgba (строки сверху
+// вниз) нужен для Empty.
+std::vector<GridCell> GridCells(int width, int height, const SpriteGrid& grid, const unsigned char* rgba = nullptr);
+// Острова непрозрачных пикселей (строки сверху вниз): прямоугольники в порядке
+// сверху вниз, слева направо.
+std::vector<glm::ivec4> FindIslands(const unsigned char* rgba, int width, int height, const SpriteAuto& params);
 
 class SpriteSheet {
 public:
     std::vector<SpriteRegion> Regions;
     std::vector<SpriteSequence> Sequences;
+    SpriteSlicing Slicing;
+    // Свободное имя «prefix_N»: имена куска уникальны в листе.
+    std::string FreeName(const std::string& prefix) const;
     const SpriteSequence* FindSequence(const std::string& name) const;
     // Последование из кусков, чьи имена начинаются с prefix, по порядку
     // номеров в конце имени (run_2 раньше run_10). Возвращает число кадров.

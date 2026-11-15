@@ -574,6 +574,13 @@ void AssetsPanel::DrawTile(EditorHost& host, const fs::path& path, bool isDir) {
         const std::string p = path.string();
         const bool model = sage::assets::IsConvertibleModel(p);
         const bool texture = sage::assets::IsConvertibleTexture(p);
+        if (texture) {
+            ImGui::Separator();
+            // Картинка режется на куски и девятину в своём редакторе: пункт
+            // здесь — короче, чем открыть окно и искать файл слотом.
+            if (EditorIcons::MenuItem("grid", T("Edit Sprites")))
+                host.OpenSpriteEditor(host.CurrentProject().AssetRef(path));
+        }
         if (model || texture) {
             ImGui::Separator();
             const char* label = model ? T("Convert to .sagemesh")

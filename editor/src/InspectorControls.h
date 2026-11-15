@@ -1,5 +1,6 @@
 #pragma once
 #include <cfloat>
+#include <functional>
 
 #include <glm/glm.hpp>
 
@@ -22,6 +23,19 @@ class EditorHost;
 // кнопки и колесо — снимком перед изменением.
 // ---------------------------------------------------------------------------
 namespace sage::editor::ictl {
+
+// СВОЯ ИСТОРИЯ ПРАВОК. Контролы по умолчанию пишут в историю сцены (host);
+// инструмент со своими данными (редактор спрайтов) подменяет её на время
+// отрисовки своих полей: снимок — его функцией.
+struct UndoScope {
+    explicit UndoScope(std::function<void()> push);
+    ~UndoScope();
+    UndoScope(const UndoScope&) = delete;
+    UndoScope& operator=(const UndoScope&) = delete;
+
+private:
+    std::function<void()> m_prev;   // вложенная область возвращает внешнюю
+};
 
 struct NumOpts {
     float Step = 1.0f;              // шаг кнопок и колеса; перетаскивание — его четверть на пиксель

@@ -184,10 +184,10 @@ void EditorLayer::RegisterPanels() {
         m_panelRegistry.Register(std::move(s));
     }
     {
-        // Нарезка листа спрайтов — своё окно (рисует себя само).
+        // Редактор спрайтов — своё рабочее место с доком (рисует себя само).
         PanelSpec s;
         s.Id = "SpriteSheet";
-        s.Title = "Sprite sheet";
+        s.Title = "Sprite Editor";
         s.Icon = "grid";
         s.Section = PanelSection::Tools;
         s.WrapWindow = false;

@@ -72,7 +72,7 @@ namespace sage { class Application; }
 #include "panels/AnimationPanel.h"
 #include "panels/TweenPanel.h"
 #include "panels/NineSlicePanel.h"
-#include "panels/SpriteSheetPanel.h"
+#include "sprite/SpriteEditor.h"
 #include "panels/GameSettingsPanel.h"
 #include "ui/CommandPalette.h"
 #include "ui/Commands.h"
@@ -166,6 +166,12 @@ public:
     sage::ui::UIScope UiScope() const override;
 
     bool OpenInterface(const std::string& assetRef) override;
+    void OpenSpriteEditor(const std::string& assetRef) override {
+        m_panelRegistry.SetVisible("SpriteSheet", true);
+        m_spriteSheet.Open(assetRef);
+        m_focusPanelId = "SpriteSheet";
+        m_focusPanelFrames = 3;
+    }
     bool OpenInterfaceObject(int objectId) override;
     void NewInterfaceDocument() override;
     bool SaveInterfaceDocument() override;
@@ -792,8 +798,8 @@ private:
     // Редактор девятины (см. panels/NineSlicePanel.h) — отдельный инструмент:
     // нарезку подбирают подолгу и по самой картинке, а не по числам вслепую.
     NineSlicePanel m_nineSlice;
-    // Нарезка листа спрайтов (panels/SpriteSheetPanel.h) — окно из реестра.
-    SpriteSheetPanel m_spriteSheet;
+    // Редактор спрайтов (sprite/SpriteEditor.h) — окно из реестра.
+    SpriteEditor m_spriteSheet;
     // Образцы для снимков (SAGE_EDITOR_UI_SAMPLE, selftest/UISampleShots.cpp).
     void RunUISampleHook(const std::string& sample);
     std::string m_focusPanelId;   // какую панель вывести вперёд (хуки снимков)

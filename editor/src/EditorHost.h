@@ -207,6 +207,8 @@ public:
     //
     // Открыть файл (ссылка на ассет) в пространстве «Интерфейс».
     virtual bool OpenInterface(const std::string& assetRef) = 0;
+    // Открыть картинку в редакторе спрайтов (пункт меню картинки в Assets).
+    virtual void OpenSpriteEditor(const std::string& assetRef) = 0;
     // Открыть интерфейс объекта сцены. Интерфейс старого вида (элементы прямо
     // в сцене) сначала выносится в свой файл.
     virtual bool OpenInterfaceObject(int objectId) = 0;
