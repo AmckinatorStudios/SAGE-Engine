@@ -377,6 +377,17 @@ public:
 
     // --- вьюпорт/камера ---
     virtual Camera& EditorCamera() = 0;
+    // Показатели сцены — те же, что в строке состояния (FPS, память, вызовы
+    // отрисовки, треугольники, объекты): информационный слой вьюпорта берёт
+    // их отсюда, а не считает второй раз.
+    struct SceneStatsInfo {
+        float Fps = 0.0f;
+        double MemoryGb = 0.0;
+        int DrawCalls = 0;
+        long long Triangles = 0;
+        int Objects = 0;
+    };
+    virtual SceneStatsInfo SceneStats() const { return {}; }
     virtual const glm::mat4& ViewMatrix() const = 0;
     virtual const glm::mat4& ProjMatrix() const = 0;
     // Сырое число бэкенда для ImGui::Image — единственная легальная дверь

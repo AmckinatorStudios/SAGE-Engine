@@ -112,15 +112,15 @@ static void DrawTemplateNote(EditorHost& host, ImVec2 pos, ImVec2 cell) {
 
 
 // Полоса с предупреждением рендера — вверху по центру, поверх кадра.
-static void DrawRenderWarning(const std::string& text, ImVec2 pos, ImVec2 cell) {
+static void DrawRenderWarning(const std::string& text, ImVec2 pos, ImVec2 cell, float toolsBottom) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float pad = 8.0f;
     const float wrap = std::max(cell.x * 0.7f, 160.0f);
     const ImVec2 ts = ImGui::CalcTextSize(text.c_str(), nullptr, false, wrap);
     const float boxW = ts.x + pad * 2.0f;
     const float boxH = ts.y + pad;
-    // Ниже виджета инструментов: он занимает верх кадра слева.
-    const ImVec2 a(pos.x + std::max(pad, (cell.x - boxW) * 0.5f), pos.y + 46.0f);
+    // Ниже строки инструментов (она бывает и в две строки, если вид узкий).
+    const ImVec2 a(pos.x + std::max(pad, (cell.x - boxW) * 0.5f), std::max(pos.y + 46.0f, toolsBottom + pad));
     const ImVec2 b(a.x + boxW, a.y + boxH);
     dl->AddRectFilled(a, b, IM_COL32(48, 26, 20, 240), 5.0f);
     dl->AddRect(a, b, IM_COL32(255, 140, 90, 220), 5.0f);
@@ -134,7 +134,7 @@ static void DrawRenderWarning(const std::string& text, ImVec2 pos, ImVec2 cell) 
 // больше не подсвечивает сцену сам собой. Это честно, но чёрный вьюпорт сам по
 // себе неотличим от поломки рендера — и смотрят в этот момент сюда, а не в
 // консоль. Одна строка на месте вопроса снимает его целиком.
-static void DrawNoLightHint(ImVec2 pos, ImVec2 cell) {
+static void DrawNoLightHint(ImVec2 pos, ImVec2 cell, const sage::editor::vptools::Box& info) {
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const char* text = T("No light sources in the scene — nothing is lit. "
                          "Add one: Objects > Light, or \"Create a sun\" in Environment");
@@ -145,7 +145,9 @@ static void DrawNoLightHint(ImVec2 pos, ImVec2 cell) {
     const float boxH = ts.y + pad;
     // Внизу по центру: верх кадра занят виджетом инструментов и предупреждением
     // рендера, и накрывать их подсказкой нельзя.
-    const ImVec2 a(pos.x + std::max(pad, (cell.x - boxW) * 0.5f), pos.y + cell.y - boxH - 28.0f);
+    ImVec2 a(pos.x + std::max(pad, (cell.x - boxW) * 0.5f), pos.y + cell.y - boxH - 28.0f);
+    // Информационный слой занял низ слева — подсказка встаёт над ним.
+    if (info.Overlaps({a.x, a.y, a.x + boxW, a.y + boxH})) a.y = info.Y0 - boxH - pad;
     const ImVec2 b(a.x + boxW, a.y + boxH);
     dl->AddRectFilled(a, b, IM_COL32(28, 30, 38, 235), 5.0f);
     dl->AddRect(a, b, IM_COL32(120, 130, 155, 200), 5.0f);
@@ -294,14 +296,11 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
             ImGui::EndDragDropTarget();
         }
 
-        // Подпись вида поверх картинки и рамка активного: без них в четырёх
-        // одинаковых серых прямоугольниках невозможно понять, где что.
-        // Подпись — ВНИЗУ слева, а не вверху: сверху теперь лежит виджет
-        // инструментов и накрывал бы её в главном виде.
+        // Подпись вида (первая строка информационного слоя, внизу слева — сверху
+        // строка инструментов) и рамка активного: без них в четырёх одинаковых
+        // прямоугольниках не понять, где что (ViewportPanel_Info.cpp).
         ImDrawList* dl = ImGui::GetWindowDrawList();
-        dl->AddText(ImVec2(slotPos[i].x + 8, slotPos[i].y + cell.y - ImGui::GetTextLineHeight() - 6),
-                    i == m_activeSlot ? IM_COL32(255, 210, 120, 230) : IM_COL32(190, 195, 205, 190),
-                    ViewKindName(kind));
+        const sage::editor::vptools::Box info = DrawInfoOverlay(host, i, kind, slotPos[i], cell, viewCount);
         if (viewCount > 1 && i == m_activeSlot) {
             dl->AddRect(slotPos[i], ImVec2(slotPos[i].x + cell.x, slotPos[i].y + cell.y),
                         IM_COL32(255, 175, 60, 200), 0.0f, 0, 2.0f);
@@ -319,12 +318,12 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         // сообщение о том, что картинка сейчас НЕ ТАКАЯ, какой должна быть.
         // Закрывать его нечем — оно исчезнет само, когда исчезнет причина.
         if (i == 0 && !host.RenderWarning().empty())
-            DrawRenderWarning(host.RenderWarning(), slotPos[0], cell);
+            DrawRenderWarning(host.RenderWarning(), slotPos[0], cell, m_toolsMax.y);
 
         // Нечем светить — так и написано. Проверка дешёвая (обход только
         // светов), а без неё чёрный кадр приходится объяснять словами.
         if (i == 0 && !sage::ecs::SceneHasAnyLight(host.CurrentScene()))
-            DrawNoLightHint(slotPos[0], cell);
+            DrawNoLightHint(slotPos[0], cell, info);
 
         // Клик по виду делает его активным — дальше в нём работают гизмо и
         // хоткеи. Без этого в раскладке из четырёх видов работал бы только один.
@@ -1008,7 +1007,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
 
     // Инструменты — ПОСЛЕДНИМИ в кадре: дочерние окна ImGui рисуются в порядке
     // подачи, и виджет обязан лечь поверх картинки сцены и поверх гизмо.
-    DrawToolsOverlay(host, viewsOrigin);
+    DrawToolsOverlay(host, viewsOrigin, cell.x);
     DrawCameraPreview(host, imgPos, ImVec2(imgPos.x + avail.x, imgPos.y + avail.y));
 
     ImGui::End(); // Viewport

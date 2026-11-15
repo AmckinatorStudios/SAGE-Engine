@@ -305,6 +305,7 @@ public:
 
     // --- EditorHost: вьюпорт/камера ---
     Camera& EditorCamera() override { return m_camera; }
+    SceneStatsInfo SceneStats() const override;
     const glm::mat4& ViewMatrix() const override { return m_view; }
     const glm::mat4& ProjMatrix() const override { return m_proj; }
     uint64_t SceneTexture() const override { return m_renderer.ViewportTexture(); }
@@ -568,6 +569,15 @@ private:
     // Самопроверка: ручки коллайдера тянутся настоящей мышью (COLLIDER_HANDLES).
     void TickColliderHandleProbe();
     int m_colliderProbeStep = 0;
+    // Строка инструментов и слой информации вьюпорта (SelfTestViewportToolbar.cpp).
+    void TickViewportToolbarProbe();
+    int m_toolbarProbeStep = 0;
+    int m_toolbarProbeWait = 0;
+    bool m_toolbarProbeSnap = false;
+    int m_toolbarProbeOp = 0;
+    glm::vec3 m_toolbarProbeMove{1.0f};
+    int m_toolbarProbeBox = -1, m_toolbarProbePlain = -1;
+    ImVec2 m_toolbarProbeClick{0.0f, 0.0f};
     int m_colliderProbeWait = 0;
     int m_colliderProbeId = -1;
     ImVec2 m_colliderProbePos{0.0f, 0.0f};

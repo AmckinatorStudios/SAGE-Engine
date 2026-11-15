@@ -182,6 +182,9 @@ bool Sides(EditorHost& host, const char* title, glm::vec4* v, const NumOpts& o);
 // EndDropdown().
 bool BeginDropdown(const char* id, const char* preview, DropLook look = DropLook::Standard);
 void EndDropdown();
+// Поле того же вида, что список, но открывает СВОЁ окно (настройки, а не
+// пункты): true — нажали. open — окно сейчас открыто (шеврон вверх, рамка).
+bool DropButton(const char* id, const char* preview, bool open = false, const char* tooltip = nullptr);
 // Замена ImGui::Combo: те же аргументы, вид kit. Видимая подпись (без «##»)
 // встаёт слева, в колонку подписей.
 bool Combo(const char* id, int* current, const char* const* items, int count, DropLook look = DropLook::Standard);

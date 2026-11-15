@@ -66,7 +66,10 @@ TEST(UiKit_vector_look_follows_the_width) {
     const float h = 24.0f, tag = 18.0f;
     // Широко — сегменты с −/+; уже — без кнопок; совсем узко — ось на строку.
     CHECK_TRUE(ictl::FitVecLook(ictl::VecLook::Segmented, 600.0f, 3, tag, h) == ictl::VecLook::Segmented);
-    CHECK_TRUE(ictl::FitVecLook(ictl::VecLook::Segmented, 200.0f, 3, tag, h) == ictl::VecLook::Compact);
+    CHECK_TRUE(ictl::FitVecLook(ictl::VecLook::Segmented, 240.0f, 3, tag, h) == ictl::VecLook::Compact);
+    // Число не обрезается: строка, в которую не влезает «-000.000» на ось
+    // даже без −/+, уходит в столбик, а не показывает «-1.60(».
+    CHECK_TRUE(ictl::FitVecLook(ictl::VecLook::Segmented, 200.0f, 3, tag, h) == ictl::VecLook::Stacked);
     CHECK_TRUE(ictl::FitVecLook(ictl::VecLook::Segmented, 90.0f, 3, tag, h) == ictl::VecLook::Stacked);
     // Заказанный вид не «повышается»: Compact в широкой панели остаётся Compact,
     // Stacked — Stacked.

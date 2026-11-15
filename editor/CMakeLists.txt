@@ -56,6 +56,7 @@ add_executable(SageEditor WIN32
     src/selftest/SelfTestAiGraphFrame.cpp
     src/selftest/SelfTestCursorLock.cpp
     src/selftest/SelfTestColliderHandles.cpp
+    src/selftest/SelfTestViewportToolbar.cpp
     src/selftest/SelfTestProjectAndAssets.cpp
     src/selftest/SelfTestRenderStability.cpp
     src/selftest/SelfTestRun.cpp
@@ -163,6 +164,8 @@ add_executable(SageEditor WIN32
     src/SignalLinksEditor.cpp
     src/panels/TopBarPanel.cpp
     src/panels/ViewportTools.cpp
+    src/panels/ViewportToolbarRules.cpp
+    src/panels/ViewportPanel_Info.cpp
     src/gizmo/Handles.cpp
     src/gizmo/ColliderEdit.cpp
     src/gizmo/ColliderHandles.cpp

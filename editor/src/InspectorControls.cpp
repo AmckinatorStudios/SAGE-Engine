@@ -119,7 +119,13 @@ float StepSide(float width, float h) {
     return std::floor(std::clamp(width * 0.22f, h * K().StepButton, h * K().StepButtonWide));
 }
 
-bool StepFits(float width, float h) { return width >= std::floor(h * K().StepButton) * 2.0f + 36.0f; }
+float DigitRoom() {
+    // Без контекста ImGui (чистые проверки раскладки) — ширина при обычном кегле.
+    if (!ImGui::GetCurrentContext()) return 52.0f;
+    return std::floor(ImGui::CalcTextSize("-000.000").x + 6.0f);
+}
+
+bool StepFits(float width, float h) { return width >= std::floor(h * K().StepButton) * 2.0f + DigitRoom(); }
 
 bool NumberIn(EditorHost* host, const char* id, float* v, const NumOpts& o, ImVec2 p, float width, bool buttons,
               ImDrawFlags leftCorners, ImDrawFlags rightCorners, bool* active) {

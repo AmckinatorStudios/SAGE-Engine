@@ -37,8 +37,8 @@ const char* const kAxisTags[4] = {"X", "Y", "Z", "W"};
 
 // Сколько ширины нужно полю оси вида look.
 float SegmentNeed(VecLook look, float tagW, float h) {
-    if (look == VecLook::Segmented) return tagW + std::floor(h * K().StepButton) * 2.0f + 36.0f;
-    return tagW + K().SegmentMin;
+    if (look == VecLook::Segmented) return tagW + std::floor(h * K().StepButton) * 2.0f + detail::DigitRoom();
+    return tagW + std::max(K().SegmentMin, detail::DigitRoom());
 }
 
 // Ширина строки из n полей вида look (с отступами между ними).

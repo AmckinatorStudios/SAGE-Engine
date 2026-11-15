@@ -613,6 +613,7 @@ void EditorLayer::OnRender() {
     TickInputProbe();
     TickCursorLockProbe();
     TickColliderHandleProbe();
+    TickViewportToolbarProbe();
     PinMouseWhileCaptured();
     ImGui::NewFrame();
     if (!app.GetWindow().CursorCaptured()) m_freeMousePos = ImGui::GetIO().MousePos;
@@ -867,7 +868,7 @@ void EditorLayer::TakeAutoScreenshot(sage::Application& app) {
     // её отсутствие в логе поймает сам smoke-тест.
     if (std::getenv("SAGE_EDITOR_SELFTEST") && (m_luaSelfTestStep >= 0 || m_cursorProbeStep >= 0 ||
                                                m_aiGraphFrameStep >= 0 ||
-                                               m_colliderProbeStep >= 0)) {
+                                               m_colliderProbeStep >= 0 || m_toolbarProbeStep >= 0)) {
         using Clock = std::chrono::steady_clock;
         if (!m_shotWaitStarted) { m_shotWaitStart = Clock::now(); m_shotWaitStarted = true; }
         if (Clock::now() - m_shotWaitStart < std::chrono::minutes(5)) return;

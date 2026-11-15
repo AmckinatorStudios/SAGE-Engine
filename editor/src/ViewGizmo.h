@@ -60,6 +60,10 @@ bool Draw(ImDrawList* dl, State& state, Camera& camera, const ImVec2& viewMin,
 // мыши, а не зовёт внутреннюю функцию, — иначе проверялось бы что угодно, кроме
 // того, работает ли гизмо. Повторить формулу в проверке значило бы получить
 // проверку, которая расходится с гизмо при первой же правке размеров.
+// Сколько места гизмо занимает от правого и верхнего края вида: строка
+// инструментов и информационный слой обходят этот угол.
+float Extent();
+
 ImVec2 AxisBall(const Camera& camera, const ImVec2& viewMin, const ImVec2& viewMax, int axis,
                 bool positive);
 
