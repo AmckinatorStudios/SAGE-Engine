@@ -5,6 +5,7 @@
 // камеры наблюдения.
 // ---------------------------------------------------------------------------
 #include "InspectorFields.h"
+#include "InspectorControls.h"
 #include "InspectorPanel.h"
 
 #include "imgui.h"
@@ -15,6 +16,9 @@
 #include "ui/ColorPicker.h"
 
 #include "sage/scene/Components.h"
+#include <cmath>
+
+namespace ictl = sage::editor::ictl;
 
 namespace ifield = sage::editor::ifield;
 
@@ -37,10 +41,10 @@ void DrawRenderTextureSection(EditorHost& host, GameObject obj, entt::registry& 
 
     // Разрешение — степенями двойки и своим числом: превью в меню редко
     // нужно больше 512, а лишние пиксели — это стоимость каждой съёмки.
-    int size[2] = {rt.Width, rt.Height};
-    if (ImGui::DragInt2(T("Resolution"), size, 1.0f, 16, 4096)) {
-        rt.Width = std::clamp(size[0], 16, 4096);
-        rt.Height = std::clamp(size[1], 16, 4096);
+    float size[2] = {(float)rt.Width, (float)rt.Height};
+    if (ictl::DragVec(&host, T("Resolution"), size, 2, 1.0f, 16.0f, 4096.0f, "%.0f")) {
+        rt.Width = std::clamp((int)std::lround(size[0]), 16, 4096);
+        rt.Height = std::clamp((int)std::lround(size[1]), 16, 4096);
         changed = true;
     }
     host.TrackLastImGuiItem();
@@ -81,7 +85,7 @@ void DrawRenderTextureSection(EditorHost& host, GameObject obj, entt::registry& 
         changed = true;
     }
     host.TrackLastImGuiItem();
-    if (ImGui::DragFloat3(T("Look at"), &rt.LookAt.x, 0.05f)) changed = true;
+    if (ictl::DragVec(&host, T("Look at"), &rt.LookAt.x, 3, 0.05f)) changed = true;
     host.TrackLastImGuiItem();
     if (EditorTheme::BeginMore("rtMore")) {
         if (ifield::Float(host, T("Near"), &rt.Near, 0.01f, 0.001f, 100.0f)) changed = true;

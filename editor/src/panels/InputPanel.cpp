@@ -412,11 +412,12 @@ void InputPanel::DrawActionList(EditorHost& host, InputSystem& input) {
         const bool collapsed = IsCollapsed(ctx->Name());
 
         // Заголовок группы: стрелка, имя, число действий, меню настроек.
-        // Стрелка — родная ImGui: у набора значков редактора нет «вниз», а
-        // рисовать её седьмым способом ради одного заголовка незачем.
-        if (ImGui::ArrowButton("##fold", collapsed ? ImGuiDir_Right : ImGuiDir_Down))
+        // Шеврон Tabler — тот же, что у разделов и списков kit.
+        ImGui::PushID("##fold");
+        if (EditorIcons::IconOnlyButton(collapsed ? "chevron-right" : "chevron-down",
+                                        collapsed ? T("Expand") : T("Collapse")))
             ToggleCollapsed(ctx->Name());
-        Sage::UI::Tooltip(collapsed ? T("Expand") : T("Collapse"));
+        ImGui::PopID();
         ImGui::SameLine(0.0f, Sage::UI::Get().SpacingXS);
         ImGui::AlignTextToFramePadding();
         ImGui::TextUnformatted(ctx->Name().c_str());

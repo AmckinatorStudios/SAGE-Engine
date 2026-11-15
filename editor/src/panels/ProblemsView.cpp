@@ -224,10 +224,9 @@ void ProblemsView::DrawList() {
         // раскрывает, щелчок по строке — выбирает.
         if (root && g && !g->Effects.empty()) {
             const bool open = m_expanded.count(p.Id) != 0;
-            const float cx = x + line * 0.5f, cy = at.y + line * 0.5f, r = line * 0.22f;
-            const ImU32 arrow = ImGui::GetColorU32(ImGuiCol_Text);
-            if (open) dl->AddTriangleFilled(ImVec2(cx - r, cy - r * 0.6f), ImVec2(cx + r, cy - r * 0.6f), ImVec2(cx, cy + r * 0.8f), arrow);
-            else dl->AddTriangleFilled(ImVec2(cx - r * 0.6f, cy - r), ImVec2(cx + r * 0.8f, cy), ImVec2(cx - r * 0.6f, cy + r), arrow);
+            const float cs = std::floor(line * 0.6f);
+            EditorIcons::Overlay(dl, std::floor(x + (line - cs) * 0.5f), std::floor(at.y + (line - cs) * 0.5f), cs,
+                                 open ? "chevron-down" : "chevron-right");
             const ImVec2 mouse = ImGui::GetMousePos();
             if (ImGui::IsItemClicked() && mouse.x < x + line) {
                 if (open) m_expanded.erase(p.Id);

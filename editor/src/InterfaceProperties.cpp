@@ -85,7 +85,7 @@ void DrawInterfaceCanvas(EditorHost& host, GameObject interfaceObject) {
     int mode = (int)info->Canvas.Mode;
     // Те же контролы, что у элемента: «Подпись: [поле]», пара W/H в строке.
     ictl::Label(T("Scale mode"));
-    if (ImGui::Combo("##scale_mode", &mode, kModes, 3)) {
+    if (ictl::Combo("##scale_mode", &mode, kModes, 3)) {
         host.PushUndoSnapshot();
         info->Canvas.Mode = (ui::Canvas::Scale)mode;
     }

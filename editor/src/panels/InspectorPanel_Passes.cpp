@@ -18,6 +18,8 @@
 #include "sage/ecs/CameraLightComponents.h"
 #include "sage/ecs/RenderComponents.h"
 
+namespace ictl = sage::editor::ictl;
+
 namespace ifield = sage::editor::ifield;
 
 namespace sage::editor {
@@ -58,14 +60,14 @@ void DrawRenderLayerField(EditorHost& host, MeshRendererComponent& mr) {
 }
 
 void DrawCameraPasses(EditorHost& host, CameraComponent& cam) {
-    if (!ImGui::TreeNode(T("Render passes" "###Render passes"))) return;
+    if (!ictl::SubSection("camera_render_passes", T("Render passes"), false)) return;
     EditorTheme::Hint(T("Passes run in order. 'default' is the main pass; layers named in other passes are "
                         "drawn only there. A pass that clears depth is drawn over everything before it."));
     int removeAt = -1;
     for (size_t i = 0; i < cam.Passes.size(); ++i) {
         CameraPass& p = cam.Passes[i];
         ImGui::PushID((int)i);
-        ImGui::SeparatorText((std::string(T("Pass")) + " " + std::to_string(i + 1)).c_str());
+        ictl::SeparatorText((std::string(T("Pass")) + " " + std::to_string(i + 1)).c_str());
         char buf[256];
         std::snprintf(buf, sizeof(buf), "%s", JoinLayers(p.Layers).c_str());
         if (ImGui::InputText(T("Layers"), buf, sizeof(buf))) p.Layers = SplitLayers(buf);
@@ -88,7 +90,7 @@ void DrawCameraPasses(EditorHost& host, CameraComponent& cam) {
         p.Layers = {cam.Passes.empty() ? std::string("default") : std::string("layer")};
         cam.Passes.push_back(p);
     }
-    ImGui::TreePop();
+    ictl::EndSubSection();
 }
 
 } // namespace sage::editor

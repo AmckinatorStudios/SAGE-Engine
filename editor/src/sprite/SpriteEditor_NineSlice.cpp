@@ -1,4 +1,5 @@
 #include "SpriteEditor.h"
+#include "InspectorControls.h"
 
 #include <algorithm>
 #include <cmath>
@@ -291,7 +292,7 @@ void SpriteEditor::DrawNineInspector(EditorHost& host) {
                                   : cur >= 0 ? regions[(size_t)cur].Name
                                              : std::string(T("Whole texture"));
         ictl::Label(T("Sprite"));
-        if (ImGui::BeginCombo("##nine_target", shown.c_str())) {
+        if (ictl::BeginDropdown("##nine_target", shown.c_str())) {
             if (m_bound) ImGui::Selectable(m_boundSlice.Title.c_str(), true);
             if (ImGui::Selectable(T("Whole texture"), !m_bound && cur < 0)) {
                 m_bound = false;
@@ -307,7 +308,7 @@ void SpriteEditor::DrawNineInspector(EditorHost& host) {
                 }
                 ImGui::PopID();
             }
-            ImGui::EndCombo();
+            ictl::EndDropdown();
         }
         if (m_bound) {
             ImGui::PushTextWrapPos(0.0f);

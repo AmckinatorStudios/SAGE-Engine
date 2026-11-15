@@ -1,4 +1,6 @@
 #include "ShaderParamsUi.h"
+#include "InspectorFields.h"
+#include "InspectorControls.h"
 
 #include <filesystem>
 #include <string>
@@ -19,6 +21,10 @@
 #include "sage/render/Shader.h"
 #include "sage/render/ShaderParams.h"
 #include "ui/ColorPicker.h"
+
+namespace ifield = sage::editor::ifield;
+
+namespace ictl = sage::editor::ictl;
 
 namespace fs = std::filesystem;
 using sage::render::ShaderUniformInfo;
@@ -88,7 +94,7 @@ int Draw(EditorHost& host, const std::shared_ptr<Material>& material,
         // Группы — как их разложил автор шейдера («// @header …»).
         if (u->Header != header) {
             header = u->Header;
-            if (!header.empty()) ImGui::SeparatorText(header.c_str());
+            if (!header.empty()) ictl::SeparatorText(header.c_str());
         }
         ImGui::PushID(u->Name.c_str());
         const std::string label = u->Label.empty() ? sage::render::UniformLabel(u->Name) : u->Label;
@@ -116,18 +122,18 @@ int Draw(EditorHost& host, const std::shared_ptr<Material>& material,
         bool changed = false;
         const int n = Components(u->Type);
         if (n == 1) {
-            if (u->HasRange) changed = ImGui::SliderFloat(label.c_str(), v, u->Min, u->Max);
-            else changed = ImGui::DragFloat(label.c_str(), v, 0.01f);
+            if (u->HasRange) changed = ifield::Slider(host, label.c_str(), v, u->Min, u->Max);
+            else changed = ifield::Float(host, label.c_str(), v, 0.01f);
         } else if (u->Color && n == 3) {
             changed = Sage::UI::ColorField3(label.c_str(), v);
         } else if (u->Color && n == 4) {
             changed = Sage::UI::ColorField4(label.c_str(), v);
         } else if (n == 2) {
-            changed = ImGui::DragFloat2(label.c_str(), v, 0.01f);
+            changed = ictl::DragVec(&host, label.c_str(), v, 2, 0.01f);
         } else if (n == 3) {
-            changed = ImGui::DragFloat3(label.c_str(), v, 0.01f);
+            changed = ictl::DragVec(&host, label.c_str(), v, 3, 0.01f);
         } else {
-            changed = ImGui::DragFloat4(label.c_str(), v, 0.01f);
+            changed = ictl::DragVec(&host, label.c_str(), v, 4, 0.01f);
         }
         // Отмена — одним шагом на жест (тянули ползунок — одна запись).
         host.TrackLastImGuiItem();

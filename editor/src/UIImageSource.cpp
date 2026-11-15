@@ -22,6 +22,8 @@
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 
+namespace ictl = sage::editor::ictl;
+
 namespace sage::editor {
 
 namespace {
@@ -34,7 +36,7 @@ bool DrawImageSource(EditorHost& host, const char* id, std::string& path, bool& 
     const char* kSources[] = {T("File"), T("Render Texture")};
     int source = IsRenderTexture(path) ? 1 : 0;
     ictl::Label(T("Source"));
-    if (ImGui::Combo("##Source", &source, kSources, 2)) {
+    if (ictl::Combo("##Source", &source, kSources, 2)) {
         host.PushUndoSnapshot();
         path = source == 1 ? std::string(kRtPrefix) : std::string();
         changed = true;
@@ -51,7 +53,7 @@ bool DrawImageSource(EditorHost& host, const char* id, std::string& path, bool& 
         }
         const std::string current = path.substr(3);
         ictl::Label(T("Render Texture"));
-        if (ImGui::BeginCombo("##RenderTexture", current.empty() ? T("(choose)") : current.c_str())) {
+        if (ictl::BeginDropdown("##RenderTexture", current.empty() ? T("(choose)") : current.c_str())) {
             for (const std::string& n : names) {
                 if (ImGui::Selectable(n.c_str(), n == current)) {
                     host.PushUndoSnapshot();
@@ -59,7 +61,7 @@ bool DrawImageSource(EditorHost& host, const char* id, std::string& path, bool& 
                     changed = true;
                 }
             }
-            ImGui::EndCombo();
+            ictl::EndDropdown();
         }
         if (names.empty())
             EditorTheme::Hint(T("No Render Texture yet: add the component to a camera object in the scene"));

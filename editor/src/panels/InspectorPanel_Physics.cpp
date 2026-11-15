@@ -10,6 +10,7 @@
 // лежали редактор материала, якоря интерфейса и список компонентов.
 // ---------------------------------------------------------------------------
 #include "InspectorFields.h"
+#include "InspectorControls.h"
 #include <cctype>
 #include <cstdarg>
 #include "sage/scene/CharacterFit.h"
@@ -70,6 +71,8 @@
 namespace ifield = sage::editor::ifield;
 
 namespace fs = std::filesystem;
+namespace ictl = sage::editor::ictl;
+
 using namespace sage::editor::inspectordetail;
 
 namespace sage::editor::inspectordetail {
@@ -96,7 +99,7 @@ void LayerMaskCombo(EditorHost& host, const char* label, sage::physics::LayerMas
         for (int b = 0; b < 32; ++b) n += (mask >> b) & 1u;
         std::snprintf(preview, sizeof(preview), T("%d layers"), n);
     }
-    if (ImGui::BeginCombo(label, preview)) {
+    if (ictl::BeginDropdown(label, preview)) {
         if (ImGui::Selectable(T("All layers"), mask == sage::physics::kAllLayers)) {
             host.PushUndoSnapshot();
             mask = sage::physics::kAllLayers;
@@ -106,14 +109,14 @@ void LayerMaskCombo(EditorHost& host, const char* label, sage::physics::LayerMas
             std::snprintf(item, sizeof(item), T("Layer %d"), b + 1);
             bool on = (mask >> b) & 1u;
             ImGui::PushID(b);
-            if (ImGui::Checkbox(item, &on)) {
+            if (ictl::Check(item, &on)) {
                 host.PushUndoSnapshot();
                 if (on) mask |= 1u << b;
                 else mask &= ~(1u << b);
             }
             ImGui::PopID();
         }
-        ImGui::EndCombo();
+        ictl::EndDropdown();
     }
 }
 } // namespace sage::editor::inspectordetail
@@ -188,7 +191,7 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
                         ImGui::SameLine();
                         const uint8_t bit = (uint8_t)(firstBit << i);
                         bool on = (rb->Locks & bit) != 0;
-                        if (ImGui::Checkbox(axes[i], &on)) {
+                        if (ictl::Check(axes[i], &on)) {
                             host.PushUndoSnapshot();
                             rb->Locks = on ? (uint8_t)(rb->Locks | bit) : (uint8_t)(rb->Locks & ~bit);
                         }
@@ -275,7 +278,7 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
                 else
                     EditorTheme::Hint(T("Convex wrap of the mesh: works for falling bodies"));
             } else if (col->Shape == sage::physics::ShapeType::Box) {
-                ImGui::DragFloat3(T("Half Extents"), &col->HalfExtents.x, 0.02f, 0.001f, 100.0f);
+                ictl::DragVec(&host, T("Half Extents"), &col->HalfExtents.x, 3, 0.02f, 0.001f, 100.0f);
                 host.TrackLastImGuiItem();
             } else if (col->Shape == sage::physics::ShapeType::Sphere) {
                 ifield::Float(host, T("Radius"), &col->Radius, 0.02f, 0.001f, 100.0f);
@@ -286,7 +289,7 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
             // Центр формы — в осях объекта; у форм по мешу его задаёт сам меш.
             if (col->Shape == sage::physics::ShapeType::Box || col->Shape == sage::physics::ShapeType::Sphere ||
                 col->Shape == sage::physics::ShapeType::Capsule) {
-                ImGui::DragFloat3(T("Shape Center"), &col->Center.x, 0.02f);
+                ictl::DragVec(&host, T("Shape Center"), &col->Center.x, 3, 0.02f);
                 host.TrackLastImGuiItem();
             }
 
@@ -304,13 +307,15 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
             for (int pi = 0; pi < (int)col->Parts.size(); ++pi) {
                 ColliderComponent::Part& p = col->Parts[pi];
                 ImGui::PushID(pi);
-                if (ImGui::TreeNodeEx(T("part" "###part"), ImGuiTreeNodeFlags_DefaultOpen, "Part %d", pi)) {
+                char partTitle[48];
+                std::snprintf(partTitle, sizeof(partTitle), "%s %d", T("Part"), pi);
+                if (ictl::SubSection(("collider_part_" + std::to_string(pi)).c_str(), partTitle, true)) {
                     int ps = (int)p.Shape;
                     if (ifield::Combo(host, T("Shape"), &ps, shapeNames, IM_ARRAYSIZE(shapeNames))) {
                         p.Shape = (sage::physics::ShapeType)ps;
                     }
                     if (p.Shape == sage::physics::ShapeType::Box) {
-                        ImGui::DragFloat3(T("Half Extents"), &p.HalfExtents.x, 0.02f, 0.001f, 100.0f);
+                        ictl::DragVec(&host, T("Half Extents"), &p.HalfExtents.x, 3, 0.02f, 0.001f, 100.0f);
                         host.TrackLastImGuiItem();
                     } else {
                         ifield::Float(host, T("Radius"), &p.Radius, 0.02f, 0.001f, 100.0f);
@@ -318,12 +323,12 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
                             ifield::Float(host, T("Half Height"), &p.HalfHeight, 0.02f, 0.001f, 100.0f);
                         }
                     }
-                    ImGui::DragFloat3(T("Offset"), &p.Offset.x, 0.02f);
+                    ictl::DragVec(&host, T("Offset"), &p.Offset.x, 3, 0.02f);
                     host.TrackLastImGuiItem();
-                    ImGui::DragFloat3(T("Rotation"), &p.EulerDeg.x, 0.5f);
+                    ictl::DragVec(&host, T("Rotation"), &p.EulerDeg.x, 3, 0.5f);
                     host.TrackLastImGuiItem();
                     if (ImGui::Button(T("Remove Part"))) removePart = pi;
-                    ImGui::TreePop();
+                    ictl::EndSubSection();
                 }
                 ImGui::PopID();
             }
@@ -353,7 +358,7 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
                 reg.try_get<CharacterControllerComponent>(obj.Entity())) {
             ifield::Float(host, T("Radius"), &ch->Radius, 0.01f, 0.05f, 5.0f);
             ifield::Float(host, T("Height"), &ch->Height, 0.02f, 0.1f, 10.0f);
-            ImGui::DragFloat3(T("Center"), &ch->Center.x, 0.01f);
+            ictl::DragVec(&host, T("Center"), &ch->Center.x, 3, 0.01f);
             host.TrackLastImGuiItem();
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", T("Body offset from the object origin"));
@@ -361,7 +366,7 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
 
             // Столкновения — на виду, а не в «Ещё»: с чем персонаж сталкивается,
             // спрашивают первым делом («почему он проходит сквозь стену?»).
-            ImGui::SeparatorText(T("Collision"));
+            ictl::SeparatorText(T("Collision"));
             LayerSlider(host, ch->Layer);
             if (ImGui::IsItemHovered()) {
                 ImGui::SetTooltip("%s", T("Layer of the character itself: rays, triggers and other masks see it here"));
@@ -433,11 +438,11 @@ void InspectorPanel::DrawPhysicsSections(EditorHost& host, GameObject obj, entt:
                 // Пусто у сустава — это «к миру»: висеть ни на чём он не умеет.
                 jc->TargetId = tr.Id > 0 ? tr.Id : -1;
             }
-            ImGui::DragFloat3(T("Anchor (offset)"), &jc->Anchor.x, 0.02f);
+            ictl::DragVec(&host, T("Anchor (offset)"), &jc->Anchor.x, 3, 0.02f);
             host.TrackLastImGuiItem();
             using JT = sage::physics::JointType;
             if (jc->Type == JT::Hinge || jc->Type == JT::Slider || jc->Type == JT::Cone) {
-                ImGui::DragFloat3(T("Axis"), &jc->Axis.x, 0.02f);
+                ictl::DragVec(&host, T("Axis"), &jc->Axis.x, 3, 0.02f);
                 host.TrackLastImGuiItem();
             }
             if (jc->Type == JT::Hinge || jc->Type == JT::Slider) {

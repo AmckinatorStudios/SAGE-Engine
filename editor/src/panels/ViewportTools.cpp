@@ -78,12 +78,12 @@ bool DropdownButton(const char* icon, const char* label, const char* tooltip) {
         dl, ImVec2(at.x + style.FramePadding.x, at.y + std::floor((h - icon_s) * 0.5f)), icon_s,
         icon, col, label, col);
 
-    // Треугольник — ВНИЗ, от той же точки, что и подпись, плюс общий зазор.
+    // Шеврон Tabler — ВНИЗ, от той же точки, что и подпись, плюс общий зазор.
+    const float cs = std::floor(caret * 1.4f);
     const float cx = at.x + style.FramePadding.x + used + gap + caret * 0.5f;
-    const float cy = at.y + h * 0.5f;
-    const float r = caret * 0.5f;
-    dl->AddTriangleFilled(ImVec2(cx - r, cy - r * 0.6f), ImVec2(cx + r, cy - r * 0.6f),
-                          ImVec2(cx, cy + r * 0.7f), col);
+    const ImVec4 cc = ImGui::ColorConvertU32ToFloat4(col);
+    EditorIcons::Overlay(dl, std::floor(cx - cs * 0.5f), std::floor(at.y + (h - cs) * 0.5f), cs, "chevron-down",
+                         glm::vec3(cc.x, cc.y, cc.z));
     return pressed;
 }
 

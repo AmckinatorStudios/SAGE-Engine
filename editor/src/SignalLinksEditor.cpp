@@ -1,4 +1,5 @@
 #include "SignalLinksEditor.h"
+#include "InspectorControls.h"
 #include "sage/scripting/Languages.h"
 
 #include <algorithm>
@@ -23,6 +24,8 @@
 #include "sage/scene/ScriptComponent.h"
 #include "sage/scripting/ScriptFields.h"
 #include "ui/UI.h"
+
+namespace ictl = sage::editor::ictl;
 
 namespace sage::editor {
 
@@ -176,7 +179,7 @@ bool DrawSignalLinks(EditorHost& host, GameObject obj) {
                 ImGui::TableNextRow();
 
                 ImGui::TableSetColumnIndex(0);
-                if (ImGui::Checkbox("##on", &link.Enabled)) {
+                if (ictl::Check("##on", &link.Enabled)) {
                     host.PushUndoSnapshot();
                     changed = true;
                 }

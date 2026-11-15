@@ -28,6 +28,8 @@
 #include "sage/ui/UIButton.h"
 #include "sage/ui/UISceneSystem.h"
 
+namespace ictl = sage::editor::ictl;
+
 namespace sage::editor {
 using namespace uiprops_detail;
 
@@ -84,13 +86,13 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
         // Имя типа ПЕРЕВОДИТСЯ; само значение хранится английским ключом.
         // В СПИСКЕ — ТОЛЬКО СВОЙ РОД: элемент меняется на элемент, контейнер —
         // на контейнер.
-        if (ImGui::BeginCombo("##Type", xf->Type.empty() ? T("Custom") : T(xf->Type.c_str()))) {
+        if (ictl::BeginDropdown("##Type", xf->Type.empty() ? T("Custom") : T(xf->Type.c_str()))) {
             std::string category;
             for (const ui::Preset& preset : ui::Presets()) {
                 if (type && preset.Container != type->Container) continue;
                 if (preset.Category != category) {
                     category = preset.Category;
-                    ImGui::SeparatorText(T(category.c_str()));
+                    ictl::SeparatorText(T(category.c_str()));
                 }
                 // СМЕНА ТИПА ПЕРЕСОБИРАЕТ ЧАСТИ, но не трогает детей и место.
                 if (ImGui::Selectable(T(preset.Name.c_str()), preset.Name == xf->Type)) {
@@ -109,7 +111,7 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
                 }
                 if (preset.Hint && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(preset.Hint));
             }
-            ImGui::EndCombo();
+            ictl::EndDropdown();
         }
         if (xf) {
             type = ui::FindPreset(xf->Type);
@@ -309,7 +311,7 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
             DrawPartFields(host, obj, ctx, *interaction, data, FieldFilter::Behaviour, true, selected);
             const std::vector<const char*> tabs = StateTabs(host, obj, ctx, *interaction, data);
             if (!tabs.empty()) {
-                ImGui::SeparatorText(T("States"));
+                ictl::SeparatorText(T("States"));
                 if (ImGui::BeginTabBar("##ui_states", ImGuiTabBarFlags_FittingPolicyScroll)) {
                     for (const char* tab : tabs) {
                         if (!ImGui::BeginTabItem(T(tab))) continue;
@@ -338,10 +340,10 @@ void DrawUIElementProperties(EditorHost& host, GameObject obj,
             for (const ui::PartType& p : ui::Parts())
                 if (p.Fields && !p.Hidden && p.Has(reg, e) && !TypeHasPart(*type, p.Id)) extra.push_back(&p);
             if (!extra.empty()) {
-                ImGui::SeparatorText(T("Parts beyond the type"));
+                ictl::SeparatorText(T("Parts beyond the type"));
                 for (const ui::PartType* p : extra) {
                     ImGui::PushID(p->Id);
-                    ImGui::SeparatorText(T(p->Title));
+                    ictl::SeparatorText(T(p->Title));
                     if (ImGui::Button(T("Remove"))) {
                         host.PushUndoSnapshot();
                         p->Remove(reg, e);

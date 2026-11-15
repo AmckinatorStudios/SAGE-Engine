@@ -51,6 +51,8 @@
 
 namespace fs = std::filesystem;
 
+namespace ictl = sage::editor::ictl;
+
 namespace sage::editor {
 
 using namespace uiprops_detail;
@@ -121,37 +123,18 @@ bool DrawAnchorPicker(UIAnchor& anchor) {
     static const char* const kAnchorNames[9] = {
         "Top left", "Top", "Top right", "Left", "Center", "Right", "Bottom left", "Bottom", "Bottom right",
     };
-    bool changed = false;
-    // СТРОГАЯ СЕТКА 3×3: одинаковые ячейки и одинаковый шаг по обеим осям,
-    // каждая ячейка ставится явно (ItemSpacing по вертикали другой и
-    // раздвигал строки сильнее столбцов). Подпись — в колонке подписей.
-    const float cell = ImGui::GetFrameHeight();
-    const float gap = 3.0f;
-    ictl::Label(T("Anchor"), 3.0f * cell + 2.0f * gap);
-    const ImVec2 origin = ImGui::GetCursorScreenPos();
-    const float icon = std::floor(cell * 0.64f);
-    const float off = std::floor((cell - icon) * 0.5f);
-    for (int index = 0; index < 9; ++index) {
-        const ImVec2 p0(origin.x + (float)(index % 3) * (cell + gap), origin.y + (float)(index / 3) * (cell + gap));
-        ImGui::SetCursorScreenPos(p0);
-        ImGui::PushID(index);
-        const bool active = (int)anchor == index;
-        if (active) ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::AccentMuted));
-        if (ImGui::Button("##anchor", ImVec2(cell, cell))) {
-            anchor = (UIAnchor)index;
-            changed = true;
-        }
-        if (active) ImGui::PopStyleColor();
-        // Рисунок внутри кнопки — ИКОНКА НАБОРА: прямоугольник и плашка,
-        // прижатая к тому краю, который эта кнопка означает. Overlay ничего
-        // не подаёт — наведение, щелчок и подсказка остаются у кнопки.
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(kAnchorNames[index]));
-        EditorIcons::Overlay(p0.x + off, p0.y + off, icon, kAnchorIcons[index],
-                             active ? glm::vec3(0.98f, 0.76f, 0.18f) : EditorIcons::kThemeColor);
-        ImGui::PopID();
+    // СЕТКА 3×3 — ОДИН КОНТРОЛ kit: общая рамка, равные ячейки через тонкие
+    // разделители, выбранная — акцентной подложкой. Подпись — в колонке подписей.
+    ictl::GroupItem items[9];
+    for (int i = 0; i < 9; ++i) {
+        items[i].Icon = kAnchorIcons[i];
+        items[i].Tooltip = T(kAnchorNames[i]);
+        items[i].Active = (int)anchor == i;
     }
-    ImGui::SetCursorScreenPos(origin);
-    ImGui::Dummy(ImVec2(3.0f * cell + 2.0f * gap, 3.0f * cell + 2.0f * gap));
+    ictl::Label(T("Anchor"), 3.0f * ImGui::GetFrameHeight());
+    const int hit = ictl::ButtonGroup("##anchor", items, 9, ictl::ButtonLook::IconOnly, 3);
+    const bool changed = hit >= 0 && hit != (int)anchor;
+    if (changed) anchor = (UIAnchor)hit;
     return changed;
 }
 
@@ -317,7 +300,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                 // Значки выбираются ГЛАЗАМИ: список имён без картинок — это
                 // угадывание, как выглядит «drop» и чем он отличается от «wire».
                 ictl::Label(label);
-                if (ImGui::BeginCombo("##v", v.empty() ? T("(none)") : v.c_str())) {
+                if (ictl::BeginDropdown("##v", v.empty() ? T("(none)") : v.c_str())) {
                     if (ImGui::Selectable(T("(none)"), v.empty())) {
                         host.PushUndoSnapshot();
                         v.clear();
@@ -335,7 +318,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                         }
                         ImGui::PopID();
                     }
-                    ImGui::EndCombo();
+                    ictl::EndDropdown();
                 }
             } else {
                 char buf[512];
@@ -410,7 +393,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             const char* preview =
                 (f.EnumNames && v >= 0 && v < f.EnumCount) ? T(f.EnumNames[v]) : "?";
             ictl::Label(label);
-            if (ImGui::BeginCombo("##v", preview)) {
+            if (ictl::BeginDropdown("##v", preview)) {
                 for (int i = 0; i < f.EnumCount; ++i) {
                     if (ImGui::Selectable(T(f.EnumNames[i]), i == v)) {
                         host.PushUndoSnapshot();
@@ -418,7 +401,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                         changed = true;
                     }
                 }
-                ImGui::EndCombo();
+                ictl::EndDropdown();
             }
             break;
         }
@@ -712,7 +695,7 @@ void DrawAppearanceSwitch(EditorHost& host, entt::entity e) {
     int mode = shape ? 2 : fill ? 1 : 0;
     const char* kModes[] = {T("None"), T("Image"), T("Shape")};
     ictl::Label(T("Background"));
-    if (!ImGui::Combo("##Appearance", &mode, kModes, 3)) return;
+    if (!ictl::Combo("##Appearance", &mode, kModes, 3)) return;
     host.PushUndoSnapshot();
     if (mode != 2) reg.remove<ui::Shape>(e);
     if (mode != 1) reg.remove<ui::Fill>(e);
@@ -792,7 +775,7 @@ void DrawContentSection(EditorHost& host, GameObject obj, const UIPropsContext& 
         int axis = !sc ? 0 : sc->Horizontal && sc->Vertical ? 3 : sc->Horizontal ? 1 : 2;
         const char* kAxes[] = {T("Off"), T("Horizontal"), T("Vertical"), T("Both")};
         ictl::Label(T("Scroll"));
-        if (ImGui::Combo("##Scroll", &axis, kAxes, 4)) {
+        if (ictl::Combo("##Scroll", &axis, kAxes, 4)) {
             host.PushUndoSnapshot();
             if (axis == 0) {
                 scroll->Remove(reg, e);

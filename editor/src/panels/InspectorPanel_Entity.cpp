@@ -108,7 +108,7 @@ void InspectorPanel::DrawSunSection(EditorHost& host, GameObject obj) {
         return;
     }
 
-    ImGui::SeparatorText(T("Sun of the scene"));
+    sage::editor::ictl::SeparatorText(T("Sun of the scene"));
     HintWrapped(T("This light IS the sun: it casts the cascaded shadows and it is where the "
                   "procedural sky draws its disc. Point it by rotating the object, or by "
                   "azimuth and elevation below."));

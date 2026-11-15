@@ -119,10 +119,12 @@ void TweenPanel::DrawCard(EditorHost& host, anim::TweenClip& clip, size_t index,
                  1.5f, thumb * 0.15f);
         cx += thumb + 6.0f;
         dl->AddText(ImVec2(cx, ty), Col(EditorTheme::Role::Text), ease.c_str());
-        // Стрелка «раскрывается» — треугольником, а не буквой.
-        const float ax = c1.x - st.FramePadding.x - arrow * 0.5f, ay = c0.y + fh * 0.5f;
-        dl->AddTriangleFilled(ImVec2(ax - 4, ay - 2), ImVec2(ax + 4, ay - 2), ImVec2(ax, ay + 3),
-                              Col(EditorTheme::Role::TextDim));
+        // Стрелка «раскрывается» — шевроном Tabler, как у всех списков kit.
+        const float cs = std::floor(fh * 0.6f);
+        const float ax = c1.x - st.FramePadding.x - arrow * 0.5f;
+        const ImVec4 dim = EditorTheme::Color(EditorTheme::Role::TextDim);
+        EditorIcons::Overlay(dl, std::floor(ax - cs * 0.5f), std::floor(c0.y + (fh - cs) * 0.5f), cs, "chevron-down",
+                             glm::vec3(dim.x, dim.y, dim.z));
     }
     ImGui::SetCursorScreenPos(ImVec2(dotsX, a.y + pad));
     if (EditorIcons::IconOnlyButton("dots", T("More: order, remove"))) {

@@ -50,6 +50,8 @@
 #include "../Localization.h"
 #include "ui/ColorPicker.h"
 
+namespace ifield = sage::editor::ifield;
+
 namespace fs = std::filesystem;
 
 // Редактор материала: правит поля РАЗДЕЛЯЕМОГО экземпляра из кэша
@@ -147,6 +149,8 @@ void InspectorPanel::DrawMaterialEditor(EditorHost& host) {
     }
     DrawMaterialFields(host, material, pathStr, /*preview=*/true);
 }
+
+namespace ictl = sage::editor::ictl;
 
 namespace {
 // Поле занимает всё, кроме места под самую длинную подпись редактора материала.
@@ -255,7 +259,7 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     // (числа, цвета, текстуры, группы — ShaderParamsUi.h), и состояние
     // отрисовки, которое из шейдера не задать.
     if (material->HasCustomShader()) {
-        ImGui::SeparatorText(T("Shader"));
+        ictl::SeparatorText(T("Shader"));
         // Шейдер выбирается слотом, как любой ассет (AssetSlot.h).
         DrawShaderSlot(host, T("Vertex"), material->VertexShaderPath, material);
         DrawShaderSlot(host, T("Fragment"), material->FragmentShaderPath, material);
@@ -270,15 +274,15 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
             m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
         });
 
-        ImGui::SeparatorText(T("Drawing"));
+        ictl::SeparatorText(T("Drawing"));
         for (const MaterialRenderField& f : MaterialRenderFields()) {
             if (std::string(f.Key) != "cull" || !f.GetEnum || !f.SetEnum) continue;
             int value = f.GetEnum(material->Render);
-            if (ImGui::Combo(f.Label, &value, f.EnumLabels, std::min(f.EnumCount, 8)))
+            if (ictl::Combo(f.Label, &value, f.EnumLabels, std::min(f.EnumCount, 8)))
                 f.SetEnum(material->Render, value);
             if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
         }
-        ImGui::SliderFloat(T("uOpacity"), &material->Opacity, 0.0f, 1.0f);
+        ifield::Slider(host, T("uOpacity"), &material->Opacity, 0.0f, 1.0f);
         host.TrackLastImGuiItem();
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("Passed to the shader as uOpacity.\n"
@@ -298,7 +302,7 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     // bloom срабатывает от яркости ВЫШЕ 1 (EngineConfig::BloomThreshold), а цвет
     // в редакторе зажат в 0..1. Без множителя «свечение» оставалось бы просто
     // светлым цветом без ореола.
-    ImGui::DragFloat(T("Emissive Strength"), &material->EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
+    ifield::Float(host, T("Emissive Strength"), &material->EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
     sage::editor::ResetField(&host, *material, material->EmissiveStrength);
     // Рамка элемента включает подпись: вышла за край — подпись обрезана.
     m_materialLabelsFit = ImGui::GetItemRectMax().x <=
@@ -308,14 +312,14 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     }
 
     // PBR (metallic-roughness) — основной путь освещения (Cook-Torrance).
-    ImGui::SeparatorText(T("PBR"));
+    ictl::SeparatorText(T("PBR"));
     // Справка по картам — при наведении на заголовок, а не двумя строками под ними.
     EditorTheme::Hint(T("Normal: tangent-space (OpenGL). Metallic/Rough/AO use R channel."));
     EditorTheme::Hint(T("Map value multiplies the factor above; Enter applies the path."));
     EditorTheme::Hint(T("Edits apply live to every entity using this material."));
-    ImGui::SliderFloat(T("Metallic"), &material->Metallic, 0.0f, 1.0f);
+    ifield::Slider(host, T("Metallic"), &material->Metallic, 0.0f, 1.0f);
     sage::editor::ResetField(&host, *material, material->Metallic);
-    ImGui::SliderFloat(T("Roughness"), &material->Roughness, 0.0f, 1.0f);
+    ifield::Slider(host, T("Roughness"), &material->Roughness, 0.0f, 1.0f);
     sage::editor::ResetField(&host, *material, material->Roughness);
 
     // Слоты текстур: превью, путь, «Обзор…», «Из Assets», «Очистить».
@@ -336,8 +340,7 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     char texturesLabel[96];
     std::snprintf(texturesLabel, sizeof(texturesLabel), "%s (%d / 6)###MaterialTextures", T("Textures"), maps);
     const bool texturesOpen =
-        ImGui::TreeNodeEx(texturesLabel, ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_Framed |
-                                             ImGuiTreeNodeFlags_SpanAvailWidth);
+        ictl::SubSection("material_textures", texturesLabel, true);
     EditorTheme::Hint(T("Albedo, normal, metallic, roughness, emissive and AO maps of the material"));
     if (texturesOpen) {
         DrawTextureSlot(host, "Albedo", material->TexturePath, material->AlbedoTex,
@@ -359,11 +362,11 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
         for (const MaterialRenderField& f : MaterialRenderFields()) {
             if (std::strcmp(f.Key, "filtering") != 0 || !f.GetEnum || !f.SetEnum) continue;
             int value = f.GetEnum(material->Render);
-            if (ImGui::Combo(T("Filtering"), &value, f.EnumLabels, f.EnumCount))
+            if (ictl::Combo(T("Filtering"), &value, f.EnumLabels, f.EnumCount))
                 f.SetEnum(material->Render, value);
             if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
         }
-        ImGui::TreePop();
+        ictl::EndSubSection();
     }
 
     // ПОВТОР ТЕКСТУРЫ («тайлинг») — ЗДЕСЬ, среди карт, а не в поведении рендера.
@@ -371,7 +374,7 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     // плиткой — это вопрос к карте, а не к тому, как рисуются грани. Какие
     // свойства сюда попадают, решает таблица (MaterialRenderFields), а не этот
     // файл: формат .sagemat от переезда подписи не меняется.
-    ImGui::SeparatorText(T("Tiling"));
+    ictl::SeparatorText(T("Tiling"));
     {
         using Mode = MaterialRender::TilingMode;
         // РЕЖИМ ПЕРВЫМ: от него зависит, что вообще значат числа ниже, и
@@ -379,7 +382,7 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
         // значит обещать настройку, которой нет.
         const char* kModes[] = {T("Uniform"), T("Per axis"), T("Per object size")};
         int mode = (int)material->Render.Tiling;
-        if (ImGui::Combo(T("Tiling mode"), &mode, kModes, 3))
+        if (ictl::Combo(T("Tiling mode"), &mode, kModes, 3))
             material->Render.Tiling = (Mode)std::clamp(mode, 0, 2);
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("Uniform — one number for both axes.\n"
@@ -393,11 +396,11 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
         const float kMin = 0.001f, kMax = 512.0f;
         if (material->Render.Tiling == Mode::Uniform) {
             float uniform = material->Render.UVScaleX;
-            if (ImGui::DragFloat(T("Tiling"), &uniform, 0.05f, kMin, kMax, "%.3f"))
+            if (ifield::Float(host, T("Tiling"), &uniform, 0.05f, kMin, kMax, "%.3f"))
                 material->Render.UVScaleX = std::clamp(uniform, kMin, kMax);
         } else {
             float tiling[2] = {material->Render.UVScaleX, material->Render.UVScaleY};
-            if (ImGui::DragFloat2(T("Tiling"), tiling, 0.05f, kMin, kMax, "%.3f")) {
+            if (ictl::DragVec(&host, T("Tiling"), tiling, 2, 0.05f, kMin, kMax, "%.3f")) {
                 material->Render.UVScaleX = std::clamp(tiling[0], kMin, kMax);
                 material->Render.UVScaleY = std::clamp(tiling[1], kMin, kMax);
             }
@@ -410,7 +413,7 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
             EditorTheme::Hint(T("Repeats per metre of each face: a 4 x 1 x 2 box gets 4 x 1 tiles in front and 2 x 1 on the side."));
 
         float offset[2] = {material->Render.UVOffsetX, material->Render.UVOffsetY};
-        if (ImGui::DragFloat2(T("Offset"), offset, 0.01f, -64.0f, 64.0f, "%.3f")) {
+        if (ictl::DragVec(&host, T("Offset"), offset, 2, 0.01f, -64.0f, 64.0f, "%.3f")) {
             material->Render.UVOffsetX = std::clamp(offset[0], -64.0f, 64.0f);
             material->Render.UVOffsetY = std::clamp(offset[1], -64.0f, 64.0f);
         }
@@ -420,8 +423,8 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     }
 
 
-    ImGui::SeparatorText(T("Transparency"));
-    ImGui::SliderFloat(T("Opacity"), &material->Opacity, 0.0f, 1.0f);
+    ictl::SeparatorText(T("Transparency"));
+    ifield::Slider(host, T("Opacity"), &material->Opacity, 0.0f, 1.0f);
     sage::editor::ResetField(&host, *material, material->Opacity);
 
     // Своего шейдера у обычного материала нет: материал-шейдер — отдельный
@@ -432,7 +435,7 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     // и строка таблицы, а не ещё одна правка здесь. Раньше каждое такое
     // свойство надо было дописать в пяти местах, и панель редактора отставала
     // от формата файла чаще всего: её забывали.
-    ImGui::SeparatorText(T("Render"));
+    ictl::SeparatorText(T("Render"));
     for (const MaterialRenderField& f : MaterialRenderFields()) {
         // Своё место в инспекторе есть не у всех: повтор текстуры показан выше,
         // среди карт (см. MaterialRenderField::Group).
@@ -443,12 +446,12 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
             // завели бы ровно то расхождение, от которого таблица и заведена.
             int value = f.GetEnum(material->Render);
             const int count = std::min(f.EnumCount, 8);
-            if (ImGui::Combo(f.Label, &value, f.EnumLabels, count))
+            if (ictl::Combo(f.Label, &value, f.EnumLabels, count))
                 f.SetEnum(material->Render, value);
         } else if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
-            ImGui::Checkbox(f.Label, &(material->Render.*f.AsBool));
+            ictl::Check(f.Label, &(material->Render.*f.AsBool));
         } else if (f.AsFloat) {
-            ImGui::SliderFloat(f.Label, &(material->Render.*f.AsFloat), f.Min, f.Max);
+            ifield::Slider(host, f.Label, &(material->Render.*f.AsFloat), f.Min, f.Max);
         }
         if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
     }
@@ -837,7 +840,7 @@ void InspectorPanel::DrawSubmeshMaterials(EditorHost& host, MeshRendererComponen
     if (!mr.MeshPtr || !mr.MeshPtr->HasExplicitSubmeshes()) return;
     const std::vector<sage::render::Submesh>& subs = mr.MeshPtr->Submeshes();
 
-    ImGui::SeparatorText(T("Model parts"));
+    ictl::SeparatorText(T("Model parts"));
     EditorTheme::Hint(T("Each part of the model has its own material. Empty means "
                                 "the object material above."));
 

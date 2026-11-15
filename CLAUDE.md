@@ -57,6 +57,7 @@ python3 scripts/check_popup_ids.py                                # имена �
 python3 scripts/check_menu_style.py                               # отступы меню
 python3 scripts/check_release_ui.py                               # меню без проверочных пунктов
 python3 scripts/check_imgui_pairs.py                              # EndCombo и подписи кнопок
+python3 scripts/check_ui_kit.py                                   # значки Tabler, контролы kit
 python3 scripts/check_file_size.py                                # файлы ≤ 1000 строк
 python3 scripts/gen_script_api.py --check                         # подсказка по API скриптов
 cmake --build build-windows -j"$(nproc)"                          # кросс-сборка mingw
@@ -162,6 +163,26 @@ Linux не видна. macOS пока не выпускается (см. п. 6).
   `EditorIcons::IconOnlyButton`**: `Button(значок, "##имя")` печатает «##имя»
   рядом со значком и считает по нему ширину — кнопка уезжает за край панели и
   перестаёт нажиматься. Проверяет `scripts/check_imgui_pairs.py`.
+- **Значки — только Tabler через `EditorIcons`.** Никаких символов Юникода
+  («▶», «✓», «▾»), эмодзи, ASCII-«значков» («+», «-», «...», «x» на кнопке),
+  стрелок `ImGui::ArrowButton` и треугольников из линий вместо значка. Нужного
+  значка нет — дописать его в `scripts/gen_icon_font.py` и в `kNames`
+  (`editor/src/EditorIcons.cpp`), перегенерировать `EditorIconFont.inl`
+  штатным генератором; сгенерированный файл руками не править. Проверяет
+  `scripts/check_ui_kit.py`.
+- **Инспекторы и окна редактора — на Editor UI Kit** (`ictl::`,
+  `editor/src/InspectorControls.h`; поля компонентов с историей — `ifield::`).
+  Одна функция — один цельный контрол: список — `ictl::Combo`/`BeginDropdown`
+  (шеврон внутри поля), вектор — `ictl::VectorN`/`Vector3`/`DragVec` (общая
+  рамка, сегменты), кнопки одной операции — `ictl::ButtonGroup`, вкл/выкл —
+  `ictl::Switch`/`Check`, раздел — `ictl::BeginSection` или
+  `EditorTheme::SectionHeader` (одна шапка), вложенная группа —
+  `ictl::SubSection`. Размеры, отступы и цвета состояний — только
+  `EditorTheme::Kit`/`State`, а не числа на месте. Своих дубликатов
+  существующих контролов не заводить: не хватает варианта — добавить его в kit
+  (`NumLook`, `VecLook`, `DropLook`, `SwitchLook`, `ButtonLook`, `ColorLook`).
+  Сырые `Combo`/`Checkbox`/`DragFloat3`/`TreeNode` в файлах инспекторов
+  ловит `scripts/check_ui_kit.py`.
 - **Стиль API скриптов — стандарт SAGE** (docs/scripting.md, «Стиль API SAGE —
   стандарт языка»), постоянно и для всего нового API, примеров и документации:
   без префикса `sage.` в примерах; имена строчными через `_`; методы объекта
