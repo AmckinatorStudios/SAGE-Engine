@@ -122,34 +122,36 @@ bool DrawAnchorPicker(UIAnchor& anchor) {
         "Top left", "Top", "Top right", "Left", "Center", "Right", "Bottom left", "Bottom", "Bottom right",
     };
     bool changed = false;
+    // СТРОГАЯ СЕТКА 3×3: одинаковые ячейки и одинаковый шаг по обеим осям,
+    // каждая ячейка ставится явно (ItemSpacing по вертикали другой и
+    // раздвигал строки сильнее столбцов). Подпись — в колонке подписей.
     const float cell = ImGui::GetFrameHeight();
-    // Подпись — над сеткой: сетка сама показывает, где элемент встанет.
-    ictl::GroupTitle(T("Anchor"));
-    ImGui::BeginGroup();
-    for (int row = 0; row < 3; ++row) {
-        for (int col = 0; col < 3; ++col) {
-            const int index = row * 3 + col;
-            if (col) ImGui::SameLine(0.0f, 2.0f);
-            ImGui::PushID(index);
-            const bool active = (int)anchor == index;
-            if (active) ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Accent));
-            const ImVec2 p0 = ImGui::GetCursorScreenPos();
-            if (ImGui::Button("##anchor", ImVec2(cell, cell))) {
-                anchor = (UIAnchor)index;
-                changed = true;
-            }
-            if (active) ImGui::PopStyleColor();
-            // Рисунок внутри кнопки — ИКОНКА НАБОРА: прямоугольник и плашка,
-            // прижатая к тому краю, который эта кнопка означает. Точка в углу,
-            // стоявшая здесь раньше, называла МЕСТО, но не говорила главного —
-            // что элемент к этому месту прижмётся, а не просто окажется рядом.
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(kAnchorNames[index]));
-            EditorIcons::Overlay(p0.x, p0.y, cell, kAnchorIcons[index],
-                                 EditorIcons::kThemeColor);
-            ImGui::PopID();
+    const float gap = 3.0f;
+    ictl::Label(T("Anchor"), 3.0f * cell + 2.0f * gap);
+    const ImVec2 origin = ImGui::GetCursorScreenPos();
+    const float icon = std::floor(cell * 0.64f);
+    const float off = std::floor((cell - icon) * 0.5f);
+    for (int index = 0; index < 9; ++index) {
+        const ImVec2 p0(origin.x + (float)(index % 3) * (cell + gap), origin.y + (float)(index / 3) * (cell + gap));
+        ImGui::SetCursorScreenPos(p0);
+        ImGui::PushID(index);
+        const bool active = (int)anchor == index;
+        if (active) ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::AccentMuted));
+        if (ImGui::Button("##anchor", ImVec2(cell, cell))) {
+            anchor = (UIAnchor)index;
+            changed = true;
         }
+        if (active) ImGui::PopStyleColor();
+        // Рисунок внутри кнопки — ИКОНКА НАБОРА: прямоугольник и плашка,
+        // прижатая к тому краю, который эта кнопка означает. Overlay ничего
+        // не подаёт — наведение, щелчок и подсказка остаются у кнопки.
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(kAnchorNames[index]));
+        EditorIcons::Overlay(p0.x + off, p0.y + off, icon, kAnchorIcons[index],
+                             active ? glm::vec3(0.98f, 0.76f, 0.18f) : EditorIcons::kThemeColor);
+        ImGui::PopID();
     }
-    ImGui::EndGroup();
+    ImGui::SetCursorScreenPos(origin);
+    ImGui::Dummy(ImVec2(3.0f * cell + 2.0f * gap, 3.0f * cell + 2.0f * gap));
     return changed;
 }
 
@@ -364,8 +366,8 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             ictl::NumOpts o = f.Max > f.Min ? ictl::OptsForRange(f.Min, f.Max) : ictl::NumOpts{};
             const std::string key = f.Key ? f.Key : "";
             const bool isSize = key.find("ize") != std::string::npos;
-            ictl::GroupTitle(DisplayLabel(label).c_str());
-            changed = ictl::Pair(host, f.Key, &v.x, &v.y, isSize ? "W" : "X", isSize ? "H" : "Y", o);
+            changed = ictl::PairRow(host, DisplayLabel(label).c_str(), &v.x, &v.y, isSize ? "W" : "X",
+                                    isSize ? "H" : "Y", o);
             break;
         }
 
@@ -549,14 +551,15 @@ void DrawLookGroup(EditorHost& host, GameObject obj, const UIPropsContext& ctx, 
         if (lf.Advanced) { anyAdvanced = true; continue; }
         DrawOneField(host, obj, ctx, p, lf, data, selected);
     }
-    if (anyAdvanced && ImGui::TreeNodeEx(T("More settings"), ImGuiTreeNodeFlags_SpanAvailWidth)) {
+    if (anyAdvanced && ictl::SubSection((std::string(p.Id ? p.Id : "") + "." + std::to_string(first) + ".more").c_str(),
+                                        T("More settings"))) {
         for (size_t k = first; k < end; ++k) {
             const ui::PartField& lf = fields[k];
             if (lf.Hidden || !lf.Advanced || !ui::FieldVisible(fields, lf, data) || !RequirementMet(reg, e, lf))
                 continue;
             DrawOneField(host, obj, ctx, p, lf, data, selected);
         }
-        ImGui::TreePop();
+        ictl::EndSubSection();
     }
 }
 
@@ -601,13 +604,12 @@ int DrawFieldsOf(EditorHost& host, GameObject obj, const UIPropsContext& ctx, co
                     ImGui::PushID(f.Key);
                     // Вид состояния на своей вкладке раскрыт сразу: вкладку и
                     // открывают ради него.
-                    const ImGuiTreeNodeFlags flags =
-                        ImGuiTreeNodeFlags_SpanAvailWidth | (view.Tab ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-                    const bool open = ImGui::TreeNodeEx(T(f.Label), flags);
+                    const std::string gid = std::string(p.Id ? p.Id : "") + "." + f.Key + (view.Tab ? view.Tab : "");
+                    const bool open = ictl::SubSection(gid.c_str(), T(f.Label), view.Tab != nullptr);
                     if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(f.Tooltip));
                     if (open) {
                         DrawLookGroup(host, obj, ctx, p, fields, i + 1, end, data, reg, e, selected);
-                        ImGui::TreePop();
+                        ictl::EndSubSection();
                     }
                     ImGui::PopID();
                 }

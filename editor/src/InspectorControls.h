@@ -51,9 +51,10 @@ NumOpts OptsForRange(float min, float max);
 
 // --- Строка: подпись слева, контрол справа --------------------------------
 float LabelWidth();
-// Подпись в колонке подписей; следующий контрол встаёт справа от неё и
-// получает оставшуюся ширину (SetNextItemWidth).
-void Label(const char* text);
+// Подпись «Имя:» в колонке подписей; следующий контрол встаёт справа от неё и
+// получает оставшуюся ширину (SetNextItemWidth). Подпись, не влезающая в
+// колонку, или поле уже minField — подпись НАД полем, целиком.
+void Label(const char* text, float minField = 0.0f);
 // Ширина контрола числа по типу значения (не растягивать без причины).
 float NumberWidth();
 
@@ -82,6 +83,10 @@ void GroupTitle(const char* title);
 bool Pair(EditorHost& host, const char* id, float* a, float* b, const char* tagA, const char* tagB,
           const NumOpts& o);
 
+// Пара в строке с подписью: «Позиция: X [..] Y [..]».
+bool PairRow(EditorHost& host, const char* label, float* a, float* b, const char* tagA, const char* tagB,
+             const NumOpts& o);
+
 // Оси построчно по две: подписи осей — n штук (2 или 4).
 bool Axes(EditorHost& host, const char* id, float* v, int n, const char* const* axes, const NumOpts& o);
 
@@ -107,7 +112,9 @@ bool Sides(EditorHost& host, const char* title, glm::vec4* v, const NumOpts& o);
 bool BeginSection(const char* id, const char* title, bool defaultOpen = true);
 void EndSection();
 
-// Вложенная раскрывашка внутри раздела («▸ Advanced»): лёгкая, без карточки.
+// Вложенная группа внутри раздела («▸ Коробка», «▸ Дополнительно»): строка-
+// заголовок и содержимое с единым отступом и линией слева. Раскрытие
+// запоминается между запусками.
 bool SubSection(const char* id, const char* title, bool defaultOpen = false);
 void EndSubSection();
 

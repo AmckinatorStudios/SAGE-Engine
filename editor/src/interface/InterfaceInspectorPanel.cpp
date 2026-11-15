@@ -11,6 +11,7 @@
 #include "../AssetSlot.h"
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
+#include "../InspectorControls.h"
 #include "InterfaceWidgets.h"
 #include "../Localization.h"
 #include "../PanelWindows.h"
@@ -79,22 +80,27 @@ void InterfaceInspectorPanel::DrawAlignTools(EditorHost& host) {
         {"am", ui::AlignEdge::CenterY, T("Centers vertically")},
         {"ab", ui::AlignEdge::Bottom, T("Bottom edges")},
     };
+    // Одинаковые квадратные кнопки с одним шагом; между группами
+    // (по горизонтали, по вертикали, распределение) — двойной шаг.
+    const float step = 3.0f, groupGap = 10.0f;
     ImGui::Spacing();
     for (int i = 0; i < 6; ++i) {
-        if (i == 3) ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
-        else if (i > 0) ImGui::SameLine();
+        if (i == 3) ImGui::SameLine(0.0f, groupGap);
+        else if (i > 0) ImGui::SameLine(0.0f, step);
         if (AlignButton(aligns[i].Id, aligns[i].Edge, aligns[i].Tip, count >= 1))
             uiops::Align(host, aligns[i].Edge);
     }
-    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
+    // Распределение — той же строкой, если помещается; иначе следующей, а не
+    // за краем панели.
+    const float btn = ImGui::GetFrameHeight();
+    const float right = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+    if (right - ImGui::GetItemRectMax().x >= groupGap + 2.0f * btn + step) ImGui::SameLine(0.0f, groupGap);
     ImGui::BeginDisabled(count < 3);
-    if (ImGui::Button(T("Across"))) uiops::Distribute(host, true, false);
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip("%s", T("Distribute across: needs three elements or more"));
-    ImGui::SameLine();
-    if (ImGui::Button(T("Down"))) uiops::Distribute(host, false, false);
-    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-        ImGui::SetTooltip("%s", T("Distribute down: needs three elements or more"));
+    if (EditorIcons::IconOnlyButton("distribute-x", T("Distribute across: needs three elements or more")))
+        uiops::Distribute(host, true, false);
+    ImGui::SameLine(0.0f, step);
+    if (EditorIcons::IconOnlyButton("distribute-y", T("Distribute down: needs three elements or more")))
+        uiops::Distribute(host, false, false);
     ImGui::EndDisabled();
     ImGui::SetNextItemWidth(-1.0f);
     ImGui::BeginDisabled(count == 0);
@@ -147,22 +153,23 @@ void InterfaceInspectorPanel::Draw(EditorHost& host, bool& open) {
         // размера и якоря у него нет (он всегда во весь экран), поэтому и
         // полей элемента здесь нет — только имя интерфейса и холст.
         GameObject iface = host.CurrentScene().Get(host.CurrentInterfaceId());
-        ImGui::TextDisabled("%s", T("Interface"));
-        ImGui::SameLine();
-        ImGui::TextUnformatted(obj.Name().c_str());
-        ImGui::Separator();
-        char buf[128];
-        std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
-        if (ImGui::InputText(T("Name"), buf, sizeof(buf))) {
-            obj.SetName(buf);
-            if (iface.Valid()) iface.SetName(buf);   // имя ресурса — то же
+        namespace ictl = sage::editor::ictl;
+        if (ictl::BeginSection("iface.root", T("Interface"))) {
+            char buf[128];
+            std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
+            ictl::Label(T("Name"));
+            if (ImGui::InputText("##iface_name", buf, sizeof(buf))) {
+                obj.SetName(buf);
+                if (iface.Valid()) iface.SetName(buf);   // имя ресурса — то же
+            }
+            host.TrackLastImGuiItem();
+            Hint(T("The main container is the whole interface area: everything else lives inside it."));
+            ictl::EndSection();
         }
-        host.TrackLastImGuiItem();
-        ImGui::PushItemWidth(-118.0f);
-        ImGui::SeparatorText(T("Canvas"));
-        sage::editor::DrawInterfaceCanvas(host, iface);
-        ImGui::PopItemWidth();
-        Hint(T("The main container is the whole interface area: everything else lives inside it."));
+        if (ictl::BeginSection("iface.canvas", T("Canvas"))) {
+            sage::editor::DrawInterfaceCanvas(host, iface);
+            ictl::EndSection();
+        }
     } else if (isInterface) {
         // ВЫБРАН САМ ИНТЕРФЕЙС — показываем ЕГО свойства, а не пустоту и не
         // поля элемента: это разные вещи, и окно обязано их различать.
