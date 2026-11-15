@@ -89,6 +89,11 @@ void EditorSceneRenderer::RenderCameraPreview(Scene& scene, const LightingEnviro
 }
 
 
+void EditorSceneRenderer::RenderTextures(Scene& scene, const LightingEnvironment& env) {
+    if (sage::render::RenderTextureViews(scene, m_batch, env, m_sceneTime) > 0)
+        sage::Application::Get().Device().BindDefaultFramebuffer();
+}
+
 void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& env, const sage::EngineConfig& cfg) {
     // Кадр от Primary-камеры сцены — ЧЕРЕЗ ТОТ ЖЕ ХЕЛПЕР, что и собранная игра
     // (sage::ecs::PrimaryCameraFrame): превью Game-панели = реальный вид в игре.
@@ -101,7 +106,12 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
         // было не на чем, хотя к камере интерфейс никакого отношения не имеет
         // (он считается в пикселях кадра, а не в мире). Непрозрачная подложка
         // сама по себе годится в фон: под ней сцены всё равно не видно.
-        if (m_uiBackdropAlpha >= 0.999f && !DrawGameUI(scene, cfg, /*onlyBackdrop=*/true)) {
+        //
+        // Подложка — при ЛЮБОЙ её прозрачности. Документ интерфейса камеры не
+        // имеет вовсе (он отдельная сцена), и условие «только непрозрачная
+        // подложка» оставляло холст пустым: рамки элементов есть, самих
+        // элементов нет.
+        if (!DrawGameUI(scene, cfg, /*onlyBackdrop=*/true)) {
             m_gamePostApplied = false;
             m_gameFrameValid = false;
         }
@@ -246,7 +256,11 @@ bool EditorSceneRenderer::DrawGameUI(Scene& scene, const sage::EngineConfig& cfg
         m_gameFrameValid = true;
         m_gamePostApplied = false;
         m_gameFbo->Bind();
-        device.SetClearColor(m_uiBackdropColor.r, m_uiBackdropColor.g, m_uiBackdropColor.b, 1.0f);
+        // Полупрозрачная подложка ложится на нейтральный тёмный фон: сцены
+        // под ней нет, и «прозрачно» значит «фон холста».
+        const glm::vec3 base(0.10f, 0.11f, 0.13f);
+        const glm::vec3 clear = glm::mix(base, m_uiBackdropColor, glm::clamp(m_uiBackdropAlpha, 0.0f, 1.0f));
+        device.SetClearColor(clear.r, clear.g, clear.b, 1.0f);
         device.Clear();
         m_gameFbo->Resolve();
     }

@@ -167,6 +167,9 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
          "Invert, glow, blur, dissolve… on this object only",
          HasComp<sage::render::ObjectEffectsComponent>,
          AddComp<sage::render::ObjectEffectsComponent>},
+        {"Render Texture", "View", "camera",
+         "Films the scene into a picture for the interface: a character preview, an item icon",
+         HasComp<RenderTextureComponent>, AddComp<RenderTextureComponent>},
         {"Light", "View", "light",
          "Point, spot or directional light", HasComp<LightComponent>, AddComp<LightComponent>},
 

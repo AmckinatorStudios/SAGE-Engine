@@ -1,0 +1,141 @@
+name: Сборка редактора для Linux
+
+# Собирает готовый редактор для Linux и кладёт его в Releases рядом со
+# сборкой для Windows: выпускаются две платформы — Linux и Windows (macOS
+# пока только ручным запуском, см. macos.yml).
+#
+# Когда запускается — как windows.yml: каждая правка main обновляет
+# «linux-latest», рабочие ветки — артефактом на вкладке Actions, тег v* —
+# отдельный релиз. Резервные ветки не собираются (почему — см. windows.yml).
+on:
+  push:
+    branches: [main, 'claude/**', '!claude/backup-main-**']
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Linux (SageEditor)
+    # Образ закреплён — см. ci.yml. От него же зависит, на каких системах
+    # запустится сборка: glibc раннера — нижняя граница (docs/README-linux.txt).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Зависимости сборки
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake g++ ninja-build libx11-dev libxrandr-dev \
+            libxinerama-dev libxcursor-dev libxi-dev libgl1-mesa-dev
+
+      - name: Сборка
+        run: |
+          # libstdc++ и libgcc — внутрь программы: на системе с другой версией
+          # GCC их системная копия может оказаться старше нужной.
+          cmake -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DSAGE_BUILD_TESTS=OFF \
+            -DCMAKE_EXE_LINKER_FLAGS="-static-libstdc++ -static-libgcc"
+          cmake --build build-linux -j"$(nproc)"
+
+      # Что ехать к людям: редактор, плеер для Build Game и упаковщик игр.
+      # Без любого из них поставка неполная — проверяем, а не надеемся.
+      - name: Проверка результата
+        run: |
+          for f in build-linux/editor/SageEditor build-linux/runtime/SagePlayer \
+                   build-linux/tools/sage_build/sage_build build-linux/editor/assets; do
+            test -e "$f" || { echo "::error::нет $f"; exit 1; }
+          done
+          file build-linux/editor/SageEditor
+          # Динамические зависимости — только системные.
+          ldd build-linux/editor/SageEditor | tee deps.txt
+          if grep -q "not found" deps.txt; then echo "::error::не хватает библиотек"; exit 1; fi
+          if grep -q "libstdc++" deps.txt; then echo "::error::libstdc++ должна быть внутри"; exit 1; fi
+
+      - name: Сборка архива
+        run: |
+          PKG=SageEditor-Linux
+          mkdir -p "$PKG/runtime"
+          cp build-linux/editor/SageEditor "$PKG"/
+          cp -r build-linux/editor/assets "$PKG"/assets
+          cp build-linux/runtime/SagePlayer "$PKG/runtime/"
+          cp -r build-linux/runtime/assets "$PKG/runtime/assets"
+          cp build-linux/tools/sage_build/sage_build "$PKG"/
+          if [ -d build-linux/editor/themes ]; then cp -r build-linux/editor/themes "$PKG/themes"; fi
+          for d in build-linux/editor/plugins/*/; do
+            [ -f "$d/plugin.json" ] || continue
+            mkdir -p "$PKG/plugins"
+            cp -r "${d%/}" "$PKG/plugins/"
+          done
+          cp docs/README-linux.txt "$PKG"/README.txt
+          cp CHANGELOG.md "$PKG"/CHANGELOG.md
+          # tar, а не zip: zip теряет право на запуск у бинарников.
+          tar -czf "$PKG.tar.gz" "$PKG"
+          ls -la "$PKG.tar.gz"
+
+      - name: Загрузить архив (вкладка Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: SageEditor-Linux
+          path: SageEditor-Linux.tar.gz
+
+      # Публикация — только с main и по тегу, с теми же предосторожностями,
+      # что у Windows (свежесть сборки, ожидание удаления, повторы).
+      - name: Опубликовать в Releases
+        if: >-
+          github.event_name != 'pull_request' &&
+          (github.ref == 'refs/heads/main' || github.ref_type == 'tag')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ "${{ github.ref_type }}" != "tag" ]]; then
+            HEAD_NOW="$(gh api repos/${{ github.repository }}/commits/main --jq .sha)"
+            if [[ -n "$HEAD_NOW" && "$HEAD_NOW" != "${{ github.sha }}" ]]; then
+              echo "main уже ушёл вперёд ($HEAD_NOW), релиз выложит более свежая сборка"
+              exit 0
+            fi
+          fi
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            # У тега один релиз на обе платформы: Linux добавляет свой архив
+            # к тому, что создала (или создаст) сборка Windows.
+            TAG="${{ github.ref_name }}"
+            gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "SAGE Editor $TAG" --notes "SAGE Editor $TAG"
+            gh release upload "$TAG" SageEditor-Linux.tar.gz --clobber
+            exit 0
+          fi
+          TAG="linux-latest"
+          TITLE="SAGE Editor — последняя сборка для Linux"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          for _ in 1 2 3 4 5 6 7 8 9 10; do
+            gh release view "$TAG" >/dev/null 2>&1 || break
+            echo "жду, пока старый релиз $TAG исчезнет..."
+            sleep 3
+          done
+          git push --delete origin "$TAG" 2>/dev/null || true
+          SUBJECT="$(git log -1 --pretty=%s)"
+          WHEN="$(git log -1 --date=format:'%d.%m.%Y %H:%M' --pretty=%cd)"
+          SHORT="$(git rev-parse --short HEAD)"
+          LATEST="$(awk '/^### /{n++} n==1{print} n==2{exit} /^## / && n>=1{exit}' CHANGELOG.md)"
+          NOTES="$(printf '%s\n\n%s\n\n%s\n%s\n%s' \
+            'Скачайте SageEditor-Linux.tar.gz, распакуйте (tar -xzf SageEditor-Linux.tar.gz) и запустите ./SageEditor из папки SageEditor-Linux. Нужна Ubuntu 24.04 или новее (glibc 2.39+), X11/XWayland и OpenGL 4.1+.' \
+            'В архиве: редактор, плеер (runtime/), sage_build и темы оформления.' \
+            "Собрано из: $SHORT — $SUBJECT" \
+            "Дата коммита: $WHEN" \
+            'Если что-то не запускается — рядом с программой появляется sage_editor.log, в нём написана причина.')"
+          if [[ -n "$LATEST" ]]; then
+            NOTES="$(printf '%s\n\n## Что изменилось (версия 0.5, путь к 1.0)\n\n%s\n\nВесь журнал — CHANGELOG.md в архиве и в репозитории.' "$NOTES" "$LATEST")"
+          fi
+          published=""
+          for attempt in 1 2 3; do
+            if gh release create "$TAG" SageEditor-Linux.tar.gz --title "$TITLE" --notes "$NOTES"; then
+              published=1
+              break
+            fi
+            echo "попытка $attempt не удалась, повтор через 5 с"
+            sleep 5
+          done
+          if [[ -z "$published" ]]; then
+            gh release edit "$TAG" --title "$TITLE" --notes "$NOTES"
+            gh release upload "$TAG" SageEditor-Linux.tar.gz --clobber
+          fi

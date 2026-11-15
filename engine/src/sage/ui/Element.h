@@ -1,6 +1,7 @@
 #pragma once
 #include "sage/ui/UIBlend.h"
 #include <string>
+#include <vector>
 #include <glm/glm.hpp>
 
 #include "sage/ui/UIAnchor.h"
@@ -173,6 +174,15 @@ struct Element {
     std::string Style;
     // Рантайм: какую версию файла стиля уже применили (-1 — никакую).
     int StyleVersion = -1;
+    // ЛОКАЛЬНЫЕ ПЕРЕОПРЕДЕЛЕНИЯ: поля («часть.поле»), которые этот элемент
+    // задал сам. Стиль их не трогает — правка общего стиля обновляет
+    // остальное и не стирает того, что сделано у элемента нарочно.
+    std::vector<std::string> StyleOverrides;
+    bool Overrides(const std::string& key) const {
+        for (const std::string& k : StyleOverrides)
+            if (k == key) return true;
+        return false;
+    }
 
     int Order = 0;        // порядок среди СОСЕДЕЙ (больше — поверх)
     // СЛОЙ ОТРИСОВКИ — порядок поверх ВСЕГО интерфейса, а не только соседей.

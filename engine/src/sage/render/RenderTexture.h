@@ -2,6 +2,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <glm/glm.hpp>
 
@@ -68,6 +69,8 @@ public:
 
     RenderTexture& GetOrCreate(const std::string& name, int width, int height);
     RenderTexture* Find(const std::string& name);
+    // Имена заведённых картинок — для выбора в редакторе.
+    std::vector<std::string> Names() const;
     void Remove(const std::string& name);
     void Clear();
 

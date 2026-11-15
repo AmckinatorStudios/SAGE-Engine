@@ -30,4 +30,9 @@ bool ReadButtonContent(Scene& scene, entt::entity button, ButtonContent& out);
 // выставить их текст и ряд кнопки.
 void ApplyButtonContent(Scene& scene, entt::entity button, const ButtonContent& content);
 
+// Подпись переключателя — правее его значка: у галочки значок квадратный, у
+// выключателя — таблетка почти вдвое шире, и подпись, поставленная под
+// галочку, наехала бы на выключатель. Зовётся при смене вида.
+void PlaceToggleCaption(Scene& scene, entt::entity toggle);
+
 } // namespace sage::ui

@@ -10,6 +10,9 @@
 #include "sage/ecs/CameraView.h"
 #include "sage/ecs/RenderComponents.h"
 #include "sage/render/RenderTexture.h"
+
+#include <cstdint>
+#include <cstring>
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Scene.h"
 
@@ -226,6 +229,33 @@ bool ChainNeedsVelocity(const PostChain& chain) {
     return false;
 }
 
+namespace {
+void HashMix(size_t& h, float v) {
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &v, sizeof(bits));
+    h ^= (size_t)bits + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2);
+}
+} // namespace
+
+size_t ChangeSignature(Scene& scene, entt::entity camera, const RenderTextureComponent& rt) {
+    size_t h = 0;
+    const glm::mat4 cam = scene.WorldMatrix(camera);
+    for (int c = 0; c < 4; ++c)
+        for (int r = 0; r < 4; ++r) HashMix(h, cam[c][r]);
+    for (float v : {rt.LookAt.x, rt.LookAt.y, rt.LookAt.z, rt.Fov, rt.OrthoSize, rt.Near, rt.Far, (float)rt.Width,
+                    (float)rt.TargetHeight(), rt.ClearColor.r, rt.ClearColor.g, rt.ClearColor.b, rt.ClearColor.a})
+        HashMix(h, v);
+    // То, что в кадре: положение каждого рисуемого объекта.
+    for (entt::entity e : scene.Registry().view<MeshRendererComponent>()) {
+        const glm::mat4 m = scene.WorldMatrix(e);
+        HashMix(h, m[3][0]);
+        HashMix(h, m[3][1]);
+        HashMix(h, m[3][2]);
+        HashMix(h, m[0][0] + m[1][1] * 3.0f + m[2][2] * 7.0f + m[0][1] * 11.0f + m[1][2] * 13.0f);
+    }
+    return h;
+}
+
 int RenderTextureViews(Scene& scene, sage::ecs::RenderBatch& batch,
                        const LightingEnvironment& env, float time) {
     auto view = scene.Registry().view<RenderTextureComponent, Transform>();
@@ -238,7 +268,16 @@ int RenderTextureViews(Scene& scene, sage::ecs::RenderBatch& batch,
     for (auto e : view) {
         RenderTextureComponent& rt = view.get<RenderTextureComponent>(e);
         if (rt.Target.empty()) continue;
-        if (!rt.Continuous && !rt.Dirty) continue;
+        if (rt.Mode == RenderTextureComponent::Update::OnChange && !rt.Dirty) {
+            // Отпечаток: камера, её настройки и положение того, что рисуется.
+            // Сравнивать картинки дороже самой съёмки; сравнить матрицы — нет.
+            const size_t sig = ChangeSignature(scene, e, rt);
+            if (sig != rt.Signature) {
+                rt.Signature = sig;
+                rt.Dirty = true;
+            }
+        }
+        if (!rt.EveryFrame() && !rt.Dirty) continue;
 
         const glm::vec3 eye = glm::vec3(scene.WorldMatrix(e)[3]);
         // Взгляд строго вниз ломает look-at: «вверх» и направление совпадают, и
@@ -249,7 +288,9 @@ int RenderTextureViews(Scene& scene, sage::ecs::RenderBatch& batch,
         const glm::vec3 up = std::abs(dir.y) > 0.99f ? glm::vec3(0.0f, 0.0f, 1.0f)
                                                      : glm::vec3(0.0f, 1.0f, 0.0f);
 
-        RenderTexture& target = registry.GetOrCreate(rt.Target, rt.Width, rt.Height);
+        RenderTexture& target = registry.GetOrCreate(rt.Target, rt.Width, rt.TargetHeight());
+        if (target.Width() != rt.Width || target.Height() != rt.TargetHeight())
+            target.Resize(rt.Width, rt.TargetHeight());
         const float aspect = (float)target.Width() / (float)std::max(target.Height(), 1);
 
         // Освещение: сценическое или своё ровное (см. StudioLight).

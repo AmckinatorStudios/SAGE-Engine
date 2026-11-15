@@ -7,6 +7,7 @@
 #include "sage/render/Texture.h"
 #include "sage/core/TextureFiltering.h"
 #include "sage/ui/NineSlice.h"
+#include "sage/ui/SpriteSheet.h"
 
 // ---------------------------------------------------------------------------
 // Из чего элемент интерфейса СДЕЛАН: подложка, надпись, картинка, полоса,
@@ -284,6 +285,13 @@ struct Image {
     // Спрайты состояний: в наборах интерфейса кнопка нарисована трижды, и
     // подсветка «осветлить на 12%» вместо нажатой картинки сразу выдаёт, что
     // набор использован наполовину.
+    // ПОСЛЕДОВАНИЕ КАДРОВ листа этой картинки («картинка.sagesheet»): имя —
+    // и картинка листает кадры сама (Sprite меняется по времени).
+    std::string Sequence;
+    float SequenceTime = 0.0f;                         // рантайм
+    std::shared_ptr<const sage::ui::SpriteSheet> Sheet; // рантайм: лист картинки
+    std::string SheetFor;                              // рантайм: для какого пути загружен
+
     glm::vec4 SpriteHover{0.0f, 0.0f, 0.0f, 0.0f};
     glm::vec4 SpritePressed{0.0f, 0.0f, 0.0f, 0.0f};
 

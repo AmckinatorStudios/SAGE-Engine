@@ -27,6 +27,28 @@ struct SpriteRegion {
     std::string Name;
     glm::ivec4 Rect{0};          // x, y, w, h
     glm::vec4 Slice{0.0f};       // девятина: лево, верх, право, низ (нули — нет)
+    // Точка опоры в долях куска (0,0 — левый верх): вокруг неё кусок
+    // поворачивается и ею ставится — у меча это рукоять, а не середина.
+    glm::vec2 Pivot{0.5f, 0.5f};
+};
+
+// ПОСЛЕДОВАНИЕ КАДРОВ — куски листа по порядку и скорость: бег персонажа,
+// вращающаяся монетка, анимированная иконка. Картинка интерфейса проигрывает
+// его (Image::Sequence), игра берёт кадр по времени (FrameAt).
+struct SpriteSequence {
+    std::string Name;
+    std::vector<std::string> Frames;   // имена кусков
+    float Fps = 12.0f;
+    bool Loop = true;
+    // Кадр на момент time (секунды). Пусто — нет кадров.
+    std::string FrameAt(float time) const;
+};
+
+// Картинка для упаковки в атлас (RGBA, строки сверху вниз).
+struct AtlasInput {
+    std::string Name;
+    const unsigned char* Rgba = nullptr;
+    int Width = 0, Height = 0;
 };
 
 struct SpriteGrid {
@@ -40,6 +62,17 @@ struct SpriteGrid {
 class SpriteSheet {
 public:
     std::vector<SpriteRegion> Regions;
+    std::vector<SpriteSequence> Sequences;
+    const SpriteSequence* FindSequence(const std::string& name) const;
+    // Последование из кусков, чьи имена начинаются с prefix, по порядку
+    // номеров в конце имени (run_2 раньше run_10). Возвращает число кадров.
+    int SequenceFromPrefix(const std::string& name, const std::string& prefix, float fps = 12.0f);
+
+    // АТЛАС: несколько картинок — в одну, с листом кусков по их именам.
+    // Полки по высоте, сторона — степень двойки не больше maxSide.
+    static bool PackAtlas(const std::vector<AtlasInput>& images, int padding, int maxSide,
+                          std::vector<unsigned char>& rgba, int& width, int& height, SpriteSheet& sheet,
+                          std::string& err);
 
     const SpriteRegion* Find(const std::string& name) const;
     SpriteRegion* Find(const std::string& name);

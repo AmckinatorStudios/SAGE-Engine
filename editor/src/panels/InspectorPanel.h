@@ -55,7 +55,11 @@ struct EntityRemovals {
     bool Audio = false;
     bool Ai = false;
     bool VisualScript = false;
+    bool RenderTexture = false;
 };
+
+// Секция Render Texture (InspectorPanel_RenderTexture.cpp).
+void DrawRenderTextureSection(EditorHost& host, GameObject obj, entt::registry& reg, bool* remove);
 
 class InspectorPanel {
 public:

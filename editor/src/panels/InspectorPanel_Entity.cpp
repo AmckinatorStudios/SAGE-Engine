@@ -699,6 +699,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     DrawAnimationSections(host, obj, reg, rm);
 
     DrawEffectSections(host, obj, reg, rm);
+    DrawRenderTextureSection(host, obj, reg, &rm.RenderTexture);
 
     DrawAiSection(host, obj, reg, rm);
     DrawVisualScriptSection(host, obj, reg, rm);
@@ -840,6 +841,11 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
     if (rm.Tween) {
         host.PushUndoSnapshot();
         reg.remove<sage::anim::TweenComponent>(obj.Entity());
+    }
+
+    if (rm.RenderTexture) {
+        host.PushUndoSnapshot();
+        reg.remove<RenderTextureComponent>(obj.Entity());
     }
 
     if (rm.Probe) {

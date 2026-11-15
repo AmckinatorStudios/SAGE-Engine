@@ -88,7 +88,9 @@ void DrawDropdownPart(const PartDrawContext& c) {
     const std::string text = chosen ? options[(size_t)d.Selected] : d.Placeholder;
     const Label* label = c.Sibling<Label>();
     const UITextStyle style = label ? StyleOf(*label, ui) : UITextStyle{};
-    const float scale = (label ? label->Scale : 1.0f) * c.Scale;
+    // Своей надписи у списка нет — кегль как у надписи по умолчанию, иначе
+    // текст выходит «родными» семипиксельными буквами.
+    const float scale = (label ? label->Scale : Label{}.Scale) * c.Scale;
     const float pad = (label ? label->PadX : 10.0f) * c.Scale;
     const float arrow = std::min(r.h * 0.28f, 10.0f * c.Scale);
     const glm::vec3 rgb = StateTint(c, glm::vec3(d.TextColor));

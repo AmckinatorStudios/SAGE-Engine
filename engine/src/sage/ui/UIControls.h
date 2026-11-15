@@ -58,6 +58,9 @@ void AnimateToggles(entt::registry& reg, const std::vector<Solved>& items, float
 // (Smoothing) и смягчением (Easing); отрезок Indeterminate бежит.
 void UpdateProgress(entt::registry& reg, const std::vector<Solved>& items, float dt);
 
+// Картинки с последовательностью кадров (Image::Sequence) листают кадры.
+void UpdateImageSequences(entt::registry& reg, const std::vector<Solved>& items, float dt);
+
 // Переключить галку/выключатель (щелчок или Enter) — с сигналом.
 void FlipToggle(entt::registry& reg, entt::entity e, const SignalFn& fire);
 

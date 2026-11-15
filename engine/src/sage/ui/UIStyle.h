@@ -35,6 +35,10 @@ nlohmann::json CaptureStyle(const entt::registry& reg, entt::entity e);
 // есть (стиль кнопки на надписи не добавит ей подложку), и только поля вида.
 void ApplyStyle(const nlohmann::json& style, entt::registry& reg, entt::entity e);
 
+// Наследование: поля стиля own поверх полей base (часть за частью, поле за
+// полем). Ключ «base» в файле стиля — путь к родителю.
+nlohmann::json MergeStyles(const nlohmann::json& base, const nlohmann::json& own);
+
 bool SaveStyleFile(const std::string& path, const nlohmann::json& style, std::string* err = nullptr);
 bool LoadStyleFile(const std::string& path, nlohmann::json& out, std::string* err = nullptr);
 

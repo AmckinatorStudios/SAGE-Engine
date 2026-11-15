@@ -1,7 +1,14 @@
 #pragma once
 #include <string>
 
+#include <entt/entt.hpp>
+
 #include "sage/ui/UIAnchor.h"
+
+namespace sage::ui {
+struct PartType;
+struct PartField;
+}
 
 class EditorHost;
 class GameObject;
@@ -44,6 +51,15 @@ bool DrawAnchorPicker(UIAnchor& anchor);
 // сам интерфейс или элемент внутри него (интерфейс ищется вверх по дереву).
 // Интерфейс старого вида (элементы прямо в сцене) сначала выносится в файл.
 void OpenInInterfaceMode(EditorHost& host, GameObject obj);
+
+// Источник картинки: файл или Render Texture (UIImageSource.cpp). true — путь
+// уже выбран здесь (Render Texture), слот файла рисовать не надо.
+bool DrawImageSource(EditorHost& host, const char* id, std::string& path, bool& changed);
+
+// Поле элемента со стилем правлено — запомнить переопределение и показать
+// кнопку «вернуть как в стиле» (UIStyleOverride.cpp).
+void NoteStyleOverride(EditorHost& host, entt::entity e, const sage::ui::PartType& part,
+                       const sage::ui::PartField& f, bool edited);
 
 // Content кнопки: подпись, значок, выравнивание, отступ (UIButtonContent.cpp).
 void DrawButtonContent(EditorHost& host, GameObject obj);

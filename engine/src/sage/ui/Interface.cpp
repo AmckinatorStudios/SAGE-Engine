@@ -12,6 +12,9 @@
 #include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UISerialize.h"
+#include "sage/anim/PropertyAnimator.h"
+#include "sage/anim/Tween.h"
+#include "sage/scene/SceneSerializerDetail.h"
 
 using json = nlohmann::json;
 
@@ -76,6 +79,15 @@ void Build(Scene& scene, const InterfaceNode& node, entt::entity parent,
     // тенями, которой нечем распорядиться.
     GameObject obj = scene.CreateEmptyObject(node.Name);
     LoadElement(node.Data, scene.Registry(), obj.Entity());
+    // АНИМАЦИЯ ЭЛЕМЕНТА — в самом интерфейсе: клип (ссылкой на .sageclip) и
+    // твины. Без этого анимация, настроенная в пространстве «Интерфейс»,
+    // исчезала при сохранении: .sageui писал только части элемента.
+    if (node.Data.contains("propertyAnimator"))
+        scene.Registry().emplace_or_replace<PropertyAnimatorComponent>(
+            obj.Entity(), scene_serial::ParsePropertyAnimator(node.Data["propertyAnimator"]));
+    if (node.Data.contains("tweens"))
+        scene.Registry().emplace_or_replace<sage::anim::TweenComponent>(
+            obj.Entity(), scene_serial::ParseTweens(node.Data["tweens"]));
     if (parent != entt::null) scene.SetParent(obj.Entity(), parent);
     if (isRoot) roots.push_back(obj.Entity());
     for (const InterfaceNode& c : node.Children)
@@ -87,6 +99,10 @@ InterfaceNode Snap(const Scene& scene, entt::entity e) {
     InterfaceNode n;
     if (const NameComponent* nc = reg.try_get<NameComponent>(e)) n.Name = nc->Name;
     SaveElement(n.Data, reg, e);
+    if (const PropertyAnimatorComponent* pa = reg.try_get<PropertyAnimatorComponent>(e))
+        scene_serial::SavePropertyAnimator(n.Data, *pa);
+    if (const sage::anim::TweenComponent* tc = reg.try_get<sage::anim::TweenComponent>(e))
+        scene_serial::SaveTweens(n.Data, *tc);
     if (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e)) {
         for (entt::entity c : h->Children) {
             // Только элементы: 3D-объект, случайно оказавшийся внутри поддерева

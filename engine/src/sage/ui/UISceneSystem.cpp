@@ -879,6 +879,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
 
     // Шкалы: показанное значение едет к цели, неопределённые бегут.
     UpdateProgress(reg, items, input.DeltaTime);
+    UpdateImageSequences(reg, items, input.DeltaTime);
 
     if (scrolled.Dragging)
         for (const Solved& it : items)
