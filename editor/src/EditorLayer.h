@@ -469,6 +469,7 @@ private:
     bool SelfTestProjectAndAssets();
     bool SelfTestSceneAndPlay();
     bool SelfTestSystems();
+    bool SelfTestPrimitives();
     bool SelfTestSelection();
     // Части SelfTestSelection и SelfTestTools — по файлу selftest/*.cpp на часть.
     bool SelfTestSceneBasics();
@@ -801,6 +802,8 @@ private:
     SpriteEditor m_spriteSheet;
     // Образцы для снимков (SAGE_EDITOR_UI_SAMPLE, selftest/UISampleShots.cpp).
     void RunUISampleHook(const std::string& sample);
+    // Шесть примитивов в ряд для снимков (SAGE_EDITOR_PRIMITIVES).
+    void RunPrimitiveShowcaseHook(const std::string& mode);
     std::string m_focusPanelId;   // какую панель вывести вперёд (хуки снимков)
     int m_focusPanelFrames = 0;
 

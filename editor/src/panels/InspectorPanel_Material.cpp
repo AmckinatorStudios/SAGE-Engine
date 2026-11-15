@@ -585,6 +585,9 @@ void InspectorPanel::DrawMeshSlot(EditorHost& host, entt::entity entity,
             // Примитив вместо модели: путь и слоты её частей уходят вместе с ней.
             SetEntityMesh(host.CurrentProject(), reg, entity, chosen, {},
                           ResourceManager::Instance().GetPrimitive(chosen));
+            // Другая форма — с её умолчаниями: число секторов капсулы не
+            // переезжает в шар.
+            mr.Ref.prim = {};
         } else {
             mr.Ref.type = chosen;   // Model — путь задаётся ниже и грузится кнопкой
         }

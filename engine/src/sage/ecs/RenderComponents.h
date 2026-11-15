@@ -8,6 +8,7 @@
 #include <glm/glm.hpp>
 #include "sage/render/Mesh.h"
 #include "sage/render/Material.h"
+#include "sage/render/PrimitiveParams.h"
 
 // ---------------------------------------------------------------------------
 // Компоненты живут рядом со своей системой, а не в общем файле.
@@ -42,9 +43,31 @@ struct MeshRef {
     // иерархии, поставленной из модели, рисует только свой узел (голову,
     // руку), а не всю модель. -1 — модель целиком (как раньше).
     int part = -1;
+    // Настройки геометрии процедурного примитива (детализация, сглаживание,
+    // высота капсулы) — СВОИ у каждого объекта: правка одного шара не трогает
+    // остальные. Нули — умолчания формы, поэтому старые сцены и код, который
+    // ставит только тип, дают прежнюю геометрию. У Model/None не читается.
+    sage::render::PrimitiveParams prim;
 
     bool operator==(const MeshRef& other) const {
-        return type == other.type && path == other.path && part == other.part;
+        return type == other.type && path == other.path && part == other.part && prim == other.prim;
+    }
+
+    // Процедурный ли это примитив и какой формы (у None/Model — false).
+    static bool ShapeOf(Type t, sage::render::PrimitiveShape& out) {
+        switch (t) {
+            case Type::Cube: out = sage::render::PrimitiveShape::Cube; return true;
+            case Type::Sphere: out = sage::render::PrimitiveShape::Sphere; return true;
+            case Type::Plane: out = sage::render::PrimitiveShape::Plane; return true;
+            case Type::Cylinder: out = sage::render::PrimitiveShape::Cylinder; return true;
+            case Type::Cone: out = sage::render::PrimitiveShape::Cone; return true;
+            case Type::Capsule: out = sage::render::PrimitiveShape::Capsule; return true;
+            default: return false;
+        }
+    }
+    bool IsPrimitive() const {
+        sage::render::PrimitiveShape s;
+        return ShapeOf(type, s);
     }
 };
 

@@ -56,6 +56,35 @@ static MeshRef::Type MeshTypeFromString(const std::string& s) {
 
 namespace SceneSerializer {
 
+// НАСТРОЙКИ ГЕОМЕТРИИ ПРИМИТИВА — только то, что задано (не ноль): у сцен
+// без настроек блока нет вовсе, и читаются они прежней геометрией.
+static json PrimitiveToJson(const sage::render::PrimitiveParams& p) {
+    json g = json::object();
+    if (p.SubX || p.SubY || p.SubZ) g["subdivisions"] = json::array({p.SubX, p.SubY, p.SubZ});
+    if (p.Segments) g["segments"] = p.Segments;
+    if (p.Rings) g["rings"] = p.Rings;
+    if (p.HeightSegments) g["heightSegments"] = p.HeightSegments;
+    if (p.Height > 0.0f) g["height"] = p.Height;
+    if (p.Flat) g["flat"] = true;
+    return g;
+}
+
+static sage::render::PrimitiveParams PrimitiveFromJson(const json& g) {
+    sage::render::PrimitiveParams p;
+    if (!g.is_object()) return p;
+    if (g.contains("subdivisions") && g["subdivisions"].is_array() && g["subdivisions"].size() == 3) {
+        p.SubX = g["subdivisions"][0].get<int>();
+        p.SubY = g["subdivisions"][1].get<int>();
+        p.SubZ = g["subdivisions"][2].get<int>();
+    }
+    p.Segments = g.value("segments", 0);
+    p.Rings = g.value("rings", 0);
+    p.HeightSegments = g.value("heightSegments", 0);
+    p.Height = g.value("height", 0.0f);
+    p.Flat = g.value("flat", false);
+    return p;
+}
+
 static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
     json root;
     root["sage_scene_version"] = sage::scene::kSceneVersion;
@@ -116,6 +145,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
             j["mesh"]["type"] = MeshTypeToString(mr.Ref.type);
             SaveAssetRef(j["mesh"], "path", mr.Ref.path);
             if (mr.Ref.part >= 0) j["mesh"]["part"] = mr.Ref.part;
+            if (mr.Ref.IsPrimitive() && !mr.Ref.prim.IsDefault()) j["mesh"]["geometry"] = PrimitiveToJson(mr.Ref.prim);
             SaveAssetRef(j, "material", mr.MaterialPath);
             // Материалы подмешей — массивом, по слоту на элемент разметки меша.
             // Пишется, только если слоты есть: у одноматериального объекта пустой
@@ -282,6 +312,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             mr.Ref.type = MeshTypeFromString(j["mesh"].value("type", "none"));
             mr.Ref.path = LoadAssetRef(j["mesh"], "path");
             mr.Ref.part = j["mesh"].value("part", -1);
+            if (j["mesh"].contains("geometry")) mr.Ref.prim = PrimitiveFromJson(j["mesh"]["geometry"]);
         }
 
         if (j.contains("decal")) {
@@ -449,7 +480,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             mr.MeshPtr = animated ? nullptr : ResourceManager::Instance().GetModel(mr.Ref.path, mr.Ref.part);
         } else {
             // Примитивы (Cube/Sphere/Plane/Cylinder/Cone) — из кэша; None -> nullptr.
-            mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type);
+            mr.MeshPtr = ResourceManager::Instance().GetPrimitive(mr.Ref.type, mr.Ref.prim);
         }
 
         // Пустой объект: компонент снимается ПОСЛЕДНИМ, уже после разбора всего

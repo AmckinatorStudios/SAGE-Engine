@@ -58,6 +58,12 @@ struct EntityRemovals {
     bool RenderTexture = false;
 };
 
+namespace sage::editor {
+// Раздел Geometry процедурного примитива (InspectorPanel_Geometry.cpp): у
+// модели и пустого объекта его нет.
+void DrawPrimitiveGeometry(EditorHost& host, MeshRendererComponent& mr);
+} // namespace sage::editor
+
 // Секция Render Texture (InspectorPanel_RenderTexture.cpp).
 void DrawRenderTextureSection(EditorHost& host, GameObject obj, entt::registry& reg, bool* remove);
 

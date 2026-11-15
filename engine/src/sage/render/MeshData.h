@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include "sage/render/Mesh.h"
+#include "sage/render/PrimitiveParams.h"
 
 // ---------------------------------------------------------------------------
 // MeshData — CPU-представление геометрии (вершины + индексы) БЕЗ GPU-ресурсов
@@ -39,13 +40,26 @@ struct MeshData {
     }
 };
 
-// Процедурные примитивы движка (параметры по умолчанию — как у Mesh::Create*,
-// то есть как у ResourceManager::GetPrimitive).
-MeshData BuildCube();
-MeshData BuildSphere(int rings = 24, int sectors = 32);
-MeshData BuildPlane(int subdivisions = 1);
-MeshData BuildCylinder(int sectors = 32);
-MeshData BuildCone(int sectors = 32);
+// Процедурные примитивы движка. Параметры по умолчанию — геометрия, которой
+// примитив был всегда (ResourceManager::GetPrimitive без настроек).
+//
+// Детализация и сглаживание — НЕ размер: размер объекта — Transform → Scale
+// (см. PrimitiveParams.h). Все генераторы выдают обход CCW снаружи, без
+// вырожденных треугольников, с единичными нормалями, UV в [0, 1] и
+// посчитанными касательными.
+//
+// Куб: подразделения каждой грани по X/Y/Z; грани плоские, рёбра острые.
+MeshData BuildCube(int subX = 1, int subY = 1, int subZ = 1);
+// Сфера радиуса 0.5: кольца от полюса до полюса и секторы; smooth — нормали
+// сферы, иначе плоские грани (число треугольников то же).
+MeshData BuildSphere(int rings = 24, int sectors = 32, bool smooth = true);
+// Плоскость 1×1 в XZ, нормаль +Y; subZ < 0 — как subX.
+MeshData BuildPlane(int subX = 1, int subZ = -1);
+// Цилиндр r=0.5, высота 1: секторы и пояса по высоте; smoothSide — гладкая
+// стенка (торцы плоские всегда).
+MeshData BuildCylinder(int sectors = 32, int heightSegments = 1, bool smoothSide = true);
+// Конус r=0.5 у основания, высота 1: то же; основание плоское всегда.
+MeshData BuildCone(int sectors = 32, int heightSegments = 1, bool smoothSide = true);
 
 // КАПСУЛА: цилиндр радиуса 0.5 с полусферами на торцах, общая высота 2 по Y.
 //
@@ -61,6 +75,18 @@ MeshData BuildCone(int sectors = 32);
 // формы: видимое тело обязано совпадать с тем, чем персонаж сталкивается.
 // Прежние 0.25 x 1 вписывали капсулу в единичный куб и делали её вдвое уже и
 // соседних примитивов, и собственного коллайдера.
-MeshData BuildCapsule(int rings = 12, int sectors = 24);
+//
+// height — общая высота (не ниже диаметра 1): меняется длина цилиндрической
+// части, полусферы остаются полусферами; rings — кольца КАЖДОЙ полусферы;
+// bodySegments — пояса цилиндрической части.
+MeshData BuildCapsule(int rings = 12, int sectors = 24, float height = 2.0f, int bodySegments = 1,
+                      bool smooth = true);
+
+// Форма по её настройкам (нули — умолчания формы, см. PrimitiveParams).
+MeshData BuildPrimitive(PrimitiveShape shape, const PrimitiveParams& params);
+
+// Касательные (normal mapping) из позиций и UV; Tangent.w — знак бинормали.
+// Генераторы зовут её сами; Mesh — для любой геометрии, что приходит в него.
+void ComputeTangents(std::vector<Vertex>& vertices, const std::vector<unsigned int>& indices);
 
 } // namespace sage::render

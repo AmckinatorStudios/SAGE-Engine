@@ -120,6 +120,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/core/SystemScheduler.cpp
     src/sage/app/CoreSystems.cpp
     src/sage/render/MeshData.cpp
+    src/sage/render/PrimitiveParams.cpp
     src/sage/render/MeshRaycast.cpp
     src/sage/assets/format/Blob.cpp
     src/sage/assets/format/MeshFormat.cpp

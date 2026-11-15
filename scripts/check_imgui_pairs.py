@@ -72,11 +72,22 @@ def main():
                     str(rel).replace("\\", "/") == KIT_WRAPPER and "ImGui::BeginCombo" in line):
                 continue
             combos += 1
+            # Открытие в переменную («const bool open = BeginDropdown(...)»;
+            # «if (open) { … EndDropdown(); }» ниже) — тело ищем от того if.
+            start = i
+            assigned = re.search(r'bool\s+(\w+)\s*=\s*[\w:]*(BeginCombo|BeginDropdown)\s*\(', line)
+            if assigned:
+                cond = re.compile(r'if\s*\(\s*' + assigned.group(1) + r'\s*\)')
+                for k in range(i + 1, min(i + 6, len(lines))):
+                    if cond.search(lines[k]):
+                        start = k
+                        break
+            i0, line0 = start, lines[start]
             # Тело списка: от строки с BeginCombo до закрытия её блока.
-            depth = brace_delta(line)
+            depth = brace_delta(line0)
             closed = False
             ends_with_combo = False
-            j = i
+            j = i0
             while j + 1 < len(lines) and depth > 0:
                 j += 1
                 if END_COMBO.search(lines[j]):
