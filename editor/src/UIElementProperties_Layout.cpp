@@ -7,6 +7,7 @@
 // полей значило бы разойтись на первой же новой галке.
 // ---------------------------------------------------------------------------
 #include "UIElementProperties.h"
+#include "InspectorControls.h"
 #include "EditorTheme.h"
 
 #include <cstdarg>
@@ -136,31 +137,23 @@ void DrawStyleRow(EditorHost& host, GameObject obj, const UIPropsContext& ctx, u
     HintWrapped("%s", T("The look comes from the style file: changes made here are replaced when the file changes."));
 }
 
-// АДАПТИВНОЕ РАЗМЕЩЕНИЕ: пределы размера, пропорции и безопасная область.
-// Одним блоком и в контейнере, и вне его — пределы действуют в обоих случаях.
-void DrawAdaptiveSettings(EditorHost& host, ui::Element* xf) {
-    if (!ImGui::TreeNodeEx(T("Adaptive placement"), ImGuiTreeNodeFlags_SpanAvailWidth)) return;
-    ImGui::DragFloat2(T("Min size"), &xf->MinSize.x, 1.0f, 0.0f, 8192.0f, "%.0f");
-    host.TrackLastImGuiItem();
-    ImGui::DragFloat2(T("Max size"), &xf->MaxSize.x, 1.0f, 0.0f, 8192.0f, "%.0f");
-    host.TrackLastImGuiItem();
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Keeps a stretched element within sensible limits on any screen. 0 — no limit."));
-    ImGui::DragFloat(T("Aspect ratio"), &xf->AspectRatio, 0.01f, 0.0f, 16.0f, "%.3f");
-    host.TrackLastImGuiItem();
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Width divided by height: the element fits its place keeping this shape. 0 — free."));
-    if (ImGui::Checkbox(T("Inside the safe area"), &xf->SafeArea)) host.PushUndoSnapshot();
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Anchors and stretching count from the safe area of the screen, not its edges:\n"
-                                  "a notch or a TV frame does not cover the element."));
-    ImGui::TreePop();
-}
-
-// --- Раздел «Где стоит» ------------------------------------------------------
+// --- PLACEMENT: где стоит и какого размера --------------------------------
+//
+// Одна из главных групп — поэтому высоко и открыта. Поля — едиными
+// контролами (ictl): X/Y подписаны, размер — раздельно или «Ш × В» со связью
+// пропорций, поля от краёв — по сторонам со связью.
 void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int selected) {
     entt::registry& reg = host.CurrentScene().Registry();
     (void)selected;
+    const ictl::NumOpts px = [] {
+        ictl::NumOpts o;
+        o.HasReset = true;
+        return o;
+    }();
+    ictl::NumOpts size = px;
+    size.Min = 0.0f;
+    size.Max = 8192.0f;
+    size.HasReset = false;
 
     // В КОНТЕЙНЕРЕ место считает контейнер: якорь и положение не действуют, и
     // показывать их значило бы обещать то, чего не происходит.
@@ -168,79 +161,84 @@ void DrawLayoutSection(EditorHost& host, entt::entity e, ui::Element* xf, int se
     const ui::Arrangement* parentArr = parent != entt::null ? reg.try_get<ui::Arrangement>(parent) : nullptr;
     const bool inStack = parentArr && parentArr->Arranges();
     if (inStack) {
-        ImGui::SeparatorText(T("In the container"));
         if (ImGui::Checkbox(T("Place by own anchor"), &xf->IgnoreLayout)) host.PushUndoSnapshot();
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("Stand where the anchor puts it, outside the row: a badge in the\n"
                                       "corner of a list card."));
         if (!xf->IgnoreLayout) {
-            ImGui::DragFloat(T("Grow"), &xf->Grow, 0.05f, 0.0f, 16.0f, "%.2f");
-            host.TrackLastImGuiItem();
+            ictl::NumOpts grow = ictl::OptsForRange(0.0f, 16.0f);
+            grow.HasReset = true;
+            ictl::Number(host, T("Grow"), &xf->Grow, grow);
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("%s", T("A share of the room left in the row or column. 0 — keep own size;\n"
                                           "two children with 1 and 2 split the rest 1:2."));
-            ImGui::DragFloat2(T("Size"), &xf->Size.x, 1.0f, 0.0f, 4096.0f);
-            host.TrackLastImGuiItem();
-            ImGui::Checkbox(T("Visible"), &xf->Visible);
-            DrawAdaptiveSettings(host, xf);
-            if (ImGui::TreeNodeEx(T("More settings"), ImGuiTreeNodeFlags_SpanAvailWidth)) {
-                ImGui::DragInt(T("Order"), &xf->Order, 1);
-                host.TrackLastImGuiItem();
-                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Place in the row: lower comes first"));
-                ImGui::DragFloat(T("Rotation"), &xf->Rotation, 1.0f, -180.0f, 180.0f, "%.1f\xc2\xb0");
-                host.TrackLastImGuiItem();
-                DrawGroupSettings(host, e);
-                ImGui::TreePop();
-            }
+            ictl::Size(host, T("Size"), &xf->Size, size);
+            if (ImGui::Checkbox(T("Visible"), &xf->Visible)) host.PushUndoSnapshot();
             return;
         }
-        ImGui::SeparatorText(T("Position"));
     }
 
     if (DrawAnchorPicker(xf->Anchor)) host.PushUndoSnapshot();
-    ImGui::DragFloat2(T("Position"), &xf->Position.x, 1.0f); host.TrackLastImGuiItem();
-
     const char* stretchNames[] = {T("None"), T("Horizontal"), T("Vertical"), T("Both")};
     int stretch = (int)xf->Mode;
     if (ImGui::Combo(T("Stretch"), &stretch, stretchNames, IM_ARRAYSIZE(stretchNames))) {
         host.PushUndoSnapshot();
         xf->Mode = (ui::Element::Stretch)stretch;
     }
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", T("Follows the parent size instead of a fixed one"));
-    }
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Follows the parent size instead of a fixed one"));
+    ictl::Position(host, T("Position"), &xf->Position, px);
+    // Размер по растянутой оси задают поля от краёв — тогда поле размера не
+    // нужно вовсе (скрыто, а не серое).
     const bool autoWidth = reg.all_of<ui::Label>(e) && reg.get<ui::Label>(e).AutoWidth;
-    ImGui::BeginDisabled(autoWidth || xf->Mode == ui::Element::Stretch::Both);
-    ImGui::DragFloat2(T("Size"), &xf->Size.x, 1.0f, 0.0f, 4096.0f); host.TrackLastImGuiItem();
-    ImGui::EndDisabled();
-    if (xf->Mode != ui::Element::Stretch::None) {
-        ImGui::DragFloat4(T("Margin l,t,r,b"), &xf->Margin.x, 1.0f); host.TrackLastImGuiItem();
-    }
-    ImGui::Checkbox(T("Visible"), &xf->Visible);
-    DrawAdaptiveSettings(host, xf);
+    if (!autoWidth && xf->Mode != ui::Element::Stretch::Both) ictl::Size(host, T("Size"), &xf->Size, size);
+    if (xf->Mode != ui::Element::Stretch::None) ictl::Sides(host, T("Margin"), &xf->Margin, px);
+    if (ImGui::Checkbox(T("Visible"), &xf->Visible)) host.PushUndoSnapshot();
+}
 
-    // Точка привязки, поворот, порядок, прозрачность — нужны реже, чем «где и
-    // какого размера», и уходят под «Ещё».
-    if (ImGui::TreeNodeEx(T("More settings"), ImGuiTreeNodeFlags_SpanAvailWidth)) {
-        ImGui::DragFloat2(T("Pivot"), &xf->Pivot.x, 0.01f, 0.0f, 1.0f); host.TrackLastImGuiItem();
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", T("Which point of the element lands on the anchor"));
-        }
-        // УГОЛ — ЧИСЛОМ, а не только мышью: «ровно 90» набирают здесь.
-        ImGui::DragFloat(T("Rotation"), &xf->Rotation, 1.0f, -180.0f, 180.0f, "%.1f\xc2\xb0");
-        host.TrackLastImGuiItem();
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", T("Around the element centre. The handle above the top edge\n"
-                                      "does the same with the mouse."));
-        ImGui::DragInt(T("Order"), &xf->Order, 1); host.TrackLastImGuiItem();
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Higher draws on top of its siblings"));
-        ImGui::DragInt(T("Draw layer"), &xf->DrawLayer, 1); host.TrackLastImGuiItem();
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", T("Above the whole interface, not only the siblings: a higher layer is\n"
-                                      "drawn over everything with a lower one. 0 — as the parent."));
-        DrawGroupSettings(host, e);
-        ImGui::TreePop();
-    }
+// --- ADVANCED элемента: редкое -------------------------------------------
+//
+// Точка привязки, поворот, порядок, слой, прозрачность и ввод поддерева,
+// наложение и адаптивные пределы — внизу, в закрытом по умолчанию разделе.
+void DrawElementAdvanced(EditorHost& host, entt::entity e, ui::Element* xf) {
+    ictl::NumOpts pivot = ictl::OptsForRange(0.0f, 1.0f);
+    pivot.HasReset = true;
+    pivot.Reset = 0.5f;
+    ictl::GroupTitle(T("Pivot"));
+    static const char* const kXY[2] = {"X", "Y"};
+    ictl::Axes(host, "pivot", &xf->Pivot.x, 2, kXY, pivot);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Which point of the element lands on the anchor"));
+    ictl::NumOpts deg = ictl::OptsForRange(-180.0f, 180.0f);
+    deg.HasReset = true;
+    deg.Format = "%.1f\xc2\xb0";
+    ictl::Number(host, T("Rotation"), &xf->Rotation, deg);
+    ictl::Integer(host, T("Order"), &xf->Order, -100000, 100000, true, 0);
+    if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Higher draws on top of its siblings"));
+    ictl::Integer(host, T("Draw layer"), &xf->DrawLayer, -1000, 1000, true, 0);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Above the whole interface, not only the siblings: a higher layer is\n"
+                                  "drawn over everything with a lower one. 0 — as the parent."));
+    DrawGroupSettings(host, e);
+
+    // АДАПТИВНОЕ РАЗМЕЩЕНИЕ: пределы размера, пропорции и безопасная область.
+    ictl::NumOpts lim;
+    lim.Min = 0.0f;
+    lim.Max = 8192.0f;
+    lim.HasReset = true;
+    ictl::Size(host, T("Min size"), &xf->MinSize, lim);
+    ictl::Size(host, T("Max size"), &xf->MaxSize, lim);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Keeps a stretched element within sensible limits on any screen. 0 — no limit."));
+    ictl::NumOpts aspect = ictl::OptsForRange(0.0f, 16.0f);
+    aspect.Step = 0.01f;
+    aspect.Format = "%.3f";
+    aspect.HasReset = true;
+    ictl::Number(host, T("Aspect ratio"), &xf->AspectRatio, aspect);
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Width divided by height: the element fits its place keeping this shape. 0 — free."));
+    if (ImGui::Checkbox(T("Inside the safe area"), &xf->SafeArea)) host.PushUndoSnapshot();
+    if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("%s", T("Anchors and stretching count from the safe area of the screen, not its edges:\n"
+                                  "a notch or a TV frame does not cover the element."));
 }
 
 // --- Оформление: движка или своё ---------------------------------------------------
@@ -284,11 +282,10 @@ void DrawGroupSettings(EditorHost& host, entt::entity e) {
     entt::registry& reg = host.CurrentScene().Registry();
     ui::Group* group = reg.try_get<ui::Group>(e);
     float alpha = group ? group->Alpha : 1.0f;
-    if (ImGui::SliderFloat(T("Opacity"), &alpha, 0.0f, 1.0f, "%.2f")) {
+    if (ictl::SliderNumber(host, T("Opacity"), &alpha, 0.0f, 1.0f, "%.2f", true, 1.0f)) {
         if (!group) group = &reg.emplace<ui::Group>(e);
         group->Alpha = alpha;
     }
-    host.TrackLastImGuiItem();
     bool input = group ? group->Interactable : true;
     if (ImGui::Checkbox(T("Catches the mouse"), &input)) {
         host.PushUndoSnapshot();

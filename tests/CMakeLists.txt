@@ -117,6 +117,7 @@ add_executable(sage_tests
     test_interface.cpp
     test_savegame.cpp
     test_colorpicker.cpp
+    test_inspector_controls.cpp
     test_postchainui.cpp
     ../editor/src/PathScope.cpp
     ../editor/src/HotkeyScope.cpp
@@ -136,6 +137,7 @@ add_executable(sage_tests
     ../editor/src/panels/settings/SettingsUi.cpp
     ../editor/src/EditorIcons.cpp
     ../editor/src/EditorPrefs.cpp
+    ../editor/src/InspectorControls.cpp
     ../editor/src/Localization.cpp
     # Плагины редактора на Lua: шаблоны и сторож проверяются без окна.
     ../editor/src/LuaPlugins.cpp

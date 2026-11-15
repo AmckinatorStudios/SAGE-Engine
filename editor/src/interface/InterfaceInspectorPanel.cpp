@@ -64,18 +64,11 @@ void GameFrameSize(EditorHost& host, int& outW, int& outH) {
 
 } // namespace
 
+// ARRANGE — инструменты ВЫДЕЛЕНИЯ, а не свойства элемента: одной компактной
+// строкой (выравнивание значками, распределение, быстрые действия списком),
+// чтобы не занимать половину инспектора.
 void InterfaceInspectorPanel::DrawAlignTools(EditorHost& host) {
     const int count = SelectedUICount(host);
-
-    ImGui::SeparatorText(T("Align"));
-    if (count == 0) {
-        Hint(T("Select an interface element."));
-    } else {
-        Hint(count == 1 ? T("One element — aligned to its parent")
-                        : T("Aligned to the last clicked element"));
-    }
-    // Шесть кнопок с РИСУНКОМ, а не с подписью: полоска у края квадратика
-    // читается быстрее слова «Left», а шесть слов заняли бы три строки.
     struct AlignDef { const char* Id; ui::AlignEdge Edge; const char* Tip; };
     const AlignDef aligns[6] = {
         {"al", ui::AlignEdge::Left, T("Left edges")},
@@ -85,31 +78,33 @@ void InterfaceInspectorPanel::DrawAlignTools(EditorHost& host) {
         {"am", ui::AlignEdge::CenterY, T("Centers vertically")},
         {"ab", ui::AlignEdge::Bottom, T("Bottom edges")},
     };
+    ImGui::Spacing();
     for (int i = 0; i < 6; ++i) {
         if (i == 3) ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
         else if (i > 0) ImGui::SameLine();
         if (AlignButton(aligns[i].Id, aligns[i].Edge, aligns[i].Tip, count >= 1))
             uiops::Align(host, aligns[i].Edge);
     }
-
-    ImGui::SeparatorText(T("Distribute"));
+    ImGui::SameLine(0.0f, ImGui::GetStyle().ItemSpacing.x * 2.0f);
     ImGui::BeginDisabled(count < 3);
     if (ImGui::Button(T("Across"))) uiops::Distribute(host, true, false);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("%s", T("Distribute across: needs three elements or more"));
     ImGui::SameLine();
     if (ImGui::Button(T("Down"))) uiops::Distribute(host, false, false);
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("%s", T("Distribute down: needs three elements or more"));
     ImGui::EndDisabled();
-    if (count < 3) Hint(T("Needs three elements or more."));
-
-    ImGui::SeparatorText(T("Quick actions"));
+    ImGui::SetNextItemWidth(-1.0f);
     ImGui::BeginDisabled(count == 0);
-    if (ImGui::Button(T("Fill the parent"), ImVec2(-1.0f, 0.0f))) uiops::StretchToParent(host, 0.0f);
-    if (ImGui::Button(T("Fill with a margin"), ImVec2(-1.0f, 0.0f)))
-        uiops::StretchToParent(host, 16.0f);
-    if (ImGui::Button(T("Round to the grid"), ImVec2(-1.0f, 0.0f)))
-        uiops::SnapSelectionToGrid(host);
-    if (ImGui::Button(T("Bring back on screen"), ImVec2(-1.0f, 0.0f))) uiops::BringIntoView(host);
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("%s", T("Pushes the selected elements back inside the screen."));
+    if (ImGui::BeginCombo("##quick", T("Quick actions"))) {
+        if (ImGui::Selectable(T("Fill the parent"))) uiops::StretchToParent(host, 0.0f);
+        if (ImGui::Selectable(T("Fill with a margin"))) uiops::StretchToParent(host, 16.0f);
+        if (ImGui::Selectable(T("Round to the grid"))) uiops::SnapSelectionToGrid(host);
+        if (ImGui::Selectable(T("Bring back on screen"))) uiops::BringIntoView(host);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Pushes the selected elements back inside the screen."));
+        ImGui::EndCombo();
+    }
     ImGui::EndDisabled();
 }
 
@@ -186,24 +181,6 @@ void InterfaceInspectorPanel::Draw(EditorHost& host, bool& open) {
         ImGui::Separator();
         Hint(T("Select an element on the canvas or in the list on the left."));
     } else {
-        ImGui::TextDisabled("%s", T("Element"));
-        ImGui::SameLine();
-        ImGui::TextUnformatted(obj.Name().c_str());
-        ImGui::Separator();
-
-        // Имя правится здесь же: в дереве слева его читают, а переименовывают
-        // там, где смотрят на свойства.
-        char buf[128];
-        std::snprintf(buf, sizeof(buf), "%s", obj.Name().c_str());
-        if (ImGui::InputText(T("Name"), buf, sizeof(buf))) obj.SetName(buf);
-        host.TrackLastImGuiItem();
-
-        // Инструменты вёрстки — ВЫШЕ свойств: они занимают три строки и нужны
-        // постоянно, а свойств три десятка, и уехав под них, выравнивание
-        // оказалось бы за пределами экрана.
-        DrawAlignTools(host);
-
-        ImGui::SeparatorText(T("Properties"));
         // Подписи у ImGui стоят СПРАВА от поля, и в узкой колонке они
         // обрезались посередине слова. Отдаём им фиксированную долю ширины.
         ImGui::PushItemWidth(-118.0f);
@@ -213,6 +190,8 @@ void InterfaceInspectorPanel::Draw(EditorHost& host, bool& open) {
         ctx.Browser = &m_browser;
         ctx.BrowseTarget = &m_browseTarget;
         ctx.ShowEvents = true;
+        ctx.ShowIdentity = true;
+        ctx.Arrange = [this, &host] { DrawAlignTools(host); };
         sage::editor::DrawUIElementProperties(host, obj, ctx);
         ImGui::PopItemWidth();
     }

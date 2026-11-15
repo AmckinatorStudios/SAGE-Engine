@@ -156,6 +156,14 @@ void EditorLayer::RunUISampleHook(const std::string& sample) {
         m_focusPanelId = "InterfaceInspector";
         m_focusPanelFrames = 60;
     }
+    // Выбрать элемент образца по имени — снять инспектор нужного типа.
+    if (const std::string pick = sage::EnvString("SAGE_EDITOR_UI_SELECT"); !pick.empty()) {
+        if (GameObject o = m_scene->FindByName(pick); o.Valid()) {
+            m_selection.SetPrimary(o.Id());
+            m_focusPanelId = "InterfaceInspector";
+            m_focusPanelFrames = 60;
+        }
+    }
     if (sample == "image-rt") {
         GameObject view = m_scene->CreateEmptyObject("Portrait view");
         m_scene->SetParent(view.Entity(), root);
