@@ -491,10 +491,10 @@ std::vector<Preset> BuildPresets() {
         p.RangeValue.Filled.Rounding = 64.0f;
     }
     {
-        Preset& p = add(SAGE_UI_TEXT("Progress Bar"));
+        Preset& p = add(SAGE_UI_TEXT("Progress"));
         p.Category = SAGE_UI_TEXT("Indicators");
         p.Icon = "ui-bar";
-        p.Hint = SAGE_UI_TEXT("A fill level: health, loading, progress");
+        p.Hint = SAGE_UI_TEXT("A fill level: a bar, a circle, along a path or by a picture");
         p.Box.Size = {240.0f, 26.0f};
         p.HasFill = true;
         p.FillStyle.Rounding = 6.0f;

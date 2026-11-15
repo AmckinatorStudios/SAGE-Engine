@@ -14,6 +14,9 @@
 #include "sage/ui/UIControls.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/UISceneSystem.h"
+#include "sage/ui/UISerialize.h"
+
+#include <nlohmann/json.hpp>
 
 using sage::ui::UIInputState;
 using sage::ui::UIRect;
@@ -257,4 +260,83 @@ TEST(UIButton_content_icon_and_label_in_a_row) {
     sage::ui::ApplyButtonContent(scene, b.Entity(), back);
     CHECK_FALSE(reg.all_of<sage::ui::Arrangement>(b.Entity()));
     CHECK_EQ((int)scene.ChildrenOf(b.Entity()).size(), 1);
+}
+
+// ===========================================================================
+//  PROGRESS (этап 7): диапазон, смягчение, неопределённый, сохранение.
+// ===========================================================================
+
+TEST(UIProgress_fraction_uses_min_and_max) {
+    sage::ui::Bar b;
+    b.Min = 50.0f;
+    b.Max = 250.0f;
+    b.Value = 100.0f;
+    CHECK_NEAR(sage::ui::BarFraction(b), 0.25f, 1e-4f);
+    b.Value = 1000.0f;
+    CHECK_NEAR(sage::ui::BarFraction(b), 1.0f, 1e-4f);
+    Scene scene("p");
+    GameObject g = Make(scene, "Progress", {0, 0}, {200, 20});
+    scene.Registry().get<sage::ui::Element>(g.Entity()).Type.clear();
+    CHECK_TRUE(sage::ui::InferType(scene.Registry(), g.Entity()) == "Progress");
+}
+
+TEST(UIProgress_easing_slows_near_the_target) {
+    Scene scene("p");
+    GameObject g = Make(scene, "Progress", {0, 0}, {200, 20});
+    auto& b = scene.Registry().get<sage::ui::Bar>(g.Entity());
+    b.Value = 0.0f;
+    b.Easing = 0.5f;
+    UIInputState step;
+    step.DeltaTime = 0.05f;
+    Frame(scene, step);
+    b.Value = 1.0f;
+    Frame(scene, step);
+    const float first = b.Displayed;
+    Frame(scene, step);
+    const float second = b.Displayed - first;
+    CHECK_TRUE(first > 0.0f && first < 0.5f);
+    CHECK_TRUE(second < first);   // шаги убывают — смягчение, а не равная скорость
+    for (int i = 0; i < 60; ++i) Frame(scene, step);
+    CHECK_NEAR(b.Displayed, 1.0f, 1e-3f);
+}
+
+TEST(UIProgress_indeterminate_segment_runs) {
+    Scene scene("p");
+    GameObject g = Make(scene, "Progress", {0, 0}, {200, 20});
+    auto& b = scene.Registry().get<sage::ui::Bar>(g.Entity());
+    b.Indeterminate = true;
+    UIInputState step;
+    step.DeltaTime = 0.35f;
+    Frame(scene, step);
+    const float a = b.Phase;
+    Frame(scene, step);
+    CHECK_TRUE(a > 0.0f && b.Phase > a);
+}
+
+TEST(UIProgress_modes_survive_saving) {
+    Scene scene("p");
+    GameObject g = Make(scene, "Progress", {0, 0}, {100, 100});
+    entt::registry& reg = scene.Registry();
+    auto& b = reg.get<sage::ui::Bar>(g.Entity());
+    b.Fill = sage::ui::Bar::Kind::Radial;
+    b.StartAngle = 90.0f;
+    b.Clockwise = false;
+    b.FillAmount = 0.75f;
+    b.RingWidth = 8.0f;
+    b.Min = 0.0f;
+    b.Max = 250.0f;
+    b.Value = 100.0f;
+    b.FillSource = sage::ui::Bar::Source::Shape;
+    nlohmann::json j;
+    CHECK_TRUE(sage::ui::SaveElement(j, reg, g.Entity()));
+    GameObject back = scene.CreateEmptyObject("Копия");
+    sage::ui::LoadElement(j, reg, back.Entity());
+    const auto& c = reg.get<sage::ui::Bar>(back.Entity());
+    CHECK_TRUE(c.Fill == sage::ui::Bar::Kind::Radial);
+    CHECK_NEAR(c.StartAngle, 90.0f, 1e-4f);
+    CHECK_FALSE(c.Clockwise);
+    CHECK_NEAR(c.FillAmount, 0.75f, 1e-4f);
+    CHECK_NEAR(c.Max, 250.0f, 1e-4f);
+    CHECK_NEAR(c.Value, 100.0f, 1e-4f);
+    CHECK_TRUE(c.FillSource == sage::ui::Bar::Source::Shape);
 }

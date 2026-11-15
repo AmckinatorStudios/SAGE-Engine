@@ -370,8 +370,53 @@ struct Bar {
     // здоровья, прыгающая рывком, читается хуже, чем едущая за четверть
     // секунды, и делать это анимацией из скрипта — писать её каждый раз заново.
     float Smoothing = 0.0f;
-    float Displayed = -1.0f; // рантайм: текущее показанное значение (< 0 — ещё не считалось)
+    float Displayed = -1.0f; // рантайм: текущее показанное значение (см. HasDisplayed)
+
+    // --- PROGRESS: режимы заполнения -------------------------------------
+    //
+    // Linear — полосой; Radial — по кругу (перезарядка, таймер, кольцо);
+    // Path — вдоль своего пути (дуга, змейка); Custom Mask — по картинке
+    // порядка: тёмные места заполняются первыми, светлые — последними
+    // (любая форма, нарисованная художником). Track — подложка элемента,
+    // Fill — часть самой шкалы: отдельных объектов в иерархии им не нужно.
+    enum class Kind { Linear, Radial, Path, CustomMask };
+    Kind Fill = Kind::Linear;
+    // Чем заливается: видом заполнения (цвет, градиент или картинка — Filled)
+    // или формой элемента (Shape: круг, скругление, свой контур) цветом Filled.
+    enum class Source { Look, Shape };
+    Source FillSource = Source::Look;
+    // Диапазон значения: здоровье 0..250 задаётся как есть, а не долей.
+    float Min = 0.0f;
+    float Max = 1.0f;
+    // Radial: откуда (градусы от верха, по часовой) и куда.
+    float StartAngle = 0.0f;
+    bool Clockwise = true;
+    // Какая доля круга (или пути) — это 100 %: 0.75 — шкала-подкова на 270°.
+    float FillAmount = 1.0f;
+    // Radial: толщина кольца (0 — сектор во весь круг).
+    float RingWidth = 0.0f;
+    // Path: путь в долях элемента (тот же формат, что у Shape::Path) и толщина.
+    std::string Path;
+    float PathWidth = 12.0f;
+    // Path и Custom Mask: заполнять с другого конца.
+    bool Reverse = false;
+    // Custom Mask: картинка порядка (яркость — когда заполняется).
+    std::string MaskImage;
+    // Смягчение: за сколько секунд показанное значение почти догоняет цель
+    // (0 — без смягчения). Smoothing выше — предел скорости, это — плавность.
+    float Easing = 0.0f;
+    // НЕОПРЕДЕЛЁННЫЙ: процесс без известного процента — по шкале бежит отрезок.
+    bool Indeterminate = false;
+
+    // Рантайм.
+    bool HasDisplayed = false;
+    float Phase = 0.0f;                         // бег отрезка Indeterminate, 0..1
+    mutable std::shared_ptr<::Texture> OrderTex; // картинка порядка (Radial, Path)
+    mutable std::string OrderKey;
 };
+
+// Доля заполнения 0..1 по показанному значению и диапазону.
+float BarFraction(const Bar& bar);
 
 // Векторный значок движка (см. sage/ui/UIIcons.h) — «heart», «plank» и прочие.
 struct Icon {

@@ -111,7 +111,7 @@ std::string InferType(const entt::registry& reg, entt::entity e) {
     if (reg.all_of<TextInput>(e)) return "Text Input";
     if (reg.all_of<Dropdown>(e)) return "Dropdown";
     if (const Range* r = reg.try_get<Range>(e)) return r->Toggle ? "Toggle" : "Slider";
-    if (reg.all_of<Bar>(e)) return "Progress Bar";
+    if (reg.all_of<Bar>(e)) return "Progress";
     if (fill && act) return "Button";
     // Контейнер с оформлением — Panel, будь оно формой или картинкой.
     if ((fill || shape) && arranges && !label && !act) return "Panel";

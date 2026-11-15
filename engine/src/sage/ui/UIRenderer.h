@@ -256,9 +256,15 @@ public:
         bool Invert = false;
         const Texture* Image = nullptr;  // маска-картинка (альфа)
         glm::vec4 UV{0.0f, 1.0f, 1.0f, 0.0f}; // её кусок: u0, v0, u1, v1
+        // КАРТИНКА ПОРЯДКА: красный канал — когда пиксель заполняется (0 —
+        // первым, 1 — последним), альфа — где картинка вообще есть. Видно то,
+        // чей порядок попал в Range. Так шкала любой формы (круг, путь, свой
+        // рисунок) едет одним числом, без перерисовки маски каждый кадр.
+        bool Ordered = false;
+        glm::vec2 Range{0.0f, 1.0f};
         bool operator==(const Mask& o) const {
             return Rect == o.Rect && Radius == o.Radius && Feather == o.Feather && Invert == o.Invert &&
-                   Image == o.Image && UV == o.UV;
+                   Image == o.Image && UV == o.UV && Ordered == o.Ordered && Range == o.Range;
         }
     };
     void PushMask(const Mask& mask);

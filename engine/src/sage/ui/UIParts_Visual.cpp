@@ -169,14 +169,52 @@ void DrawImagePart(const PartDrawContext& c) {
 
 const char* const kBarGrow[] = {SAGE_UI_TEXT("Right"), SAGE_UI_TEXT("Left"), SAGE_UI_TEXT("Up"),
                                 SAGE_UI_TEXT("Down")};
+const char* const kBarKind[] = {SAGE_UI_TEXT("Linear"), SAGE_UI_TEXT("Radial"), SAGE_UI_TEXT("Path"),
+                                SAGE_UI_TEXT("Custom Mask")};
+const char* const kBarSource[] = {SAGE_UI_TEXT("Image"), SAGE_UI_TEXT("Shape")};
 const char* const kBarFillMode[] = {SAGE_UI_TEXT("Squeeze"), SAGE_UI_TEXT("Reveal")};
 
 const std::vector<PartField>& BarFields() {
     static const std::vector<PartField> f = [] {
         std::vector<PartField> v = {
-            {"value", SAGE_UI_TEXT("Value"), PartField::Kind::Float, offsetof(Bar, Value), 0.0f, 1.0f},
+            {"value", SAGE_UI_TEXT("Value"), PartField::Kind::Float, offsetof(Bar, Value), -100000.0f,
+             100000.0f},
+            {"kind", SAGE_UI_TEXT("Fill mode"), PartField::Kind::Enum, offsetof(Bar, Fill), 0.0f, 3.0f,
+             "Linear — a bar; Radial — around a circle; Path — along a path;\n"
+             "Custom Mask — by a picture: dark places fill first, light ones last.",
+             kBarKind, 4},
             {"grow", SAGE_UI_TEXT("Grows"), PartField::Kind::Enum, offsetof(Bar, Grow), 0.0f, 0.0f,
-             "A vertical gauge (mana at the side, a volume column) needs Up or Down.", kBarGrow, 4},
+             "A vertical gauge (mana at the side, a volume column) needs Up or Down.", kBarGrow, 4,
+             PartField::Widget::Auto, "kind", 0},
+            {"clockwise", SAGE_UI_TEXT("Clockwise"), PartField::Kind::Bool, offsetof(Bar, Clockwise), 0.0f, 1.0f,
+             nullptr, nullptr, 0, PartField::Widget::Auto, "kind", 1},
+            {"startAngle", SAGE_UI_TEXT("Start angle"), PartField::Kind::Float, offsetof(Bar, StartAngle), -360.0f,
+             360.0f, "Degrees from the top, clockwise.", nullptr, 0, PartField::Widget::Auto, "kind", 1},
+            {"ringWidth", SAGE_UI_TEXT("Ring width"), PartField::Kind::Float, offsetof(Bar, RingWidth), 0.0f,
+             512.0f, "0 — a full sector (a pie); above — a ring of this thickness.", nullptr, 0,
+             PartField::Widget::Auto, "kind", 1},
+            {"path", SAGE_UI_TEXT("Path"), PartField::Kind::String, offsetof(Bar, Path), 0.0f, 0.0f,
+             "Points in fractions of the element: M 0 0.5 L 1 0.5; C — a curve.", nullptr, 0,
+             PartField::Widget::Auto, "kind", 2},
+            {"pathWidth", SAGE_UI_TEXT("Path width"), PartField::Kind::Float, offsetof(Bar, PathWidth), 1.0f,
+             256.0f, nullptr, nullptr, 0, PartField::Widget::Auto, "kind", 2},
+            {"maskImage", SAGE_UI_TEXT("Order picture"), PartField::Kind::String, offsetof(Bar, MaskImage), 0.0f,
+             0.0f, "Dark fills first, light last; transparent never.", nullptr, 0, PartField::Widget::Texture,
+             "kind", 3},
+            {"reverse", SAGE_UI_TEXT("From the other end"), PartField::Kind::Bool, offsetof(Bar, Reverse), 0.0f,
+             1.0f, nullptr, nullptr, 0, PartField::Widget::Auto, "kind", ShowIfAny({2, 3})},
+            {"fillAmount", SAGE_UI_TEXT("Fill amount"), PartField::Kind::Float, offsetof(Bar, FillAmount), 0.01f,
+             1.0f, "How much of the circle (or path) is 100%: 0.75 — a horseshoe gauge.", nullptr, 0,
+             PartField::Widget::Auto, "kind", ShowIfAny({1, 2, 3})},
+            {"source", SAGE_UI_TEXT("Fill source"), PartField::Kind::Enum, offsetof(Bar, FillSource), 0.0f, 1.0f,
+             "Image — the Fill look (colour, gradient or picture); Shape — the element's shape in the fill colour.",
+             kBarSource, 2},
+            {"min", SAGE_UI_TEXT("Minimum"), PartField::Kind::Float, offsetof(Bar, Min), -100000.0f, 100000.0f},
+            {"max", SAGE_UI_TEXT("Maximum"), PartField::Kind::Float, offsetof(Bar, Max), -100000.0f, 100000.0f},
+            {"indeterminate", SAGE_UI_TEXT("Indeterminate"), PartField::Kind::Bool, offsetof(Bar, Indeterminate),
+             0.0f, 1.0f, "No known percentage: a segment runs along the gauge."},
+            {"easing", SAGE_UI_TEXT("Smoothing"), PartField::Kind::Float, offsetof(Bar, Easing), 0.0f, 4.0f,
+             "Seconds the shown value takes to settle; slows near the end. 0 — none."},
             {"fillMode", SAGE_UI_TEXT("Picture shows value by"), PartField::Kind::Enum, offsetof(Bar, Mode),
              0.0f, 1.0f,
              "Squeeze — the fill picture shrinks to the value.\n"
@@ -185,52 +223,76 @@ const std::vector<PartField>& BarFields() {
              kBarFillMode, 2, PartField::Widget::Auto, "filled.texture", 1},
             {"padding", SAGE_UI_TEXT("Fill inset (l,t,r,b)"), PartField::Kind::Vec4, offsetof(Bar, Padding),
              0.0f, 64.0f, "How far the fill stays from the edge of the bar."},
-            {"smoothing", SAGE_UI_TEXT("Smoothing"), PartField::Kind::Float, offsetof(Bar, Smoothing), 0.0f,
-             8.0f, "Units per second; 0 is instant."},
+            {"smoothing", SAGE_UI_TEXT("Transition speed"), PartField::Kind::Float, offsetof(Bar, Smoothing), 0.0f,
+             100000.0f, "The fastest the shown value moves, in value units per second; 0 — no limit."},
             {"filled", SAGE_UI_TEXT("Fill"), PartField::Kind::Look, offsetof(Bar, Filled)},
         };
-        v[0].Content = true;
-        MarkAdvanced(v, {"fillMode", "padding", "smoothing"});
+        for (const char* key : {"value", "kind", "grow", "clockwise", "startAngle", "path", "maskImage"})
+            for (PartField& f : v)
+                if (std::string(f.Key) == key) f.Content = true;
+        MarkAdvanced(v, {"fillMode", "padding", "smoothing", "easing", "ringWidth", "pathWidth", "reverse",
+                         "fillAmount", "source", "min", "max", "indeterminate"});
         MarkCustomOnly(v, {"fillMode", "padding"});
         return v;
     }();
     return f;
 }
 
-float BarShown(const Bar& bar) {
-    return (bar.Smoothing > 0.0f && bar.Displayed >= 0.0f) ? bar.Displayed : bar.Value;
+float BarShown(const Bar& bar) { return bar.HasDisplayed ? bar.Displayed : bar.Value; }
+
+// Какая часть шкалы видна: [0, доля] или бегущий отрезок неопределённой.
+glm::vec2 BarRange(const Bar& bar) {
+    if (bar.Indeterminate) {
+        const float lo = bar.Phase * 1.3f - 0.3f;
+        return {std::max(0.0f, lo), std::min(1.0f, lo + 0.3f)};
+    }
+    return {0.0f, BarFraction(bar)};
 }
 
 void DrawBarPart(const PartDrawContext& c) {
     const Bar& bar = *static_cast<const Bar*>(c.Data);
     const UIRect& r = c.Rect;
-    const float t = std::clamp(BarShown(bar), 0.0f, 1.0f);
-    if (t <= 0.0f) return;
+    const glm::vec2 range = BarRange(bar);
+    if (range.y <= range.x) return;
 
     const glm::vec4 pad = (c.EngineSkin ? glm::vec4(3.0f) : bar.Padding) * c.Scale;
     const Look engineFill = EngineLook(bar.Filled, EngineRole::BarFill);
     const Look& filled = c.EngineSkin ? engineFill : bar.Filled;
     const UIRect inner{r.x + pad.x, r.y + pad.y, std::max(0.0f, r.w - pad.x - pad.z),
                        std::max(0.0f, r.h - pad.y - pad.w)};
+    if (bar.Fill != Bar::Kind::Linear) {
+        DrawProgressShaped(c, bar, filled, inner, range);
+        return;
+    }
+    // Отрезок [range.x, range.y] вдоль направления роста.
     UIRect fillRect = inner;
+    const float a = range.x, b = range.y;
     switch (bar.Grow) {
-        case Bar::Direction::LeftToRight: fillRect.w = inner.w * t; break;
+        case Bar::Direction::LeftToRight:
+            fillRect.x = inner.x + inner.w * a;
+            fillRect.w = inner.w * (b - a);
+            break;
         case Bar::Direction::RightToLeft:
-            fillRect.w = inner.w * t;
-            fillRect.x = inner.x + inner.w - fillRect.w;
+            fillRect.x = inner.x + inner.w * (1.0f - b);
+            fillRect.w = inner.w * (b - a);
             break;
         case Bar::Direction::BottomToTop:
-            fillRect.h = inner.h * t;
-            fillRect.y = inner.y + inner.h - fillRect.h;
+            fillRect.y = inner.y + inner.h * (1.0f - b);
+            fillRect.h = inner.h * (b - a);
             break;
-        case Bar::Direction::TopToBottom: fillRect.h = inner.h * t; break;
+        case Bar::Direction::TopToBottom:
+            fillRect.y = inner.y + inner.h * a;
+            fillRect.h = inner.h * (b - a);
+            break;
     }
-    // ОТКРЫТЬ, А НЕ СЖАТЬ: картинка заполнения рисуется во всю полосу и
-    // обрезается долей. Для плашки цветом разницы нет — сжатие честнее
-    // скругляет край.
-    if (!c.EngineSkin && bar.Mode == Bar::FillMode::Reveal && filled.HasTexture()) {
+    // ОТКРЫТЬ, А НЕ СЖАТЬ: картинка (или форма) заполнения рисуется во всю
+    // полосу и обрезается долей. Для плашки цветом разницы нет — сжатие
+    // честнее скругляет край.
+    const bool reveal = bar.FillSource == Bar::Source::Shape ||
+                        (!c.EngineSkin && bar.Mode == Bar::FillMode::Reveal && filled.HasTexture());
+    if (reveal) {
         c.Ui->PushClipRect(fillRect.x, fillRect.y, fillRect.w, fillRect.h);
-        DrawLook(c, filled, inner, /*tint=*/false);
+        DrawProgressSource(c, bar, filled, inner);
         c.Ui->PopClipRect();
         return;
     }

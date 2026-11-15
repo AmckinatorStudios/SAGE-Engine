@@ -278,6 +278,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/UIParts.cpp
     src/sage/ui/UIParts_Input.cpp
     src/sage/ui/UIParts_Controls.cpp
+    src/sage/ui/UIParts_Progress.cpp
     src/sage/ui/UIControls.cpp
     src/sage/ui/UIParts_Look.cpp
     src/sage/ui/UIParts_Visual.cpp
