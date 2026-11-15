@@ -635,10 +635,23 @@ Size, Range) и **контрол**. Подписи полей — слева, в
    (`ui::SetAppearanceSource`: своё запекается из вида движка один раз и при
    смене источника не стирается; у Saved Style — компактный слот файла,
    «Сохранить как стиль…» — небольшой командой), фон (None / Image / Shape у
-   Panel и Button) и вид: Fill, Shape.
-4. **Свойства типа** (PROGRESS, SLIDER, DROPDOWN…) — назначение элемента:
-   значение ползунком в своём Min..Max, Range `Min [..] Max [..]`, режимы;
-   редкие поля — «▸ Advanced» внутри раздела.
+   Panel и Button) и вид: Fill, Shape — и оформление частей типа: заполнение
+   и дорожка шкалы (у Progress подложка подписана **Track**), дорожка, ручка,
+   квадратик и отметка у Slider/Toggle, цвет, тень и обводка надписи.
+4. **Главный раздел типа** — назначение элемента: **Progress** (Value, Min/Max,
+   Fill mode, Direction, Indeterminate), **Range** у Slider (Value, Min/Max,
+   Step, Vertical), **Value** у Toggle (вкл/выкл, Checkbox/Switch), **Content**
+   у Text, **Image Source** у Image, **Input** у Text Input, **Options** у
+   Dropdown; редкие поля — «▸ Advanced» внутри раздела. Затем **Typography**
+   (шрифт, кегль, начертание, выравнивание, интервал строк) и **Transition**
+   (скорость и сглаживание перехода, время анимации переключателя). У Text и
+   Image содержимое — первым, оформление после него.
+
+   Раздел поля объявляет само поле (`PartField::Section`: `kSectionLook`,
+   `kSectionTypography`, `kSectionTransition`, nullptr — главный), а тип —
+   название главного раздела, подпись подложки и порядок (`Preset::Section`,
+   `BackgroundTitle`, `ContentFirst`): часть из игры раскладывается так же,
+   без правки инспектора.
 5. **Раскладка и содержимое** — у контейнеров.
 6. **Interaction** — включено, действие, курсор, навигация, звуки и
    состояния (наведение, нажатие, фокус, недоступно) вкладками.

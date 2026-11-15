@@ -89,6 +89,8 @@ const Look& StateLook(const PartDrawContext& c, const Look& normal, bool& stateT
 void DrawLook(const PartDrawContext& c, const Look& look, const UIRect& r, bool tint = true);
 void MarkAdvanced(std::vector<PartField>& v, std::initializer_list<const char*> keys);
 void MarkCustomOnly(std::vector<PartField>& v, std::initializer_list<const char*> keys);
+// Раздел инспектора для полей (PartField::Section).
+void MarkSection(std::vector<PartField>& v, const char* section, std::initializer_list<const char*> keys);
 void MarkTab(std::vector<PartField>& v, const char* tab, const char* need, std::initializer_list<const char*> keys);
 Look EngineLook(const Look& src, EngineRole role);
 EngineRole FillRole(const PartDrawContext& c);

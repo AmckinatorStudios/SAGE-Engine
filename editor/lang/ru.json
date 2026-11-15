@@ -3985,6 +3985,9 @@
     "coin_0": "coin_0",
     "icon → icon_0, icon_1, icon_2": "icon → icon_0, icon_1, icon_2",
     "pixels": "пикселей",
-    "Pixel grid: shown from 8x zoom": "Сетка пикселей: видна с увеличения 8x"
+    "Pixel grid: shown from 8x zoom": "Сетка пикселей: видна с увеличения 8x",
+    "Typography": "Типографика",
+    "Transition": "Переход",
+    "Image Source": "Источник картинки"
   }
 }

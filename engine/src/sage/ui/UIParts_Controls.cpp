@@ -72,6 +72,7 @@ const std::vector<PartField>& DropdownFields() {
         };
         for (int i = 0; i < 4; ++i) v[(size_t)i].Content = true;
         MarkAdvanced(v, {"maxVisible", "listColor", "highlightColor", "textColor"});
+        MarkSection(v, kSectionLook, {"listColor", "highlightColor", "textColor"});
         return v;
     }();
     return f;

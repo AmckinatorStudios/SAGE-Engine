@@ -127,6 +127,7 @@ const std::vector<PartField>& ImageFields() {
         // его не находили.
         MarkAdvanced(v, {"sprite", "sequence", "sliceCenterFill", "sliceEdgeFill", "sliceDrawCenter", "pixelScale",
                          "snapPixels"});
+        MarkSection(v, kSectionLook, {"tint"});
         return v;
     }();
     return f;
@@ -232,9 +233,11 @@ const std::vector<PartField>& BarFields() {
         for (const char* key : {"value", "kind", "grow", "clockwise", "startAngle", "path", "maskImage"})
             for (PartField& f : v)
                 if (std::string(f.Key) == key) f.Content = true;
-        MarkAdvanced(v, {"fillMode", "padding", "smoothing", "easing", "ringWidth", "pathWidth", "reverse",
-                         "fillAmount", "source", "indeterminate"});
+        MarkAdvanced(v, {"fillMode", "padding", "ringWidth", "pathWidth", "reverse", "fillAmount", "source"});
         MarkCustomOnly(v, {"fillMode", "padding"});
+        // Цвет и источник заполнения — оформление; скорость — переход.
+        MarkSection(v, kSectionLook, {"filled", "source", "fillMode", "padding"});
+        MarkSection(v, kSectionTransition, {"smoothing", "easing"});
         return v;
     }();
     return f;
@@ -415,9 +418,15 @@ const std::vector<PartField>& LabelFields() {
          "stateColors", 1},
     };
     v[0].Content = true;
-    MarkAdvanced(v, {"font", "fontPixelHeight", "fontSnapPixels", "fontFilter", "autoWidth", "autoSize", "lineSpacing", "padX",
+    MarkAdvanced(v, {"fontPixelHeight", "fontSnapPixels", "fontFilter", "autoWidth", "autoSize", "padX",
                      "shadowOffset", "shadowColor", "outline", "outlineColor", "stateColors",
                      "hoverColor", "pressedColor", "disabledColor"});
+    // Текст — содержимое; шрифт, кегль и выравнивание — типографика; цвет,
+    // тень и обводка — оформление.
+    MarkSection(v, kSectionTypography, {"scale", "face", "font", "fontPixelHeight", "fontSnapPixels", "fontFilter",
+                                        "horizontal", "vertical", "lineSpacing"});
+    MarkSection(v, kSectionLook, {"color", "shadowOffset", "shadowColor", "outline", "outlineColor", "stateColors",
+                                  "hoverColor", "pressedColor", "disabledColor"});
     MarkCustomOnly(v, {"fontPixelHeight", "fontSnapPixels", "fontFilter", "shadowOffset", "shadowColor",
                        "outline", "outlineColor", "stateColors", "hoverColor", "pressedColor",
                        "disabledColor"});

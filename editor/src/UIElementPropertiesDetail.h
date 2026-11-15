@@ -31,6 +31,10 @@ struct FieldView {
     bool SplitContent = false;   // у реакции на мышь поведение — отдельным разделом
     bool Advanced = false;       // false — основные поля, true — редкие
     const char* Tab = nullptr;   // nullptr — поля без вкладки; иначе только эта вкладка
+    // Раздел инспектора (PartField::Section): при BySection — только поля
+    // этого раздела (nullptr — главного раздела типа).
+    bool BySection = false;
+    const char* Section = nullptr;
 };
 
 // Оформление элемента, чьи поля сейчас рисуются (движка — поля «только для

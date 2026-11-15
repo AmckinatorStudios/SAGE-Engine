@@ -25,7 +25,7 @@ void ApplyNode(entt::registry& reg, entt::entity e, const Preset& p) {
     // является, — иначе и инспектор, и список, и скрипт снова вынуждены
     // угадывать это по набору частей.
     Element box = p.Box;
-    box.Type = p.Name;
+    box.Type = p.Type.empty() ? p.Name : p.Type;
     reg.emplace_or_replace<Element>(e, box);
     part(p.HasFill, p.FillStyle);
     part(p.HasLabel, p.LabelStyle);
@@ -123,6 +123,14 @@ std::string InferType(const entt::registry& reg, entt::entity e) {
     if (fill && !label && !image && !icon) return "Panel";
     if (!fill && !shape && !label && !image && !icon && !act) return "Container";
     return {};
+}
+
+std::string CanonicalType(const std::string& type) {
+    if (type.empty() || FindPreset(type)) return type;
+    for (const Preset& p : Presets())
+        for (const Preset& child : p.Children)
+            if (child.Name == type && !child.Type.empty()) return child.Type;
+    return type;
 }
 
 int InferMissingTypes(Scene& scene) {

@@ -70,4 +70,8 @@ std::string InferType(const entt::registry& reg, entt::entity e);
 // развёртывания интерфейса. Возвращает, скольким тип назначен.
 int InferMissingTypes(Scene& scene);
 
+// Тип из файла — к имени типа. Раньше ребёнок заготовки (надпись кнопки)
+// получал типом своё ИМЯ («Текст»), и инспектор не узнавал в нём Text.
+std::string CanonicalType(const std::string& type);
+
 } // namespace sage::ui
