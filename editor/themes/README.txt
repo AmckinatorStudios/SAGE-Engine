@@ -34,7 +34,8 @@
               cellPadding            (пара чисел: [по горизонтали, по вертикали])
               scrollbarSize grabMinSize indentSpacing
               borderWindow borderFrame borderPopup
-              tabOverline separatorSize
+              separatorSize   (tabOverline старых тем не читается: полосы
+                               над активной вкладкой нет)
 
 Проще всего начать с готового: «Настройки > Оформление > Выгрузить тему в themes/»
 запишет сюда текущую тему целиком — останется поменять цвета и перезапустить

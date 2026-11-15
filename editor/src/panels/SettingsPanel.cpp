@@ -172,8 +172,7 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
         }
         ImGui::PushID(i);
         // Строка раздела рисуется сама, а не Selectable: у Selectable фон
-        // вылезает за отступ окна, а полоса акцента, нарисованная левее него,
-        // упиралась в край колонки — выбранный пункт выглядел съехавшим.
+        // вылезает за отступ окна, и выбранный пункт выглядел съехавшим.
         const ImVec2 p = ImGui::GetCursorScreenPos();
         const float w = ImGui::GetContentRegionAvail().x;
         const float h = ImGui::GetFrameHeight() + st.SpacingSM;
@@ -190,10 +189,8 @@ void SettingsPanel::Draw(EditorHost& host, bool& open) {
             bg.w = sel ? 0.16f : 0.9f;
             dl->AddRectFilled(p, q, ImGui::ColorConvertFloat4ToU32(bg), 5.0f);
         }
-        // Выбранный раздел — полоса акцента у левого края строки, внутри неё.
-        if (sel)
-            dl->AddRectFilled(ImVec2(p.x, p.y + h * 0.22f), ImVec2(p.x + 3.0f, q.y - h * 0.22f),
-                              EditorTheme::Color32(EditorTheme::Role::Accent), 1.5f);
+        // Выбранный раздел — подложкой и ярким текстом, без жёлтой полосы
+        // у края: полоса повторяла то, что уже говорит подложка.
         const ImU32 col = EditorTheme::Color32(sel ? EditorTheme::Role::Text : EditorTheme::Role::TextDim);
         const float icon = std::floor(ImGui::GetFontSize() * 1.15f);
         const float iy = p.y + (h - icon) * 0.5f;

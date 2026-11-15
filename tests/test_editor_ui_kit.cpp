@@ -92,12 +92,88 @@ TEST(UiKit_vector_is_one_row_without_id_clashes) {
         f.Run(600.0f, draw);
         worst = std::max(worst, f.Ctx->HoveredIdPreviousFrameItemCount);
     }
-    // Вектор — один элемент строки во всю ширину (значок справа встаёт за
-    // рамкой), высотой в одно поле.
+    // Строка полей — во всю ширину (значок справа встаёт за последним полем),
+    // высотой в одно поле.
     const float avail = 600.0f - 2.0f * ImGui::GetStyle().WindowPadding.x;
     CHECK_NEAR(rect.x, avail, 1.0f);
     CHECK_NEAR(rect.y, ImGui::GetFrameHeight(), 0.5f);
     CHECK_TRUE(worst <= 1);
+}
+
+// ОСЬ — СВОЁ ПОЛЕ: у каждой оси своя область взаимодействия, поля одной
+// ширины не пересекаются и разделены отступом, в отступе ничего не нажимается.
+// Для векторов 2, 3 и 4 осей.
+TEST(UiKit_vector_axes_are_separate_fields) {
+    for (const int n : {2, 3, 4}) {
+        KitFrame f;
+        float v[4] = {1.0f, 2.0f, 3.0f, 4.0f};
+        auto draw = [&] { ictl::DragVec(nullptr, "##vec", v, n, 0.1f); };
+        f.Run(700.0f, draw);
+        const ImVec2 pad = ImGui::GetStyle().WindowPadding;
+        const float avail = 700.0f - 2.0f * pad.x;
+        const float field = ictl::VecFieldWidth(avail, n);
+        const float gap = ictl::VecAxisGap();
+        CHECK_TRUE(gap >= 2.0f);
+        CHECK_TRUE(field * (float)n + gap * (float)(n - 1) <= avail + 0.5f);
+        const float y = pad.y + ImGui::GetFrameHeight() * 0.5f;
+        auto hoveredAt = [&](float x) {
+            ImGui::GetIO().AddMousePosEvent(x, y);
+            f.Run(700.0f, draw);
+            f.Run(700.0f, draw);
+            return f.Ctx->HoveredId;
+        };
+        ImGuiID ids[4] = {};
+        for (int i = 0; i < n; ++i) {
+            const float x0 = pad.x + (field + gap) * (float)i;
+            // Середина числа в поле — само поле оси.
+            ids[i] = hoveredAt(x0 + field * 0.6f);
+            CHECK_TRUE(ids[i] != 0);
+            for (int k = 0; k < i; ++k) CHECK_TRUE(ids[i] != ids[k]);
+            // Отступ после поля — пустой: поля не соприкасаются.
+            if (i + 1 < n) CHECK_EQ(hoveredAt(x0 + field + gap * 0.5f), (ImGuiID)0);
+        }
+    }
+}
+
+// Каждую ось правят независимо: перетаскивание по полю Y меняет только Y.
+TEST(UiKit_vector_axes_change_independently) {
+    KitFrame f;
+    float v[3] = {1.0f, 2.0f, 3.0f};
+    auto draw = [&] { ictl::DragVec(nullptr, "##vec", v, 3, 0.1f); };
+    f.Run(700.0f, draw);
+    const ImVec2 pad = ImGui::GetStyle().WindowPadding;
+    const float field = ictl::VecFieldWidth(700.0f - 2.0f * pad.x, 3);
+    const float x = pad.x + field + ictl::VecAxisGap() + field * 0.6f;
+    const float y = pad.y + ImGui::GetFrameHeight() * 0.5f;
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddMousePosEvent(x, y);
+    f.Run(700.0f, draw);
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+    f.Run(700.0f, draw);
+    for (int step = 1; step <= 6; ++step) {
+        io.AddMousePosEvent(x + 10.0f * (float)step, y);
+        f.Run(700.0f, draw);
+    }
+    io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+    f.Run(700.0f, draw);
+    CHECK_TRUE(v[1] > 2.0f);
+    CHECK_NEAR(v[0], 1.0f, 1e-6f);
+    CHECK_NEAR(v[2], 3.0f, 1e-6f);
+}
+
+// Узкая панель — ось на строку: поля не сжимаются до нечитаемых.
+TEST(UiKit_vector_stacks_when_narrow) {
+    KitFrame f;
+    float v[3] = {1.0f, 2.0f, 3.0f};
+    ImVec2 rect(0, 0);
+    auto draw = [&] {
+        ictl::DragVec(nullptr, "##vec", v, 3, 0.1f);
+        rect = ImGui::GetItemRectSize();
+    };
+    f.Run(110.0f, draw);
+    CHECK_TRUE(rect.y > ImGui::GetFrameHeight() * 2.5f);
+    f.Run(700.0f, draw);
+    CHECK_NEAR(rect.y, ImGui::GetFrameHeight(), 0.5f);
 }
 
 TEST(UiKit_dropdown_opens_from_the_whole_field) {

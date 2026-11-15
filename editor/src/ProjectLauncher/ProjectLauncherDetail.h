@@ -52,13 +52,8 @@ inline bool NavItem(const char* icon, const char* label, bool active) {
     const ImVec2 p1(p0.x + w, p0.y + h);
     if (active) dl->AddRectFilled(p0, p1, EditorTheme::Color32(Role::Selection), ui.CornerRadius);
     else if (hovered) dl->AddRectFilled(p0, p1, EditorTheme::Color32(Role::Hover), ui.CornerRadius);
-    if (active) {
-        // Указатель — ТОНКИЙ. Толстая полоса и заливка сразу дают два акцента
-        // на один пункт, и жёлтого на экране становится больше, чем смысла.
-        dl->AddRectFilled(ImVec2(p0.x, p0.y + ui.SpacingXS),
-                          ImVec2(p0.x + 2.0f * Sage::UI::Scale(), p1.y - ui.SpacingXS),
-                          EditorTheme::Color32(Role::Accent), 1.0f);
-    }
+    // Выбранный пункт — подложкой и ярким текстом; жёлтой полосы-указателя
+    // у края нет: она дублировала подложку вторым акцентом.
 
     const ImVec4 col = EditorTheme::Color(active ? Role::Text : Role::TextDim);
     EditorIcons::DrawLabeled(dl, ImVec2(p0.x + ui.SpacingMD, p0.y + (h - ui.IconSize) * 0.5f),
