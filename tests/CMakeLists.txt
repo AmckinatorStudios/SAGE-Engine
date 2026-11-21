@@ -21,6 +21,7 @@ add_executable(sage_tests
     test_zip.cpp
     test_animation.cpp
     test_animgraph.cpp
+    test_anim_layers.cpp
     test_pivot.cpp
     test_hierarchy.cpp
     test_scripting.cpp

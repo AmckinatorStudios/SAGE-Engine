@@ -8,6 +8,7 @@
 
 #include "../AssetSlot.h"
 #include "../EditorHost.h"
+#include "../animws/AnimStage.h"
 #include "../EditorIcons.h"
 #include "../EditorTheme.h"
 #include "../InspectorControls.h"
@@ -38,7 +39,6 @@ void AnimGraphPanel::Open(EditorHost& host, const std::string& path) {
         m_redo.clear();
         m_selected = 0;
         m_inspectNode = false;
-        m_values.clear();
         m_rebind = true;
         m_frameRequest = true;
         m_status.clear();
@@ -119,10 +119,14 @@ void AnimGraphPanel::SelectNode(EditorHost& host, int id) {
 
 // --- Предпросмотр на выбранном объекте ----------------------------------------
 
+// Граф играет на КОПИИ цели в сцене предпросмотра пространства Animation
+// (animws/AnimStage.h), а не на объекте уровня: раньше окно клало свой граф и
+// значения параметров в настоящий компонент выбранного объекта и при уходе
+// возвращало их обратно — любой путь мимо «возврата» оставлял уровень в чужом
+// состоянии.
 AnimationComponent* AnimGraphPanel::Target(EditorHost& host) const {
-    if (m_targetId < 0) return nullptr;
-    GameObject o = host.CurrentScene().Get(m_targetId);
-    return o.Valid() ? o.Registry()->try_get<AnimationComponent>(o.Entity()) : nullptr;
+    AnimStage* stage = host.AnimationStage();
+    return stage ? stage->StageAnim() : nullptr;
 }
 
 const AnimGraphInstance* AnimGraphPanel::LiveInstance(EditorHost& host) const {
@@ -139,46 +143,30 @@ std::vector<std::string> AnimGraphPanel::ModelClipNames(EditorHost& host) const 
 }
 
 void AnimGraphPanel::ReleasePreview(EditorHost& host) {
-    if (AnimationComponent* am = Target(host)) {
-        // Свой граф объекта — снова из его файла (или никакого): подменённый
-        // из памяти граф в сцене остаться не должен.
-        am->GraphResolvedFrom.clear();
-        if (am->GraphPath.empty()) am->GraphAsset = nullptr;
-    }
-    m_targetId = -1;
+    // Уровень окно не трогает — возвращать нечего. Сцена предпросмотра
+    // переходит к графу объекта (Animation Inspector).
+    (void)host;
+    m_shared.reset();
     m_rebind = true;
 }
 
 void AnimGraphPanel::SyncPreview(EditorHost& host) {
-    // Объект предпросмотра — выбранный, если у него есть анимация. Выбрали
-    // другой — прежнему возвращается его граф.
-    int want = -1;
-    GameObject sel = host.CurrentScene().Get(host.Selection().Primary());
-    if (m_hasGraph && sel.Valid() && sel.Registry()->all_of<AnimationComponent>(sel.Entity())) want = sel.Id();
-    if (want != m_targetId) {
-        ReleasePreview(host);
-        m_targetId = want;
-    }
-    AnimationComponent* am = Target(host);
-    if (!am) return;
-    if (m_rebind || !am->GraphAsset) {
-        am->GraphAsset = std::make_shared<const AnimGraph>(m_graph);
+    AnimStage* stage = host.AnimationStage();
+    if (!stage || !m_hasGraph) return;
+    // Граф из памяти — правка видна до сохранения. Новый общий экземпляр —
+    // только при изменении, влияющем на позу (Changed(true)).
+    if (m_rebind || !m_shared) {
+        m_shared = std::make_shared<const AnimGraph>(m_graph);
         m_rebind = false;
     }
-    // Значения параметров — те же Params.Floats, что пишут скрипты в игре.
-    for (const AnimGraphParam& p : m_graph.Params) {
-        auto it = m_values.find(p.Name);
-        am->Params.Floats[p.Name] = it != m_values.end() ? it->second : p.Default;
-    }
+    stage->SetGraph(m_shared, m_path);
 }
 
 // --- Окно -------------------------------------------------------------------
 
 void AnimGraphPanel::Draw(EditorHost& host, bool* open, const std::string& windowId) {
-    if (!*open) {
-        if (m_targetId >= 0) ReleasePreview(host);
-        return;
-    }
+    m_open = *open;
+    if (!*open) return;
     if (m_focusFrames > 0) {
         ImGui::SetNextWindowFocus();
         --m_focusFrames;
@@ -253,7 +241,6 @@ void AnimGraphPanel::DrawToolbar(EditorHost& host) {
         m_redo.clear();
         m_selected = 0;
         m_inspectNode = false;
-        m_values.clear();
         m_rebind = true;
         m_frameRequest = true;
     }
@@ -284,34 +271,19 @@ void AnimGraphPanel::DrawToolbar(EditorHost& host) {
         // Без графа предпросматривать нечего.
     } else if (!am) {
         ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("%s", T("Select an object with a skeleton: the graph plays on it in the Viewport"));
+        ImGui::TextDisabled("%s", T("Choose a model with a skeleton in Animation Inspector > Target: the graph plays on it in the Viewport"));
     } else {
-        if (EditorIcons::IconOnlyButton(am->Playing ? "pause" : "play", am->Playing ? T("Pause") : T("Play"))) {
-            host.PushUndoSnapshot();
-            am->Playing = !am->Playing;
+        // Воспроизведение — предпросмотра (сцена Animation); скорость и повтор —
+        // объекта, в Animation Inspector > Animation Source.
+        AnimStage& stage = *host.AnimationStage();
+        if (EditorIcons::IconOnlyButton(stage.Playing() ? "pause" : "play", stage.Playing() ? T("Pause") : T("Play"))) {
+            stage.SetPlaying(!stage.Playing());
+            stage.SetMode(AnimStage::Source::Graph);
         }
         ImGui::SameLine();
         if (EditorIcons::IconOnlyButton("refresh", T("Restart from the beginning"))) am->Graph.Restart();
         ImGui::SameLine();
-        // Скорость — короткий список, а не полоса во всю ширину.
-        static const float kSpeeds[] = {0.25f, 0.5f, 1.0f, 1.5f, 2.0f};
-        char cur[16];
-        std::snprintf(cur, sizeof(cur), "%gx", am->Speed);
-        ImGui::SetNextItemWidth(ImGui::CalcTextSize("0.25x").x + ImGui::GetFrameHeight() * 1.6f);
-        if (ictl::BeginDropdown("##ag_speed", cur, ictl::DropLook::Compact)) {
-            for (float sp : kSpeeds) {
-                char item[16];
-                std::snprintf(item, sizeof(item), "%gx", sp);
-                if (ImGui::Selectable(item, std::abs(am->Speed - sp) < 1e-3f)) {
-                    host.PushUndoSnapshot();
-                    am->Speed = sp;
-                }
-            }
-            ictl::EndDropdown();
-        }
-        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Playback speed of the object"));
-        ImGui::SameLine();
-        GameObject o = host.CurrentScene().Get(m_targetId);
+        GameObject o = host.LevelScene().Get(stage.TargetId());
         ImGui::AlignTextToFramePadding();
         EditorIcons::Inline("model");
         ImGui::SameLine(0.0f, 4.0f);

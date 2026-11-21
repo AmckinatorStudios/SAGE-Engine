@@ -175,6 +175,11 @@ public:
     // Открыть граф анимации (.sageanimgraph, путь на диске) в окне Animation
     // Graph пространства Animation; играет он на выбранном объекте.
     virtual void OpenAnimGraph(const std::string& graphPath) = 0;
+    // Сцена предпросмотра пространства Animation (animws/AnimStage.h): копия
+    // цели, на которой играют клипы, граф, слои и правка позы. nullptr — нет.
+    virtual class AnimStage* AnimationStage() { return nullptr; }
+    // Граф предпросмотра ведёт окно графа (открыто, граф загружен).
+    virtual bool AnimGraphPreviewActive() const { return false; }
     // Инструмент рабочего пространства рисует в Inspector СВОЙ выделенный
     // элемент (узел графа анимации) вместо объекта. true — нарисовал, и
     // инспектор объекта в этом кадре не нужен. Выбор объекта это отменяет.

@@ -1,4 +1,5 @@
 #pragma once
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -15,14 +16,13 @@ struct AnimationComponent;
 
 // ---------------------------------------------------------------------------
 // Окно SAGE Animation Graph — вкладка пространства Animation: холст узлов и
-// параметры графа. Своего предпросмотра у окна НЕТ: граф играет на выбранном
-// объекте (с моделью со скелетом) в общем вьюпорте пространства — ровно той
-// системой анимации (sage/anim/AnimationSystem), что и в игре. Граф кладётся в
-// компонент объекта прямо из памяти (AnimationComponent::GraphAsset), поэтому
-// правка видна сразу, до сохранения, а путь графа объекта не меняется.
+// параметры графа (имя, умолчание, диапазон). Граф играет на КОПИИ цели в
+// сцене предпросмотра пространства (animws/AnimStage.h) той же системой
+// анимации, что в игре, прямо из памяти — правка видна до сохранения, а объект
+// уровня не получает ни графа, ни значений параметров.
 //
-// Свойства выбранного узла рисует Inspector (EditorHost::DrawToolInspector);
-// выбор объекта возвращает инспектору его свойства.
+// Значения параметров для предпросмотра и свойства выбранного узла — в
+// Animation Inspector, раздел Animation Graph.
 // ---------------------------------------------------------------------------
 class AnimGraphPanel {
 public:
@@ -40,7 +40,8 @@ public:
     bool HasGraph() const { return m_hasGraph; }
     const sage::anim::AnimGraph& Graph() const { return m_graph; }
     const std::string& Path() const { return m_path; }
-    int PreviewTarget() const { return m_targetId; }
+    // Окно открыто с графом — граф предпросмотра ведёт оно.
+    bool PreviewActive() const { return m_open && m_hasGraph; }
     int SelectedNode() const { return m_selected; }
     void SelectNode(EditorHost& host, int id);
     // Состояние графа на объекте предпросмотра (nullptr — объекта нет).
@@ -112,10 +113,10 @@ private:
     glm::vec2 m_menuAt{0.0f};
     bool m_frameRequest = false;
 
-    // Предпросмотр: объект сцены, на котором играет редактируемый граф.
-    int m_targetId = -1;
-    bool m_rebind = true;       // граф изменился — отдать новый в компонент
-    std::unordered_map<std::string, float> m_values;   // значения параметров для предпросмотра
+    // Предпросмотр: граф отдаётся сцене Animation общим неизменяемым экземпляром.
+    std::shared_ptr<const sage::anim::AnimGraph> m_shared;
+    bool m_rebind = true;       // граф изменился — отдать новый
+    bool m_open = false;
 
     // Диалоги
     FileBrowser m_browser;

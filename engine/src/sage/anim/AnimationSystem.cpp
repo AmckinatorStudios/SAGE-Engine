@@ -4,6 +4,7 @@
 #include "sage/core/Profiler.h"
 
 #include <algorithm>
+#include <cmath>
 #include <exception>
 
 #include "sage/core/Log.h"
@@ -194,6 +195,60 @@ static void EnsureGraph(AnimationComponent& am) {
     if (am.Graph.MissingBones() > 0)
         LOG_WARN("Anim") << "Граф анимации: " << am.Graph.MissingBones()
                          << " каналов клипов не нашли костей в скелете " << am.ResolvedFrom;
+}
+
+// Слои: клип и маска собираются при смене пути, маски или модели — разбор
+// файла и проход по иерархии не работа для каждого кадра. Каждый кадр — только
+// время и указатели (хранилище компонентов может переехать).
+static void EnsureLayers(AnimationComponent& am, float dt) {
+    am.LayerStates.resize(am.Layers.size());
+    am.LayerPoses.clear();
+    if (!am.Model || am.Layers.empty()) return;
+    const Skeleton& sk = am.Model->GetSkeleton();
+    for (size_t i = 0; i < am.Layers.size(); ++i) {
+        const AnimationLayer& layer = am.Layers[i];
+        AnimationLayerState& st = am.LayerStates[i];
+        const bool rebindClip = st.BoundTo != &sk || st.ClipFrom != layer.ClipPath;
+        if (rebindClip) {
+            st.ClipFrom = layer.ClipPath;
+            st.HasClip = false;
+            st.Clip = AnimationClip{};
+            st.MissingBones = 0;
+            st.Time = 0.0f;
+            if (!layer.ClipPath.empty()) {
+                try {
+                    const ClipAsset asset = LoadClip(sage::AssetDatabase::Instance().LocatePath(layer.ClipPath));
+                    st.Clip = Bind(asset, sk, &st.MissingBones);
+                    st.HasClip = true;
+                    if (st.MissingBones > 0)
+                        LOG_WARN("Anim") << "Слой '" << layer.Name << "': " << st.MissingBones
+                                         << " каналов клипа без кости в скелете " << am.ResolvedFrom;
+                } catch (const std::exception& e) {
+                    LOG_ERROR("Anim") << "Слой '" << layer.Name << "': клип не прочитан '" << layer.ClipPath
+                                      << "': " << e.what();
+                }
+            }
+        }
+        if (rebindClip || st.MaskFrom != layer.Mask) {
+            st.MaskFrom = layer.Mask;
+            st.JointWeights.clear();
+            st.MissingMaskBones = 0;
+            if (!layer.Mask.empty()) st.JointWeights = MaskWeights(sk, layer.Mask, &st.MissingMaskBones);
+        }
+        st.BoundTo = &sk;
+        if (!st.HasClip) continue;
+        // Время слоя идёт вместе с компонентом (скорость, пауза) и по кругу.
+        if (am.Playing && st.Clip.Duration > 0.0f) {
+            st.Time = std::fmod(st.Time + dt * am.Speed, st.Clip.Duration);
+            if (st.Time < 0.0f) st.Time += st.Clip.Duration;
+        }
+        AnimLayerPose pose;
+        pose.Clip = &st.Clip;
+        pose.Time = st.Time;
+        pose.Weight = std::clamp(am.LayerWeight(i), 0.0f, 1.0f);
+        pose.JointWeights = st.JointWeights.empty() ? nullptr : &st.JointWeights;
+        am.LayerPoses.push_back(pose);
+    }
 }
 
 // --- Обратная кинематика поверх позы ---------------------------------------
@@ -391,6 +446,8 @@ void UpdateAnimators(Scene& scene, float dt) {
         } else {
             am.Anim.SetExternalPose(nullptr);
         }
+        EnsureLayers(am, dt);
+        am.Anim.SetLayers(am.LayerPoses.empty() ? nullptr : &am.LayerPoses);
         am.Anim.Update(am.Playing ? dt : 0.0f); // 0 dt: держим текущую позу
 
         // Корневое движение переносим на трансформ сущности. Поворотом

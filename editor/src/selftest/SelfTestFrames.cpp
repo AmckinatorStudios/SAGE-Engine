@@ -156,13 +156,13 @@ void EditorLayer::CheckWorkspaceDockFrame() {
             return;
         }
         case 3: {
-            // НИЗ — ОДИН УЗЕЛ: Assets, Console, клип и граф вкладками; вьюпорт,
-            // иерархия и инспектор — свои окна пространства, в доке.
+            // НИЗ — ОДИН УЗЕЛ: таймлайн, граф, Assets и Console вкладками;
+            // вьюпорт, иерархия и инспектор анимации — свои панели, в доке.
             const unsigned int bottom = dockOf("AssetsAnim");
             if (bottom == 0) { done(false, "в анимации панель ассетов вне дока"); return; }
             for (const char* id : {"ConsoleAnim", "AnimationAnim", "AnimGraph"})
                 if (dockOf(id) != bottom) { done(false, (std::string(id) + " не во вкладках нижнего узла анимации").c_str()); return; }
-            for (const char* id : {"ViewportAnim", "HierarchyAnim", "InspectorAnim"})
+            for (const char* id : {"AnimViewport", "AnimHierarchy", "AnimInspector"})
                 if (dockOf(id) == 0 || dockOf(id) == bottom) { done(false, (std::string(id) + " не на своём месте в анимации").c_str()); return; }
             if (dockOf("Assets") != m_wsDockHome) { done(false, "раскладка анимации забрала окно ассетов у сцены"); return; }
             SetWorkspace(EditorWorkspace::Scene);

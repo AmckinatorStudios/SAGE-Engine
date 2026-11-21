@@ -229,9 +229,9 @@ void EditorLayer::BuildAnimationDockLayout(unsigned int dockspaceId) {
     DockRegisteredPanels(EditorWorkspace::Animation, left, right, bottom, center);
     ImGui::DockBuilderFinish(dockspaceId);
 
-    // Вперёд — клип: с ним приходят в это пространство чаще всего.
+    // Вперёд — таймлайн: с ним приходят в это пространство чаще всего.
     if (ImGuiWindow* clip = ImGui::FindWindowByID(ImHashStr("AnimationAnim"))) ImGui::FocusWindow(clip);
-    if (ImGuiWindow* view = ImGui::FindWindowByID(ImHashStr("ViewportAnim"))) ImGui::FocusWindow(view);
+    if (ImGuiWindow* view = ImGui::FindWindowByID(ImHashStr("AnimViewport"))) ImGui::FocusWindow(view);
 }
 
 void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
@@ -309,8 +309,11 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // заново — то есть настроенное расположение панелей теряется при каждом
     // переходе «сцена — интерфейс». Разные узлы ImGui запоминает каждый свой,
     // в том же imgui.ini, и обе раскладки переживают перезапуск.
+    // Имя дока анимации сменилось вместе с её раскладкой (свои вьюпорт,
+    // иерархия и инспектор): под прежним именем в imgui.ini лежит раскладка с
+    // панелями сцены, и новые панели в неё не встали бы.
     static const char* const kDockNames[(int)EditorWorkspace::Count] = {
-        "SageDockSpace", "SageInterfaceDock", "SageAnimationDock"};
+        "SageDockSpace", "SageInterfaceDock", "SageAnimationWorkspace"};
     ImGuiID dockspaceId = ImGui::GetID(kDockNames[(int)m_workspace]);
     // ОСТАЛЬНЫЕ ДОК-ПРОСТРАНСТВА ДЕРЖИМ ЖИВЫМИ, хоть и не показываем.
     //

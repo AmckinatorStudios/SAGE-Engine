@@ -45,6 +45,8 @@ namespace sage { class Application; }
 #include "aigraph/AiDebugPanel.h"
 #include "aigraph/AiGraphPanel.h"
 #include "animgraph/AnimGraphPanel.h"
+#include "animws/AnimPanels.h"
+#include "animws/AnimStage.h"
 #include "EditorPanelVisibility.h"
 #include "PanelRegistry.h"
 #include "EditorRecovery.h"
@@ -202,6 +204,8 @@ public:
         return m_workspace == EditorWorkspace::Animation && m_animGraph.DrawInspector(*this);
     }
     AnimGraphPanel& AnimGraphWindow() { return m_animGraph; }
+    AnimStage* AnimationStage() override { return &m_animStage; }
+    bool AnimGraphPreviewActive() const override { return m_animGraph.PreviewActive(); }
     void OpenVisualScript(const std::string& graphPath) override {
         m_panelRegistry.SetVisible("VisualScript", true);
         m_visualScript.Open(*this, graphPath);
@@ -504,6 +508,7 @@ private:
     bool SelfTestVisualScript();     // Visual Scripting: свой редактор, узлы, компонент в Play
     bool SelfTestAiGraph();          // SAGE AI Graph: библиотека, редактор графов, компонент AI в Play
     bool SelfTestAnimGraph();        // SAGE Animation Graph: ассет, окно, компонент, сохранение сцены
+    bool SelfTestAnimWorkspace();    // пространство Animation: копия цели, ключ кости, граф, слои, уровень не тронут
     bool SelfTestAssetsBrowser();    // панель Assets: порядок, поиск, выделение, операции, настройки вида
     bool SelfTestPivot();            // опора Transform: положения, отмена, гизмо, иерархия, сцена
     bool SelfTestShaders();          // шаблоны шейдеров собираются, умолчания доходят
@@ -841,6 +846,11 @@ private:
     // инструмент под задачу: анимацию правят рядом со сценой и рядом с
     // вёрсткой, поэтому она докуется в обоих пространствах.
     AnimationPanel m_animation;
+    // Пространство Animation: своя сцена предпросмотра и три своих панели.
+    AnimStage m_animStage;
+    AnimHierarchyPanel m_animHierarchy;
+    AnimViewportPanel m_animViewport;
+    AnimInspectorPanel m_animInspector;
     AiGraphPanel m_aiGraph;     // SAGE AI Graph (aigraph/AiGraphPanel.h)
     AnimGraphPanel m_animGraph; // SAGE Animation Graph (animgraph/AnimGraphPanel.h)
     AiDebugPanel m_aiDebug;     // отладчик ИИ

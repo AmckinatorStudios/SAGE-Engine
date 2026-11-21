@@ -159,6 +159,11 @@ public:
     uint64_t RenderLiveScene(Scene& scene, int size, const glm::vec3& focus, float fitRadius,
                              const std::string& key);
 
+    // СЦЕНА С ЗАДАННОЙ КАМЕРОЙ И ФОНОМ — рабочее пространство Animation ведёт
+    // свою камеру (орбита, сдвиг, приближение) и светлый фон. Свет, окружение и
+    // вывод — те же, что у всех превью.
+    uint64_t RenderSceneView(Scene& scene, int width, int height, const glm::mat4& view, const glm::mat4& proj,
+                             const glm::vec3& eye, const glm::vec3& clearColor, const std::string& key);
     void Orbit(float dYaw, float dPitch);
     void Zoom(float delta);
     void ResetView();

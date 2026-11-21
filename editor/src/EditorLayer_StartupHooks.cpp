@@ -133,7 +133,7 @@ void EditorLayer::ApplyStartupHooks() {
             "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
             "SAGE_EDITOR_SHOW_CONSOLE",  "SAGE_EDITOR_SHOW_PROBLEMS",
             "SAGE_EDITOR_SHOW_PLUGINS",   "SAGE_EDITOR_SHADER_DEMO",  "SAGE_EDITOR_LIGHT_COOKIE", "SAGE_EDITOR_PRIMITIVES",
-            "SAGE_EDITOR_OPEN_ANIMGRAPH", "SAGE_EDITOR_SHOW_ASSETS",
+            "SAGE_EDITOR_OPEN_ANIMGRAPH", "SAGE_EDITOR_SHOW_ASSETS", "SAGE_EDITOR_ANIM_WORKSPACE",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -346,6 +346,18 @@ void EditorLayer::ApplyStartupHooks() {
             tr.SetPivotKeepPlace(glm::vec3(0.5f, 0.5f, 0.5f));
             m_tools.PivotEdit = true;
         }
+    }
+    // Пространство Animation для снимка: выбранный объект — цель, клип открыт,
+    // кость выбрана (SAGE_EDITOR_ANIM_CLIP / SAGE_EDITOR_ANIM_BONE). Мыши у
+    // прогона нет, а проверять надо именно картинку вьюпорта и инспектора.
+    if (std::getenv("SAGE_EDITOR_ANIM_WORKSPACE")) {
+        SetWorkspace(EditorWorkspace::Animation);
+        m_animStage.SetTarget(*this, m_selection.Primary());
+        if (const std::string clip = sage::EnvString("SAGE_EDITOR_ANIM_CLIP"); !clip.empty()) OpenAnimationClip(clip);
+        if (const std::string bone = sage::EnvString("SAGE_EDITOR_ANIM_BONE"); !bone.empty())
+            if (const sage::anim::Skeleton* sk = m_animStage.Skeleton())
+                for (int j = 0; j < sk->Count(); ++j)
+                    if (sk->Joints[(size_t)j].Name == bone) m_animStage.SelectBone(j);
     }
     if (const char* a = std::getenv("SAGE_EDITOR_SELECT_ASSET")) {
         m_headlessProject = true;

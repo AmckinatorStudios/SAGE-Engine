@@ -42,6 +42,9 @@ void SaveClip(const ClipAsset& clip, const std::string& path) {
     root["sage_anim_version"] = kClipVersion;
     root["name"] = clip.Name;
     root["duration"] = clip.Duration;
+    // Только у своего клипа: файл, вынутый из модели, ключа не несёт и
+    // остаётся «только для чтения» (см. ClipAsset::Editable).
+    if (clip.Editable) root["editable"] = true;
 
     json channels = json::array();
     for (const ClipAsset::Channel& ch : clip.Channels) {
@@ -97,6 +100,7 @@ ClipAsset LoadClip(const std::string& path) {
     ClipAsset clip;
     clip.Name = root.value("name", std::string());
     clip.Duration = root.value("duration", 0.0f);
+    clip.Editable = root.value("editable", false);
     if (!root.contains("channels") || !root["channels"].is_array()) return clip;
 
     for (const json& c : root["channels"]) {

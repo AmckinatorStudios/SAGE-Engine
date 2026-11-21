@@ -477,6 +477,19 @@ void SaveAnimation(json& j, const AnimationComponent& am) {
     oj["playing"] = am.Playing;
     oj["blendTime"] = am.BlendTime;
     oj["rootMotion"] = am.RootMotion;
+    // Слои — только если есть: сцена без слоёв остаётся байт в байт прежней.
+    if (!am.Layers.empty()) {
+        json layers = json::array();
+        for (const AnimationLayer& l : am.Layers) {
+            json lj;
+            lj["name"] = l.Name;
+            lj["clipPath"] = l.ClipPath;
+            lj["weight"] = l.Weight;
+            if (!l.Mask.empty()) lj["mask"] = l.Mask;
+            layers.push_back(std::move(lj));
+        }
+        oj["layers"] = std::move(layers);
+    }
 }
 
 AnimationComponent ParseAnimation(const json& aj) {
@@ -489,6 +502,19 @@ AnimationComponent ParseAnimation(const json& aj) {
     am.Playing = aj.value("playing", true);
     am.BlendTime = aj.value("blendTime", 0.25f);
     am.RootMotion = aj.value("rootMotion", false);
+    if (aj.contains("layers") && aj["layers"].is_array()) {
+        for (const json& lj : aj["layers"]) {
+            if (!lj.is_object()) continue;
+            AnimationLayer l;
+            l.Name = lj.value("name", std::string());
+            l.ClipPath = lj.value("clipPath", std::string());
+            l.Weight = lj.value("weight", 1.0f);
+            if (lj.contains("mask") && lj["mask"].is_array())
+                for (const json& b : lj["mask"])
+                    if (b.is_string()) l.Mask.push_back(b.get<std::string>());
+            am.Layers.push_back(std::move(l));
+        }
+    }
     // Model/Anim восстановятся при первом UpdateAnimators (Ready=false).
     return am;
 }
