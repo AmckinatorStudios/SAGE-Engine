@@ -221,6 +221,7 @@ void EditorLayer::OnDetach() {
     // контекста, и редактор падал бы при выходе — после всей работы, когда
     // списать падение уже не на что.
     m_inspector.Shutdown();
+    m_animGraph.Shutdown();
     m_assets.Shutdown();
     m_launcher.Shutdown();   // обложки проектов — тоже текстуры
     m_plugins.UnloadAll(); // ДО разрушения ImGui-контекста — плагины рисуют через тот же ImGui

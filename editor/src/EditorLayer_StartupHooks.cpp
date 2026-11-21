@@ -133,6 +133,7 @@ void EditorLayer::ApplyStartupHooks() {
             "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
             "SAGE_EDITOR_SHOW_CONSOLE",  "SAGE_EDITOR_SHOW_PROBLEMS",
             "SAGE_EDITOR_SHOW_PLUGINS",   "SAGE_EDITOR_SHADER_DEMO",  "SAGE_EDITOR_LIGHT_COOKIE", "SAGE_EDITOR_PRIMITIVES",
+            "SAGE_EDITOR_OPEN_ANIMGRAPH",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -146,6 +147,11 @@ void EditorLayer::ApplyStartupHooks() {
                 LOG_ERROR("Editor") << "Не удалось создать проект для headless-прогона: " << err;
         }
     }
+
+    // Окно Animation Graph с графом из файла — для скриншот-проверки окна и
+    // предпросмотра (путь к .sageanimgraph; модель — из самого графа).
+    if (const std::string graph = sage::EnvString("SAGE_EDITOR_OPEN_ANIMGRAPH"); !graph.empty())
+        OpenAnimGraph(graph);
 
     // Окно «Плагины» с примером плагина в проекте — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_PLUGINS")) {

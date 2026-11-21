@@ -33,6 +33,7 @@
 #include "../HotkeyScope.h"
 #include "../SceneCover.h"
 #include "../Thumbnails.h"
+#include "sage/anim/AnimGraph.h"
 #include "../AssetCovers.h"
 
 #include "sage/assets/import/Convert.h"
@@ -489,6 +490,7 @@ bool AssetsPanel::CreateAsset(CreateKind kind, const std::string& rawName, const
         case CreateKind::Scene:    wantExt = ".sage"; break;
         case CreateKind::TextFile: wantExt = ".txt"; break;
         case CreateKind::Material: wantExt = ".sagemat"; break;
+        case CreateKind::AnimGraph: wantExt = ".sageanimgraph"; break;
         default: break;
     }
     if (wantExt && fs::path(name).extension() != wantExt) name += wantExt;
@@ -542,6 +544,10 @@ bool AssetsPanel::CreateAsset(CreateKind kind, const std::string& rawName, const
                 "    function onUpdate(dt: number)\n"
                 "    end\n"
                 "end\n";
+        } else if (kind == CreateKind::AnimGraph) {
+            // Пустой граф с контрактом движка — только выход. Что смешивать,
+            // решает человек в редакторе графа.
+            content = sage::anim::AnimGraphToJson(sage::anim::NewAnimGraph());
         } else if (kind == CreateKind::Material) {
             content =
                 "{\n"

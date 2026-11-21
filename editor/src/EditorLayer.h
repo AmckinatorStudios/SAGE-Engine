@@ -44,6 +44,7 @@ namespace sage { class Application; }
 #include "EditorPlaySession.h"
 #include "aigraph/AiDebugPanel.h"
 #include "aigraph/AiGraphPanel.h"
+#include "animgraph/AnimGraphPanel.h"
 #include "EditorPanelVisibility.h"
 #include "PanelRegistry.h"
 #include "EditorRecovery.h"
@@ -188,6 +189,11 @@ public:
         m_panelRegistry.SetVisible("AiGraph", true);
         m_aiGraph.Open(*this, graphPath);
     }
+    void OpenAnimGraph(const std::string& graphPath, const std::string& modelHint = {}) override {
+        m_panelRegistry.SetVisible("AnimGraph", true);
+        m_animGraph.Open(*this, graphPath, modelHint);
+    }
+    AnimGraphPanel& AnimGraphWindow() { return m_animGraph; }
     void OpenVisualScript(const std::string& graphPath) override {
         m_panelRegistry.SetVisible("VisualScript", true);
         m_visualScript.Open(*this, graphPath);
@@ -488,6 +494,7 @@ private:
     bool SelfTestPanelRegistry();
     bool SelfTestVisualScript();     // Visual Scripting: свой редактор, узлы, компонент в Play
     bool SelfTestAiGraph();          // SAGE AI Graph: библиотека, редактор графов, компонент AI в Play
+    bool SelfTestAnimGraph();        // SAGE Animation Graph: ассет, окно, компонент, сохранение сцены
     bool SelfTestShaders();          // шаблоны шейдеров собираются, умолчания доходят
     bool SelfTestScenesGone();       // удалили все сцены — редактор живёт; виды логики «Создать…»
     bool SelfTestGIBake();           // запекание освещения: разметка, фон, свет по месту, «устарело»    // реестр панелей: встроенные, на ходу, окна плагинов          // плагины на Lua: шаблон, меню, отмена, ошибки, Play
@@ -822,6 +829,7 @@ private:
     // вёрсткой, поэтому она докуется в обоих пространствах.
     AnimationPanel m_animation;
     AiGraphPanel m_aiGraph;     // SAGE AI Graph (aigraph/AiGraphPanel.h)
+    AnimGraphPanel m_animGraph; // SAGE Animation Graph (animgraph/AnimGraphPanel.h)
     AiDebugPanel m_aiDebug;     // отладчик ИИ
     // Visual Scripting — тот же редактор графов в своём режиме (свои виды
     // графов и узлы, папка assets/visual).

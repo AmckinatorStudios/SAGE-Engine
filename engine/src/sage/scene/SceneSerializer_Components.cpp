@@ -417,6 +417,8 @@ void SaveAnimation(json& j, const AnimationComponent& am) {
     // Клип — ПУТЬ к файлу; номер остался запасным путём для сцен, сделанных до
     // появления файлов клипов, и для моделей, клипы которых ещё не вынуты.
     oj["clipPath"] = am.ClipPath;
+    // Граф анимации — тоже путь: граф один на всех, кто его играет.
+    if (!am.GraphPath.empty()) oj["graphPath"] = am.GraphPath;
     oj["clip"] = am.Clip;
     oj["speed"] = am.Speed;
     oj["loop"] = am.Loop;
@@ -428,6 +430,7 @@ void SaveAnimation(json& j, const AnimationComponent& am) {
 AnimationComponent ParseAnimation(const json& aj) {
     AnimationComponent am;
     am.ClipPath = aj.value("clipPath", std::string());
+    am.GraphPath = aj.value("graphPath", std::string());
     am.Clip = aj.value("clip", 0);
     am.Speed = aj.value("speed", 1.0f);
     am.Loop = aj.value("loop", true);

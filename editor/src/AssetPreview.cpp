@@ -443,6 +443,12 @@ uint64_t AssetPreview::RenderPrefab(const std::string& path, int size, const std
     return RenderScene(scene, size, radius, center, key);
 }
 
+uint64_t AssetPreview::RenderLiveScene(Scene& scene, int size, const glm::vec3& focus, float fitRadius,
+                                       const std::string& key) {
+    Init();
+    return RenderScene(scene, size, fitRadius, focus, key);
+}
+
 uint64_t AssetPreview::RenderScene(Scene& scene, int size, float fitRadius,
                                    const glm::vec3& focus, const std::string& key) {
     size = std::clamp(size, 32, 1024);

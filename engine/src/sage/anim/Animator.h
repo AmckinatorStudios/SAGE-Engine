@@ -17,6 +17,27 @@ namespace sage::anim {
 // одного — первый клип; клипов нет — -1.
 int PreferredIdleClip(const std::vector<AnimationClip>& clips);
 
+// Локальная поза скелета: TRS каждой кости относительно родителя. Это общий
+// язык всех, кто СТРОИТ позу (клип, кросс-фейд, граф анимации), и того, кто
+// превращает её в палитру костей (Animator). Смешивание идёт в TRS, а не в
+// матрицах: суставы движутся по кратчайшей дуге, масштаб не «схлопывается».
+struct LocalPose {
+    std::vector<glm::vec3> T;
+    std::vector<glm::quat> R;
+    std::vector<glm::vec3> S;
+    int Size() const { return (int)T.size(); }
+    void Resize(int n) { T.resize(n); R.resize(n); S.resize(n); }
+};
+
+// Поза клипа в момент time: поза покоя скелета, поверх — каналы клипа.
+// clip == nullptr — поза покоя. Общий сэмплер для Animator и графа анимации:
+// два сэмплера одного формата однажды разошлись бы в интерполяции.
+void SampleClipPose(const Skeleton& skeleton, const AnimationClip* clip, float time, LocalPose& out);
+
+// out = a·(1-w) + b·w покостно (lerp T/S, slerp R). out может совпадать с a или b.
+// Размеры a и b обязаны совпадать (одна поза одного скелета).
+void BlendPoses(const LocalPose& a, const LocalPose& b, float w, LocalPose& out);
+
 
 // ---------------------------------------------------------------------------
 // Animator — проигрыватель скелетной анимации. Хранит ПОКАДРОВОЕ состояние
@@ -77,6 +98,18 @@ public:
     // (тогда база — дефолтная поза скелета).
     void SetPoseOverride(const std::vector<JointPose>* overrides) { m_overrides = overrides; }
 
+    // ВНЕШНИЙ ИСТОЧНИК ПОЗЫ вместо собственных клипов — крючок для графа
+    // анимации (sage/anim/AnimGraph.h). Поза строится снаружи, а Animator
+    // делает с ней то же, что с позой клипа: корневое движение, ручные
+    // переопределения и IK сверху, палитра костей для скиннинга. Так у графа
+    // нет своего второго «проигрывателя», и всё, что умеет Animator, работает
+    // поверх графа без единой строчки в графе.
+    //
+    // Указатель не копируется и не владеется (как у SetPoseOverride). Поза не
+    // того размера (скелет сменился) игнорируется. nullptr — снова свои клипы.
+    void SetExternalPose(const LocalPose* pose) { m_external = pose; }
+    const LocalPose* ExternalPose() const { return m_external; }
+
     // --- Корневое движение (root motion) -----------------------------------
     //
     // Библиотеки анимаций поставляются в двух вариантах: с запечённым в клип
@@ -126,8 +159,7 @@ private:
     // Локальные TRS костей для клипа в момент time (дефолты, переопределённые
     // каналами). Общий сэмплер — используется и одиночным проигрыванием, и
     // обоими клипами кросс-фейда.
-    void SamplePose(int clipIndex, float time,
-                    std::vector<glm::vec3>& t, std::vector<glm::quat>& r, std::vector<glm::vec3>& s) const;
+    void SamplePose(int clipIndex, float time, LocalPose& out) const;
     // Считает палитру из TRS двух клипов, смешанных по weight (globals -> bones).
     void ComputePoseBlended(float weight);
 
@@ -149,6 +181,7 @@ private:
 
     // Переопределения позы (не владеем — см. SetPoseOverride).
     const std::vector<JointPose>* m_overrides = nullptr;
+    const LocalPose* m_external = nullptr;  // не владеем — см. SetExternalPose
     bool m_rootMotion = false;
     bool m_hasPrevRoot = false;
     glm::vec3 m_prevRoot{0.0f};  // локальный перенос корня в прошлом кадре

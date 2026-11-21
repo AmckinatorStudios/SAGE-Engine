@@ -172,6 +172,9 @@ public:
     virtual void OpenAnimationClip(const std::string& clipPath) = 0;
     // Открыть граф SAGE AI в редакторе графов (путь на диске).
     virtual void OpenAiGraph(const std::string& graphPath) = 0;
+    // Открыть граф анимации (.sageanimgraph, путь на диске) в окне Animation
+    // Graph. modelHint — модель для предпросмотра, если в графе её нет.
+    virtual void OpenAnimGraph(const std::string& graphPath, const std::string& modelHint = {}) = 0;
     // Открыть граф Visual Scripting в его редакторе (путь на диске).
     virtual void OpenVisualScript(const std::string& graphPath) = 0;
     // Открыть окно Tween на твине объекта (индекс в его TweenComponent) и

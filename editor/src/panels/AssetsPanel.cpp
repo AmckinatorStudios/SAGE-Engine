@@ -270,6 +270,7 @@ void AssetsPanel::OpenItem(EditorHost& host, const fs::path& path, bool isDir) {
         // нельзя (см. panels/AnimationPanel.h).
         case OpenAs::Clip: host.OpenAnimationClip(path.string()); break;
         case OpenAs::AiGraph: host.OpenAiGraph(sage::PathToUtf8(path)); break;
+        case OpenAs::AnimGraph: host.OpenAnimGraph(sage::PathToUtf8(path)); break;
         case OpenAs::VisualScript: host.OpenVisualScript(sage::PathToUtf8(path)); break;
         // Интерфейс правится в своём пространстве, а не разворачивается в сцену.
         case OpenAs::Interface: host.OpenInterface(host.CurrentProject().AssetRef(path)); break;
@@ -691,6 +692,7 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
         // Script, задача, AI Graph и языки плагинов выбираются в окне.
         if (EditorIcons::MenuItem("script", T("Script or graph..."))) startCreate(ca::What::Script, "NewScript");
         if (EditorIcons::MenuItem("material", T("Material..."))) startCreate(ca::What::Material, "NewMaterial");
+        if (EditorIcons::MenuItem("anim", T("Animation graph..."))) startCreate(ca::What::AnimGraph, "NewAnimGraph");
         // Шейдер — из шаблона (вода, освещённый, без света, экран): готовый
         // контракт движка и параметры, которые инспектор покажет ползунками.
         if (EditorIcons::MenuItem("shader", T("Shader..."))) startCreate(ca::What::Shader, "NewShader");

@@ -49,6 +49,7 @@ add_executable(SageEditor WIN32
     src/selftest/SelfTestPanels.cpp
     src/selftest/SelfTestGIBake.cpp
     src/selftest/SelfTestAiGraph.cpp
+    src/selftest/SelfTestAnimGraph.cpp
     src/selftest/SelfTestVisualScript.cpp
     src/selftest/SelfTestScenesGone.cpp
     src/selftest/SelfTestPrimitives.cpp
@@ -123,6 +124,9 @@ add_executable(SageEditor WIN32
     src/panels/InspectorPanel_Effects.cpp
     src/panels/InspectorPanel_RenderTexture.cpp
     src/panels/InspectorPanel_Ai.cpp
+    src/animgraph/AnimGraphPanel.cpp
+    src/animgraph/AnimGraphPanel_Canvas.cpp
+    src/animgraph/AnimGraphPanel_Sides.cpp
     src/aigraph/AiGraphPanel.cpp
     src/aigraph/AiGraphPanel_Sides.cpp
     src/aigraph/AiGraphPanel_Check.cpp

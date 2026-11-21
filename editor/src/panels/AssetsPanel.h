@@ -33,7 +33,7 @@ public:
 
     // Скрипт — только SAGE Lua (.slua): обычный Lua новыми файлами не
     // создаётся (старые .lua открываются и работают как прежде).
-    enum class CreateKind { None, Folder, SageScript, TextFile, Material, Scene };
+    enum class CreateKind { None, Folder, SageScript, TextFile, Material, Scene, AnimGraph };
 
     // ИМЯ ОКНА приходит снаружи: у каждого рабочего пространства оно своё
     // (см. PanelWindowId.h). Панель одна, а окон два — иначе раскладки сцены и

@@ -60,6 +60,7 @@ void EditorLayer::RunSelfTest() {
         ok = SelfTestPanelRegistry() && ok;
         ok = SelfTestGIBake() && ok;
         ok = SelfTestAiGraph() && ok;
+        ok = SelfTestAnimGraph() && ok;
         ok = SelfTestVisualScript() && ok;
         ok = SelfTestShaders() && ok;
         ok = SelfTestScenesGone() && ok;

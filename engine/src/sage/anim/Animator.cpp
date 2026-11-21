@@ -182,27 +182,43 @@ void Animator::Update(float dt) {
     ComputePoseBlended(FadeWeight());
 }
 
-void Animator::SamplePose(int clipIndex, float time,
-                          std::vector<glm::vec3>& t, std::vector<glm::quat>& r,
-                          std::vector<glm::vec3>& s) const {
-    const auto& joints = m_skeleton->Joints;
-    int n = (int)joints.size();
+void SampleClipPose(const Skeleton& skeleton, const AnimationClip* clip, float time, LocalPose& out) {
+    const auto& joints = skeleton.Joints;
+    const int n = (int)joints.size();
+    out.Resize(n);
     for (int i = 0; i < n; ++i) {
-        t[i] = joints[i].Translation;
-        r[i] = joints[i].Rotation;
-        s[i] = joints[i].Scale;
+        out.T[i] = joints[i].Translation;
+        out.R[i] = joints[i].Rotation;
+        out.S[i] = joints[i].Scale;
     }
-    if (clipIndex < 0 || !m_clips || clipIndex >= (int)m_clips->size()) return;
-    for (const AnimChannel& ch : (*m_clips)[clipIndex].Channels) {
+    if (!clip) return;
+    for (const AnimChannel& ch : clip->Channels) {
         if (ch.Joint < 0 || ch.Joint >= n) continue;
         glm::vec3 v; glm::quat q;
         ch.Sample(time, v, q);
         switch (ch.Target) {
-            case AnimPath::Translation: t[ch.Joint] = v; break;
-            case AnimPath::Rotation:    r[ch.Joint] = q; break;
-            case AnimPath::Scale:       s[ch.Joint] = v; break;
+            case AnimPath::Translation: out.T[ch.Joint] = v; break;
+            case AnimPath::Rotation:    out.R[ch.Joint] = q; break;
+            case AnimPath::Scale:       out.S[ch.Joint] = v; break;
         }
     }
+}
+
+void BlendPoses(const LocalPose& a, const LocalPose& b, float w, LocalPose& out) {
+    const int n = std::min(a.Size(), b.Size());
+    // out может совпадать с a или с b: значения покостно читаются до записи.
+    if (&out != &a && &out != &b) out = a;
+    for (int i = 0; i < n; ++i) {
+        out.T[i] = glm::mix(a.T[i], b.T[i], w);
+        out.S[i] = glm::mix(a.S[i], b.S[i], w);
+        out.R[i] = glm::slerp(a.R[i], b.R[i], w);
+    }
+}
+
+void Animator::SamplePose(int clipIndex, float time, LocalPose& out) const {
+    const AnimationClip* clip =
+        (clipIndex >= 0 && m_clips && clipIndex < (int)m_clips->size()) ? &(*m_clips)[clipIndex] : nullptr;
+    SampleClipPose(*m_skeleton, clip, time, out);
 }
 
 void Animator::ComputePoseBlended(float weight) {
@@ -214,20 +230,21 @@ void Animator::ComputePoseBlended(float weight) {
     //    (weight: 0 -> целиком старый, 1 -> целиком новый). Позы смешиваются В
     //    ПРОСТРАНСТВЕ TRS (lerp T/S, slerp R), а не матриц — так суставы идут по
     //    кратчайшей дуге без «схлопывания» масштаба.
-    std::vector<glm::vec3> t(n), s(n);
-    std::vector<glm::quat> r(n);
-    SamplePose(m_clip, m_time, t, r, s);
-
-    if (m_fadeFromClip >= 0 && weight < 1.0f) {
-        std::vector<glm::vec3> t0(n), s0(n);
-        std::vector<glm::quat> r0(n);
-        SamplePose(m_fadeFromClip, m_fadeFromTime, t0, r0, s0);
-        for (int i = 0; i < n; ++i) {
-            t[i] = glm::mix(t0[i], t[i], weight);
-            s[i] = glm::mix(s0[i], s[i], weight);
-            r[i] = glm::slerp(r0[i], r[i], weight);
+    LocalPose pose;
+    if (m_external && m_external->Size() == n) {
+        // Позу построил граф анимации — клипы аниматора не участвуют.
+        pose = *m_external;
+    } else {
+        SamplePose(m_clip, m_time, pose);
+        if (m_fadeFromClip >= 0 && weight < 1.0f) {
+            LocalPose from;
+            SamplePose(m_fadeFromClip, m_fadeFromTime, from);
+            BlendPoses(from, pose, weight, pose);
         }
     }
+    std::vector<glm::vec3>& t = pose.T;
+    std::vector<glm::quat>& r = pose.R;
+    std::vector<glm::vec3>& s = pose.S;
 
     // 1.5 Корневое движение: снимаем перемещение с позы и копим его отдельно.
     //

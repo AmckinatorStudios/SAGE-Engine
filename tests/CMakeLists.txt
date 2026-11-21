@@ -20,6 +20,7 @@ add_executable(sage_tests
     test_serialization.cpp
     test_zip.cpp
     test_animation.cpp
+    test_animgraph.cpp
     test_hierarchy.cpp
     test_scripting.cpp
     test_robustness.cpp

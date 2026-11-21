@@ -4,6 +4,7 @@
 #include <unordered_map>
 #include <vector>
 #include <glm/glm.hpp>
+#include "sage/anim/AnimGraph.h"
 #include "sage/anim/Animator.h"
 
 // ---------------------------------------------------------------------------
@@ -87,6 +88,12 @@ struct AnimationComponent {
     // которой ещё не вынуты.
     std::string ClipPath;
 
+    // ГРАФ АНИМАЦИИ (.sageanimgraph). Задан — позу строит граф, а клип выше
+    // не играет: два источника позы на одном скелете дали бы позу, которую
+    // никто не заказывал. Параметры графа — Params.Floats (SetFloat ниже, в
+    // Lua — animator:SetFloat): тот же словарь, что уже читают скрипты.
+    std::string GraphPath;
+
     int Clip = 0;             // запасной путь: номер клипа В МОДЕЛИ
     float Speed = 1.0f;
     bool Loop = true;
@@ -124,6 +131,21 @@ struct AnimationComponent {
     int MissingBones = 0;
     sage::anim::Animator Anim;                          // рантайм-состояние проигрывания
     AnimationParams Params;                             // рантайм (см. выше)
+
+    // Параметр графа из C++ — та же запись, что делает Lua animator:SetFloat.
+    void SetFloat(const std::string& name, float value) { Params.Floats[name] = value; }
+    float GetFloat(const std::string& name) const {
+        auto it = Params.Floats.find(name);
+        return it != Params.Floats.end() ? it->second : Graph.GetFloat(name);
+    }
+
+    // Граф: ресурс (общий, неизменяемый) и состояние ЭТОГО объекта. Ресурс
+    // читается из GraphPath; редактор кладёт сюда граф прямо из памяти для
+    // предпросмотра, оставив GraphPath пустым.
+    std::shared_ptr<const sage::anim::AnimGraph> GraphAsset;  // рантайм
+    sage::anim::AnimGraphInstance Graph;                      // рантайм
+    std::string GraphResolvedFrom;                            // рантайм
+    uint64_t GraphRevision = 0;                               // рантайм (AnimGraphRevision)
     bool Ready = false;                                 // инициализирован ли (загрузка+rig)
     // Из какого файла собран Model. Нужен, чтобы заметить смену модели в Mesh:
     // человек меняет модель в инспекторе, и скелет обязан переехать за ней, а

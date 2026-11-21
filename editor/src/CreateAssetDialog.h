@@ -25,7 +25,7 @@ namespace sage::editor::createasset {
 
 // Shader — пустой шейдер (NewShader.h): материал-шейдер (.vert/.frag/.sagemat)
 // или шейдер экрана (.frag); вид выбирается карточкой в окне.
-enum class What { Folder, Script, Scene, Material, TextFile, Shader };
+enum class What { Folder, Script, Scene, Material, TextFile, Shader, AnimGraph };
 
 struct Request {
     What Kind = What::Script;
@@ -61,6 +61,7 @@ inline std::filesystem::path DefaultDir(const std::filesystem::path& assetsDir, 
         case What::Script: return assetsDir / "scripts";
         case What::Material: return assetsDir / "materials";
         case What::Scene: return assetsDir / "Scenes";
+        case What::AnimGraph: return assetsDir / "animations";
         default: return assetsDir;
     }
 }
@@ -72,6 +73,7 @@ inline std::string FileName(What kind, const std::string& logicExt, const std::s
         case What::Folder: return name;
         case What::Scene: return name + ".sage";
         case What::Material: return name + ".sagemat";
+        case What::AnimGraph: return name + ".sageanimgraph";
         case What::TextFile: return name + ".txt";
         case What::Shader: return name + logicExt;   // расширение — от шаблона
         case What::Script:

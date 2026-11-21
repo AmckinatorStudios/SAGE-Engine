@@ -159,6 +159,7 @@ Kind KindOf(const fs::path& path) {
     if (ext == ".sageuistyle") return Kind::UiStyle;
     if (ext == ".sageui") return Kind::Interface;
     if (ext == ".aigraph") return Kind::AiGraph;
+    if (ext == ".sageanimgraph") return Kind::AnimGraph;
     if (ext == ".sgraph" || ext == ".vgraph") return Kind::VisualScript;   // .vgraph — старые файлы
     // Модели спрашиваются у РЕЕСТРА импортёров, а не у списка здесь: движок
     // умеет .obj/.gltf/.glb/.fbx/.blend/.bbmodel и пополняется плагинами.
@@ -188,6 +189,7 @@ const char* KindName(Kind kind) {
         case Kind::UiStyle:  return T("interface style");
         case Kind::Interface: return T("interface");
         case Kind::AiGraph:  return T("AI graph");
+        case Kind::AnimGraph: return T("animation graph");
         case Kind::VisualScript: return T("script graph");
         default:             return T("file");
     }
@@ -210,6 +212,7 @@ const char* KindIcon(Kind kind) {
         case Kind::UiStyle:  return "ui-panel";
         case Kind::Interface: return "layout";
         case Kind::AiGraph:  return "wire";
+        case Kind::AnimGraph: return "anim";
         case Kind::VisualScript: return "wire";
         default:             return "file";
     }
@@ -231,6 +234,7 @@ std::vector<std::string> Extensions(Kind kind) {
         case Kind::UiStyle:  return {".sageuistyle"};
         case Kind::Interface: return {".sageui"};
         case Kind::AiGraph:  return {".aigraph"};
+        case Kind::AnimGraph: return {".sageanimgraph"};
         case Kind::VisualScript: return {".sgraph", ".vgraph"};
         // У папки расширений нет: диалог выбирает КАТАЛОГ, а подсказка «поддер-
         // живаются…» в отказе остаётся пустой — перечислять там нечего.
@@ -256,7 +260,7 @@ void BeginDrag(const fs::path& path, AssetPreview* preview) {
 
 bool CanCreate(Kind kind) {
     return kind == Kind::Material || kind == Kind::Script || kind == Kind::Scene || kind == Kind::VisualScript ||
-           kind == Kind::AiGraph;
+           kind == Kind::AiGraph || kind == Kind::AnimGraph;
 }
 
 namespace {
@@ -283,6 +287,7 @@ sage::editor::createasset::What CreateWhat(Kind kind) {
     switch (kind) {
         case Kind::Material: return W::Material;
         case Kind::Scene: return W::Scene;
+        case Kind::AnimGraph: return W::AnimGraph;
         default: return W::Script;
     }
 }
@@ -495,6 +500,7 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
                 req.Name = actions && !actions->SuggestedName.empty() ? actions->SuggestedName
                            : kind == Kind::Material ? "NewMaterial"
                            : kind == Kind::Scene    ? "NewScene"
+                           : kind == Kind::AnimGraph ? "NewAnimGraph"
                                                     : "NewScript";
                 req.Done = [slotKey](const fs::path& made) { CreatedForSlot()[slotKey] = made.string(); };
                 sage::editor::createasset::Open(req);

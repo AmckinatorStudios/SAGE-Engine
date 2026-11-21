@@ -174,6 +174,17 @@ void EditorLayer::RegisterPanels() {
         m_panelRegistry.Register(std::move(s));
     }
     {
+        // SAGE Animation Graph — окно под задачу, рисует себя само.
+        PanelSpec s;
+        s.Id = "AnimGraph";
+        s.Title = "Animation Graph";
+        s.Icon = "anim";
+        s.Section = PanelSection::Tools;
+        s.WrapWindow = false;
+        s.Draw = [this](EditorHost& host, bool* open, const std::string&) { m_animGraph.Draw(host, open); };
+        m_panelRegistry.Register(std::move(s));
+    }
+    {
         PanelSpec s;
         s.Id = "VisualScript";
         s.Title = "Script Graph";
