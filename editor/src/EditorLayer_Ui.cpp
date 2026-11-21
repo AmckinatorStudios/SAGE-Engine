@@ -108,10 +108,15 @@ constexpr float kStatusBarHeight = 26.0f;
 // интерфейсу, означает инспектор, показывающий меш там, где ждут раскладку.
 void EditorLayer::SetWorkspace(EditorWorkspace workspace) {
     if (workspace == m_workspace) return;
+    // Сцена и анимация работают с ОДНИМ уровнем и одним выделением: персонаж,
+    // выбранный в сцене, тот же в анимации. Подменяется документ — и
+    // сбрасывается выделение — только на переходе к вёрстке и обратно.
+    const bool swapsDocument =
+        workspace == EditorWorkspace::Interface || m_workspace == EditorWorkspace::Interface;
     // Игра идёт в той сцене, что на месте m_scene, — и пространства меняют
     // именно её (документ интерфейса <-> уровень). Под работающими скриптами
     // сцену не подменяют.
-    if (InPlayMode()) StopPlay();
+    if (swapsDocument && InPlayMode()) StopPlay();
     // ДОКУМЕНТ — ДО СБРОСА ВЫДЕЛЕНИЯ. Самый частый путь в вёрстку: выбрали в
     // сцене объект интерфейса и переключились. По выделению и понятно, какой
     // интерфейс человек собрался править; после сброса подсказка потеряна.
@@ -131,11 +136,20 @@ void EditorLayer::SetWorkspace(EditorWorkspace workspace) {
         // появится при сохранении.
         NewInterfaceDocument();
     }
-    m_selection.Clear();
+    // Уходя из анимации, объект предпросмотра получает обратно свой граф.
+    if (m_workspace == EditorWorkspace::Animation) m_animGraph.ReleasePreview(*this);
+    if (swapsDocument) m_selection.Clear();
     if (m_uiDocActive) SwapInterfaceDocument();   // уровень — на место
     m_workspace = workspace;
     if (workspace == EditorWorkspace::Interface && m_uiDocOpen && !m_uiDocActive)
         SwapInterfaceDocument();
+    // Первый вход в анимацию за сессию показывает клип: без него нижняя
+    // полоса пространства — только Assets и Console. Закрытый потом клип
+    // остаётся закрытым.
+    if (workspace == EditorWorkspace::Animation && !m_animationSpaceVisited) {
+        m_animationSpaceVisited = true;
+        m_panels[EditorPanel::Animation] = true;
+    }
     // Своя раскладка у каждого пространства строится при первом показе: узла с
     // таким именем ImGui ещё не знает, и BuildXxxDockLayout сработает сам.
     if (workspace == EditorWorkspace::Interface) {
@@ -197,6 +211,27 @@ void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
     // ничего — молча.
     if (ImGuiWindow* canvas = ImGui::FindWindowByID(ImHashStr("InterfaceViewport")))
         ImGui::FocusWindow(canvas);
+}
+
+void EditorLayer::BuildAnimationDockLayout(unsigned int dockspaceId) {
+    // Привычная раскладка сцены: иерархия слева, инспектор справа, вьюпорт в
+    // центре. Снизу — ОДИН узел вкладками: Assets, Console, клип и граф
+    // анимации. Нижняя полоса выше, чем у сцены: на ней работают — шкала
+    // времени и граф, — а не только заглядывают в консоль.
+    ImGui::DockBuilderRemoveNode(dockspaceId);
+    ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace);
+    ImGui::DockBuilderSetNodeSize(dockspaceId, ImGui::GetMainViewport()->WorkSize);
+
+    ImGuiID center = dockspaceId;
+    ImGuiID right = ImGui::DockBuilderSplitNode(center, ImGuiDir_Right, 0.21f, nullptr, &center);
+    ImGuiID left = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.20f, nullptr, &center);
+    ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.36f, nullptr, &center);
+    DockRegisteredPanels(EditorWorkspace::Animation, left, right, bottom, center);
+    ImGui::DockBuilderFinish(dockspaceId);
+
+    // Вперёд — клип: с ним приходят в это пространство чаще всего.
+    if (ImGuiWindow* clip = ImGui::FindWindowByID(ImHashStr("AnimationAnim"))) ImGui::FocusWindow(clip);
+    if (ImGuiWindow* view = ImGui::FindWindowByID(ImHashStr("ViewportAnim"))) ImGui::FocusWindow(view);
 }
 
 void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
@@ -274,10 +309,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // заново — то есть настроенное расположение панелей теряется при каждом
     // переходе «сцена — интерфейс». Разные узлы ImGui запоминает каждый свой,
     // в том же imgui.ini, и обе раскладки переживают перезапуск.
-    const bool interfaceSpace = m_workspace == EditorWorkspace::Interface;
-    ImGuiID dockspaceId =
-        ImGui::GetID(interfaceSpace ? "SageInterfaceDock" : "SageDockSpace");
-    // ВТОРОЕ ДОК-ПРОСТРАНСТВО ДЕРЖИМ ЖИВЫМ, хоть и не показываем.
+    static const char* const kDockNames[(int)EditorWorkspace::Count] = {
+        "SageDockSpace", "SageInterfaceDock", "SageAnimationDock"};
+    ImGuiID dockspaceId = ImGui::GetID(kDockNames[(int)m_workspace]);
+    // ОСТАЛЬНЫЕ ДОК-ПРОСТРАНСТВА ДЕРЖИМ ЖИВЫМИ, хоть и не показываем.
     //
     // Не подать его ImGui значит сказать «этого дока больше нет»: узлы, в
     // которых не осталось ни одного окна, убираются, а окна из неподанного
@@ -285,10 +320,12 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // посреди экрана: раскладка вёрстки забирала её себе, нижний узел
     // раскладки сцены пустел и исчезал, а вернуться ей было уже некуда.
     // KeepAliveOnly — это ровно «узлы живы, окна свои не отпускают».
-    const ImGuiID otherDockspaceId =
-        ImGui::GetID(interfaceSpace ? "SageDockSpace" : "SageInterfaceDock");
-    if (ImGui::DockBuilderGetNode(otherDockspaceId) != nullptr)
-        ImGui::DockSpace(otherDockspaceId, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_KeepAliveOnly);
+    for (int w = 0; w < (int)EditorWorkspace::Count; ++w) {
+        if (w == (int)m_workspace) continue;
+        const ImGuiID other = ImGui::GetID(kDockNames[w]);
+        if (ImGui::DockBuilderGetNode(other) != nullptr)
+            ImGui::DockSpace(other, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_KeepAliveOnly);
+    }
 
     // Куда возвращать панель, у которой сняли галочку «в отдельном окне».
     panelwindows::SetHomeDock(dockspaceId);
@@ -296,7 +333,8 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // или пользователь попросил сброс (Window > Reset Layout).
     if (m_rebuildDockLayout || ImGui::DockBuilderGetNode(dockspaceId) == nullptr) {
         m_rebuildDockLayout = false;
-        if (interfaceSpace) BuildInterfaceDockLayout(dockspaceId);
+        if (m_workspace == EditorWorkspace::Interface) BuildInterfaceDockLayout(dockspaceId);
+        else if (m_workspace == EditorWorkspace::Animation) BuildAnimationDockLayout(dockspaceId);
         else BuildDefaultDockLayout(dockspaceId);
     }
 
@@ -411,6 +449,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             const SectionDef sections[] = {
                 {pe::PanelSection::Scene, "scene", T("Scene")},
                 {pe::PanelSection::Interface, "ui-screen", T("Interface")},
+                {pe::PanelSection::Animation, "anim", T("Animation")},
                 // Общие стоят в ОБОИХ рабочих местах — потому и отдельным разделом.
                 {pe::PanelSection::Shared, "folder", T("Shared")},
                 // Инструменты открывают ПОД ЗАДАЧУ и закрывают.

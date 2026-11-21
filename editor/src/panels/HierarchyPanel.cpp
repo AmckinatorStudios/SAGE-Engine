@@ -467,11 +467,12 @@ void HierarchyPanel::DrawNode(EditorHost& host, Scene& scene, entt::entity e) {
     ImGui::PopID();
 }
 
-void HierarchyPanel::Draw(EditorHost& host, bool* open) {
+void HierarchyPanel::Draw(EditorHost& host, bool* open, const std::string& windowId) {
     Scene& scene = host.CurrentScene();
     entt::registry& reg = scene.Registry();
 
-    ImGui::Begin(EditorIcons::WindowTitle("hierarchy", T("Hierarchy"), "Hierarchy").c_str(), open, panelwindows::WindowFlags("Hierarchy"));
+    ImGui::Begin(EditorIcons::WindowTitle("hierarchy", T("Hierarchy"), windowId.c_str()).c_str(), open,
+                 panelwindows::WindowFlags(windowId.c_str()));
     // --- ДВЕ КНОПКИ НАД СПИСКОМ ---------------------------------------------
     //
     // Создать объект можно было двумя способами, и оба надо было ЗНАТЬ: меню

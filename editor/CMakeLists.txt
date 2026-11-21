@@ -50,6 +50,7 @@ add_executable(SageEditor WIN32
     src/selftest/SelfTestGIBake.cpp
     src/selftest/SelfTestAiGraph.cpp
     src/selftest/SelfTestAnimGraph.cpp
+    src/selftest/SelfTestPivot.cpp
     src/selftest/SelfTestVisualScript.cpp
     src/selftest/SelfTestScenesGone.cpp
     src/selftest/SelfTestPrimitives.cpp
@@ -137,6 +138,8 @@ add_executable(SageEditor WIN32
     src/panels/InspectorPanel_Ui.cpp
     src/panels/ViewportPanel.cpp
     src/panels/ViewportPanel_Pilot.cpp
+    src/panels/ViewportPanel_Gizmo.cpp
+    src/panels/InspectorPanel_Pivot.cpp
     src/panels/GamePanel.cpp
     src/panels/AssetsPanel.cpp
     src/panels/AssetsPanel_Tile.cpp

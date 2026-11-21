@@ -134,6 +134,8 @@ public:
     // параметром RenderViewport: тот и так принимает девять аргументов и
     // вызывается в цикле по всем видам раскладки.
     void SetShowBounds(bool show) { m_showBounds = show; }
+    void SetShowSkeleton(bool show) { m_showSkeleton = show; }
+    void DrawSkeletons(Scene& scene, const std::vector<int>& selection);
     void SetColliderGizmo(const ColliderGizmoStyle& style) { m_colliderGizmo = style; }
 
     // Отладочная графика ИГРЫ (Debug:DrawLine из скриптов). Указатель, а не
@@ -347,6 +349,7 @@ private:
     // накладывается по нему, а у разных видов раскладки размеры разные.
     int m_outlineMaskW = 1280, m_outlineMaskH = 720;
     bool m_showBounds = false;
+    bool m_showSkeleton = false;
     ColliderGizmoStyle m_colliderGizmo;
     const sage::render::DebugLines* m_scriptDebug = nullptr;
     // Переливает заказы скриптов в DebugDraw. Одно место на оба вида (вьюпорт и

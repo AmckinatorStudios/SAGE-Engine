@@ -108,7 +108,7 @@ void EditorLayer::CheckWorkspaceDockFrame() {
     auto done = [this](bool ok, const char* why) {
         m_workspaceDockChecked = true;
         if (ok) LOG_INFO("Editor") << "WORKSPACE_DOCK: OK — общие панели остаются в доке "
-                                   << "после перехода «сцена — интерфейс» и обратно";
+                                   << "после переходов «сцена — интерфейс — анимация» и обратно";
         else LOG_ERROR("Editor") << "WORKSPACE_DOCK: FAIL — " << why;
     };
 
@@ -139,7 +139,7 @@ void EditorLayer::CheckWorkspaceDockFrame() {
             m_wsDockStep = 2;
             m_wsDockWait = 8;
             return;
-        default: {
+        case 2: {
             const unsigned int back = dockOf("Assets");
             if (back == 0) {
                 done(false, "вернувшись в сцену, панель ассетов отцепилась от дока");
@@ -148,8 +148,32 @@ void EditorLayer::CheckWorkspaceDockFrame() {
             } else if (dockOf("AssetsUI") == 0) {
                 done(false, "окно ассетов вёрстки потеряло свой док при возврате в сцену");
             } else {
-                done(true, nullptr);
+                // Третье пространство — анимация.
+                SetWorkspace(EditorWorkspace::Animation);
+                m_wsDockStep = 3;
+                m_wsDockWait = 8;
             }
+            return;
+        }
+        case 3: {
+            // НИЗ — ОДИН УЗЕЛ: Assets, Console, клип и граф вкладками; вьюпорт,
+            // иерархия и инспектор — свои окна пространства, в доке.
+            const unsigned int bottom = dockOf("AssetsAnim");
+            if (bottom == 0) { done(false, "в анимации панель ассетов вне дока"); return; }
+            for (const char* id : {"ConsoleAnim", "AnimationAnim", "AnimGraph"})
+                if (dockOf(id) != bottom) { done(false, (std::string(id) + " не во вкладках нижнего узла анимации").c_str()); return; }
+            for (const char* id : {"ViewportAnim", "HierarchyAnim", "InspectorAnim"})
+                if (dockOf(id) == 0 || dockOf(id) == bottom) { done(false, (std::string(id) + " не на своём месте в анимации").c_str()); return; }
+            if (dockOf("Assets") != m_wsDockHome) { done(false, "раскладка анимации забрала окно ассетов у сцены"); return; }
+            SetWorkspace(EditorWorkspace::Scene);
+            m_wsDockStep = 4;
+            m_wsDockWait = 8;
+            return;
+        }
+        default: {
+            if (dockOf("Assets") != m_wsDockHome) done(false, "после анимации ассеты сцены не на своём месте");
+            else if (dockOf("AssetsAnim") == 0) done(false, "окно ассетов анимации потеряло свой док при возврате");
+            else done(true, nullptr);
             return;
         }
     }

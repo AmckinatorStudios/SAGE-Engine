@@ -123,6 +123,9 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         j["position"] = Vec3ToJson(tr.Position);
         j["rotation"] = Vec3ToJson(tr.Rotation);
         j["scale"]    = Vec3ToJson(tr.Scale);
+        // Опора — только если её задали: сцены без неё не меняются ни на байт,
+        // а старые без ключа открываются с опорой в начале координат объекта.
+        if (tr.Pivot != glm::vec3(0.0f)) j["pivot"] = Vec3ToJson(tr.Pivot);
         // ПРИЗНАК ОТСУТСТВИЯ, А НЕ МОЛЧАНИЕ. Старые сцены ключа "noMesh" не
         // имеют, и загрузчик по-прежнему даёт их объектам MeshRenderer — иначе
         // каждая сохранённая до этой правки сцена открылась бы невидимой.
@@ -299,6 +302,7 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
         if (j.contains("position")) tr.Position = Vec3FromJson(j["position"]);
         if (j.contains("rotation")) tr.Rotation = Vec3FromJson(j["rotation"]);
         if (j.contains("scale"))    tr.Scale    = Vec3FromJson(j["scale"]);
+        if (j.contains("pivot"))    tr.Pivot    = Vec3FromJson(j["pivot"]);
         if (j.contains("color"))    mr.Color    = Vec3FromJson(j["color"]);
         mr.CastShadows = j.value("castShadows", mr.CastShadows);
         mr.InReflections = j.value("inReflections", mr.InReflections);

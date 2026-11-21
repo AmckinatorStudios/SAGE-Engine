@@ -46,7 +46,12 @@ namespace sage::editor::panelid {
 // таблицы, и отдавать указатель на временную строку — верный способ получить
 // окно со случайным именем.
 inline std::string For(const char* base, EditorWorkspace workspace) {
-    return workspace == EditorWorkspace::Interface ? (std::string(base) + "UI") : std::string(base);
+    // Окна сцены — без суффикса: по этим именам imgui.ini помнит раскладку.
+    switch (workspace) {
+        case EditorWorkspace::Interface: return std::string(base) + "UI";
+        case EditorWorkspace::Animation: return std::string(base) + "Anim";
+        default: return std::string(base);
+    }
 }
 
 // Заголовок окна: перевод плюс «###» с именем. ИМЯ ВСЕГДА ПОСЛЕ «###», потому

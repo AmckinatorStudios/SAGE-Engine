@@ -195,6 +195,8 @@ void ViewportPanel::DrawMoreMenu(EditorHost& host) {
     ImGui::EndDisabled();
     // Габариты выделенного — та коробка, по которой считается попадание мышью.
     if (EditorIcons::MenuItemToggle("rect", T("Bounds of the selection"), &tools.ShowBounds)) {}
+    // Кости моделей со скелетом — видно, куда смотрит и как гнётся поза.
+    if (EditorIcons::MenuItemToggle("ik", T("Skeleton of animated models"), &tools.ShowSkeleton)) {}
 
     Sage::UI::MenuSection(T("Views"));
     if (EditorIcons::BeginMenu("layout", T("View layout"))) {
@@ -214,6 +216,12 @@ void ViewportPanel::DrawMoreMenu(EditorHost& host) {
         if (EditorIcons::MenuItem("fit", T("Show all")))
             for (OrthoView& v : m_ortho) { v.Center = glm::vec3(0.0f); v.Height = 20.0f; }
         ImGui::EndMenu();
+    }
+    // Вернуть камеру к виду по умолчанию: улетевший далеко иначе ищет сцену.
+    if (EditorIcons::MenuItem("camera", T("Reset camera"))) {
+        ResetCamera(host.EditorCamera());
+        m_kinds[m_activeSlot] = ViewKind::Perspective;
+        for (OrthoView& v : m_ortho) { v.Center = glm::vec3(0.0f); v.Height = 20.0f; }
     }
     // Информация поверх вида — привычка человека: в настройках редактора.
     if (EditorIcons::BeginMenu("info", T("Viewport Overlays"))) {
@@ -263,7 +271,7 @@ void ViewportPanel::DrawToolsOverlay(EditorHost& host, ImVec2 origin, float cell
     // Ширины групп — заранее: по ним решается перенос (vptools::FlowRows).
     const float spaceW = TextGroupWidth({T("Local"), T("Global")});
     const float snapW = h + (t.Snap ? inner + SnapFieldWidth(snapLabel) : 0.0f);
-    const std::vector<float> widths = {h * 4.0f, spaceW, snapW, h * 2.0f + inner, h};
+    const std::vector<float> widths = {h * 4.0f, spaceW, snapW, h * 3.0f + inner * 2.0f, h};
     const std::vector<int> rows = vptools::FlowRows(widths, groupGap, maxWidth);
     m_snapFieldShown = t.Snap;
     auto placeGroup = [&](size_t i) {
@@ -338,6 +346,18 @@ void ViewportPanel::DrawToolsOverlay(EditorHost& host, ImVec2 origin, float cell
                                 : T("Collider Edit (C): select an object with a box, sphere or capsule collider");
         if (ictl::ButtonGroup("##collider_edit", &it, 1, ictl::ButtonLook::IconOnly) == 0)
             host.ColliderEditMode() = !host.ColliderEditMode();
+    }
+    ImGui::SameLine(0.0f, inner);
+    {
+        // Правка опоры: гизмо встаёт в опору и тянет только её. Повторное
+        // нажатие возвращает обычное гизмо объекта.
+        ictl::GroupItem it;
+        it.Icon = "anchor-cc";
+        it.Active = t.PivotEdit;
+        it.Enabled = sel.Valid();
+        it.Tooltip = T("Edit Pivot: drag the point the object rotates and scales around — the object itself "
+                       "does not move");
+        if (ictl::ButtonGroup("##pivot_edit", &it, 1, ictl::ButtonLook::IconOnly) == 0) t.PivotEdit = !t.PivotEdit;
     }
 
     // --- 5. Редкое ----------------------------------------------------------

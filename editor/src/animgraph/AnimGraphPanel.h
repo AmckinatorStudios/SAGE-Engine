@@ -1,49 +1,50 @@
 #pragma once
-#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
-#include <entt/entt.hpp>
 #include <glm/glm.hpp>
 
 #include "imgui.h"
 
-#include "AssetPreview.h"
 #include "FileBrowser.h"
 #include "sage/anim/AnimGraph.h"
 
 class EditorHost;
-class Scene;
+struct AnimationComponent;
 
 // ---------------------------------------------------------------------------
-// Окно SAGE Animation Graph: сверху — предпросмотр модели, играющей граф,
-// снизу — холст узлов, справа — инспектор выбранного узла и параметры.
+// Окно SAGE Animation Graph — вкладка пространства Animation: холст узлов и
+// параметры графа. Своего предпросмотра у окна НЕТ: граф играет на выбранном
+// объекте (с моделью со скелетом) в общем вьюпорте пространства — ровно той
+// системой анимации (sage/anim/AnimationSystem), что и в игре. Граф кладётся в
+// компонент объекта прямо из памяти (AnimationComponent::GraphAsset), поэтому
+// правка видна сразу, до сохранения, а путь графа объекта не меняется.
 //
-// Предпросмотр — настоящая мини-сцена с компонентом Animation: граф играет
-// ровно та же система (sage/anim/AnimationSystem), что и в игре, а не
-// отдельный «проигрыватель для окна», который однажды разошёлся бы с игрой.
-// Граф кладётся в компонент прямо из памяти (AnimationComponent::GraphAsset),
-// поэтому правка видна сразу, до сохранения.
+// Свойства выбранного узла рисует Inspector (EditorHost::DrawToolInspector);
+// выбор объекта возвращает инспектору его свойства.
 // ---------------------------------------------------------------------------
 class AnimGraphPanel {
 public:
-    AnimGraphPanel();
-    ~AnimGraphPanel();
-
-    void Draw(EditorHost& host, bool* open);
-    // Отпустить видеоресурсы предпросмотра — пока жив контекст GL.
-    void Shutdown();
-    // Открыть файл графа (путь на диске). modelHint — модель для
-    // предпросмотра, если в графе её ещё нет (модель объекта из инспектора).
-    void Open(EditorHost& host, const std::string& path, const std::string& modelHint = {});
+    void Draw(EditorHost& host, bool* open, const std::string& windowId);
+    // Открыть файл графа (путь на диске).
+    void Open(EditorHost& host, const std::string& path);
     bool Save(EditorHost& host);
+    // Свойства выбранного узла — в Inspector. false — узел не выбран (или
+    // после него выбрали объект): инспектор рисует объект.
+    bool DrawInspector(EditorHost& host);
+    // Вернуть объекту предпросмотра его собственный граф (уход из
+    // пространства, закрытие окна, смена выделения).
+    void ReleasePreview(EditorHost& host);
 
     bool HasGraph() const { return m_hasGraph; }
     const sage::anim::AnimGraph& Graph() const { return m_graph; }
     const std::string& Path() const { return m_path; }
-    // Состояние предпросмотра — для самопроверки редактора.
-    const sage::anim::AnimGraphInstance* PreviewInstance() const;
+    int PreviewTarget() const { return m_targetId; }
+    int SelectedNode() const { return m_selected; }
+    void SelectNode(EditorHost& host, int id);
+    // Состояние графа на объекте предпросмотра (nullptr — объекта нет).
+    const sage::anim::AnimGraphInstance* LiveInstance(EditorHost& host) const;
 
 private:
     // --- Документ ---------------------------------------------------------
@@ -58,17 +59,16 @@ private:
     // --- Части окна -------------------------------------------------------
     void DrawToolbar(EditorHost& host);
     void DrawEmpty(EditorHost& host);
-    void DrawPreview(EditorHost& host, const ImVec2& size);
     void DrawCanvas(EditorHost& host);
     void DrawCanvasMenu(EditorHost& host);
-    void DrawSide(EditorHost& host);
     void DrawNodeInspector(EditorHost& host);
     void DrawParams(EditorHost& host);
     void DrawBrowser(EditorHost& host);
 
-    // --- Предпросмотр -----------------------------------------------------
-    void SyncPreview(EditorHost& host, float dt);
-    std::vector<std::string> ModelClipNames() const;
+    // --- Предпросмотр на выбранном объекте --------------------------------
+    AnimationComponent* Target(EditorHost& host) const;
+    void SyncPreview(EditorHost& host);
+    std::vector<std::string> ModelClipNames(EditorHost& host) const;
 
     // --- Холст ------------------------------------------------------------
     ImVec2 ToScreen(const glm::vec2& p) const;
@@ -78,7 +78,7 @@ private:
     ImVec2 OutputPinPos(const sage::anim::AnimGraphNode& n) const;
     std::string NodeTitle(const sage::anim::AnimGraphNode& n) const;
     std::string NodeDetail(const sage::anim::AnimGraphNode& n) const;
-    void AddNodeAt(sage::anim::AnimNodeKind kind, const glm::vec2& at);
+    void AddNodeAt(EditorHost& host, sage::anim::AnimNodeKind kind, const glm::vec2& at);
     void DeleteSelected();
     void FrameAll();
 
@@ -92,11 +92,17 @@ private:
     std::string m_status;
     int m_focusFrames = 0;
 
+    // Узел в Inspector: пока выделение объектов то же, что в момент выбора
+    // узла. Выбрали объект — инспектор снова его.
+    bool m_inspectNode = false;
+    unsigned m_inspectSelection = 0;   // EditorSelection::Changes в момент выбора узла
+
     // Холст
     glm::vec2 m_pan{40.0f, 40.0f};
     float m_zoom = 1.0f;
     ImVec2 m_origin{0, 0};
     ImVec2 m_canvasSize{0, 0};
+    ImVec2 m_lastCanvasSize{0, 0};
     int m_dragNode = 0;
     bool m_dragMoved = false;
     int m_linkFrom = 0;        // тянем провод от выхода узла
@@ -106,19 +112,14 @@ private:
     glm::vec2 m_menuAt{0.0f};
     bool m_frameRequest = false;
 
-    // Предпросмотр
-    std::unique_ptr<Scene> m_scene;
-    entt::entity m_entity = entt::null;
-    AssetPreview m_preview;
-    std::string m_sceneModel;   // какая модель стоит в мини-сцене
+    // Предпросмотр: объект сцены, на котором играет редактируемый граф.
+    int m_targetId = -1;
     bool m_rebind = true;       // граф изменился — отдать новый в компонент
-    bool m_playing = true;
-    float m_playSpeed = 1.0f;
-    std::unordered_map<std::string, float> m_values;   // текущие значения параметров
+    std::unordered_map<std::string, float> m_values;   // значения параметров для предпросмотра
 
     // Диалоги
     FileBrowser m_browser;
-    enum class Browse { None, SaveAs, ClipFile, PreviewModel };
+    enum class Browse { None, SaveAs, ClipFile };
     Browse m_browse = Browse::None;
     int m_browseNode = 0;
 };

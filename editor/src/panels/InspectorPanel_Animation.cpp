@@ -115,9 +115,10 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
             ImGui::TextUnformatted(T("Animation graph"));
             assetslot::Actions graphActions;
             graphActions.SuggestedName = "NewAnimGraph";
-            graphActions.Edit = [&host, am, mesh] {
-                const std::string model = mesh && mesh->Ref.type == MeshRef::Type::Model ? mesh->Ref.path : std::string();
-                host.OpenAnimGraph(sage::PathToUtf8(host.CurrentProject().Dir() / sage::PathFromUtf8(am->GraphPath)), model);
+            // Граф откроется в пространстве Animation и заиграет на этом объекте
+            // (он выбран) в общем вьюпорте.
+            graphActions.Edit = [&host, am] {
+                host.OpenAnimGraph(sage::PathToUtf8(host.CurrentProject().Dir() / sage::PathFromUtf8(am->GraphPath)));
             };
             const assetslot::Result graphSlot =
                 assetslot::Draw(host, "animgraph", assetslot::Kind::AnimGraph, am->GraphPath, &m_preview,

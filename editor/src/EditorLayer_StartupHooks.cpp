@@ -184,6 +184,7 @@ void EditorLayer::ApplyStartupHooks() {
     // кривая проверяются глазами, и открыть панель в прогоне больше нечем.
     if (std::getenv("SAGE_EDITOR_SHOW_ANIMATION")) {
         m_headlessProject = true;
+        SetWorkspace(EditorWorkspace::Animation);
         m_panels[EditorPanel::Animation] = true;
         m_animation.RequestFocus(60);
     }
@@ -322,6 +323,14 @@ void EditorLayer::ApplyStartupHooks() {
         // Снимают ИНСПЕКТОР выбранного: вкладкой поверх у него по умолчанию
         // стоит Environment, и скриншот показывал бы не то.
         m_focusInspectorFrames = 3;
+        // Снимок правки опоры: выбранный повёрнут, опора — в верхнем углу
+        // габаритов, гизмо в режиме Edit Pivot.
+        if (obj.Valid() && std::getenv("SAGE_EDITOR_PIVOT_DEMO")) {
+            Transform& tr = obj.GetTransform();
+            tr.Rotation = glm::vec3(0.0f, 35.0f, 0.0f);
+            tr.SetPivotKeepPlace(glm::vec3(0.5f, 0.5f, 0.5f));
+            m_tools.PivotEdit = true;
+        }
     }
     if (const char* a = std::getenv("SAGE_EDITOR_SELECT_ASSET")) {
         m_headlessProject = true;
@@ -620,6 +629,11 @@ void EditorLayer::ApplyStartupHooks() {
         // кадре десяток пикселей, по которым не видно ни шва текстуры, ни позы.
         if (m_selection.Primary() >= 0) FocusSelected();
     }
+    // Узел графа анимации в Inspector — для снимка (Id узла открытого графа).
+    // После моделей: выбор объекта возвращает инспектору объект.
+    if (std::getenv("SAGE_EDITOR_SHOW_SKELETON")) m_tools.ShowSkeleton = true;   // снимок костей во вьюпорте
+    if (const std::string node = sage::EnvString("SAGE_EDITOR_ANIMGRAPH_NODE"); !node.empty())
+        m_animGraph.SelectNode(*this, std::atoi(node.c_str()));
     // Открыть окно About (версии подсистем) при старте — для скриншот-проверки.
     if (std::getenv("SAGE_EDITOR_SHOW_ABOUT")) { m_headlessProject = true; m_showAbout = true; }
     // Палитра команд — тем же способом: увидеть её иначе можно только руками

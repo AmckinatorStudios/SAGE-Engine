@@ -1,5 +1,5 @@
-// Боковая панель Animation Graph: инспектор выбранного узла и параметры графа.
-// Узлы на холсте компактные — всё, что настраивается, здесь.
+// Animation Graph вне холста: свойства выбранного узла (их рисует Inspector
+// пространства — узлы на холсте компактные) и параметры графа (колонка окна).
 #include "AnimGraphPanel.h"
 
 #include <algorithm>
@@ -18,7 +18,10 @@
 using namespace sage::anim;
 namespace ictl = sage::editor::ictl;
 
-void AnimGraphPanel::DrawSide(EditorHost& host) {
+bool AnimGraphPanel::DrawInspector(EditorHost& host) {
+    // Выбрали объект после узла — инспектор снова его.
+    if (m_inspectNode && host.Selection().Changes() != m_inspectSelection) m_inspectNode = false;
+    if (!m_inspectNode || !m_hasGraph || !m_graph.Find(m_selected)) return false;
     // Правки полей — в СВОЮ историю графа, а не в историю сцены. Одно
     // перетаскивание поля — один шаг отмены.
     ictl::UndoScope undo([this] {
@@ -26,23 +29,15 @@ void AnimGraphPanel::DrawSide(EditorHost& host) {
         PushUndo();
         m_editUndo = true;
     });
-    if (ictl::BeginSection("ag_node", T("Node"), true, "inspector")) {
-        DrawNodeInspector(host);
-        ictl::EndSection();
-    }
-    if (ictl::BeginSection("ag_params", T("Parameters"), true, "chart")) {
-        DrawParams(host);
-        ictl::EndSection();
-    }
+    const std::string header = std::string(T("Animation Graph Node")) + "###ag_node";
+    if (EditorTheme::SectionHeader("wire", header.c_str())) DrawNodeInspector(host);
+    return true;
 }
 
 void AnimGraphPanel::DrawNodeInspector(EditorHost& host) {
     AnimGraphNode* n = m_graph.Find(m_selected);
-    if (!n) {
-        ImGui::TextDisabled("%s", T("Select a node on the canvas."));
-        return;
-    }
-    const AnimGraphInstance* live = PreviewInstance();
+    if (!n) return;
+    const AnimGraphInstance* live = LiveInstance(host);
     ImGui::TextUnformatted(NodeTitle(*n).c_str());
     ImGui::Spacing();
     switch (n->Kind) {
@@ -69,9 +64,9 @@ void AnimGraphPanel::DrawNodeInspector(EditorHost& host) {
                 m_browseNode = n->Id;
             }
             if (n->ClipPath.empty()) {
-                const std::vector<std::string> names = ModelClipNames();
+                const std::vector<std::string> names = ModelClipNames(host);
                 if (names.empty()) {
-                    ImGui::TextDisabled("%s", T("The preview model has no clips."));
+                    ImGui::TextDisabled("%s", T("Select an object with a skeleton to pick one of its clips."));
                 } else {
                     ictl::Label(T("Model clip"));
                     const char* preview = n->ClipName.empty() ? T("choose...") : n->ClipName.c_str();
@@ -142,7 +137,9 @@ void AnimGraphPanel::DrawNodeInspector(EditorHost& host) {
 }
 
 void AnimGraphPanel::DrawParams(EditorHost& host) {
-    ImGui::TextDisabled("%s", T("Game code sets them: animator:SetFloat(name, value)"));
+    ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::TextDim));
+    ImGui::TextWrapped("%s", T("Game code sets them: animator:SetFloat(name, value)"));
+    ImGui::PopStyleColor();
     int removeAt = -1;
     for (size_t i = 0; i < m_graph.Params.size(); ++i) {
         AnimGraphParam& p = m_graph.Params[i];

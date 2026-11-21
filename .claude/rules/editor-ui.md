@@ -42,6 +42,16 @@ paths:
 
 - Панель — запись `PanelSpec` (`PanelRegistry.h`; встроенные —
   `EditorLayer_Panels.cpp`); меню, палитра и раскладка читают реестр.
+- Рабочие пространства (`EditorWorkspace`: Scene, Interface, Animation) — на
+  общей системе докинга: у каждого свой DockSpace и своя раскладка в
+  imgui.ini, `Build<Пространство>DockLayout` раскладывает панели по
+  `PanelSpec::<Пространство>Dock`. Общие панели (Viewport, Hierarchy,
+  Inspector, Assets, Console) не дублируются: одна панель, своё окно в
+  пространстве (`PerSpaceWindow`, `PanelWindowId.h`). Своего мини-вьюпорта у
+  инструмента нет — результат виден в общем Viewport; свойства выделенного в
+  инструменте — в Inspector (`EditorHost::DrawToolInspector`). Связанные
+  инструменты — в одном пространстве (клип и граф анимации — в Animation;
+  Tween — свойства объектов — в Scene).
 - Ассет — слотом `assetslot::Draw` (`AssetSlot.h`), не полем с путём; кроме
   путей наружу проекта.
 - В меню, палитре и окнах нет пунктов разработчика (тесты, лист иконок, демо,

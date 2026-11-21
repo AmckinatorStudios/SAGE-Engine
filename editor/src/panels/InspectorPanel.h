@@ -69,7 +69,7 @@ void DrawRenderTextureSection(EditorHost& host, GameObject obj, entt::registry& 
 
 class InspectorPanel {
 public:
-    void Draw(EditorHost& host, bool* open);
+    void Draw(EditorHost& host, bool* open, const std::string& windowId = "Inspector");
 
     // Освободить GPU-ресурсы превью, пока контекст жив (см. AssetPreview).
     void Shutdown() { m_preview.Shutdown(); }

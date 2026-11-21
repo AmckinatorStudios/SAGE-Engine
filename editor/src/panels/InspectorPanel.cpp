@@ -40,7 +40,7 @@ namespace ictl = sage::editor::ictl;
 
 namespace fs = std::filesystem;
 
-void InspectorPanel::Draw(EditorHost& host, bool* open) {
+void InspectorPanel::Draw(EditorHost& host, bool* open, const std::string& windowId) {
     // Обложки в файловом диалоге рисуются ТЕМ ЖЕ превью, что и слоты этой
     // панели: второй набор буферов в видеопамяти ради модального окна не нужен.
     m_browser.SetPreview(&m_preview);
@@ -143,7 +143,14 @@ void InspectorPanel::Draw(EditorHost& host, bool* open) {
         }
     }
 
-    ImGui::Begin(EditorIcons::WindowTitle("inspector", T("Inspector"), "Inspector").c_str(), open, panelwindows::WindowFlags("Inspector"));
+    ImGui::Begin(EditorIcons::WindowTitle("inspector", T("Inspector"), windowId.c_str()).c_str(), open,
+                 panelwindows::WindowFlags(windowId.c_str()));
+    // Инструмент пространства (узел графа анимации) занимает инспектор своим
+    // выделенным элементом; выбор объекта возвращает обычные свойства.
+    if (host.DrawToolInspector()) {
+        ImGui::End();
+        return;
+    }
 
     // --- ЗАМОК --------------------------------------------------------------
     //

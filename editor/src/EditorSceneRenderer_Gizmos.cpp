@@ -33,6 +33,40 @@
 
 
 
+// Скелеты анимированных моделей: кость — отрезок от родителя, сустав — точка.
+// Поза — та, что сейчас у аниматора (клип, граф, IK). Кости сидят ВНУТРИ меша,
+// поэтому рисуются своим проходом, где заслонённая часть почти не бледнеет.
+void EditorSceneRenderer::DrawSkeletons(Scene& scene, const std::vector<int>& selection) {
+    auto& reg = scene.Registry();
+    auto animView = reg.view<AnimationComponent, IdComponent>();
+    for (auto e : animView) {
+        const AnimationComponent& am = animView.get<AnimationComponent>(e);
+        if (!am.Model) continue;
+        const auto& joints = am.Model->GetSkeleton().Joints;
+        const auto& globals = am.Anim.GlobalMatrices();
+        if (globals.size() != joints.size()) continue;
+        const int id = animView.get<IdComponent>(e).Id;
+        const bool selected = std::find(selection.begin(), selection.end(), id) != selection.end();
+        const glm::vec3 color = selected ? glm::vec3(1.0f, 0.8f, 0.2f) : glm::vec3(0.4f, 0.85f, 1.0f);
+        const glm::mat4 world = scene.WorldMatrix(e);
+        // Сустав — соразмерно скелету: точка в 2 см на великане не видна, а
+        // на мыши закрывает всю лапу.
+        glm::vec3 lo(1e30f), hi(-1e30f);
+        for (const glm::mat4& g : globals) {
+            const glm::vec3 p = glm::vec3(world * g[3]);
+            lo = glm::min(lo, p);
+            hi = glm::max(hi, p);
+        }
+        const float joint = std::max(0.01f, glm::length(hi - lo) * 0.025f);
+        for (size_t i = 0; i < joints.size(); ++i) {
+            const glm::vec3 at = glm::vec3(world * globals[i][3]);
+            if (joints[i].Parent >= 0 && joints[i].Parent < (int)globals.size())
+                m_debugDraw->Line(glm::vec3(world * globals[(size_t)joints[i].Parent][3]), at, color);
+            m_debugDraw->WireSphere(at, joint, color, 8);
+        }
+    }
+}
+
 // Гизмо невидимых объектов: каркасы камер, света, зондов, коллайдеров.
 // Гизмо невидимых/физических сущностей (камера/свет/эмиттер/коллайдер) — всегда
 // видны и кликабельны. Накопление в DebugDraw, Flush — у вызывающего.

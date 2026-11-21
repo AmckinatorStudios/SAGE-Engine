@@ -1,4 +1,5 @@
 #pragma once
+#include <string>
 #include "../ui/TreeLines.h"
 #include "imgui.h"
 
@@ -19,7 +20,7 @@ class Scene;
 // несколько кадров подряд), остальное берётся из EditorHost/Scene.
 class HierarchyPanel {
 public:
-    void Draw(EditorHost& host, bool* open);
+    void Draw(EditorHost& host, bool* open, const std::string& windowId = "Hierarchy");
 
     // Какой значок у сущности в списке. Публично — потому что это ДОГОВОР с
     // человеком, а не подробность рисования: значок отвечает на вопрос «что это

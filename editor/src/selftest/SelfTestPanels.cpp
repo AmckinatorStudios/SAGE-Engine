@@ -17,7 +17,7 @@ bool EditorLayer::SelfTestPanelRegistry() {
     // Встроенные: каждая видимая в меню «Окно» панель — в реестре.
     for (const char* id : {"Viewport", "Game", "Hierarchy", "Inspector", "Lighting", "InterfaceViewport",
                            "InterfaceHierarchy", "InterfaceInspector", "InterfacePreview", "Assets", "Console",
-                           "Animation", "Tween", "Profiler"})
+                           "Animation", "AnimGraph", "Tween", "Profiler"})
         if (!m_panelRegistry.Find(id)) fail(std::string("нет встроенной панели ") + id);
 
     // «Сбросить раскладку» открывает ровно прежний состав (инструменты — нет).
@@ -29,6 +29,19 @@ bool EditorLayer::SelfTestPanelRegistry() {
                           EditorPanel::InterfaceInspector, EditorPanel::InterfacePreview})
         if (!m_panels[p]) fail("сброс раскладки не вернул встроенную панель " + std::to_string((int)p));
     if (m_panels[EditorPanel::Profiler]) fail("сброс раскладки открыл профилировщик");
+    if (!m_panels[EditorPanel::Animation] || !m_panelRegistry.IsVisible("AnimGraph"))
+        fail("сброс раскладки не вернул клип и граф анимации");
+    // Пространства: анимация — свои окна общих панелей, без Game и Tween.
+    {
+        const pe::PanelSpec* vp = m_panelRegistry.Find("Viewport");
+        const pe::PanelSpec* tw = m_panelRegistry.Find("Tween");
+        const pe::PanelSpec* game = m_panelRegistry.Find("Game");
+        if (!vp || !pe::PanelRegistry::InSpace(*vp, EditorWorkspace::Animation) ||
+            pe::PanelRegistry::WindowId(*vp, EditorWorkspace::Animation) == "Viewport")
+            fail("у пространства анимации нет своего окна вьюпорта");
+        if (tw && pe::PanelRegistry::InSpace(*tw, EditorWorkspace::Animation)) fail("Tween попал в пространство анимации");
+        if (game && pe::PanelRegistry::InSpace(*game, EditorWorkspace::Animation)) fail("Game попал в пространство анимации");
+    }
 
     // Панель «со стороны»: одна регистрация — и она в палитре.
     {

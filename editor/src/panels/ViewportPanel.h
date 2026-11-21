@@ -17,6 +17,9 @@
 
 
 class EditorHost;
+class GameObject;
+class Camera;
+struct Transform;
 
 // Панель Viewport — картинка сцены (редакторская камера) + всё интерактивное:
 // полёт камеры (ПКМ+WASDQE), гизмо ImGuizmo (W/E/R), пикинг ЛКМ. Режим гизмо,
@@ -25,13 +28,17 @@ class EditorHost;
 // и применяет. Свои — только эфемерные флаги взаимодействия.
 class ViewportPanel {
 public:
-    void Draw(EditorHost& host, bool* open);
+    // windowId — имя окна в раскладке пространства (сцена — «Viewport»).
+    void Draw(EditorHost& host, bool* open, const std::string& windowId = "Viewport");
 
     // Просит вывести таб Viewport вперёд (несколько кадров SetNextWindowFocus —
     // одноразовый проигрывает раскладке доков). По умолчанию активно на старте:
     // Viewport — рабочая панель (пикинг/гизмо/аутлайн), редактор должен
     // открываться на ней, а не на «игровом окне» Game.
     void RequestFocus() { m_focusFrames = 3; }
+    // Вид камеры редактора по умолчанию — им редактор открывается, к нему
+    // возвращает «Сбросить камеру».
+    static void ResetCamera(Camera& camera);
 
     // --- Раскладка видов ----------------------------------------------------
     //
@@ -192,6 +199,12 @@ private:
     // Куда вернуть курсор после захвата (см. ViewportPanel.cpp).
     ImVec2 m_captureReturnPos{0.0f, 0.0f};
     bool m_gizmoWasUsing = false; // фронт «начали таскать гизмо» -> одна запись undo
+public:
+    // Гизмо объекта (ViewportPanel_Gizmo.cpp): матрица гизмо — в опоре
+    // объекта; ApplyGizmo переносит сдвиг гизмо в Transform (или в опору).
+    static glm::mat4 GizmoFrame(const glm::mat4& objectWorld, const Transform& tr);
+    void ApplyGizmo(EditorHost& host, GameObject selected, const glm::mat4& gizmo, bool pivotEdit);
+private:
     // Ручки формы коллайдера (режим C) и «мышь занята ими» в этом кадре —
     // тогда щелчок не выбирает объект под ручкой.
     sage::editor::ColliderHandles m_colliderHandles;

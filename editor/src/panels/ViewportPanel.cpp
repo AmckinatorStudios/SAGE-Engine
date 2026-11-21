@@ -27,17 +27,6 @@
 #include "../EditorPrefs.h"
 #include "../CursorCapture.h"
 
-namespace {
-
-// Раскладывает мировую матрицу обратно в Transform.
-//
-// Тонкая обёртка над Transform::SetFromMatrix: разложение живёт РЯДОМ со
-// сборкой матрицы (engine/src/sage/scene/Transform.h), потому что обязано
-// совпадать с ней по порядку углов (T*Ry*Rx*Rz*S). Своя копия здесь однажды
-// разошлась бы с движком, и объект прыгал бы при первом касании гизмо.
-void DecomposeToTransform(const glm::mat4& m, Transform& out) { out.SetFromMatrix(m); }
-
-} // namespace
 
 
 const char* ViewportPanel::ViewKindName(ViewKind kind) {
@@ -155,7 +144,7 @@ static void DrawNoLightHint(ImVec2 pos, ImVec2 cell, const sage::editor::vptools
                 text, nullptr, wrap);
 }
 
-void ViewportPanel::Draw(EditorHost& host, bool* open) {
+void ViewportPanel::Draw(EditorHost& host, bool* open, const std::string& windowId) {
     // Раскладка из переменной окружения — для headless-прогонов и скриншотов
     // документации: кликнуть в комбо там некому, а проверять раскладку надо.
     static bool layoutFromEnv = false;
@@ -173,7 +162,8 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     }
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin(EditorIcons::WindowTitle("world", T("Viewport"), "Viewport").c_str(), open, panelwindows::WindowFlags("Viewport"));
+    ImGui::Begin(EditorIcons::WindowTitle("world", T("Viewport"), windowId.c_str()).c_str(), open,
+                 panelwindows::WindowFlags(windowId.c_str()));
 
     // Мышь НА ВИДЖЕТЕ инструментов? Ректом прошлого кадра — сам виджет
     // рисуется в конце, поверх видов, а знать об этом надо здесь: клик по его
@@ -598,21 +588,21 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
     // Scene::WorldMatrix) — ручки, которые тянут ничего, обманывают.
     if (selected.Valid() && !colliderGizmo && selected.Id() != m_pilotId &&
         !host.CurrentScene().IsFolder(selected.Entity()) &&
-        host.Tools().GizmoOp != EditorHost::kGizmoSelectOnly) {
+        (host.Tools().GizmoOp != EditorHost::kGizmoSelectOnly || host.Tools().PivotEdit)) {
         Transform& tr = selected.GetTransform();
         // Гизмо работает в МИРОВОМ пространстве (учёт родителей): манипулируем
         // мировой матрицей, результат переводим обратно в локальную через
         // inverse(родительская мировая). Для корневой сущности родитель = единица.
         Scene& scene = host.CurrentScene();
-        entt::entity parent = scene.ParentOf(selected.Entity());
-        glm::mat4 parentWorld = (parent != entt::null) ? scene.WorldMatrix(parent) : glm::mat4(1.0f);
-        glm::mat4 model = scene.WorldMatrix(selected.Entity());
+        // Гизмо — в опоре объекта (Transform::Pivot): поворот и масштаб идут вокруг неё.
+        glm::mat4 model = GizmoFrame(scene.WorldMatrix(selected.Entity()), tr);
+        const bool pivotEdit = host.Tools().PivotEdit;   // гизмо тянет опору, объект стоит
 
         // МАСШТАБ ТОЛЬКО У ТОГО, У ЧЕГО ЕСТЬ РАЗМЕР (sage/scene/ScaleLock.h). У
         // камеры, света, звука ручки масштаба и рамка не рисуются вовсе:
         // ручка, которая тянется и ничего не значит, хуже отсутствующей.
         const bool canScale = sage::scene::CanScale(scene.Registry(), selected.Entity());
-        const bool rectTool = canScale && (ImGuizmo::OPERATION)host.Tools().GizmoOp == ImGuizmo::BOUNDS;
+        const bool rectTool = !pivotEdit && canScale && (ImGuizmo::OPERATION)host.Tools().GizmoOp == ImGuizmo::BOUNDS;
 
         // Пока гизмо не тащат, но курсор над ним — запоминаем состояние «до»:
         // первый же кадр перетаскивания уже мутирует Transform, поэтому снапшот
@@ -643,11 +633,12 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                                    host.Tools().GizmoOp == (int)ImGuizmo::BOUNDS;
             if (scaleTool) m_scaleLockHint = sage::scene::ScaleLockOf(scene.Registry(), selected.Entity());
         }
+        if (pivotEdit) op = ImGuizmo::TRANSLATE;   // у опоры есть только место
         // Шаг привязки: перенос — свой по каждой оси, поворот и масштаб — один.
         float snapValues[3];
         const float snapUnit = host.Tools().SnapStepForCurrentOp();
         snapValues[0] = snapValues[1] = snapValues[2] = snapUnit;
-        if ((ImGuizmo::OPERATION)host.Tools().GizmoOp == ImGuizmo::TRANSLATE)
+        if (op == ImGuizmo::TRANSLATE)
             for (int k = 0; k < 3; ++k) snapValues[k] = host.Tools().SnapMove[k];
         // Ctrl — привязка наоборот на время жеста (как в Unity): без похода к
         // кнопке, когда нужен один ровный шаг.
@@ -663,7 +654,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
         bool usingNow = ImGuizmo::IsUsing();
         if (usingNow && !m_gizmoWasUsing && !host.InPlayMode()) {
             host.History().CommitPending();
-            m_dragStartPrimary = scene.WorldMatrix(selected.Entity());
+            m_dragStartPrimary = scene.WorldMatrix(selected.Entity());   // объект, не опора
             m_dragStartWorlds.clear();
             for (int id : host.Selection().All()) {
                 GameObject o = scene.Get(id);
@@ -692,9 +683,9 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                 if (mr->MeshPtr) {
                     const glm::vec3 bmin = mr->MeshPtr->BoundsMin();
                     const glm::vec3 bmax = mr->MeshPtr->BoundsMax();
-                    for (int i = 0; i < 3; ++i) {
-                        localBounds[i] = bmin[i];
-                        localBounds[i + 3] = bmax[i];
+                    for (int i = 0; i < 3; ++i) {   // в системе гизмо, то есть от опоры
+                        localBounds[i] = bmin[i] - tr.Pivot[i];
+                        localBounds[i + 3] = bmax[i] - tr.Pivot[i];
                     }
                 }
             }
@@ -740,50 +731,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open) {
                                  nullptr, snapNow ? snapValues : nullptr,
                                  boundsPtr, boundsSnapPtr);
 
-        if (manipulated) {
-            // Мировая -> локальная: убираем вклад родителя.
-            glm::mat4 local = (parent != entt::null) ? glm::inverse(parentWorld) * model : model;
-            const glm::vec3 scaleBefore = tr.Scale;
-            DecomposeToTransform(local, tr);
-            tr.Scale = sage::scene::AllowedScale(scene.Registry(), selected.Entity(), scaleBefore, tr.Scale);
-            // ВО ВРЕМЯ ИГРЫ ПОЛОЖЕНИЕ ВЕДЁТ ФИЗИКА, и правку Transform она
-            // затирает на следующем же шаге: объект возвращался на место, будто
-            // мышь ничего не делала. Переставляем и само тело — тогда ящик
-            // можно подвинуть под игрока прямо на ходу, ради чего это и нужно.
-            host.SyncBodyToTransform(selected);
-
-            // Мультивыделение: та же мировая дельта — на остальные выбранные.
-            if (host.Selection().All().size() > 1) {
-                glm::mat4 delta = model * glm::inverse(m_dragStartPrimary);
-                for (auto& [id, startWorld] : m_dragStartWorlds) {
-                    if (id == selected.Id()) continue;
-                    GameObject o = scene.Get(id);
-                    if (!o.Valid() || scene.IsFolder(o.Entity())) continue;
-                    // Пропускаем потомков других выбранных: их несёт двигающийся
-                    // родитель, иначе смещение применилось бы дважды.
-                    bool ancestorSelected = false;
-                    for (entt::entity a = scene.ParentOf(o.Entity());
-                         a != entt::null; a = scene.ParentOf(a)) {
-                        if (host.Selection().Contains(scene.Registry().get<IdComponent>(a).Id)) {
-                            ancestorSelected = true;
-                            break;
-                        }
-                    }
-                    if (ancestorSelected) continue;
-                    glm::mat4 newWorld = delta * startWorld;
-                    entt::entity p = scene.ParentOf(o.Entity());
-                    glm::mat4 pw = (p != entt::null) ? scene.WorldMatrix(p) : glm::mat4(1.0f);
-                    glm::mat4 loc = (p != entt::null) ? glm::inverse(pw) * newWorld : newWorld;
-                    // В группе масштабируют все, кому можно: камера, попавшая в
-                    // набор с ящиками, едет вместе с ними, но не растёт.
-                    const glm::vec3 otherBefore = o.GetTransform().Scale;
-                    DecomposeToTransform(loc, o.GetTransform());
-                    o.GetTransform().Scale =
-                        sage::scene::AllowedScale(scene.Registry(), o.Entity(), otherBefore, o.GetTransform().Scale);
-                    host.SyncBodyToTransform(o);
-                }
-            }
-        }
+        if (manipulated) ApplyGizmo(host, selected, model, pivotEdit);
         m_gizmoWasUsing = usingNow;
     } else {
         m_gizmoWasUsing = false;

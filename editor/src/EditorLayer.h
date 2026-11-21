@@ -180,7 +180,11 @@ public:
         return m_uiDocActive ? m_sceneDirty : m_uiDocDirty;
     }
 
+    // Клип и граф живут в пространстве анимации: открытие ведёт туда. Из
+    // вёрстки — нет: там клипом анимируют элементы интерфейса, и уход унёс
+    // бы документ вёрстки из-под клипа.
     void OpenAnimationClip(const std::string& clipPath) override {
+        if (m_workspace != EditorWorkspace::Interface) SetWorkspace(EditorWorkspace::Animation);
         m_panels[EditorPanel::Animation] = true;
         m_animation.RequestFocus();
         m_animation.OpenClip(*this, clipPath);
@@ -189,9 +193,13 @@ public:
         m_panelRegistry.SetVisible("AiGraph", true);
         m_aiGraph.Open(*this, graphPath);
     }
-    void OpenAnimGraph(const std::string& graphPath, const std::string& modelHint = {}) override {
+    void OpenAnimGraph(const std::string& graphPath) override {
+        SetWorkspace(EditorWorkspace::Animation);
         m_panelRegistry.SetVisible("AnimGraph", true);
-        m_animGraph.Open(*this, graphPath, modelHint);
+        m_animGraph.Open(*this, graphPath);
+    }
+    bool DrawToolInspector() override {
+        return m_workspace == EditorWorkspace::Animation && m_animGraph.DrawInspector(*this);
     }
     AnimGraphPanel& AnimGraphWindow() { return m_animGraph; }
     void OpenVisualScript(const std::string& graphPath) override {
@@ -409,6 +417,7 @@ private:
     // Раскладка пространства «Интерфейс». Своя, а не общая: у него другой
     // состав панелей и другой главный — холст, а не вьюпорт сцены.
     void BuildInterfaceDockLayout(unsigned int dockspaceId);
+    void BuildAnimationDockLayout(unsigned int dockspaceId);
     // Рисует панели текущего пространства.
     void DrawWorkspacePanels();
     void DrawStatusBar(float height);
@@ -495,6 +504,7 @@ private:
     bool SelfTestVisualScript();     // Visual Scripting: свой редактор, узлы, компонент в Play
     bool SelfTestAiGraph();          // SAGE AI Graph: библиотека, редактор графов, компонент AI в Play
     bool SelfTestAnimGraph();        // SAGE Animation Graph: ассет, окно, компонент, сохранение сцены
+    bool SelfTestPivot();            // опора Transform: положения, отмена, гизмо, иерархия, сцена
     bool SelfTestShaders();          // шаблоны шейдеров собираются, умолчания доходят
     bool SelfTestScenesGone();       // удалили все сцены — редактор живёт; виды логики «Создать…»
     bool SelfTestGIBake();           // запекание освещения: разметка, фон, свет по месту, «устарело»    // реестр панелей: встроенные, на ходу, окна плагинов          // плагины на Lua: шаблон, меню, отмена, ошибки, Play
@@ -810,6 +820,7 @@ private:
     InterfaceInspectorPanel m_uiInspector;
     InterfacePreviewPanel m_uiPreview;
     EditorWorkspace m_workspace = EditorWorkspace::Scene;
+    bool m_animationSpaceVisited = false;   // клип показан при первом входе в «Анимацию»
     // Номер объекта-интерфейса, который сейчас верстают. -1 — ни одного;
     // 0 — особая строка «Без интерфейса» (элементы, собранные кодом).
     int m_currentInterface = -1;

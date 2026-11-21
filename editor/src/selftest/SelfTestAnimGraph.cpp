@@ -37,6 +37,7 @@ bool EditorLayer::SelfTestAnimGraph() {
 
     OpenAnimGraph(sage::PathToUtf8(created));
     if (!m_animGraph.HasGraph() || m_animGraph.Path() != sage::PathToUtf8(created)) fail("граф не открылся в окне");
+    if (m_workspace != EditorWorkspace::Animation) fail("граф открылся не в пространстве анимации");
 
     // Объект с графом: путь — ссылкой проекта, как его кладёт слот.
     GameObject probe = m_scene->CreateObject("AnimGraph Probe");
@@ -67,7 +68,7 @@ bool EditorLayer::SelfTestAnimGraph() {
     }
 
     m_scene->RemoveObject(probe.Id());
-    m_panelRegistry.SetVisible("AnimGraph", false);
+    SetWorkspace(EditorWorkspace::Scene);
     fs::remove(created, ec);
     if (ok) LOG_INFO("Editor") << "ANIM_GRAPH: OK — ассет, окно, компонент и сохранение графа";
     return ok;

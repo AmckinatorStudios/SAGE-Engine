@@ -101,7 +101,7 @@ std::string AnimGraphPanel::NodeDetail(const AnimGraphNode& n) const {
     }
 }
 
-void AnimGraphPanel::AddNodeAt(AnimNodeKind kind, const glm::vec2& at) {
+void AnimGraphPanel::AddNodeAt(EditorHost& host, AnimNodeKind kind, const glm::vec2& at) {
     PushUndo();
     const int id = m_graph.Add(kind, at);
     if (!id) {
@@ -112,7 +112,7 @@ void AnimGraphPanel::AddNodeAt(AnimNodeKind kind, const glm::vec2& at) {
     // Новый параметр-узел сразу смотрит на первый параметр графа: чаще всего
     // он и нужен, а пустой узел ничего не значит.
     if (kind == AnimNodeKind::Float && !m_graph.Params.empty()) n->Param = m_graph.Params.front().Name;
-    m_selected = id;
+    SelectNode(host, id);
     Changed();
 }
 
@@ -140,15 +140,19 @@ void AnimGraphPanel::FrameAll() {
 }
 
 void AnimGraphPanel::DrawCanvas(EditorHost& host) {
-    (void)host;
     ImGuiIO& io = ImGui::GetIO();
     m_origin = ImGui::GetCursorScreenPos();
     m_canvasSize = ImGui::GetContentRegionAvail();
     if (m_canvasSize.x < 50.0f || m_canvasSize.y < 50.0f) return;
+    // Кадрирование — когда размер холста устоялся: в первые кадры док ещё
+    // раскладывает окна, и вписанный в чужой размер граф уезжал за край.
     if (m_frameRequest) {
+        const bool stable = std::abs(m_canvasSize.x - m_lastCanvasSize.x) < 1.0f &&
+                            std::abs(m_canvasSize.y - m_lastCanvasSize.y) < 1.0f;
         FrameAll();
-        m_frameRequest = false;
+        if (stable) m_frameRequest = false;
     }
+    m_lastCanvasSize = m_canvasSize;
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const ImVec2 end(m_origin.x + m_canvasSize.x, m_origin.y + m_canvasSize.y);
 
@@ -184,7 +188,7 @@ void AnimGraphPanel::DrawCanvas(EditorHost& host) {
 
     const float fontSize = ImGui::GetFontSize() * std::clamp(m_zoom, 0.6f, 1.4f);
     ImFont* font = ImGui::GetFont();
-    const AnimGraphInstance* live = PreviewInstance();
+    const AnimGraphInstance* live = LiveInstance(host);
 
     // Провода — под узлами.
     for (const AnimGraphLink& l : m_graph.Links) {
@@ -282,11 +286,11 @@ void AnimGraphPanel::DrawCanvas(EditorHost& host) {
                 m_linkToPin = hoverInPin;
             }
         } else if (hoverNode) {
-            m_selected = hoverNode;
+            SelectNode(host, hoverNode);   // свойства узла — в Inspector
             m_dragNode = hoverNode;
             m_dragMoved = false;
         } else {
-            m_selected = 0;
+            SelectNode(host, 0);
         }
     }
     if (m_dragNode && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 2.0f)) {
@@ -329,7 +333,7 @@ void AnimGraphPanel::DrawCanvas(EditorHost& host) {
         ImGui::GetMouseDragDelta(ImGuiMouseButton_Right).x * ImGui::GetMouseDragDelta(ImGuiMouseButton_Right).x +
                 ImGui::GetMouseDragDelta(ImGuiMouseButton_Right).y * ImGui::GetMouseDragDelta(ImGuiMouseButton_Right).y <
             16.0f) {
-        m_selected = hoverNode;
+        SelectNode(host, hoverNode);
         m_menuAt = ToCanvas(io.MousePos);
         m_menuRequest = true;
     }
@@ -348,7 +352,6 @@ void AnimGraphPanel::DrawCanvas(EditorHost& host) {
 }
 
 void AnimGraphPanel::DrawCanvasMenu(EditorHost& host) {
-    (void)host;
     if (m_menuRequest) {
         ImGui::OpenPopup(kCanvasMenu);
         m_menuRequest = false;
@@ -368,11 +371,11 @@ void AnimGraphPanel::DrawCanvasMenu(EditorHost& host) {
         }
         if (EditorIcons::MenuItem("trash", T("Delete node"), "Del", canDelete)) DeleteSelected();
     } else {
-        if (EditorIcons::MenuItem("anim", T("Animation Clip"))) AddNodeAt(AnimNodeKind::Clip, m_menuAt);
-        if (EditorIcons::MenuItem("wire", T("Blend"))) AddNodeAt(AnimNodeKind::Blend, m_menuAt);
-        if (EditorIcons::MenuItem("chart", T("Float Parameter"))) AddNodeAt(AnimNodeKind::Float, m_menuAt);
+        if (EditorIcons::MenuItem("anim", T("Animation Clip"))) AddNodeAt(host, AnimNodeKind::Clip, m_menuAt);
+        if (EditorIcons::MenuItem("wire", T("Blend"))) AddNodeAt(host, AnimNodeKind::Blend, m_menuAt);
+        if (EditorIcons::MenuItem("chart", T("Float Parameter"))) AddNodeAt(host, AnimNodeKind::Float, m_menuAt);
         if (m_graph.OutputNode() == 0 && EditorIcons::MenuItem("exit", T("Output")))
-            AddNodeAt(AnimNodeKind::Output, m_menuAt);
+            AddNodeAt(host, AnimNodeKind::Output, m_menuAt);
     }
     ImGui::EndPopup();
 }

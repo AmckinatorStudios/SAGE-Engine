@@ -356,6 +356,7 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         } else {
             rowReset("scl", tr.Scale, glm::vec3(1.0f));
         }
+        sage::editor::inspectordetail::DrawPivotSection(host, obj);
     }
 
     // --- Mesh Renderer: ОДНА секция на весь компонент -------------------------

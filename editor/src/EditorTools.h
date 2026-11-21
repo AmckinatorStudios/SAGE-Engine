@@ -71,10 +71,14 @@ struct EditorTools {
 
     bool ShowGrid = true;
     bool ShowBounds = false;
+    bool ShowSkeleton = false;   // кости анимированных моделей поверх вида
     EditorRenderMode RenderMode = EditorRenderMode::Shaded;
 
     UIToolSettings UI;          // сетка и привязки вёрстки (см. UIToolSettings.h)
     bool ColliderEdit = false;  // гизмо тянет коллайдер, а не объект
+    // Правка опоры (Transform::Pivot): гизмо стоит в опоре и тянет только
+    // её, объект не двигается. Выключено — обычное управление объектом.
+    bool PivotEdit = false;
     ColliderGizmoStyle ColliderGizmo;
 
     // Шаг привязки для ТЕКУЩЕГО гизмо. Определён в .cpp: сверка GizmoOp с

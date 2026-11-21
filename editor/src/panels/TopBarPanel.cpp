@@ -120,7 +120,7 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
 
     // --- РАБОЧЕЕ ПРОСТРАНСТВО ----------------------------------------------
     //
-    // Два переключателя, а не меню: пространств ровно два, переключаются они
+    // Переключатели, а не меню: пространств три, переключаются они
     // часто, и прятать за меню то, чем пользуются каждые несколько минут,
     // значит добавлять к каждому переходу лишний щелчок и лишний поиск.
     //
@@ -138,6 +138,11 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
         if (EditorIcons::Button("layout", T("Interface"), T("Design the game interface"),
                                 space == EditorWorkspace::Interface))
             host.SetWorkspace(EditorWorkspace::Interface);
+        ImGui::SameLine(0.0f, ui.SpacingXS);
+        CenterY(row);
+        if (EditorIcons::Button("anim", T("Animation"), T("Animate skeletons: clips and animation graphs"),
+                                space == EditorWorkspace::Animation))
+            host.SetWorkspace(EditorWorkspace::Animation);
     }
 
     divider();

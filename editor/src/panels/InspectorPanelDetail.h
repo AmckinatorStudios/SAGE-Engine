@@ -1,9 +1,12 @@
 #pragma once
 #include <string>
 
+#include <glm/glm.hpp>
+
 #include "sage/physics/PhysicsTypes.h"
 
 class EditorHost;
+class GameObject;
 
 // Общие мелочи секций инспектора объекта (InspectorPanel_*.cpp). Только для них.
 namespace sage::editor::inspectordetail {
@@ -15,5 +18,10 @@ inline std::string Hint2(const char* a, const char* b) { return std::string(a) +
 
 void LayerSlider(EditorHost& host, sage::physics::LayerMask& mask);
 void LayerMaskCombo(EditorHost& host, const char* label, sage::physics::LayerMask& mask);
+
+// Раздел Pivot внутри Transform (InspectorPanel_Pivot.cpp).
+void DrawPivotSection(EditorHost& host, GameObject obj);
+// Готовое положение опоры по габаритам: at — доли коробки, −1…+1 по осям.
+glm::vec3 PivotPreset(const glm::vec3& lo, const glm::vec3& hi, const glm::vec3& at);
 
 } // namespace sage::editor::inspectordetail
