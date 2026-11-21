@@ -19,6 +19,7 @@
 #include "sage/scene/SceneSerializer.h"
 #include "sage/scene/ScriptComponent.h"
 #include "sage/scripting/ScriptEngine.h"
+#include "sage/scripting/ScriptFields.h"
 #include "sage/scripting/ScriptingSystem.h"
 #include "sage/scripting/lua/LuaBackend.h"
 
@@ -285,4 +286,103 @@ TEST(MultiScript_old_scene_format_loads) {
         CHECK_NEAR(sc->Scripts[0].Fields.Get("speed").AsFloat(), 6.0f, 1e-5);
         CHECK_TRUE(sc->Groups.empty());
     }
+}
+
+// ГРУППЫ ПЕРЕМЕННЫХ В ОБЪЯВЛЕНИИ: `group` в описании поля — рядом с label и
+// tooltip, порядок объявления сохраняется, без group — без группы; старая
+// форма описания и простые глобальные — как были.
+TEST(MultiScript_public_field_groups_are_parsed_in_declaration_order) {
+    const std::string src = R"(
+local Player = {}
+Player.public = {
+    walk_speed = field.number(4.2, 0, 20, {
+        label = "Walk Speed",
+        tooltip = "Скорость ходьбы",
+        group = "Movement",
+    }),
+    max_health = field.number(100, 0, 500, { group = "Stats" }),
+    run_speed = field.number(7.5, 0, 20, {
+        group = "Movement",
+    }),
+    loose = field.boolean(true),
+    jump_height = field.number(1.1, 0, 5, { group = "Movement" }),
+    armor = { 3, min = 0, max = 10, label = "Броня", group = "Stats" },
+    plain = 5,
+}
+return Player
+)";
+    const sage::vars::Table t = sage::scripting::ParseFields("player.lua", src);
+    std::vector<std::string> names;
+    for (const auto& v : t.All()) names.push_back(v.Name);
+    CHECK_TRUE(names == std::vector<std::string>({"walk_speed", "max_health", "run_speed", "loose", "jump_height",
+                                                  "armor", "plain"}));
+    auto group = [&](const char* n) { const auto* v = t.Find(n); return v ? v->Group : std::string("?"); };
+    CHECK_EQ(group("walk_speed"), std::string("Movement"));
+    CHECK_EQ(group("run_speed"), std::string("Movement"));
+    CHECK_EQ(group("jump_height"), std::string("Movement"));
+    CHECK_EQ(group("max_health"), std::string("Stats"));
+    CHECK_EQ(group("armor"), std::string("Stats"));   // старая форма описания
+    CHECK_EQ(group("loose"), std::string());
+    CHECK_EQ(group("plain"), std::string());
+    const auto* walk = t.Find("walk_speed");
+    CHECK_TRUE(walk && walk->Label == "Walk Speed" && walk->Tooltip == "Скорость ходьбы");
+    CHECK_TRUE(walk && std::abs(walk->Data.AsFloat() - 4.2f) < 1e-5f && std::abs(walk->Max - 20.0f) < 1e-5f);
+    const auto* armor = t.Find("armor");
+    CHECK_TRUE(armor && armor->Label == "Броня" && armor->Data.AsInt() == 3);
+
+    // Простой скрипт старого вида: глобальные — без групп, как и были.
+    const sage::vars::Table simple = sage::scripting::ParseFields("simple.lua", "speed = 5.0\nfunction Update(dt) end\n");
+    CHECK_TRUE(simple.Find("speed") != nullptr && simple.Find("speed")->Group.empty());
+}
+
+// Правка скрипта: группы и подписи приходят из нового объявления, значения
+// объекта остаются (по имени и виду). Файл с group по-прежнему выполняется.
+TEST(MultiScript_field_groups_follow_the_script_and_keep_values) {
+    sage::vars::Table fields = sage::scripting::ParseFields("p.lua", R"(
+local P = {}
+P.public = { speed = field.number(1, 0, 10, { group = "Old", label = "Speed" }) }
+return P
+)");
+    fields.Find("speed")->Data = sage::vars::Value(6.5f);   // настроено в инспекторе
+    fields.MergeDeclaration(sage::scripting::ParseFields("p.lua", R"(
+local P = {}
+P.public = {
+    hp = field.integer(10, 0, 100, { group = "Stats" }),
+    speed = field.number(1, 0, 10, { group = "Movement", label = "Run Speed", tooltip = "быстро" }),
+}
+return P
+)"));
+    const auto* speed = fields.Find("speed");
+    CHECK_TRUE(speed != nullptr);
+    if (speed) {
+        CHECK_NEAR(speed->Data.AsFloat(), 6.5f, 1e-5);
+        CHECK_EQ(speed->Group, std::string("Movement"));
+        CHECK_EQ(speed->Label, std::string("Run Speed"));
+        CHECK_EQ(speed->Tooltip, std::string("быстро"));
+    }
+    CHECK_TRUE(fields.Find("hp") && fields.Find("hp")->Group == "Stats");
+
+    // Группа — только раскладка: в файле сцены её нет, имена и значения те же.
+    Scene scene("g");
+    GameObject o = scene.CreateObject("G");
+    scene.Registry().emplace<ScriptComponent>(o.Entity(), ScriptComponent("scripts/p.lua", fields));
+    const std::string text = SceneSerializer::SaveToString(scene);
+    CHECK_TRUE(text.find("Movement") == std::string::npos);
+    std::unique_ptr<Scene> loaded = SceneSerializer::LoadFromString(text);
+    GameObject g = loaded->FindByName("G");
+    const ScriptComponent* sc = g.Valid() ? loaded->Registry().try_get<ScriptComponent>(g.Entity()) : nullptr;
+    CHECK_TRUE(sc && sc->Scripts.size() == 1 && std::abs(sc->Scripts[0].Fields.Get("speed").AsFloat() - 6.5f) < 1e-5f);
+
+    // Скрипт с group выполняется и получает значение под своим именем.
+    World w;
+    GameObject hero = w.scene.CreateObject("Hero");
+    w.scene.Registry().emplace<ScriptComponent>(hero.Entity(), w.File("grouped", R"(
+local P = {}
+P.public = { speed = field.number(1, 0, 10, { group = "Movement" }) }
+function P:Start() journal[#journal + 1] = string.format('%g', self.speed) end
+return P
+)"), Fields("speed", 3.0f));
+    w.sys->AttachScene(w.scene);
+    for (const auto& e : w.errors) std::printf("       %s\n", e.Format().c_str());
+    CHECK_EQ(w.Journal(), std::string("3"));
 }

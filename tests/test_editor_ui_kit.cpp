@@ -13,6 +13,7 @@
 
 #include <cstdio>
 #include <functional>
+#include <string>
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -294,4 +295,73 @@ TEST(UiKit_dropdown_with_input_stays_open) {
         if ((w->Flags & ImGuiWindowFlags_Popup) && w->Active) popup = w;
     CHECK_TRUE(popup != nullptr);
     CHECK_TRUE(popup && popup->Size.y > 30.0f);
+}
+
+// СТРОКА ПОДГРУППЫ С ДЕЙСТВИЯМИ: карандаш и корзина — свои области нажатия,
+// щелчок по ним не сворачивает группу; переименование — полем на месте
+// подписи, Enter подтверждает, Escape отменяет.
+TEST(UiKit_subsection_actions_do_not_toggle_and_rename_in_place) {
+    KitFrame f;
+    bool rename = false, remove = false, open = false;
+    bool editing = false;
+    std::string name = "Combat";
+    int result = 0;
+    auto draw = [&] {
+        ictl::SubSectionActions a;
+        a.Rename = &rename;
+        a.Remove = &remove;
+        if (editing) {
+            a.EditName = &name;
+            a.EditResult = &result;
+        }
+        open = ictl::SubSection("uikit.test.subsection.actions", "Combat", true, {}, &a);
+        if (open) ictl::EndSubSection();
+    };
+    f.Run(400.0f, draw);
+    CHECK_TRUE(open);
+    const ImVec2 pad = ImGui::GetStyle().WindowPadding;
+    const float h = ImGui::GetFrameHeight();
+    const float w = 400.0f - 2.0f * pad.x;
+    const float buttons = 2.0f * h + 2.0f + 2.0f;
+    const float y = pad.y + h * 0.5f;
+    const float pencilX = pad.x + w - buttons + 2.0f + h * 0.5f;
+    const float trashX = pencilX + h + 2.0f;
+
+    bool sawRename = false, sawRemove = false;
+    auto drawSeen = [&] { draw(); sawRename = sawRename || rename; sawRemove = sawRemove || remove; };
+    f.Click(pencilX, y, 400.0f, drawSeen);
+    CHECK_TRUE(sawRename);
+    CHECK_TRUE(!sawRemove);
+    CHECK_TRUE(open);   // группа не свернулась
+    f.Click(trashX, y, 400.0f, drawSeen);
+    CHECK_TRUE(sawRemove);
+    CHECK_TRUE(open);
+
+    // Переименование: поле получает фокус само, набранное приходит в name.
+    editing = true;
+    f.Run(400.0f, draw);
+    f.Run(400.0f, draw);
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddInputCharactersUTF8("Boss");
+    f.Run(400.0f, draw);
+    CHECK_EQ(result, 0);
+    io.AddKeyEvent(ImGuiKey_Enter, true);
+    int got = 0;
+    auto drawResult = [&] { draw(); if (result != 0) got = result; };
+    f.Run(400.0f, drawResult);
+    io.AddKeyEvent(ImGuiKey_Enter, false);
+    f.Run(400.0f, drawResult);
+    CHECK_EQ(got, 1);
+    CHECK_EQ(name, std::string("Boss"));   // всё выделено при входе — набор заменил имя
+
+    // Escape — отмена.
+    name = "Combat";
+    got = 0;
+    f.Run(400.0f, drawResult);
+    f.Run(400.0f, drawResult);
+    io.AddKeyEvent(ImGuiKey_Escape, true);
+    f.Run(400.0f, drawResult);
+    io.AddKeyEvent(ImGuiKey_Escape, false);
+    f.Run(400.0f, drawResult);
+    CHECK_EQ(got, -1);
 }

@@ -184,7 +184,7 @@ bool FieldCall(Reader& r, Var& var) {
         if (r.Eat(')') || r.Done()) break;
         Value v;
         if (Scalar(r, v)) args.push_back(v);
-        else if (r.Eat('{')) { // описание { label = "...", tooltip = "..." }
+        else if (r.Eat('{')) { // описание { label = "...", tooltip = "...", group = "..." }
             while (!r.Done()) {
                 r.Skip();
                 if (r.Eat('}')) break;
@@ -193,6 +193,7 @@ bool FieldCall(Reader& r, Var& var) {
                 if (!r.Eat('=')) { r.SkipValue(); continue; }
                 if (key == "label" && r.String(text)) var.Label = text;
                 else if (key == "tooltip" && r.String(text)) var.Tooltip = text;
+                else if (key == "group" && r.String(text)) var.Group = text;
                 else r.SkipValue();
                 r.Skip();
                 if (!r.Eat(',')) r.Eat(';');
@@ -244,7 +245,7 @@ bool FieldCall(Reader& r, Var& var) {
     return true;
 }
 
-// Старая форма описания: { 10, min = 0, max = 100, label = "Урон" }.
+// Старая форма описания: { 10, min = 0, max = 100, label = "Урон", group = "Бой" }.
 bool Described(Reader& r, Var& var) {
     if (!r.Eat('{')) return false;
     bool haveValue = false;
@@ -260,11 +261,12 @@ bool Described(Reader& r, Var& var) {
                 bool integral = false;
                 if (r.Number(n, integral)) (key == "min" ? var.Min : var.Max) = (float)n;
                 else r.SkipValue();
-            } else if (key == "label" || key == "tooltip" || key == "kind" || key == "of") {
+            } else if (key == "label" || key == "tooltip" || key == "group" || key == "kind" || key == "of") {
                 std::string text;
                 if (r.String(text)) {
                     if (key == "label") var.Label = text;
                     else if (key == "tooltip") var.Tooltip = text;
+                    else if (key == "group") var.Group = text;
                     else if (key == "of") var.Hint = text;
                     else declaredKind = text;
                 } else {

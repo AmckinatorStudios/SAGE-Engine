@@ -200,9 +200,12 @@ private:
     // время могут перезагрузить (undo, открытие другой сцены).
     int m_browseScriptEntity = -1;
     int m_browseScriptSlot = -1;     // какой из скриптов объекта (ScriptComponent::Scripts)
-    // Переименование группы скриптов: какая группа и набираемое имя.
+    // Переименование группы скриптов на месте заголовка: какая группа, у
+    // какого объекта, набираемое имя и «имя не подошло».
     std::string m_scriptGroupRenaming;
-    char m_scriptGroupName[64] = {};
+    int m_scriptGroupEntity = -1;
+    std::string m_scriptGroupEdit;
+    bool m_scriptGroupBadName = false;
     // То же для звукового файла и по той же причине: диалог отвечает через
     // кадр, а сцену за это время могут перезагрузить.
     int m_browseAudioEntity = -1;
