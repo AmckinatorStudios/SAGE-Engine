@@ -29,262 +29,207 @@ using sage::input::InputSystem;
 using sage::input::SourceKind;
 using sage::input::TriggerMode;
 
+// Редактируемое в окне действия: клавиши и «Дополнительно».
 
-
-// Свойства выбранного действия: привязки, тонкая настройка, поведение.
 // --- КЛАВИШИ ДЕЙСТВИЯ ----------------------------------------------------
 //
-// Плитками, а не таблицей на пять колонок. Таблица отвечала на пять вопросов
-// сразу («источник, устройство, вклад, конфликт, удалить»), из которых человек
-// задаёт один: какая клавиша. Плитка показывает клавишу и значок устройства;
-// всё остальное — в меню по правой кнопке, там же, где и живёт.
-void InputPanel::DrawControls(EditorHost& host, Action& action, const std::string& contextName) {
+// Каждая привязка — отдельный элемент: нажатие запускает переназначение прямо
+// в этом же окне (без второй модалки), рядом — удаление. Спорная привязка
+// красится и подписывается: узнать, что клавиша занята, надо в момент
+// назначения, а не когда игра повела себя странно.
+void InputPanel::DrawDraftControls(EditorHost& host, InputSystem& input) {
     const Sage::UI::Style& ui = Sage::UI::Get();
+    const Action* self = nullptr;
+    if (!m_draft.IsNew) {
+        if (Context* oc = input.FindContext(m_draft.Original.Context))
+            self = oc->Find(m_draft.Original.Name);
+    }
+    const float h = ImGui::GetFrameHeight();
+    const float avail = ImGui::GetContentRegionAvail().x;
+    float lineX = 0.0f;
     int removeAt = -1;
+    std::vector<std::string> warnings;
 
-    for (int i = 0; i < (int)action.Bindings().size(); ++i) {
-        const Binding& binding = action.Bindings()[(size_t)i];
+    // Элемент переносится на новую строку, если не помещается: окно не
+    // растягивается и не прячет привязку за краем.
+    auto place = [&](float w) {
+        if (lineX > 0.0f && lineX + ui.SpacingXS + w > avail) lineX = 0.0f;
+        else if (lineX > 0.0f) ImGui::SameLine(0.0f, ui.SpacingXS);
+        lineX = (lineX > 0.0f ? lineX + ui.SpacingXS : 0.0f) + w;
+    };
+    const float padX = ImGui::GetStyle().FramePadding.x * 2.0f;
+    const float iconS = std::floor(h * 0.68f);
+
+    for (int i = 0; i < (int)m_draft.Bindings.size(); ++i) {
+        const Binding& binding = m_draft.Bindings[(size_t)i];
+        const bool capturing = m_draft.Capture == i;
+        const std::string label = capturing ? std::string(T("Press a control...")) : binding.ToString();
+        const std::string conflict = ConflictWith(input, binding, self);
+        place(EditorIcons::LabeledWidth(iconS, label.c_str()) + padX + h);
         ImGui::PushID(i);
-
-        const std::string label = binding.ToString();
-        const std::string conflict = ConflictWith(host.ProjectInput(), binding, &action);
-        // Спорная клавиша красится сразу: узнать, что она занята, надо в момент
-        // назначения, а не когда игра повела себя странно.
         if (!conflict.empty())
             ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
-        if (EditorIcons::Button(DeviceIcon(binding), label.c_str(),
-                                T("Click to reassign, right-click for settings"))) {
-            m_captureBinding = i;
-            m_captureOpen = true;
-            m_captureContext = contextName;
-            m_captureAction = action.Name();
+        if (EditorIcons::Button(DeviceIcon(binding), label.c_str(), T("Click to reassign"), capturing))
+            m_draft.Capture = capturing ? Draft::kNoCapture : i;
+        if (!conflict.empty()) {
+            ImGui::PopStyleColor();
+            warnings.push_back(binding.ToString() + " — " + T("also used by:") + " " + conflict);
         }
-        if (!conflict.empty()) ImGui::PopStyleColor();
-
-        if (!conflict.empty() && ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s %s\n%s", T("also:"), conflict.c_str(),
-                              T("The same control is bound to another action. That is legal when "
-                                "the two never run at the same time — they live in different "
-                                "contexts."));
-        }
-
-        if (Sage::UI::MenuScope bindingMenu; ImGui::BeginPopupContextItem("##bindmenu")) {
-            DrawBindingTuning(host, action, i);
-            if (EditorIcons::MenuItem("trash", T("Remove this control"))) removeAt = i;
-            ImGui::EndPopup();
-        }
-
-        // Плитки идут в строку, пока есть место: у действия их обычно две-три
-        // (клавиша и кнопка геймпада), и столбец из двух строк занимал бы
-        // высоту ради ничего.
-        const float next = ImGui::GetItemRectMax().x + ui.SpacingXS + 90.0f;
-        if (next < ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x)
-            ImGui::SameLine(0.0f, ui.SpacingXS);
+        ImGui::SameLine(0.0f, 0.0f);
+        if (EditorIcons::IconOnlyButton("trash", T("Remove this control"))) removeAt = i;
         ImGui::PopID();
     }
 
-    if (action.Bindings().empty()) {
+    if (m_draft.Capture == -1) {
+        const char* label = T("Press a control...");
+        place(EditorIcons::LabeledWidth(iconS, label) + padX);
+        EditorIcons::Button("keyboard", label, T("Escape cancels"), true);
+    }
+
+    if (m_draft.Bindings.empty() && m_draft.Capture != -1) {
         ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
         ImGui::TextUnformatted(T("No key assigned — the action can never fire"));
         ImGui::PopStyleColor();
     }
 
+    // + Add Control. У булева действия — сразу ловля. У осевого ещё и список
+    // осей: курсор шевелится всегда, и первая же дрожь руки заняла бы поле
+    // (см. BindingFromEvent).
     ImGui::Spacing();
-    if (EditorIcons::Button("plus", T("Key"), T("Press a key, mouse button or gamepad button"))) {
-        m_captureBinding = -1;   // −1 — добавить новую, а не заменить
-        m_captureOpen = true;
-        m_captureContext = contextName;
-        m_captureAction = action.Name();
+    const bool bool_ = (ActionType)m_draft.Type == ActionType::Digital;
+    if (EditorIcons::Button("plus", T("Add Control"), T("Press a key, mouse button or gamepad button"))) {
+        if (bool_) m_draft.Capture = -1;
+        else ImGui::OpenPopup("##addControl");
     }
-    // Оси назначаются списком, а не ловлей: курсор шевелится всегда, и первая
-    // же дрожь руки заняла бы поле (см. BindingFromEvent).
-    if (action.Type() != ActionType::Digital) {
-        ImGui::SameLine(0.0f, ui.SpacingXS);
-        if (EditorIcons::Button("plus", T("Axis..."), T("A stick, trigger or the mouse as an axis")))
-            ImGui::OpenPopup("##axisMenu");
-        if (Sage::UI::MenuScope axisMenu; ImGui::BeginPopup("##axisMenu")) {
-            for (const AxisItem& item : kAxes) {
-                // Мышь и геймпад — разные рисунки: список из восьми ПРОПИСНЫХ
-                // имён читается по буквам, а по рисунку видно семейство ещё до
-                // чтения.
-                const char* icon = std::strncmp(item.Label, "MOUSE", 5) == 0 ? "select" : "pilot";
-                if (!EditorIcons::MenuItem(icon, item.Label)) continue;
-                Binding b = item.Make();
-                // Вторая ось векторного действия почти всегда Y — угадываем по
-                // имени, чтобы не заставлять переставлять руками каждый раз.
-                if (action.Type() == ActionType::Vector && std::strstr(item.Label, "_Y"))
-                    b.Axis = Component::Y;
-                action.Bind(b);
-                host.SetProjectInputDirty(true);
-            }
-            ImGui::EndPopup();
+    if (Sage::UI::MenuScope addMenu; ImGui::BeginPopup("##addControl")) {
+        if (EditorIcons::MenuItem("keyboard", T("Press a key or button...")))
+            m_draft.Capture = -1;
+        ImGui::Separator();
+        for (const AxisItem& item : kAxes) {
+            const char* icon = std::strncmp(item.Label, "MOUSE", 5) == 0 ? "select" : "pilot";
+            if (!EditorIcons::MenuItem(icon, item.Label)) continue;
+            Binding b = item.Make();
+            // Вторая ось векторного действия почти всегда Y — угадываем по имени.
+            if ((ActionType)m_draft.Type == ActionType::Vector && std::strstr(item.Label, "_Y"))
+                b.Axis = Component::Y;
+            m_draft.Bindings.push_back(b);
         }
+        ImGui::EndPopup();
+    }
+
+    for (const std::string& w : warnings) {
+        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
+        ImGui::TextWrapped("%s", w.c_str());
+        ImGui::PopStyleColor();
+    }
+    if (!warnings.empty()) {
+        ImGui::PushTextWrapPos(0.0f);
+        Sage::UI::TextSecondary("%s", T("That is legal when the two never run at the same time — "
+                                        "they live in different contexts."));
+        ImGui::PopTextWrapPos();
     }
 
     if (removeAt >= 0) {
-        action.RemoveBindingAt(removeAt);
-        host.SetProjectInputDirty(true);
+        m_draft.Bindings.erase(m_draft.Bindings.begin() + removeAt);
+        m_draft.Capture = Draft::kNoCapture;
     }
+    (void)host;
 }
 
-
-// Вклад и половина вектора — в меню у плитки. У кнопочного действия их нет
-// вовсе: «вклад +1» у кнопки прыжка — поле, которое нечем объяснить.
-void InputPanel::DrawBindingTuning(EditorHost& host, Action& action, int index) {
-    if (action.Type() == ActionType::Digital) return;
-    if (index < 0 || index >= (int)action.Bindings().size()) return;
-
-    Sage::UI::MenuSection(T("This control"), true);
-    Sage::UI::BeginProperties("tuning");
-    Sage::UI::PropertyLabel(T("Contribution"),
-                            T("Contribution to the value: W gives +1, S gives -1"));
-    ImGui::SetNextItemWidth(120.0f);
-    float scale = action.Bindings()[(size_t)index].Scale;
-    if (ImGui::DragFloat("##scale", &scale, 0.05f, -4.0f, 4.0f, "%.2f")) {
-        action.MutableBindings()[(size_t)index].Scale = scale;
-        host.SetProjectInputDirty(true);
-    }
-    if (action.Type() == ActionType::Vector) {
-        Sage::UI::PropertyLabel(T("Axis"), T("Which half of the vector this source feeds"));
-        ImGui::SetNextItemWidth(120.0f);
-        int axis = (action.Bindings()[(size_t)index].Axis == Component::Y) ? 1 : 0;
-        const char* axes[] = {T("X"), T("Y")};
-        if (ImGui::Combo("##axis", &axis, axes, 2)) {
-            action.MutableBindings()[(size_t)index].Axis = axis ? Component::Y : Component::X;
-            host.SetProjectInputDirty(true);
-        }
-    }
-    Sage::UI::EndProperties();
-    ImGui::Separator();
-}
-
-
-// --- ПОВЕДЕНИЕ -----------------------------------------------------------
+// --- ДОПОЛНИТЕЛЬНО -------------------------------------------------------
 //
-// Свёрнуто по умолчанию, и это главное решение раздела: девять человек из
-// десяти приходят сюда поменять клавишу, а не мёртвую зону. Раньше эти поля
-// стояли на экране всегда — то есть человек, которому нужна была одна кнопка,
-// каждый раз читал десяток чужих настроек, чтобы убедиться, что они не его.
-void InputPanel::DrawBehavior(EditorHost& host, Action& action) {
-    sage::input::ActionSettings& s = action.Settings();
+// Свёрнуто по умолчанию (Section(..., false) в окне действия): девять человек
+// из десяти приходят сюда поменять клавишу, а не мёртвую зону. Показывается
+// только то, что относится к виду значения: у булева действия нет мёртвой зоны,
+// у осевого — режима срабатывания. Правится ЧЕРНОВИК (m_draft).
+void InputPanel::DrawAdvanced(EditorHost&) {
+    sage::input::ActionSettings& s = m_draft.Settings;
+    const ActionType type = (ActionType)m_draft.Type;
     Sage::UI::BeginProperties("behavior");
 
-    if (action.Type() == ActionType::Digital) {
+    if (type == ActionType::Digital) {
         Sage::UI::PropertyLabel(T("Fires"));
         ImGui::SetNextItemWidth(-1);
         int trigger = (int)s.Trigger;
         const char* triggers[] = {TriggerLabel(TriggerMode::Press), TriggerLabel(TriggerMode::Release),
                                   TriggerLabel(TriggerMode::Hold), TriggerLabel(TriggerMode::Tap)};
-        if (ImGui::Combo("##trigger", &trigger, triggers, 4)) {
-            s.Trigger = (TriggerMode)trigger;
-            host.SetProjectInputDirty(true);
-        }
+        if (ImGui::Combo("##trigger", &trigger, triggers, 4)) s.Trigger = (TriggerMode)trigger;
 
         if (s.Trigger == TriggerMode::Hold) {
             Sage::UI::PropertyLabel(T("Hold, sec"));
             ImGui::SetNextItemWidth(-1);
-            if (ImGui::DragFloat("##hold", &s.HoldTime, 0.01f, 0.05f, 3.0f, "%.2f"))
-                host.SetProjectInputDirty(true);
+            ImGui::DragFloat("##hold", &s.HoldTime, 0.01f, 0.05f, 3.0f, "%.2f");
         }
         if (s.Trigger == TriggerMode::Tap) {
             Sage::UI::PropertyLabel(T("Tap shorter than, sec"));
             ImGui::SetNextItemWidth(-1);
-            if (ImGui::DragFloat("##tap", &s.TapTime, 0.01f, 0.05f, 2.0f, "%.2f"))
-                host.SetProjectInputDirty(true);
+            ImGui::DragFloat("##tap", &s.TapTime, 0.01f, 0.05f, 2.0f, "%.2f");
         }
 
         Sage::UI::PropertyLabel(T("Exact modifiers"),
                                T("Off: W keeps working while Shift is held — otherwise sprinting "
                                  "would break walking. On: for shortcuts, so Ctrl+S never fires "
                                  "from Ctrl+Shift+S."));
-        if (ImGui::Checkbox("##exact", &s.ExactModifiers)) host.SetProjectInputDirty(true);
+        ImGui::Checkbox("##exact", &s.ExactModifiers);
     } else {
         Sage::UI::PropertyLabel(T("Dead zone"),
                                T("Stick wobble around the centre is ignored. Does not touch the "
                                  "keyboard: a key is either pressed or not."));
         ImGui::SetNextItemWidth(-1);
-        if (ImGui::DragFloat("##deadzone", &s.DeadZone, 0.01f, 0.0f, 0.9f, "%.2f"))
-            host.SetProjectInputDirty(true);
-
+        ImGui::DragFloat("##deadzone", &s.DeadZone, 0.01f, 0.0f, 0.9f, "%.2f");
         Sage::UI::PropertyLabel(T("Dead zone shape"),
                                T("Radial is the right choice for a stick: otherwise the diagonal "
                                  "leaves the zone earlier than a straight push."));
         ImGui::SetNextItemWidth(-1);
         int zone = (s.Zone == DeadZoneMode::Axial) ? 1 : 0;
         const char* zones[] = {T("Radial"), T("Per axis")};
-        if (ImGui::Combo("##zone", &zone, zones, 2)) {
+        if (ImGui::Combo("##zone", &zone, zones, 2))
             s.Zone = zone ? DeadZoneMode::Axial : DeadZoneMode::Radial;
-            host.SetProjectInputDirty(true);
-        }
 
         Sage::UI::PropertyLabel(T("Smoothing, sec"),
                                T("0 is raw — the right choice for a first-person view: a smoothed "
                                  "look feels like the mouse is sinking."));
         ImGui::SetNextItemWidth(-1);
-        if (ImGui::DragFloat("##smoothing", &s.Smoothing, 0.005f, 0.0f, 1.0f, "%.3f"))
-            host.SetProjectInputDirty(true);
-
+        ImGui::DragFloat("##smoothing", &s.Smoothing, 0.005f, 0.0f, 1.0f, "%.3f");
         Sage::UI::PropertyLabel(T("Sensitivity"));
         ImGui::SetNextItemWidth(-1);
-        if (ImGui::DragFloat("##sensitivity", &s.Sensitivity, 0.01f, 0.01f, 10.0f, "%.2f"))
-            host.SetProjectInputDirty(true);
-
+        ImGui::DragFloat("##sensitivity", &s.Sensitivity, 0.01f, 0.01f, 10.0f, "%.2f");
         Sage::UI::PropertyLabel(T("Normalize diagonal"),
                                T("Without it diagonal movement is 1.41 times faster than straight "
                                  "— the oldest bug in games."));
-        if (ImGui::Checkbox("##normalize", &s.Normalize)) host.SetProjectInputDirty(true);
+        ImGui::Checkbox("##normalize", &s.Normalize);
 
         Sage::UI::PropertyLabel(T("Press threshold"),
                                T("From which value an analog source counts as pressed — a trigger "
                                  "used as a fire button."));
         ImGui::SetNextItemWidth(-1);
-        if (ImGui::DragFloat("##pressthreshold", &s.PressThreshold, 0.01f, 0.05f, 1.0f, "%.2f"))
-            host.SetProjectInputDirty(true);
-    }
-    Sage::UI::EndProperties();
-}
-
-
-// --- СВОЙСТВА ДЕЙСТВИЯ ---------------------------------------------------
-bool InputPanel::DrawActionProperties(EditorHost& host, Action& action,
-                                      const std::string& contextName) {
-    bool deleteRequested = false;
-
-    // Шапка: имя и контекст, в котором действие живёт. Контекст написан здесь,
-    // потому что свойства открыты по щелчку в длинном списке, и «а где это
-    // было» — вопрос, который возникает сразу.
-    ImGui::TextUnformatted(action.Name().c_str());
-    const float delW = ImGui::GetFrameHeight();
-    ImGui::SameLine(ImGui::GetContentRegionAvail().x >= delW + 8.0f
-                        ? ImGui::GetCursorPosX() + ImGui::GetContentRegionAvail().x - delW
-                        : ImGui::GetCursorPosX());
-    if (EditorIcons::IconOnlyButton("trash", T("Delete this action"))) deleteRequested = true;
-    Sage::UI::TextSecondary("%s", contextName.c_str());
-
-    Sage::UI::Separator();
-
-    // КЛАВИШИ — ПЕРВЫМИ. За ними сюда и приходят.
-    Sage::UI::TextSecondary("%s", T("Keys"));
-    ImGui::Spacing();
-    DrawControls(host, action, contextName);
-
-    Sage::UI::Separator();
-    Sage::UI::BeginProperties("kind");
-    Sage::UI::PropertyLabel(T("Kind"),
-                            T("A button answers yes/no, an axis gives -1..1, a vector gives two "
-                              "axes at once — movement and look."));
-    ImGui::SetNextItemWidth(-1);
-    int type = (int)action.Type();
-    const char* types[] = {ActionTypeLabel(ActionType::Digital), ActionTypeLabel(ActionType::Axis),
-                           ActionTypeLabel(ActionType::Vector)};
-    if (ImGui::Combo("##kind", &type, types, 3)) {
-        action.SetType((ActionType)type);
-        host.SetProjectInputDirty(true);
+        ImGui::DragFloat("##pressthreshold", &s.PressThreshold, 0.01f, 0.05f, 1.0f, "%.2f");
     }
     Sage::UI::EndProperties();
 
-    // Свёрнуто: см. DrawBehavior — это настройки для тех, кто их ищет.
-    if (Sage::UI::Section(T("Behavior"), false)) DrawBehavior(host, action);
-
-    return deleteRequested;
+    // ВКЛАД И ПОЛОВИНА ВЕКТОРА — только у осевых действий и только здесь: у
+    // булева действия этих полей нет вовсе («вклад +1» у кнопки прыжка нечем
+    // объяснить), а у осевого их трогают один раз при настройке.
+    if (type != ActionType::Digital && !m_draft.Bindings.empty()) {
+        Sage::UI::MenuSection(T("Controls"), true);
+        Sage::UI::BeginProperties("tuning");
+        for (size_t i = 0; i < m_draft.Bindings.size(); ++i) {
+            Binding& b = m_draft.Bindings[i];
+            ImGui::PushID((int)i);
+            const std::string name = b.ToString();
+            Sage::UI::PropertyLabel(name.c_str(),
+                                    T("Contribution to the value: W gives +1, S gives -1"));
+            ImGui::SetNextItemWidth(type == ActionType::Vector ? -90.0f : -1.0f);
+            ImGui::DragFloat("##scale", &b.Scale, 0.05f, -4.0f, 4.0f, "%.2f");
+            if (type == ActionType::Vector) {
+                ImGui::SameLine();
+                ImGui::SetNextItemWidth(80.0f);
+                int axis = (b.Axis == Component::Y) ? 1 : 0;
+                const char* axes[] = {T("X"), T("Y")};
+                if (ImGui::Combo("##axis", &axis, axes, 2)) b.Axis = axis ? Component::Y : Component::X;
+            }
+            ImGui::PopID();
+        }
+        Sage::UI::EndProperties();
+    }
 }

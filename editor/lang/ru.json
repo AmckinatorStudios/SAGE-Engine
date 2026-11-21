@@ -4338,6 +4338,19 @@
     "Modified": "Изменён",
     "Ascending": "По возрастанию",
     "Descending": "По убыванию",
-    "Sort order (folders always first)": "Порядок (папки всегда первыми)"
+    "Sort order (folders always first)": "Порядок (папки всегда первыми)",
+    "Add Action": "Добавить действие",
+    "Add Control": "Добавить клавишу",
+    "Add action here": "Добавить действие сюда",
+    "An action with this name already exists in this context": "Действие с таким именем в этом контексте уже есть",
+    "Edit action": "Изменение действия",
+    "Escape cancels": "Escape — отмена",
+    "Press a control...": "Нажмите клавишу...",
+    "Press a key or button...": "Нажать клавишу или кнопку...",
+    "Press a key, a mouse button, the wheel or a gamepad button. Escape cancels.": "Нажмите клавишу, кнопку мыши, колесо или кнопку геймпада. Escape — отмена.",
+    "Press «Add Action» above: name it, and the editor will ask for the key right away.": "Нажмите «Добавить действие» выше: дайте имя, и редактор сразу попросит клавишу.",
+    "That is legal when the two never run at the same time — they live in different contexts.": "Это допустимо, если оба действия никогда не работают одновременно — например, в разных контекстах.",
+    "Value Type": "Тип значения",
+    "also used by:": "ещё занята в:"
   }
 }
