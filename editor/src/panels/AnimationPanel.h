@@ -10,6 +10,7 @@
 #include "sage/scene/Scene.h"
 
 class EditorHost;
+namespace anim = sage::anim;
 
 // ---------------------------------------------------------------------------
 // ИНСТРУМЕНТ АНИМАЦИИ — ОДИН НА ВЕСЬ РЕДАКТОР.
@@ -76,6 +77,10 @@ public:
     // Открыть клип по пути. Понимает оба расширения: свой .sageclip и вынутый
     // из модели .sageanim — второй только для чтения.
     void OpenClip(EditorHost& host, const std::string& path);
+    // Создать клип и СРАЗУ привязать его к объекту: файл в assets + компонент
+    // на объекте. Одно действие, потому что по отдельности ни файл без
+    // компонента, ни компонент без файла ничего не делают.
+    bool CreateClipFor(EditorHost& host, GameObject object);
     // Ключ выбранной кости (сцена Animation) из её показанной позы: все каналы
     // или только поправленные гизмо (авто-ключ).
     void KeySelectedBone(EditorHost& host, bool onlyEdited);
@@ -91,9 +96,20 @@ public:
 
 private:
     void DrawToolbar(EditorHost& host);
-    void DrawTracks(EditorHost& host, float width);
+    void DrawTracks(EditorHost& host, float width, float height);
     void DrawTimeline(EditorHost& host, ImVec2 size);
     void DrawCurve(EditorHost& host, ImVec2 size);
+    // Поля выбранных ключей над кривой: интерполяция, время, значение.
+    void DrawKeyFields(EditorHost& host);
+    // Меню клипа: сохранить, сделать своим, имя, повтор — редкие действия.
+    void DrawClipMenu(EditorHost& host);
+    // Ключи дорожки снова по времени (после перетаскивания и правки времени);
+    // выделение переводится на новые номера, а не теряется.
+    void ResortTrack(int track);
+    void CopyKeys();
+    void PasteKeys();
+    // Номер дорожки, чью кривую показывает редактор кривых (-1 — нет).
+    int CurveTrack() const;
     void DrawAddTrackPopup(EditorHost& host);
     // Пустое состояние: клип не открыт. Отсюда его создают или открывают —
     // другого способа завести анимацию нет.
@@ -101,10 +117,6 @@ private:
     // Полоса владельца: кто играет этот клип и чем это подтверждено в сцене.
     void DrawOwnerBar(EditorHost& host);
 
-    // Создать клип и СРАЗУ привязать его к объекту: файл в assets + компонент
-    // на объекте. Одно действие, потому что по отдельности ни файл без
-    // компонента, ни компонент без файла ничего не делают.
-    bool CreateClipFor(EditorHost& host, GameObject object);
     // Повесить открытый клип на объект (добавить компонент с этим путём).
     void BindTo(EditorHost& host, GameObject object);
     // Найти в сцене объект, который играет открытый клип. entt::null — никто.
@@ -182,6 +194,26 @@ private:
     float m_dragStartTime = 0.0f;
     std::vector<float> m_dragStartTimes;
     bool m_dragPlayhead = false;
+    // Выделение рамкой: где начали (экран) и было ли выделение «в добавок».
+    bool m_boxSelect = false;
+    ImVec2 m_boxFrom{0, 0};
+    // Ручка безье, которую тянут: захват — от нажатия до отпускания, где бы ни
+    // была мышь (раньше ручка ловилась только рядом с курсором и «отпускалась»
+    // от быстрого движения). 1 — исходящая ключа, 2 — входящая ключа.
+    int m_curveDrag = 0;
+    int m_curveDragTrack = -1, m_curveDragKey = -1, m_curveDragComp = 0;
+    // Какие компоненты свойства видны на кривой (x, y, z, w).
+    bool m_curveComp[4] = {true, true, true, true};
+    // Высота редактора кривых (тянется разделителем) и свёрнут ли он.
+    float m_curveHeight = -1.0f;   // < 0 — ещё не тянули: доля высоты панели
+    bool m_curveOpen = true;
+    // Буфер копирования ключей: дорожка (цель + свойство) и ключи со временем
+    // от первого скопированного.
+    struct CopiedKey {
+        std::string Target, Property;
+        anim::Key Key;
+    };
+    std::vector<CopiedKey> m_copied;
 
     // Откат — СВОЙ, а не общий с историей сцены: инструмент правит клип, а не
     // сцену, и класть правку ключа в стек, где лежат перемещения объектов,

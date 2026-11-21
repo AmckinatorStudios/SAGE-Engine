@@ -180,6 +180,14 @@ public:
     virtual class AnimStage* AnimationStage() { return nullptr; }
     // Граф предпросмотра ведёт окно графа (открыто, граф загружен).
     virtual bool AnimGraphPreviewActive() const { return false; }
+    // РЕСУРС АНИМАЦИИ ОБЪЕКТА — В РЕДАКТОР одним действием (кнопки компонентов
+    // в Inspector): пространство Animation, объект — цель предпросмотра,
+    // ресурс открыт там, где он правится (клип — в таймлайне, граф — в окне
+    // графа).
+    virtual void EditAnimation(int objectId, const std::string& resource) { (void)objectId; (void)resource; }
+    // Создать клип объекту, назначить его и открыть: skeletal — свой .sageanim
+    // в Animation, иначе .sageclip в Property Animator. false — не создан.
+    virtual bool CreateAnimationClip(int objectId, bool skeletal) { (void)objectId; (void)skeletal; return false; }
     // Инструмент рабочего пространства рисует в Inspector СВОЙ выделенный
     // элемент (узел графа анимации) вместо объекта. true — нарисовал, и
     // инспектор объекта в этом кадре не нужен. Выбор объекта это отменяет.

@@ -527,6 +527,9 @@ void SavePropertyAnimator(json& j, const PropertyAnimatorComponent& a) {
     json& oj = j["propertyAnimator"];
     oj["clipPath"] = a.ClipPath;
     oj["playing"] = a.Playing;
+    // Повтор клипа перебивается только явно; ключ loopOverride пишется
+    // всегда — по нему чтение отличает новую сцену от старой (см. ниже).
+    oj["loopOverride"] = a.LoopOverride;
     oj["loop"] = a.Loop;
     oj["speed"] = a.Speed;
     // Время НЕ пишется: это положение бегунка сейчас, а не свойство сцены.
@@ -539,6 +542,15 @@ PropertyAnimatorComponent ParsePropertyAnimator(const json& aj) {
     a.ClipPath = aj.value("clipPath", std::string());
     a.Playing = aj.value("playing", true);
     a.Loop = aj.value("loop", true);
+    if (aj.contains("loopOverride")) {
+        a.LoopOverride = aj.value("loopOverride", false);
+    } else {
+        // СЦЕНА ДО ПЕРЕНОСА ПОВТОРА В КЛИП. Там «loop» компонента всегда
+        // перебивал клип и по умолчанию был true. Выключенный — это выбор
+        // человека («сыграть один раз»), он сохраняется переопределением;
+        // включённый — значение по умолчанию: решает клип.
+        a.LoopOverride = !a.Loop;
+    }
     a.Speed = aj.value("speed", 1.0f);
     return a;   // Clip/Ready восстановит первый UpdatePropertyAnimators
 }

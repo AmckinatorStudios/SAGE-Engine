@@ -31,6 +31,7 @@ add_executable(SageEditor WIN32
     src/EditorHistory.cpp
     src/EditorTools.cpp
     src/EditorLayer_Assets.cpp
+    src/EditorLayer_Animation.cpp
     src/EditorLayer_Ui.cpp
     src/EditorLayer_InterfaceDoc.cpp
     src/CursorCapture.cpp
@@ -217,6 +218,7 @@ add_executable(SageEditor WIN32
     src/panels/AnimationPanel.cpp
     src/panels/AnimationPanel_Timeline.cpp
     src/panels/AnimationPanel_Stage.cpp
+    src/panels/AnimationPanel_Curve.cpp
     src/panels/TweenPanel.cpp
     src/TweenUi.cpp
     src/panels/TweenPanel_Cards.cpp

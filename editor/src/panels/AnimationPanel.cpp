@@ -47,7 +47,11 @@ entt::entity AnimationPanel::FindOwner(EditorHost& host) const {
     Scene& scene = const_cast<EditorHost&>(host).CurrentScene();
     entt::registry& reg = scene.Registry();
     std::error_code ec;
-    const fs::path mine = fs::weakly_canonical(fs::path(m_path), ec);
+    // Пути разбираются ОТ ПРОЕКТА (LocatePath): в компоненте путь записан
+    // относительно проекта, а рабочая папка редактора — не он. Раньше
+    // относительный путь разбирался от неё, владелец не находился, и клип,
+    // открытый кнопкой компонента, оказывался «ни на каком объекте».
+    const fs::path mine = fs::weakly_canonical(fs::path(sage::AssetDatabase::Instance().LocatePath(m_path)), ec);
     entt::entity found = entt::null;
     reg.view<PropertyAnimatorComponent>().each(
         [&](entt::entity e, const PropertyAnimatorComponent& pa) {
@@ -57,7 +61,8 @@ entt::entity AnimationPanel::FindOwner(EditorHost& host) const {
             // решать, что это разные клипы, значит терять привязку на ровном
             // месте.
             std::error_code e2;
-            const fs::path theirs = fs::weakly_canonical(fs::path(pa.ClipPath), e2);
+            const fs::path theirs =
+                fs::weakly_canonical(fs::path(sage::AssetDatabase::Instance().LocatePath(pa.ClipPath)), e2);
             if (theirs == mine) found = e;
         });
     return found;
@@ -169,6 +174,8 @@ void AnimationPanel::OpenClip(EditorHost& host, const std::string& path) {
     m_undo.clear();
     m_redo.clear();
     m_status.clear();
+    // Кривая видна сразу — у первой дорожки, а не после поиска, куда щёлкнуть.
+    m_activeTrack = m_clip.Tracks.empty() ? -1 : 0;
     Bump();
     if (skeletal && StageMode(host)) host.AnimationStage()->SetMode(AnimStage::Source::Clip);
 }
@@ -382,122 +389,149 @@ void AnimationPanel::DrawOwnerBar(EditorHost& host) {
     }
 }
 
+// ВЕРХНЯЯ ПАНЕЛЬ — ТОЛЬКО ТО, ЧТО НУЖНО ПОСТОЯННО: клип (меню с редкими
+// действиями), воспроизведение, время и длительность, авто-ключ и ключ.
+// Раньше здесь стояли в ряд дюжина значков без подписей, поля имени, длины и
+// повтора, сохранение и «новый клип» — и найти «поставить ключ» среди них
+// было задачей. Редкое (сохранить, сделать своим, имя, повтор) — в меню
+// клипа; кто играет клип — строкой ниже.
 void AnimationPanel::DrawToolbar(EditorHost& host) {
     const bool editable = Editable();
 
-    DrawOwnerBar(host);
-
-    // --- Откуда клип --------------------------------------------------------
-    //
-    // Сказано ПЕРВЫМ делом и цветом: импортированный клип выглядит как обычный,
-    // и человек, начавший его править, узнал бы правду только после
-    // переимпорта модели — то есть потеряв работу.
+    // --- Клип: имя кнопкой меню -------------------------------------------
+    {
+        std::string label = (m_clip.Name.empty() ? std::string(T("Clip")) : m_clip.Name);
+        if (m_dirty) label += " *";
+        ImGui::SetNextItemWidth(std::clamp(ImGui::CalcTextSize(label.c_str()).x + ImGui::GetFrameHeight() * 2.0f,
+                                           ImGui::GetFontSize() * 7.0f, ImGui::GetFontSize() * 14.0f));
+        if (ictl::DropButton("##clip_menu", label.c_str(), false, T("Clip: save, name, loop")))
+            ImGui::OpenPopup("ClipMenu###ClipMenu");
+        DrawClipMenu(host);
+    }
     if (m_clip.Imported) {
-        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
-        EditorIcons::Inline("import");
-        ImGui::SameLine(0.0f, EditorIcons::TextGap());
-        ImGui::TextUnformatted(T("Imported — read only"));
-        ImGui::PopStyleColor();
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", T("This clip comes from the model file and is rebuilt on every\n"
-                                      "re-import. Make a copy to edit it."));
-        }
         ImGui::SameLine();
-        // Скелетный клип «своим» не делается: у костей нет свойства сцены, и
-        // копия была бы клипом, который этот инструмент не умеет применить.
-        // Его играет компонент Animation, и сказано это прямо.
-        if (m_skeletal) {
-            // Копия — свой файл в assets/animations: исходный, вынутый из
-            // модели, не трогается и пересоздаётся при переимпорте как раньше.
-            if (ImGui::Button(T("Make it mine"))) MakeOwnSkeletal(host);
-        } else if (ImGui::Button(T("Make it mine"))) {
-            m_clip.Imported = false;
-            m_clip.Name += " (custom)";
-            m_path.clear();   // сохранится как новый файл, чужой не тронем
-            m_dirty = true;
-            m_status = T("The copy is editable. Save it next to the model.");
-        }
-    } else {
-        ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Ok));
-        EditorIcons::Inline("pencil");
-        ImGui::SameLine(0.0f, EditorIcons::TextGap());
-        ImGui::TextUnformatted(T("Custom — editable"));
-        ImGui::PopStyleColor();
+        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", T("Read only"));
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("This clip comes from the model file and is rebuilt on every\n"
+                                      "re-import. Clip menu > Make it mine — an editable copy."));
     }
+    ImGui::SameLine(0.0f, 14.0f);
 
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-
-    char name[128];
-    std::snprintf(name, sizeof(name), "%s", m_clip.Name.c_str());
-    ImGui::SetNextItemWidth(160.0f);
-    ImGui::BeginDisabled(!editable);
-    if (ImGui::InputText(T("Clip"), name, sizeof(name))) {
-        m_clip.Name = name;
-        m_dirty = true;
-    }
-    ImGui::EndDisabled();
-
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(90.0f);
-    ImGui::BeginDisabled(!editable);
-    if (ImGui::DragFloat(T("Length"), &m_clip.Duration, 0.05f, 0.05f, 600.0f, "%.2f s")) {
-        m_dirty = true;
-    }
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    ImGui::BeginDisabled(!editable);
-    if (ImGui::Checkbox(T("Loop"), &m_clip.Loop)) m_dirty = true;
-    ImGui::EndDisabled();
-
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-
-    // --- Показ --------------------------------------------------------------
-    if (EditorIcons::IconOnlyButton(m_playing ? "pause" : "play",
-                                    m_playing ? T("Stop") : T("Play"), m_playing))
+    // --- Воспроизведение ----------------------------------------------------
+    if (EditorIcons::IconOnlyButton(m_playing ? "pause" : "play", m_playing ? T("Pause (Space)") : T("Play (Space)"),
+                                    m_playing))
         m_playing = !m_playing;
     ImGui::SameLine();
-    if (EditorIcons::IconOnlyButton("stop", T("To the start"))) {
+    if (EditorIcons::IconOnlyButton("stop", T("Stop and go to the start"))) {
         m_playing = false;
         m_time = 0.0f;
         SyncSceneToTime(host);
     }
     ImGui::SameLine();
-    // АВТО-КЛЮЧ. Пока он включён, любая правка объекта в сцене ложится ключом
-    // в текущий момент. Это единственный способ анимировать «руками»: иначе
-    // каждый сдвиг надо подтверждать кнопкой, и половина забывается.
-    if (EditorIcons::IconOnlyButton("clock", T("Auto-key: an edit becomes a key"), m_autoKey)) {
-        if (editable) m_autoKey = !m_autoKey;
-    }
-    ImGui::SameLine();
-    ImGui::BeginDisabled(!editable || m_clip.Tracks.empty());
-    if (EditorIcons::IconOnlyButton("plus", T("Key the current pose (K)"))) CaptureKey(host, -1);
-    ImGui::EndDisabled();
-
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-    ImGui::BeginDisabled(!editable);
-    if (EditorIcons::IconOnlyButton("save", T("Save the clip")) && editable) SaveCurrent(host);
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    // «ЕЩЁ ОДИН КЛИП» — ЭТО СНОВА ФАЙЛ И КОМПОНЕНТ, а не чистый лист в памяти.
-    // Кнопка, заводившая безымянный клип ниоткуда, и была главным источником
-    // «анимации из воздуха».
+    // Время — числом: в него вписывают «ровно 1.25», а не ловят бегунком.
     {
-        GameObject forObj = StageMode(host) ? host.LevelScene().Get(host.AnimationStage()->TargetId())
-                                            : host.SelectedObject();
-        ImGui::BeginDisabled(!forObj.Valid() || m_hasSkeleton);
-        if (EditorIcons::IconOnlyButton("file", T("New clip for the selected object"))) CreateClipFor(host, forObj);
-        ImGui::EndDisabled();
+        ictl::NumOpts o;
+        o.Step = 0.01f;
+        o.Min = 0.0f;
+        o.Max = 600.0f;
+        o.Format = "%.2f";
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 4.6f);
+        ictl::UndoScope noUndo([] {});
+        if (ictl::Number(host, "##time", &m_time, o, ictl::NumLook::Compact)) {
+            m_playing = false;
+            SyncSceneToTime(host);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Current time, seconds"));
     }
+    ImGui::SameLine(0.0f, 4.0f);
+    ImGui::TextDisabled("/");
+    ImGui::SameLine(0.0f, 4.0f);
+    {
+        ictl::NumOpts o;
+        o.Step = 0.05f;
+        o.Min = 0.05f;
+        o.Max = 600.0f;
+        o.Format = "%.2f s";
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 5.0f);
+        ImGui::BeginDisabled(!editable);
+        float duration = m_clip.Duration;
+        ictl::UndoScope undo([this] { PushUndo(); });
+        if (ictl::Number(host, "##duration", &duration, o, ictl::NumLook::Compact)) {
+            m_clip.Duration = std::max(0.05f, duration);
+            m_dirty = true;
+            Bump();
+        }
+        ImGui::EndDisabled();
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s", T("Length of the clip: keys after it do not play"));
+    }
+    ImGui::SameLine(0.0f, 14.0f);
 
-    if (m_dirty) {
-        ImGui::SameLine();
-        ImGui::TextDisabled("%s", T("(unsaved)"));
+    // --- Ключи --------------------------------------------------------------
+    ImGui::BeginDisabled(!editable);
+    if (ictl::Button("clock", T("Auto Key"), T("While on, every edit of the object or bone becomes a key"),
+                     ictl::ButtonLook::Standard, 0.0f, m_autoKey))
+        m_autoKey = !m_autoKey;
+    ImGui::SameLine();
+    const bool canKey = m_skeletal ? (StageMode(host) && host.AnimationStage()->SelectedBone() >= 0) || !m_clip.Tracks.empty()
+                                   : !m_clip.Tracks.empty();
+    ImGui::BeginDisabled(!canKey);
+    if (ictl::Button("plus", T("Key"), m_skeletal ? T("Key the selected bone at the current time (K)")
+                                                  : T("Key every track at the current time (K)"))) {
+        if (m_skeletal && StageMode(host) && host.AnimationStage()->SelectedBone() >= 0) KeySelectedBone(host, false);
+        else CaptureKey(host, -1);
+    }
+    ImGui::EndDisabled();
+    ImGui::EndDisabled();
+
+    // Кто играет клип — строкой ниже: ответ на «что я сейчас анимирую».
+    DrawOwnerBar(host);
+}
+
+// МЕНЮ КЛИПА — действия, нужные раз за сессию, а не каждую минуту.
+void AnimationPanel::DrawClipMenu(EditorHost& host) {
+    if (Sage::UI::MenuScope menu; ImGui::BeginPopup("ClipMenu###ClipMenu")) {
+        const bool editable = Editable();
+        if (EditorIcons::MenuItem("save", T("Save"), "Ctrl+S", editable)) SaveCurrent(host);
+        if (m_clip.Imported && EditorIcons::MenuItem("import", T("Make it mine"))) {
+            if (m_skeletal) {
+                MakeOwnSkeletal(host);
+            } else {
+                m_clip.Imported = false;
+                m_clip.Name += " (custom)";
+                m_path.clear();   // сохранится как новый файл, чужой не тронем
+                m_dirty = true;
+                m_status = T("The copy is editable. Save it to write a new file.");
+            }
+        }
+        if (!m_skeletal) {
+            GameObject forObj = StageMode(host) ? host.LevelScene().Get(host.AnimationStage()->TargetId())
+                                                : host.SelectedObject();
+            if (EditorIcons::MenuItem("file", T("New clip for the object"), nullptr, forObj.Valid()))
+                CreateClipFor(host, forObj);
+        }
+        ImGui::Separator();
+        ImGui::BeginDisabled(!editable);
+        char name[128];
+        std::snprintf(name, sizeof(name), "%s", m_clip.Name.c_str());
+        ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
+        if (ImGui::InputText(T("Name"), name, sizeof(name))) {
+            m_clip.Name = name;
+            m_dirty = true;
+        }
+        if (!m_skeletal) {
+            bool loop = m_clip.Loop;
+            if (EditorIcons::MenuItemToggle("refresh", T("Loop"), &loop)) {
+                PushUndo();
+                m_clip.Loop = loop;
+            }
+        }
+        ImGui::EndDisabled();
+        if (!m_path.empty()) {
+            ImGui::Separator();
+            ImGui::TextDisabled("%s", host.CurrentProject().AssetRef(m_path).c_str());
+        }
+        ImGui::EndPopup();
     }
 }
 
@@ -603,8 +637,8 @@ void AnimationPanel::DrawAddTrackPopup(EditorHost& host) {
     }
 }
 
-void AnimationPanel::DrawTracks(EditorHost& host, float width) {
-    ImGui::BeginChild("##tracks", ImVec2(width, 0), ImGuiChildFlags_Borders);
+void AnimationPanel::DrawTracks(EditorHost& host, float width, float height) {
+    ImGui::BeginChild("##tracks", ImVec2(width, height), ImGuiChildFlags_Borders);
     ImGui::BeginDisabled(!Editable());
     if (EditorIcons::Button("plus", T("Track"), T("Animate one more property")))
         ImGui::OpenPopup("AddTrack###AddTrack");
@@ -618,7 +652,10 @@ void AnimationPanel::DrawTracks(EditorHost& host, float width) {
         if (EditorIcons::IconOnlyButton("select", T("Only the selected bone"), m_selectedBoneOnly))
             m_selectedBoneOnly = !m_selectedBoneOnly;
     }
-    ImGui::Dummy(ImVec2(0.0f, kRulerHeight - ImGui::GetTextLineHeight()));
+    // Строки — ровно напротив строк линейки: тот же отступ сверху (высота
+    // шкалы) и та же высота строки без зазора между строками.
+    ImGui::SetCursorPosY(ImGui::GetStyle().WindowPadding.y + RulerHeight());
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 0.0f));
 
     AnimStage* stage = StageMode(host) ? host.AnimationStage() : nullptr;
     for (int i : m_rows) {
@@ -667,6 +704,7 @@ void AnimationPanel::DrawTracks(EditorHost& host, float width) {
         }
         ImGui::PopID();
     }
+    ImGui::PopStyleVar();
     if (m_clip.Tracks.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
         ImGui::TextWrapped("%s", T("No tracks yet. Select an object and add the property\n"
@@ -732,6 +770,9 @@ void AnimationPanel::Draw(EditorHost& host, bool* open, const std::string& windo
     const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     if (focused && !ImGui::GetIO().WantTextInput) {
         if (ImGui::IsKeyPressed(ImGuiKey_Space)) m_playing = !m_playing;
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false) && Editable()) SaveCurrent(host);
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C, false)) CopyKeys();
+        if (ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_V, false) && Editable()) PasteKeys();
         if (Editable() && ImGui::IsKeyPressed(ImGuiKey_K)) {
             if (m_skeletal && StageMode(host) && host.AnimationStage()->SelectedBone() >= 0) KeySelectedBone(host, false);
             else CaptureKey(host, -1);
@@ -775,20 +816,47 @@ void AnimationPanel::Draw(EditorHost& host, bool* open, const std::string& windo
     PushToStage(host);
     UpdateRows(host);
 
+    // ДОРОЖКИ И ЛИНЕЙКА СВЕРХУ, КРИВЫЕ СНИЗУ — с разделителем, который
+    // тянут, и заголовком, который сворачивает кривые. Раньше кривые просто
+    // исчезали, если панели не хватало 260 точек высоты, — то есть почти
+    // всегда в обычной раскладке.
     const ImVec2 avail = ImGui::GetContentRegionAvail();
-    const float trackWidth = std::min(240.0f, avail.x * 0.3f);
-    // КРИВАЯ ПОЯВЛЯЕТСЯ, КОГДА ЕСТЬ МЕСТО. На панели в две строки высоты она
-    // съела бы саму линейку — то есть то, ради чего панель открыли. Порог не
-    // «красивое число»: ниже него кривая всё равно нечитаема, и честнее её не
-    // рисовать вовсе.
-    const bool roomForCurve = avail.y > 260.0f;
-    const float curveHeight = roomForCurve ? std::min(180.0f, avail.y * 0.4f) : 0.0f;
-    const float rowsHeight = roomForCurve ? (avail.y - curveHeight - 8.0f) : 0.0f;
+    const float trackWidth = std::min(260.0f, avail.x * 0.3f);
+    const float header = ImGui::GetFrameHeight();
+    const float splitter = 6.0f;
+    const float statusH = m_status.empty() ? 0.0f : ImGui::GetTextLineHeightWithSpacing();
+    // Пока разделитель не тянули — кривым около двух пятых высоты.
+    if (m_curveHeight < 0.0f) m_curveHeight = std::max(90.0f, avail.y * 0.4f);
+    const float curveH = m_curveOpen ? std::clamp(m_curveHeight, 70.0f, std::max(70.0f, avail.y - 90.0f)) : 0.0f;
+    const float rowsH = std::max(40.0f, avail.y - curveH - splitter - header - statusH - ImGui::GetStyle().ItemSpacing.y * 2.0f);
 
-    DrawTracks(host, trackWidth);
+    DrawTracks(host, trackWidth, rowsH);
     ImGui::SameLine();
-    DrawTimeline(host, ImVec2(0.0f, rowsHeight));
-    if (roomForCurve) DrawCurve(host, ImVec2(0.0f, 0.0f));
+    DrawTimeline(host, ImVec2(0.0f, rowsH));
+
+    // Разделитель: тянуть — высота кривых, двойной щелчок — свернуть/развернуть.
+    ImGui::InvisibleButton("##curve_split", ImVec2(std::max(1.0f, avail.x), splitter));
+    if (ImGui::IsItemHovered() || ImGui::IsItemActive()) ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
+    if (ImGui::IsItemActive() && m_curveOpen) m_curveHeight = std::max(70.0f, m_curveHeight - ImGui::GetIO().MouseDelta.y);
+    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) m_curveOpen = !m_curveOpen;
+    {
+        const ImVec2 r0 = ImGui::GetItemRectMin(), r1 = ImGui::GetItemRectMax();
+        const float y = (r0.y + r1.y) * 0.5f;
+        ImGui::GetWindowDrawList()->AddLine(ImVec2(r0.x, y), ImVec2(r1.x, y),
+                                            EditorTheme::Color32(EditorTheme::Role::Line), 1.0f);
+    }
+    // Заголовок кривых: свернуть, какие компоненты видны.
+    if (EditorIcons::IconOnlyButton(m_curveOpen ? "chevron-down" : "chevron-right",
+                                    m_curveOpen ? T("Hide the curves") : T("Show the curves")))
+        m_curveOpen = !m_curveOpen;
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(T("Curves"));
+    if (m_curveOpen) {
+        ImGui::SameLine();
+        DrawKeyFields(host);
+        DrawCurve(host, ImVec2(0.0f, curveH));
+    }
 
     if (!m_status.empty()) ImGui::TextDisabled("%s", m_status.c_str());
     ImGui::End();

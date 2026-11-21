@@ -138,6 +138,33 @@ int SetKey(Track& track, float time, const glm::vec4& value, Interp interp) {
     return 0;
 }
 
+std::vector<int> SortKeys(Track& track) {
+    std::vector<int> order(track.Keys.size());
+    for (size_t i = 0; i < order.size(); ++i) order[i] = (int)i;
+    // Устойчиво: ключи с одинаковым временем не меняются местами — иначе
+    // выделение «прыгало» бы между ними при каждом перетаскивании.
+    std::stable_sort(order.begin(), order.end(),
+                     [&track](int a, int b) { return track.Keys[(size_t)a].Time < track.Keys[(size_t)b].Time; });
+    std::vector<Key> sorted;
+    sorted.reserve(track.Keys.size());
+    std::vector<int> newIndex(track.Keys.size());
+    for (size_t n = 0; n < order.size(); ++n) {
+        sorted.push_back(track.Keys[(size_t)order[n]]);
+        newIndex[(size_t)order[n]] = (int)n;
+    }
+    track.Keys = std::move(sorted);
+    return newIndex;
+}
+
+void ClampTangents(Key& key) {
+    // Время внутри отрезка обязано идти вперёд: исходящая ручка — в первой
+    // его половине по времени (0..1), входящая — от конца назад (-1..0).
+    // Ручка, вытянутая за соседний ключ, давала бы петлю, у которой на одно
+    // время приходится несколько значений.
+    key.OutTangent.x = std::clamp(key.OutTangent.x, 0.0f, 1.0f);
+    key.InTangent.x = std::clamp(key.InTangent.x, -1.0f, 0.0f);
+}
+
 bool RemoveKey(Track& track, int index) {
     if (index < 0 || index >= (int)track.Keys.size()) return false;
     track.Keys.erase(track.Keys.begin() + index);
@@ -192,18 +219,21 @@ std::string ToJsonString(const PropertyClip& clip) {
         tj["target"] = t.Target;
         tj["property"] = t.Property;
         tj["keys"] = json::array();
-        for (const Key& k : t.Keys) {
+        for (size_t ki = 0; ki < t.Keys.size(); ++ki) {
+            const Key& k = t.Keys[ki];
             json kj;
             kj["time"] = k.Time;
             kj["value"] = {k.Value.x, k.Value.y, k.Value.z, k.Value.w};
             kj["interp"] = InterpName(k.Out);
-            // Касательные пишутся ТОЛЬКО у безье: у прямой и ступеньки они не
-            // значат ничего, и файл, полный нулевых касательных, читается как
-            // «здесь что-то настроено», хотя не настроено ничего.
-            if (k.Out == Interp::Bezier) {
-                kj["in"] = {k.InTangent.x, k.InTangent.y};
-                kj["out"] = {k.OutTangent.x, k.OutTangent.y};
-            }
+            // Касательные пишутся ТОЛЬКО там, где они что-то значат: у прямой и
+            // ступеньки их нет, и файл, полный нулевых касательных, читается
+            // как «здесь что-то настроено». Исходящая — у ключа-безье, ВХОДЯЩАЯ —
+            // и у ключа, перед которым стоит безье: форму отрезка задают обе, и
+            // раньше входящая писалась только у безье-ключа — отрезок
+            // «безье -> прямая» менял форму после перезагрузки.
+            const bool afterBezier = ki > 0 && t.Keys[ki - 1].Out == Interp::Bezier;
+            if (k.Out == Interp::Bezier || afterBezier) kj["in"] = {k.InTangent.x, k.InTangent.y};
+            if (k.Out == Interp::Bezier) kj["out"] = {k.OutTangent.x, k.OutTangent.y};
             tj["keys"].push_back(kj);
         }
         j["tracks"].push_back(tj);

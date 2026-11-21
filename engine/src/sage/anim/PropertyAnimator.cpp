@@ -82,7 +82,7 @@ void UpdatePropertyAnimators(Scene& scene, float dt) {
         if (!a.Clip) continue;
         const PropertyClip& clip = *a.Clip;
         if (a.Playing && dt > 0.0f) a.Time += dt * a.Speed;
-        a.Time = WrapTime(a.Time, clip.Duration, a.Loop);
+        a.Time = WrapTime(a.Time, clip.Duration, a.EffectiveLoop(clip));
         ApplyClipAt(scene, e, clip, a.Time);
     }
 }

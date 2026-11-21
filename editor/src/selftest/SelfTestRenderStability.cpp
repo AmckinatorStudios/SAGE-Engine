@@ -252,6 +252,7 @@ bool EditorLayer::SelfTestRenderStability() {
                 PropertyAnimatorComponent& pa =
                     m_scene->Registry().emplace<PropertyAnimatorComponent>(mover.Entity());
                 pa.ClipPath = clipPath.string();
+                pa.LoopOverride = true;
                 pa.Loop = false;
                 sage::anim::UpdatePropertyAnimators(*m_scene, 1.0f);
                 const float played = mover.GetTransform().Position.x;
