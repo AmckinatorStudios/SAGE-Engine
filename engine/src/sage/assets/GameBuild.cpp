@@ -1,6 +1,8 @@
 #include "sage/assets/GameBuild.h"
 
+#include <atomic>
 #include <cctype>
+#include <chrono>
 
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/GameInfo.h"
@@ -42,25 +44,38 @@ GameBuildResult BuildGame(const GameBuildRequest& req, const GameBuildHooks& hoo
     if (!hasInfo || info.Name.empty()) info.Name = req.ProjectName;
     const std::string fileName = req.ProjectName.empty() || hasInfo ? info.FileName() : req.ProjectName;
 
-    // 1. Папка игры. Пересборка затирает прошлую: это артефакт, не данные.
+    // 1. Папка игры. СОБИРАЕМ ВО ВРЕМЕННОЙ папке рядом с итоговой (тот же том —
+    // переименование атомарно) и подменяем только после успеха: раньше
+    // remove_all стоял ДО сборки, и ошибка или отмена уничтожали прошлую
+    // рабочую игру. Имя уникально (время + счётчик), чтобы параллельные и
+    // оборванные прежние сборки не мешали.
     stage("Preparing the game folder");
     progress(0.02f);
     const fs::path gameDir = req.OutputDir / sage::PathFromUtf8(fileName);
     res.GameDir = gameDir;
-    fs::remove_all(gameDir, ec);
-    ec.clear();
-    fs::create_directories(gameDir, ec);
+    static std::atomic<unsigned> counter{0};
+    const std::string uniq = std::to_string(
+        (unsigned long long)std::chrono::steady_clock::now().time_since_epoch().count()) + "-" +
+        std::to_string(counter++);
+    const fs::path tmpDir = req.OutputDir / sage::PathFromUtf8(fileName + ".build-" + uniq);
+    // Любой отказ убирает ТОЛЬКО временную папку.
+    auto Abort = [&](const char* key, std::string detail = {}) {
+        std::error_code rmEc;
+        fs::remove_all(tmpDir, rmEc);
+        return Fail(res, key, std::move(detail));
+    };
+    fs::create_directories(tmpDir, ec);
     if (ec)
-        return Fail(res, "Cannot create the game folder: ", sage::PathToUtf8(gameDir) + " (" + ec.message() + ")");
+        return Abort("Cannot create the game folder: ", sage::PathToUtf8(tmpDir) + " (" + ec.message() + ")");
 
     // 2. Исполняемый файл игры и его библиотеки. На Windows плеер, собранный
     // MinGW, тянет рядом с собой .dll (libstdc++ и прочие): без них игра у
     // игрока не запускалась бы вовсе — с сообщением системы, а не движка.
     stage("Copying the player");
-    const fs::path exe = gameDir / sage::PathFromUtf8(fileName + exeSuffix);
+    const fs::path exe = tmpDir / sage::PathFromUtf8(fileName + exeSuffix);
     fs::copy_file(req.Player, exe, fs::copy_options::overwrite_existing, ec);
-    if (ec) return Fail(res, "Player copy failed: ", ec.message());
-    res.Exe = exe;
+    if (ec) return Abort("Player copy failed: ", ec.message());
+    res.Exe = gameDir / sage::PathFromUtf8(fileName + exeSuffix);
     // Иконка и «Свойства» файла (версия, автор, описание) — в сам exe. Это
     // украшение, а не условие запуска: не вышло — предупреждение, игра
     // собирается дальше.
@@ -80,9 +95,9 @@ GameBuildResult BuildGame(const GameBuildRequest& req, const GameBuildHooks& hoo
         std::string ext = e.path().extension().string();
         for (char& c : ext) c = (char)std::tolower((unsigned char)c);
         if (e.is_regular_file(ec) && ext == ".dll")
-            fs::copy_file(e.path(), gameDir / e.path().filename(), fs::copy_options::overwrite_existing, ec);
+            fs::copy_file(e.path(), tmpDir / e.path().filename(), fs::copy_options::overwrite_existing, ec);
     }
-    if (cancelled()) return Fail(res, "Build cancelled");
+    if (cancelled()) return Abort("Build cancelled");
 
     // 3. Пакет: ресурсы движка, затем проект (его файл того же имени главнее —
     // PackWriter заменяет запись), затем оглавление базы ассетов.
@@ -102,7 +117,7 @@ GameBuildResult BuildGame(const GameBuildRequest& req, const GameBuildHooks& hoo
 
     const size_t total = pack.Count();
     res.Files = total;
-    const bool saved = pack.Save(gameDir / "game.sagepak", [&](size_t done, size_t all) {
+    const bool saved = pack.Save(tmpDir / "game.sagepak", [&](size_t done, size_t all) {
         // 5..95 % шкалы — пакет: это почти всё время сборки.
         progress(0.05f + 0.9f * (all ? (float)done / (float)all : 1.0f));
         stage("Packing and encrypting: ", std::to_string(done) + " / " + std::to_string(total));
@@ -110,10 +125,9 @@ GameBuildResult BuildGame(const GameBuildRequest& req, const GameBuildHooks& hoo
     });
     if (!saved) {
         if (cancelled()) {
-            fs::remove_all(gameDir, ec);
-            return Fail(res, "Build cancelled");
+            return Abort("Build cancelled");
         }
-        return Fail(res, "Could not write the game package: ", pack.LastError());
+        return Abort("Could not write the game package: ", pack.LastError());
     }
 
     // 4. Настройки игры — рядом с exe: их игрок вправе править (разрешение,
@@ -121,16 +135,35 @@ GameBuildResult BuildGame(const GameBuildRequest& req, const GameBuildHooks& hoo
     stage("Finishing");
     const fs::path projCfg = req.ProjectDir / "sage.cfg";
     if (fs::exists(projCfg, ec))
-        fs::copy_file(projCfg, gameDir / "sage.cfg", fs::copy_options::overwrite_existing, ec);
+        fs::copy_file(projCfg, tmpDir / "sage.cfg", fs::copy_options::overwrite_existing, ec);
     if (req.CopyProjectFile) {
-        fs::copy_file(req.ProjectDir / "project.sageproj", gameDir / "project.sageproj",
+        fs::copy_file(req.ProjectDir / "project.sageproj", tmpDir / "project.sageproj",
                       fs::copy_options::overwrite_existing, ec);
-        if (ec) return Fail(res, "Could not copy the project file: ", ec.message());
+        if (ec) return Abort("Could not copy the project file: ", ec.message());
     }
     // 5. Пользовательские папки (скины, музыка, моды): открытые папки рядом с
     // игрой с README и примерами из <проект>/userfolders/<имя>.
-    const size_t folders = usercontent::PrepareForBuild(gameDir, req.ProjectDir, info.UserFolders);
+    const size_t folders = usercontent::PrepareForBuild(tmpDir, req.ProjectDir, info.UserFolders);
     if (folders > 0) LOG_INFO("Build") << "Пользовательских папок рядом с игрой: " << folders;
+
+    // 6. Подмена: старая сборка — в резервную папку, новая — на её место; не
+    // вышло — старая возвращается. Резерв удаляется только после успеха.
+    if (cancelled()) return Abort("Build cancelled");
+    const fs::path backup = req.OutputDir / sage::PathFromUtf8(fileName + ".old-" + uniq);
+    bool hadOld = false;
+    if (fs::exists(gameDir, ec)) {
+        fs::rename(gameDir, backup, ec);
+        if (ec) return Abort("Cannot replace the previous build: ", ec.message());
+        hadOld = true;
+    }
+    fs::rename(tmpDir, gameDir, ec);
+    if (ec) {
+        const std::string why = ec.message();
+        std::error_code rbEc;
+        if (hadOld) fs::rename(backup, gameDir, rbEc);
+        return Abort("Cannot replace the previous build: ", why);
+    }
+    if (hadOld) fs::remove_all(backup, ec);
     progress(1.0f);
     stage("Done");
     LOG_INFO("Build") << "Игра собрана: " << sage::PathToUtf8(gameDir);

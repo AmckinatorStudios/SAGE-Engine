@@ -12,6 +12,7 @@
 #include "../GameBuilder.h"
 #include "../ProjectLauncher/ProjectDatabase.h"
 #include "sage/core/Paths.h"
+#include "sage/assets/GameInfo.h"
 #include <filesystem>
 
 #include <cstdio>
@@ -23,16 +24,41 @@ namespace {
 // Размер окна в пикселях интерфейса: при крупном масштабе (4K, 150 %) окно
 // растёт вместе с текстом, а не обрезает его.
 float Scaled(float px) { return px * EditorTheme::EffectiveScale(); }
+
+fs::path AbsNormal(const fs::path& p) {
+    std::error_code ec;
+    fs::path r = fs::absolute(p, ec).lexically_normal();
+    if (!r.empty() && !r.has_filename()) r = r.parent_path(); // убрать хвостовой «/»
+    return r;
+}
+
+// Каталог вывода не может быть корнем проекта или его родителем: иначе сборка
+// исключила бы содержимое проекта из пакета. Сравнение — по компонентам пути,
+// а не по строковому префиксу ("/a/My" не предок "/a/MyGame").
+bool OutputDirOverlapsProject(const fs::path& out, const fs::path& project) {
+    const fs::path rel = AbsNormal(project).lexically_relative(AbsNormal(out));
+    if (rel.empty()) return false;
+    return *rel.begin() != "..";
+}
+
+// Иконки платформ — ближайшие уже встроенные Tabler-глифы (источника Tabler
+// Webfont для brand-windows/ubuntu/apple в сборке нет).
+const char* TargetIcon(const std::string& id) {
+    if (id == "windows-x64") return "window";
+    if (id == "linux-x64") return "console";
+    return "game";
+}
 } // namespace
 
 DialogsPanel::DialogsPanel() {
     // Дефолтная папка диалогов — рядом с бинарником; сборка игр — в dist/.
-    std::snprintf(m_projectDir, sizeof(m_projectDir), "%s", fs::current_path().string().c_str());
+    std::snprintf(m_projectDir, sizeof(m_projectDir), "%s", sage::PathToUtf8(fs::current_path()).c_str());
     // Папка сборки ставится при открытии окна — от проекта (см. Build Game).
 }
 
 void DialogsPanel::Open(const char* name) {
     m_error.clear();
+    if (std::string(name) == "Build Game") m_buildRefresh = true;
     ImGui::OpenPopup(name);
 }
 
@@ -45,7 +71,7 @@ void DialogsPanel::Browse(const FileBrowser::Config& cfg, char* buffer, size_t s
     // путь заново.
     if (buffer[0]) {
         std::error_code ec;
-        fs::path typed(buffer);
+        const fs::path typed = sage::PathFromUtf8(buffer);
         if (fs::is_directory(typed, ec)) c.StartDir = typed;
         else if (typed.has_parent_path() && fs::is_directory(typed.parent_path(), ec))
             c.StartDir = typed.parent_path();
@@ -67,7 +93,7 @@ void DialogsPanel::Draw(EditorHost& host) {
     // Результат обзора кладём в буфер того поля, ради которого его открыли.
     if (m_browser.Draw() && m_browseTarget) {
         std::snprintf(m_browseTarget, m_browseTargetSize, "%s",
-                      m_browser.Result().string().c_str());
+                      sage::PathToUtf8(m_browser.Result()).c_str());
         m_browseTarget = nullptr;
         m_error.clear();
     }
@@ -167,7 +193,7 @@ void DialogsPanel::Draw(EditorHost& host) {
         ImGui::InputText(T("File name"), m_sceneName, sizeof(m_sceneName));
         fs::path target =
             host.CurrentProject().ScenesDir() / (std::string(m_sceneName) + ".sage");
-        ImGui::TextDisabled("-> %s", target.string().c_str());
+        ImGui::TextDisabled("-> %s", sage::PathToUtf8(target).c_str());
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
         if (ImGui::Button(T("Save"), ImVec2(120, 0))) {
             host.CurrentScene().SetName(m_sceneName);
@@ -202,15 +228,117 @@ void DialogsPanel::Draw(EditorHost& host) {
             std::snprintf(m_buildDir, sizeof(m_buildDir), "%s",
                           sage::PathToUtf8(fs::absolute(project.Dir() / "Builds", absEc).lexically_normal()).c_str());
         }
+        if (m_buildDirProject != projectKey) m_buildRefresh = true;
+        if (m_buildRefresh) {
+            m_buildRefresh = false;
+            m_targets = host.BuildTargets();
+            // Имя игры — по правилам GameBuild.cpp, а не project.Name().
+            sage::assets::GameInfo info;
+            const bool hasInfo = sage::assets::LoadGameInfo(project.Dir(), info);
+            if (!hasInfo || info.Name.empty()) info.Name = project.Name();
+            m_buildFileName = project.Name().empty() || hasInfo ? info.FileName() : project.Name();
+            // Нативная платформа, иначе первая доступная; выбор пользователя сохраняем.
+            bool keep = false;
+            for (const BuildTargetInfo& t : m_targets) keep |= (t.Id == m_targetId && t.Available);
+            if (!keep) {
+                m_targetId.clear();
+#if defined(_WIN32)
+                const char* native = "windows-x64";
+#elif defined(__APPLE__)
+                const char* native = "macos-arm64";
+#else
+                const char* native = "linux-x64";
+#endif
+                for (const BuildTargetInfo& t : m_targets)
+                    if (t.Available && t.Id == native) m_targetId = t.Id;
+                if (m_targetId.empty())
+                    for (const BuildTargetInfo& t : m_targets)
+                        if (t.Available) { m_targetId = t.Id; break; }
+            }
+        }
         const float width = Scaled(600.0f);
 
-        ImGui::TextUnformatted(project.Name().c_str());
+        ImGui::TextUnformatted(m_buildFileName.c_str());
+
+        // --- ПЛАТФОРМА: три карточки; недоступная не выбирается и говорит почему.
+        ImGui::SeparatorText(T("Target Platform"));
+        {
+            const float gap = ImGui::GetStyle().ItemSpacing.x;
+            const float cardW = (width - gap * 2.0f) / 3.0f;
+            const float cardH = Scaled(120.0f);
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            ImGui::BeginDisabled(running);
+            for (size_t i = 0; i < m_targets.size(); ++i) {
+                const BuildTargetInfo& t = m_targets[i];
+                if (i) ImGui::SameLine(0.0f, gap);
+                ImGui::PushID((int)i);
+                const ImVec2 pos = ImGui::GetCursorScreenPos();
+                const bool clicked = ImGui::InvisibleButton("##card", ImVec2(cardW, cardH));
+                const bool hovered = ImGui::IsItemHovered();
+                if (clicked && t.Available) m_targetId = t.Id;
+                if (hovered && !t.Available && !t.UnavailableReason.empty())
+                    ImGui::SetTooltip("%s", t.UnavailableReason.c_str());
+                const bool selected = t.Available && t.Id == m_targetId;
+                const float rounding = Scaled(6.0f);
+                const ImVec2 max(pos.x + cardW, pos.y + cardH);
+                dl->AddRectFilled(pos, max,
+                    selected ? EditorTheme::Color32Alpha(EditorTheme::Role::Accent, 0.18f)
+                             : EditorTheme::Color32(hovered && t.Available ? EditorTheme::Role::Hover
+                                                                           : EditorTheme::Role::SurfaceAlt),
+                    rounding);
+                dl->AddRect(pos, max,
+                    selected ? EditorTheme::Color32(EditorTheme::Role::Accent)
+                             : EditorTheme::Color32(EditorTheme::Role::Line),
+                    rounding, 0, selected ? 2.0f : 1.0f);
+                // Галочка выбранной карточки — тремя штрихами ImDrawList, без
+                // нового значка в шрифте.
+                if (selected) {
+                    const float r = Scaled(9.0f);
+                    const ImVec2 c(max.x - Scaled(8.0f) - r, pos.y + Scaled(8.0f) + r);
+                    dl->AddCircleFilled(c, r, EditorTheme::Color32(EditorTheme::Role::Accent));
+                    const ImVec2 pts[3] = {ImVec2(c.x - r * 0.45f, c.y + r * 0.02f),
+                                           ImVec2(c.x - r * 0.1f, c.y + r * 0.38f),
+                                           ImVec2(c.x + r * 0.5f, c.y - r * 0.32f)};
+                    dl->AddPolyline(pts, 3, EditorTheme::Color32(EditorTheme::Role::TextOnAccent),
+                                    ImDrawFlags_None, Scaled(2.0f));
+                }
+                const ImU32 textCol = EditorTheme::Color32(t.Available ? EditorTheme::Role::Text
+                                                                       : EditorTheme::Role::TextFaint);
+                const float iconSize = Scaled(32.0f);
+                const ImVec4 ic = EditorTheme::Color(t.Available ? EditorTheme::Role::Text
+                                                                 : EditorTheme::Role::TextFaint);
+                EditorIcons::Overlay(pos.x + (cardW - iconSize) * 0.5f, pos.y + Scaled(8.0f), iconSize,
+                                     TargetIcon(t.Id), glm::vec3(ic.x, ic.y, ic.z));
+                float y = pos.y + Scaled(8.0f) + iconSize + Scaled(4.0f);
+                auto centered = [&](const char* txt, ImU32 col) {
+                    const float w = ImGui::CalcTextSize(txt).x;
+                    dl->AddText(ImVec2(pos.x + (cardW - w) * 0.5f, y), col, txt);
+                    y += ImGui::GetTextLineHeightWithSpacing();
+                };
+                centered(T(t.Name.c_str()), textCol);
+                centered(t.Architecture.c_str(), EditorTheme::Color32(EditorTheme::Role::TextDim));
+                centered(t.Available ? T("Ready") : T("Not installed"),
+                         EditorTheme::Color32(t.Available ? EditorTheme::Role::Ok
+                                                          : EditorTheme::Role::TextFaint));
+                ImGui::PopID();
+            }
+            ImGui::EndDisabled();
+        }
+        // Причина недоступности — прямо в окне, не в консоли.
+        const BuildTargetInfo* selectedTarget = nullptr;
+        for (const BuildTargetInfo& t : m_targets)
+            if (t.Available && t.Id == m_targetId) selectedTarget = &t;
         ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
-        EditorTheme::Hint(T("Player and project are packed into a folder ready to run. "
-                                    "All game files go into one encrypted game.sagepak."));
+        if (!selectedTarget) {
+            ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
+                               T("Runtime unavailable: no SagePlayer is installed for any platform"));
+        }
+        for (const BuildTargetInfo& t : m_targets)
+            if (!t.Available)
+                ImGui::TextDisabled("%s: %s", T(t.Name.c_str()), t.UnavailableReason.c_str());
         ImGui::PopTextWrapPos();
 
-        ImGui::SeparatorText(T("Output folder"));
+        ImGui::SeparatorText(T("Output directory"));
         ImGui::BeginDisabled(running);
         {
             const float browseW = EditorIcons::LabeledWidth(ImGui::GetFontSize(), T("Browse...")) +
@@ -223,16 +351,20 @@ void DialogsPanel::Draw(EditorHost& host) {
             BrowseButton("builddir", c, m_buildDir, sizeof(m_buildDir));
         }
         ImGui::EndDisabled();
+        const fs::path outDir = AbsNormal(sage::PathFromUtf8(m_buildDir));
+        const bool outOk = !outDir.empty() && !OutputDirOverlapsProject(outDir, project.Dir());
         {
-            const fs::path exe = sage::PathFromUtf8(m_buildDir) / project.Name() /
-#ifdef _WIN32
-                                 (project.Name() + ".exe");
-#else
-                                 project.Name();
-#endif
-            ImGui::TextDisabled("%s", T("The game will be:"));
+            const bool isExe = selectedTarget && selectedTarget->Id == "windows-x64";
+            const fs::path exe = outDir / sage::PathFromUtf8(m_buildFileName) /
+                                 sage::PathFromUtf8(m_buildFileName + (isExe ? ".exe" : ""));
+            ImGui::SeparatorText(T("Final output"));
             ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
-            ImGui::TextWrapped("%s", sage::PathToUtf8(exe.lexically_normal()).c_str());
+            ImGui::TextWrapped("%s", sage::PathToUtf8(exe).c_str());
+            if (!outOk)
+                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Danger), "%s",
+                                   T("The output directory must not be the project folder or its parent"));
+            else
+                ImGui::TextDisabled("%s", T("Existing build will be replaced after successful build"));
             ImGui::PopTextWrapPos();
         }
 
@@ -269,8 +401,10 @@ void DialogsPanel::Draw(EditorHost& host) {
         }
         if (builder.Finished() && !running) {
             if (builder.Succeeded()) {
+                ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
                 ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Ok), T("Built: %s"),
                                    sage::PathToUtf8(builder.GameDir()).c_str());
+                ImGui::PopTextWrapPos();
             } else if (!builder.Error().empty()) {
                 ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
                 ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Danger), "%s",
@@ -289,11 +423,14 @@ void DialogsPanel::Draw(EditorHost& host) {
         if (running) {
             if (ImGui::Button(T("Cancel build"), btn)) builder.Cancel();
         } else {
-            ImGui::BeginDisabled(!hasScene);
+            ImGui::BeginDisabled(!hasScene || !selectedTarget || !outOk);
             if (ImGui::Button(T("Build"), btn)) {
                 std::string err;
                 m_error.clear();
-                if (!host.StartBuildGame(sage::PathFromUtf8(m_buildDir), err)) m_error = err;
+                if (!host.StartBuildGame(outDir, err, m_targetId)) {
+                    m_error = err;
+                    m_buildRefresh = true; // runtime мог исчезнуть: карточки покажут правду
+                }
             }
             ImGui::EndDisabled();
             if (builder.Finished() && builder.Succeeded()) {

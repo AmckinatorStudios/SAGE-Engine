@@ -36,6 +36,17 @@ class ScriptEngine;
 // ---------------------------------------------------------------------------
 namespace sage::editor { class PanelRegistry; }
 
+// Профиль целевой платформы сборки. Платформа однозначно определяется путём к
+// SagePlayer: именно он уходит в GameBuildRequest::Player.
+struct BuildTargetInfo {
+    std::string Id;           // "windows-x64" | "linux-x64" | "macos-arm64"
+    std::string Name;         // "Windows"
+    std::string Architecture; // "x64"
+    std::filesystem::path PlayerPath;
+    std::string UnavailableReason;
+    bool Available = false;
+};
+
 class EditorHost {
 public:
     virtual ~EditorHost() = default;
@@ -91,7 +102,11 @@ public:
     // false + err при ошибке. Нужен панели диалогов (Build Game...).
     virtual bool BuildGame(const std::filesystem::path& outputDir, std::string& err) = 0;
     // То же в фоне: окно сборки следит за Builder() и рисует полосу хода.
-    virtual bool StartBuildGame(const std::filesystem::path& outputDir, std::string& err) = 0;
+    // targetId — ID профиля (BuildTargetInfo::Id); пустой — нативная платформа.
+    virtual bool StartBuildGame(const std::filesystem::path& outputDir, std::string& err,
+                                const std::string& targetId = {}) = 0;
+    // Целевые платформы сборки (все три профиля, с доступностью runtime).
+    virtual std::vector<BuildTargetInfo> BuildTargets() const = 0;
     virtual class GameBuilder& Builder() = 0;
     // Есть ли у проекта хоть одна сцена. Окно сборки спрашивает это ДО
     // нажатия: игры без сцены не бывает, и узнать об этом надо раньше, чем
