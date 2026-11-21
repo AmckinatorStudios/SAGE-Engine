@@ -50,14 +50,22 @@ void EditorLayer::TickCursorLockProbe() {
             const bool held = glfwGetInputMode(handle, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
             const bool pinned = std::fabs(io.MousePos.x - m_mousePin.x) < 0.5f &&
                                 std::fabs(io.MousePos.y - m_mousePin.y) < 0.5f;
+            // Захват окна держит Viewport (облёт на ПКМ), а Play не в фокусе и
+            // сам ничего не захватывал: его синхронизация не должна отпускать
+            // чужой захват (раньше отпускала каждый кадр).
+            m_play.Cursor().SetGameFocused(false);
+            m_play.Cursor().SyncCapture();
+            const bool foreignKept = window.CursorCaptured() &&
+                                     glfwGetInputMode(handle, GLFW_CURSOR) == GLFW_CURSOR_DISABLED;
             window.SetCursorCaptured(false);
-            if (held && pinned && m_cursorLookOk) {
+            if (held && pinned && m_cursorLookOk && foreignKept) {
                 LOG_INFO("Editor") << "CURSOR_LOCK: OK — сброшенный со стороны захват вернулся сам, "
                                       "мышь интерфейса стоит на месте, облёт получает смещение мыши";
             } else {
                 LOG_ERROR("Editor") << "CURSOR_LOCK: FAIL — " << (held ? "" : "захват не вернулся после сброса; ")
                                     << (pinned ? "" : "мышь интерфейса уехала вслед за виртуальным курсором; ")
-                                    << (m_cursorLookOk ? "" : "смещение мыши в захвате не дошло до облёта");
+                                    << (m_cursorLookOk ? "" : "смещение мыши в захвате не дошло до облёта; ")
+                                    << (foreignKept ? "" : "Play без фокуса отпустил захват, который держит Viewport");
             }
             return;
         }

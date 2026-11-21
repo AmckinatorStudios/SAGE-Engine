@@ -42,7 +42,8 @@ public:
     void ReleaseCapture() {
         m_wantCapture = false;
         m_releasedByEditor = false;
-        Apply(false);
+        m_applied = false;
+        if (m_bridge) m_bridge->SetCursorCaptured(false);
     }
 
     void SetCursorCaptured(bool captured) override {
@@ -81,12 +82,22 @@ public:
     bool CursorCaptured() const override { return m_wantCapture; }
 
 private:
+    // Окно одно, а захватить его может и Viewport (облёт камеры на ПКМ). Play
+    // отпускает только то, что захватил сам: раньше «игра не в фокусе» значило
+    // SetCursorCaptured(false) КАЖДЫЙ кадр, и щелчок ПКМ по Viewport во время
+    // Play (фокус уходит от Game) сбрасывал его захват при зажатой кнопке, а
+    // вернуть его было некому — он ставится только по фронту.
+    // Захват по-прежнему просится каждый кадр: окно само возвращает режим.
     void Apply(bool captured) {
-        if (m_bridge) m_bridge->SetCursorCaptured(captured);
+        if (!m_bridge) return;
+        if (!captured && !m_applied) return;
+        m_applied = captured;
+        m_bridge->SetCursorCaptured(captured);
     }
 
     sage::input::GlfwBridge* m_bridge = nullptr;
     bool m_gameFocused = false;
     bool m_wantCapture = false;
+    bool m_applied = false;            // Play сам держит захват окна
     bool m_releasedByEditor = false;   // курсор отпустил ESC редактора, а не игра
 };
