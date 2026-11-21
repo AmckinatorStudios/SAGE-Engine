@@ -1,6 +1,14 @@
 {
   "name": "Русский",
   "strings": {
+    "Open an existing project (Ctrl+O)": "Открыть существующий проект (Ctrl+O)",
+    "Not opened yet": "Ещё не открывали",
+    "Just now": "Только что",
+    "%d min ago": "%d мин назад",
+    "%d h ago": "%d ч назад",
+    "%d days ago": "%d дн. назад",
+    "Create a new project or open an existing one — you can also just drop a project folder into this window.": "Создайте новый проект или откройте существующий — папку проекта можно и просто бросить в это окно.",
+    "Destination:": "Папка проекта:",
     "Drawing": "Отрисовка",
     "For objects: its own .vert/.frag and settings": "Для объектов: свои .vert/.frag и настройки",
     "For the camera: processes the finished frame": "Для камеры: обрабатывает готовый кадр",

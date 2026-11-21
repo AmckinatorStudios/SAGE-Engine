@@ -1,7 +1,9 @@
 #include "ProjectCard.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <string>
 
 #include "imgui_internal.h"
@@ -48,95 +50,57 @@ void TextAt(ImDrawList* dl, const ImVec2& pos, float size, ImU32 color, const st
     dl->AddText(ImGui::GetFont(), size, pos, color, text.c_str());
 }
 
-// Значок типа проекта — тот же набор, что во всём редакторе.
-const char* KindIcon(ProjectKind kind) {
-    switch (kind) {
-        case ProjectKind::Scene: return "scene";
-        case ProjectKind::Sample: return "material";
-        case ProjectKind::Template: return "copy";
-        default: return "cube";
-    }
-}
-
-// Метка типа поверх обложки: тёмная подложка и мелкий текст. Рисунком, а не
-// компонентом Badge: она лежит ПОВЕРХ картинки, то есть в абсолютных
-// координатах, и элементом ImGui быть не должна — иначе перехватит клик у
-// карточки.
-void DrawKindTag(ImDrawList* dl, const ImVec2& pos, ProjectKind kind, float fontSize) {
-    const char* label = ProjectKindLabel(kind);
-    const ImVec2 size = ImGui::GetFont()->CalcTextSizeA(fontSize, FLT_MAX, 0.0f, label);
-    const Sage::UI::Style& ui = Sage::UI::Get();
-    const ImVec2 pad(ui.SpacingSM, ui.SpacingXS * 0.75f);
-    const ImVec2 max(pos.x + size.x + pad.x * 2.0f, pos.y + size.y + pad.y * 2.0f);
-    dl->AddRectFilled(pos, max, EditorTheme::Color32Alpha(Role::Bg, 0.72f), ui.CornerRadiusSmall);
-    TextAt(dl, ImVec2(pos.x + pad.x, pos.y + pad.y), fontSize,
-           EditorTheme::Color32(Role::TextDim), label);
-}
-
-// «•••» — три точки в правом верхнем углу. Одинаково в сетке и в списке.
-bool DotsButton(const ImVec2& center, float box) {
-    ImGui::SetCursorScreenPos(ImVec2(center.x - box * 0.5f, center.y - box * 0.5f));
-    const bool pressed = ImGui::InvisibleButton("##menu", ImVec2(box, box));
-    const bool hovered = ImGui::IsItemHovered();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    if (hovered) {
-        dl->AddRectFilled(ImGui::GetItemRectMin(), ImGui::GetItemRectMax(),
-                          EditorTheme::Color32(Role::Hover), Sage::UI::Get().CornerRadiusSmall);
-    }
-    const ImU32 col = EditorTheme::Color32(hovered ? Role::Text : Role::TextDim);
-    const float step = std::max(3.0f, box * 0.18f);
-    for (int i = -1; i <= 1; ++i)
-        dl->AddCircleFilled(ImVec2(center.x + (float)i * step, center.y), 1.5f, col, 6);
-    return pressed;
-}
-
 } // namespace
 
 // ---------------------------------------------------------------------------
-//  Размеры
+//  Время
 // ---------------------------------------------------------------------------
 
-int CardColumns(float availWidth, float targetWidth, float gap) {
-    if (availWidth <= 0.0f || targetWidth <= 0.0f) return 1;
-    const int columns = (int)std::floor((availWidth + gap) / (targetWidth + gap));
-    return std::max(1, columns);
-}
-
-float CardWidth(float availWidth, int columns, float gap) {
-    columns = std::max(1, columns);
-    return std::floor((availWidth - gap * (float)(columns - 1)) / (float)columns);
-}
-
-float CardHeight(CardLayout layout, float width) {
-    const Sage::UI::Style& ui = Sage::UI::Get();
-    const float line = ImGui::GetTextLineHeight();
-    if (layout == CardLayout::List) {
-        // Строка: две строки текста и поля. Обложка вписывается в эту высоту,
-        // а не задаёт её — иначе список перестал бы быть плотным.
-        return std::floor(line * 2.0f + ui.SpacingMD * 2.0f);
+std::string RelativeTime(long long unixTime) {
+    if (unixTime <= 0) return T("Not opened yet");
+    const long long now = std::chrono::duration_cast<std::chrono::seconds>(
+                              std::chrono::system_clock::now().time_since_epoch()).count();
+    const long long d = std::max(0LL, now - unixTime);
+    char buf[64];
+    if (d < 60) return T("Just now");
+    if (d < 3600) {
+        std::snprintf(buf, sizeof(buf), T("%d min ago"), (int)(d / 60));
+        return buf;
     }
-    // Сетка: обложка 16:9 плюс подпись из трёх строк.
-    return std::floor(width * 9.0f / 16.0f + line * 3.0f + ui.SpacingSM * 2.0f + ui.SpacingMD);
+    if (d < 86400) {
+        std::snprintf(buf, sizeof(buf), T("%d h ago"), (int)(d / 3600));
+        return buf;
+    }
+    if (d < 2 * 86400) return T("Yesterday");
+    if (d < 30LL * 86400) {
+        std::snprintf(buf, sizeof(buf), T("%d days ago"), (int)(d / 86400));
+        return buf;
+    }
+    return FormatStamp(unixTime);
 }
 
 // ---------------------------------------------------------------------------
-//  Отрисовка
+//  Строка
 // ---------------------------------------------------------------------------
 
-CardEvent DrawProjectCard(CardLayout layout, const ProjectEntry& entry, bool selected,
-                          const ImVec2& size, ProjectThumbnail& thumbs) {
+float RowHeight() {
+    const Sage::UI::Style& ui = Sage::UI::Get();
+    // Две строки текста и поля; обложка вписывается в высоту, а не задаёт её —
+    // иначе список перестал бы быть плотным.
+    return std::floor(ImGui::GetTextLineHeight() * 2.0f + ui.SpacingMD * 2.0f);
+}
+
+CardEvent DrawProjectRow(const ProjectEntry& entry, bool selected, float width,
+                         ProjectThumbnail& thumbs) {
     const Sage::UI::Style& ui = Sage::UI::Get();
     CardEvent ev;
+    const ImVec2 size(width, RowHeight());
 
     ImGui::PushID(entry.Path.c_str());
     const ImVec2 p0 = ImGui::GetCursorScreenPos();
     const ImVec2 p1(p0.x + size.x, p0.y + size.y);
 
-    // Вся карточка — один невидимый элемент. AllowOverlap нужен, чтобы кнопка
-    // «•••», поданная ПОСЛЕ неё и поверх неё, получала свои нажатия: иначе
-    // меню открывалось бы через раз, а карточка «моргала» выбором под ним.
-    ImGui::SetNextItemAllowOverlap();
-    ImGui::InvisibleButton("##card", size);
+    ImGui::InvisibleButton("##row", size);
     const bool hovered = ImGui::IsItemHovered();
     if (ImGui::IsItemClicked(ImGuiMouseButton_Left)) ev.Selected = true;
     if (hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) ev.Activated = true;
@@ -146,15 +110,10 @@ CardEvent DrawProjectCard(CardLayout layout, const ProjectEntry& entry, bool sel
     }
 
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    const float radius = ui.CornerRadius;
-    const ImU32 bg = EditorTheme::Color32(hovered ? Role::Elevated : Role::SurfaceAlt);
-    dl->AddRectFilled(p0, p1, bg, radius);
-    // Рамка — ТОНКАЯ и всегда: по ней читается граница карточки на тёмном фоне.
-    // Выбранная получает акцент, а не заливку: жёлтым в этом окне светится
-    // ровно одна кнопка — «Открыть проект».
-    dl->AddRect(p0, p1, selected ? EditorTheme::Color32(Role::Accent)
-                                 : EditorTheme::Color32(Role::Line),
-                radius, 0, selected ? 1.6f : 1.0f);
+    // Выбранная строка — подложкой, без рамок и акцентной заливки: жёлтым в окне
+    // светится одна кнопка («Новый проект»).
+    if (selected) dl->AddRectFilled(p0, p1, EditorTheme::Color32(Role::Selection), ui.CornerRadius);
+    else if (hovered) dl->AddRectFilled(p0, p1, EditorTheme::Color32(Role::Hover), ui.CornerRadius);
 
     const float caption = std::max(10.0f, ImGui::GetFontSize() * 0.82f);
     const float body = ImGui::GetFontSize();
@@ -162,87 +121,29 @@ CardEvent DrawProjectCard(CardLayout layout, const ProjectEntry& entry, bool sel
     const ImU32 dimCol = EditorTheme::Color32(Role::TextDim);
     const ImU32 faintCol = EditorTheme::Color32(Role::TextFaint);
 
-    const std::string modified =
-        entry.Missing ? std::string(T("The folder is gone"))
-                      : std::string(T("Last modified: ")) + HumanStamp(entry.Modified);
+    const std::string stamp =
+        entry.Missing ? std::string(T("The folder is gone")) : RelativeTime(entry.Opened);
 
-    if (layout == CardLayout::Grid) {
-        const float shotH = std::floor(size.x * 9.0f / 16.0f);
-        const ImVec2 shot1(p1.x, p0.y + shotH);
-        dl->PushClipRect(p0, shot1, true);
-        thumbs.Draw(entry, p0, shot1, radius);
-        dl->PopClipRect();
-        // Линия под обложкой: без неё картинка и подпись сливаются в одно пятно.
-        dl->AddLine(ImVec2(p0.x, shot1.y), ImVec2(p1.x, shot1.y),
-                    EditorTheme::Color32(Role::Line), 1.0f);
-        DrawKindTag(dl, ImVec2(p0.x + ui.SpacingSM, p0.y + ui.SpacingSM), entry.Kind, caption);
+    const float inner = size.y - ui.SpacingSM * 2.0f;
+    const ImVec2 shot0(p0.x + ui.SpacingSM, p0.y + ui.SpacingSM);
+    const ImVec2 shot1(shot0.x + inner * 16.0f / 9.0f, shot0.y + inner);
+    dl->PushClipRect(shot0, shot1, true);
+    thumbs.Draw(entry, shot0, shot1, ui.CornerRadiusSmall);
+    dl->PopClipRect();
 
-        float y = shot1.y + ui.SpacingSM;
-        const float textX = p0.x + ui.SpacingMD;
-        const float textW = size.x - ui.SpacingMD * 2.0f - ui.IconSize;
-        EditorIcons::Overlay(textX, y + (body - ui.IconSize) * 0.5f, ui.IconSize,
-                             KindIcon(entry.Kind),
-                             glm::vec3(EditorTheme::Color(Role::TextDim).x,
-                                       EditorTheme::Color(Role::TextDim).y,
-                                       EditorTheme::Color(Role::TextDim).z));
-        TextAt(dl, ImVec2(textX + ui.IconSize + ui.SpacingXS, y), body, nameCol,
-               TruncateAt(entry.Name, textW, body));
-        y += ImGui::GetTextLineHeight() + ui.SpacingXS;
-        TextAt(dl, ImVec2(textX, y), caption, faintCol,
-               TruncateAt(entry.Path, size.x - ui.SpacingMD * 2.0f, caption));
-        y += ImGui::GetTextLineHeight() * 0.9f + ui.SpacingXS;
-        TextAt(dl, ImVec2(textX, y), caption, dimCol,
-               TruncateAt(modified, size.x - ui.SpacingMD * 2.0f, caption));
-    } else {
-        // Список: та же информация в одну строку. Обложка маленькая — она здесь
-        // примета, а не картинка.
-        const float inner = size.y - ui.SpacingSM * 2.0f;
-        const ImVec2 shot0(p0.x + ui.SpacingSM, p0.y + ui.SpacingSM);
-        const ImVec2 shot1(shot0.x + inner * 16.0f / 9.0f, shot0.y + inner);
-        dl->PushClipRect(shot0, shot1, true);
-        thumbs.Draw(entry, shot0, shot1, ui.CornerRadiusSmall);
-        dl->PopClipRect();
+    const float textX = shot1.x + ui.SpacingMD;
+    const float stampW = ImGui::GetFont()->CalcTextSizeA(caption, FLT_MAX, 0.0f, stamp.c_str()).x;
+    const float rightX = p1.x - ui.SpacingMD - stampW;
+    const float textW = std::max(60.0f, rightX - textX - ui.SpacingMD);
+    const float mid = p0.y + size.y * 0.5f;
+    const float lineH = ImGui::GetTextLineHeight();
 
-        const float textX = shot1.x + ui.SpacingMD;
-        // Справа — время правки и метка типа; имя и путь занимают остаток.
-        const float tagW = ImGui::GetFont()->CalcTextSizeA(caption, FLT_MAX, 0.0f,
-                                                           ProjectKindLabel(entry.Kind)).x +
-                           ui.SpacingMD;
-        const float stampW = ImGui::GetFont()->CalcTextSizeA(caption, FLT_MAX, 0.0f,
-                                                             modified.c_str()).x;
-        // Место под кнопку «•••» вычитается ЗДЕСЬ, а не «на глаз»: без этого
-        // дата упиралась в три точки и читалась как «21:44•••».
-        const float dotsRoom = ImGui::GetFrameHeight() * 0.8f + ui.SpacingMD;
-        const float rightX = p1.x - dotsRoom - ui.SpacingSM - stampW;
-        const float textW = std::max(60.0f, rightX - textX - tagW - ui.SpacingMD);
+    TextAt(dl, ImVec2(textX, mid - lineH - ui.SpacingXS * 0.25f), body, nameCol,
+           TruncateAt(entry.Name, textW, body));
+    TextAt(dl, ImVec2(textX, mid + ui.SpacingXS * 0.25f), caption, faintCol,
+           TruncateAt(entry.Path, textW, caption));
+    TextAt(dl, ImVec2(rightX, mid - lineH * 0.45f), caption, dimCol, stamp);
 
-        EditorIcons::Overlay(textX, p0.y + size.y * 0.5f - ui.IconSize * 0.5f, ui.IconSize,
-                             KindIcon(entry.Kind),
-                             glm::vec3(EditorTheme::Color(Role::TextDim).x,
-                                       EditorTheme::Color(Role::TextDim).y,
-                                       EditorTheme::Color(Role::TextDim).z));
-        const float nameX = textX + ui.IconSize + ui.SpacingXS;
-        TextAt(dl, ImVec2(nameX, p0.y + ui.SpacingSM), body, nameCol,
-               TruncateAt(entry.Name, textW, body));
-        TextAt(dl, ImVec2(nameX, p0.y + ui.SpacingSM + ImGui::GetTextLineHeight()), caption,
-               faintCol, TruncateAt(entry.Path, textW, caption));
-        TextAt(dl, ImVec2(rightX, p0.y + size.y * 0.5f - ImGui::GetTextLineHeight() * 0.45f),
-               caption, dimCol, modified);
-        DrawKindTag(dl, ImVec2(rightX - tagW - ui.SpacingMD,
-                               p0.y + size.y * 0.5f - ImGui::GetTextLineHeight() * 0.55f),
-                    entry.Kind, caption);
-    }
-
-    // Кнопка меню — последней, поверх карточки.
-    const float dots = ImGui::GetFrameHeight() * 0.8f;
-    const ImVec2 after = ImGui::GetCursorScreenPos();
-    if (DotsButton(ImVec2(p1.x - dots * 0.75f - ui.SpacingXS, p0.y + dots * 0.75f + ui.SpacingXS),
-                   dots)) {
-        ev.Selected = true;
-        ev.MenuRequested = true;
-    }
-    Sage::UI::Tooltip(T("Project actions"));
-    ImGui::SetCursorScreenPos(after);
     ImGui::PopID();
     return ev;
 }

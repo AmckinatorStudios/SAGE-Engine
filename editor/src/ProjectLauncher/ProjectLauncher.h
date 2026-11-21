@@ -12,40 +12,23 @@ class EditorHost;
 // ---------------------------------------------------------------------------
 // СТАРТОВОЕ ОКНО ПРОЕКТОВ — самостоятельный экран, а не панель редактора.
 //
-// ЧТО ЭТО ЗА МОДУЛЬ И ПОЧЕМУ ОН ОТДЕЛЬНЫЙ. Первое, что видит человек, запустив
-// SAGE, — не редактор, а список своих проектов. Это отдельный продукт со своей
-// задачей: найти нужный проект среди сотни, посмотреть, что в нём, создать
-// новый, принести чужой. Ни вьюпорта, ни иерархии, ни инспектора здесь нет и
-// быть не должно — от редактора этому экрану нужен ровно один переход:
+// Первое, что видит человек, запустив SAGE, — список его проектов. Задача
+// одна: открыть нужный проект или создать новый. Поэтому экран один, без
+// разделов, фильтров и панели подробностей: шапка (поиск, «Открыть», «Новый
+// проект») и список по времени последнего открытия.
 //
-//      Стартовое окно  ->  «Открыть проект»  ->  EditorHost  ->  редактор
-//
-// Поэтому модуль лежит в своей папке и знает о редакторе ровно столько,
-// сколько объявлено в EditorHost: создать проект, открыть проект. Обратной
-// зависимости нет: EditorLayer вызывает Draw() и не знает, что внутри.
-//
-// ЧТО БЫЛО ДО ЭТОГО. Одно окно на два столбца: слева список недавних строками,
-// справа две формы — «создать» и «открыть». Оно решало ту же задачу, пока
-// проектов было три: список без поиска, без отбора, без сортировки, без
-// сведений о проекте (кроме пути) и без единой картинки. На двадцати проектах
-// такой список превращается в поиск глазами по столбцу путей, а на сотне —
-// перестаёт работать вовсе.
+// Модуль знает о редакторе ровно столько, сколько объявлено в EditorHost:
+// создать проект, открыть проект. EditorLayer вызывает Draw() и не знает, что
+// внутри.
 //
 // ОТКУДА БЕРЁТСЯ СПИСОК. Из базы стартового окна (ProjectDatabase): проекты,
-// которые человек открывал, создавал или принёс сам. Диск не сканируется —
-// см. ProjectDatabase.h.
+// которые человек открывал, создавал или принёс сам. Диск не сканируется.
 //
-// ЧЕГО ЗДЕСЬ НЕТ. Работы без проекта. Окно закрывается только созданием или
-// открытием проекта: половина редактора без проекта не работает по
-// определению (пути ассетов, сборка игры, шаблоны), и «облегчённый режим»
-// означал бы оговорку «а если проекта нет» в каждой новой возможности.
+// ЧЕГО ЗДЕСЬ НЕТ. Работы без проекта: окно закрывается только созданием или
+// открытием проекта (половина редактора без проекта не работает по
+// определению).
 // ---------------------------------------------------------------------------
 namespace Sage::Launcher {
-
-// Разделы левой навигации. Расширяется без правки редактора — ровно ради этого
-// стартовое окно и вынесено в свой модуль (Templates, Samples, Marketplace,
-// Cloud Projects — это новый пункт здесь, а не новая ветка в EditorLayer).
-enum class LauncherSection { Projects, Recent, Templates, Settings, Count };
 
 class ProjectLauncher {
 public:
@@ -71,21 +54,20 @@ public:
     const std::string& LastStatus() const { return m_status; }
 
 private:
-    void DrawTopBar(bool canClose, bool& closeRequested);
-    void DrawSidebar();
-    void DrawBrowser(EditorHost& host, ProjectDatabase& db);
-    void DrawTemplates();
-    void DrawSettings(ProjectDatabase& db);
-    void DrawDetails(EditorHost& host, ProjectDatabase& db);
+    void DrawTopBar(EditorHost& host, ProjectDatabase& db, bool canClose, bool& closeRequested);
+    void DrawList(EditorHost& host, ProjectDatabase& db);
+    void DrawEmpty(bool searching);
     void DrawDialogs(EditorHost& host, ProjectDatabase& db);
     void HandleShortcuts(EditorHost& host, ProjectDatabase& db,
                          const std::vector<int>& shown);
 
     // Открыть проект (двойной клик, Enter, кнопка). Ошибку кладёт в m_error —
-    // ранние выходы из кадра здесь запрещены: мы внутри двух окон.
+    // ранние выходы из кадра здесь запрещены: мы внутри окна.
     void OpenProject(EditorHost& host, ProjectDatabase& db, const std::string& path);
     void RunAction(EditorHost& host, ProjectDatabase& db, ProjectAction action,
                    const std::string& path);
+    void StartCreate();
+    void StartOpenBrowser();
     // Что мешает создать проект (пусто — можно). Считается каждый кадр: человек
     // должен видеть препятствие, а не натыкаться на него после нажатия.
     std::string CreateBlockedReason() const;
@@ -94,19 +76,16 @@ private:
     void SavePrefs() const;
 
     // --- состояние экрана ---
-    LauncherSection m_section = LauncherSection::Projects;
-    ProjectFilter m_filter = ProjectFilter::All;
-    ProjectSort m_sort = ProjectSort::Recent;
-    CardLayout m_layout = CardLayout::Grid;
     char m_search[128] = {0};
     bool m_focusSearch = false;
     std::string m_selected;     // путь выбранного проекта
     std::string m_error;
     std::string m_status;
     bool m_prefsLoaded = false;
+    float m_colW = 0.0f;        // ширина колонки списка в этом кадре
 
-    // Контекстное меню карточки: цель и просьба открыть (OpenPopup можно звать
-    // только в кадре, а просьба приходит из карточки).
+    // Контекстное меню строки: цель и просьба открыть (OpenPopup можно звать
+    // только в кадре, а просьба приходит из строки).
     std::string m_menuTarget;
     bool m_menuRequested = false;
 
@@ -114,19 +93,17 @@ private:
     enum class Dialog { None, Create, Rename, Duplicate, Delete };
     Dialog m_dialog = Dialog::None;
     bool m_dialogOpening = false;
+    bool m_focusName = false;        // курсор в поле имени при открытии «Нового проекта»
     std::string m_dialogTarget;      // над каким проектом
-    char m_nameBuf[128] = "MyGame";
+    char m_nameBuf[128] = "My Game";
     char m_dirBuf[512] = {0};
-    char m_descBuf[256] = {0};
-    std::string m_templateId;
-    ProjectKind m_newKind = ProjectKind::Game;
 
     // Файловый диалог общий на все поля окна: открыт он может быть только
     // один, а куда положить ответ — помнит указатель.
     FileBrowser m_browser;
     char* m_browseTarget = nullptr;
     size_t m_browseTargetSize = 0;
-    bool m_browseImport = false;     // выбирали проект для импорта
+    bool m_browseOpen = false;       // выбирали проект для открытия
 
     ProjectThumbnail m_thumbs;
 };
