@@ -109,7 +109,7 @@ add_executable(SageEditor WIN32
     src/Project.cpp
     src/PluginManager.cpp
     src/ProjectLauncher/ProjectLauncher.cpp
-    src/ProjectLauncher/ProjectLauncher_Panes.cpp
+    src/ProjectLauncher/ProjectLauncher_Dialogs.cpp
     src/ProjectLauncher/ProjectDatabase.cpp
     src/ProjectLauncher/ProjectCard.cpp
     src/ProjectLauncher/ProjectThumbnail.cpp

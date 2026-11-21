@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 4330.
+// Язык: Русский. Строк: 4338.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -62,12 +62,18 @@ constexpr TranslationPair kRussianStrings[] = {
      "%d клеток выходят за текстуру — их не будет"},
     {"%d clip channels found no bone in this skeleton",
      "Каналов клипов без кости в этом скелете: %d"},
+    {"%d days ago",
+     "%d дн. назад"},
     {"%d empty cells skipped",
      "%d пустых клеток пропущено"},
+    {"%d h ago",
+     "%d ч назад"},
     {"%d keys selected",
      "Выделено ключей: %d"},
     {"%d layers",
      "Слоёв: %d"},
+    {"%d min ago",
+     "%d мин назад"},
     {"%d objects selected",
      "Выделено объектов: %d"},
     {"%d of %d",
@@ -1972,6 +1978,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Создать: %s"},
     {"Create a new project (Ctrl+Shift+N)",
      "Создать новый проект (Ctrl+Shift+N)"},
+    {"Create a new project or open an existing one — you can also just drop a project folder into this window.",
+     "Создайте новый проект или откройте существующий — папку проекта можно и просто бросить в это окно."},
     {"Create a scene and save it into scenes/ of the project.",
      "Создайте сцену и сохраните её в scenes/ проекта."},
     {"Create a sun",
@@ -2210,6 +2218,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Описание"},
     {"Design the game interface",
      "Верстать интерфейс игры"},
+    {"Destination:",
+     "Папка проекта:"},
     {"Detach",
      "Отвязать"},
     {"Detach to root",
@@ -3698,6 +3708,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Склеивает два текста."},
     {"Joint",
      "Сочленение"},
+    {"Just now",
+     "Только что"},
     {"Justify",
      "Прижимать"},
     {"KB",
@@ -4652,6 +4664,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Не загружен"},
     {"Not on any object — read only",
      "Ни на ком не стоит — только чтение"},
+    {"Not opened yet",
+     "Ещё не открывали"},
     {"Not running",
      "Не запущен"},
     {"Not saved: ",
@@ -4976,6 +4990,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сначала откройте текстуру."},
     {"Open a texture to start",
      "Откройте текстуру, чтобы начать"},
+    {"Open an existing project (Ctrl+O)",
+     "Открыть существующий проект (Ctrl+O)"},
     {"Open console",
      "Открыть консоль"},
     {"Open contour",
