@@ -76,6 +76,18 @@ public:
     // Открыть клип по пути. Понимает оба расширения: свой .sageclip и вынутый
     // из модели .sageanim — второй только для чтения.
     void OpenClip(EditorHost& host, const std::string& path);
+    // Ключ выбранной кости (сцена Animation) из её показанной позы: все каналы
+    // или только поправленные гизмо (авто-ключ).
+    void KeySelectedBone(EditorHost& host, bool onlyEdited);
+    // Записать открытый клип (.sageclip или свой .sageanim).
+    bool SaveCurrent(EditorHost& host);
+    // Перевести бегунок и показать клип в этот момент (там, где он
+    // показывается: в вёрстке — на уровне, в Animation — на копии владельца).
+    void SeekTo(EditorHost& host, float time) {
+        m_time = time < 0.0f ? 0.0f : time;
+        m_playing = false;
+        SyncSceneToTime(host);
+    }
 
 private:
     void DrawToolbar(EditorHost& host);
@@ -110,8 +122,11 @@ private:
         bool operator==(const KeyRef& o) const { return Track == o.Track && Key == o.Key; }
     };
 
-    // Правится ли клип: свой, открыт и есть кому его играть.
-    bool Editable() const { return m_hasClip && !m_clip.Imported && m_owner != entt::null; }
+    // Правится ли клип: свой, открыт и есть на чём его играть — объект-владелец
+    // (клип свойств) или модель со скелетом в сцене Animation (скелетный).
+    bool Editable() const {
+        return m_hasClip && !m_clip.Imported && (m_skeletal ? m_hasSkeleton : m_owner != entt::null);
+    }
     void AutoKeyTick(EditorHost& host);
 
     // Клип вынут ИЗ МОДЕЛИ (.sageanim): он не про свойства сцены, а про кости,
@@ -119,7 +134,30 @@ private:
     // к объекту этот инструмент не может. Такой клип показывается и
     // проигрывается линейкой, но правки выключены целиком.
     bool m_skeletal = false;
+
+    // --- ПРОСТРАНСТВО ANIMATION ----------------------------------------------
+    //
+    // Там клип показывается и снимается не с уровня, а с КОПИИ цели в сцене
+    // предпросмотра (animws/AnimStage.h): клип свойств двигает копию, скелетный
+    // играет на копии модели, ключ кости берётся из позы, поставленной гизмо.
+    // В вёрстке (Interface) всё как было — клип анимирует элементы документа.
+    bool StageMode(EditorHost& host) const;
+    // Сцена и владелец, на которых показывается и с которых снимается клип
+    // свойств. false — показывать не на чем.
+    bool PoseContext(EditorHost& host, Scene*& scene, entt::entity& owner);
+    // Отдать скелетный клип (с правками в памяти) сцене предпросмотра.
+    void PushToStage(EditorHost& host);
+    // Импортированный скелетный клип -> свой файл в assets/animations.
+    void MakeOwnSkeletal(EditorHost& host);
+    // Видимые дорожки (номера в клипе) — общие для списка и линейки.
+    void UpdateRows(EditorHost& host);
+    std::vector<int> m_rows;
+    bool m_selectedBoneOnly = false;   // показывать дорожки только выбранной кости
+    bool m_hasSkeleton = false;        // у цели пространства есть скелет
+    uint64_t m_rev = 1;                // ревизия клипа для сцены предпросмотра
+    uint64_t m_seenPoseEdits = 0;
     void PushUndo();
+    void Bump() { ++m_rev; }
     void CaptureKey(EditorHost& host, int trackIndex);
     void SyncSceneToTime(EditorHost& host);
 

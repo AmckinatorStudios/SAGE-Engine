@@ -221,7 +221,11 @@ void RegisterComponents(Backend& backend) {
     an["GetLayerWeight"] = [](AnimatorRef& r, const std::string& layer) {
         AnimationComponent& a = Need<AnimationComponent>(r.Obj, "GetLayerWeight");
         auto it = a.Params.Layers.find(layer);
-        return it == a.Params.Layers.end() ? 0.0f : it->second;
+        if (it != a.Params.Layers.end()) return it->second;
+        // Скрипт вес не задавал — действующий вес слоя с таким именем.
+        for (size_t i = 0; i < a.Layers.size(); ++i)
+            if (a.Layers[i].Name == layer) return a.LayerWeight(i);
+        return 0.0f;
     };
 
     // --- Audio ---------------------------------------------------------------

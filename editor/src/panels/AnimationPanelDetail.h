@@ -20,6 +20,7 @@
 #include "sage/core/Log.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
+#include <glm/gtc/quaternion.hpp>
 
 namespace fs = std::filesystem;
 namespace anim = sage::anim;
@@ -47,6 +48,22 @@ inline std::string PathFromOwner(Scene& scene, entt::entity owner, entt::entity 
     // Цель не под владельцем — дорожку класть некуда: клип, ссылающийся вверх,
     // перестанет работать на втором экземпляре.
     return cur == owner ? path : std::string();
+}
+
+// Каналы кости в скелетном клипе — свойства "joint.translation/rotation/scale"
+// (так их раскладывает OpenClip): кость — Target дорожки.
+inline bool IsBoneChannel(const std::string& prop) { return prop.rfind("joint.", 0) == 0; }
+inline const char* BoneChannelTitle(const std::string& prop) {
+    if (prop == "joint.translation") return T("Position");
+    if (prop == "joint.rotation") return T("Rotation");
+    return T("Scale");
+}
+// Значение ключа канала из TRS кости: поворот — кватернион (x, y, z, w), как
+// в .sageanim.
+inline glm::vec4 BoneValue(const std::string& prop, const glm::vec3& t, const glm::quat& r, const glm::vec3& s) {
+    if (prop == "joint.translation") return glm::vec4(t, 0.0f);
+    if (prop == "joint.rotation") return glm::vec4(r.x, r.y, r.z, r.w);
+    return glm::vec4(s, 0.0f);
 }
 
 inline const char* InterpTitle(anim::Interp i) {

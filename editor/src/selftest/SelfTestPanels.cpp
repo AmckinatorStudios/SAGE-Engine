@@ -31,14 +31,23 @@ bool EditorLayer::SelfTestPanelRegistry() {
     if (m_panels[EditorPanel::Profiler]) fail("сброс раскладки открыл профилировщик");
     if (!m_panels[EditorPanel::Animation] || !m_panelRegistry.IsVisible("AnimGraph"))
         fail("сброс раскладки не вернул клип и граф анимации");
-    // Пространства: анимация — свои окна общих панелей, без Game и Tween.
+    for (const char* id : {"AnimViewport", "AnimHierarchy", "AnimInspector"})
+        if (!m_panelRegistry.IsVisible(id)) fail(std::string("сброс раскладки не вернул ") + id);
+    // Пространства: у анимации СВОИ вьюпорт, иерархия и инспектор (сцена
+    // предпросмотра, animws/), панели уровня туда не попадают; без Game и Tween.
     {
         const pe::PanelSpec* vp = m_panelRegistry.Find("Viewport");
         const pe::PanelSpec* tw = m_panelRegistry.Find("Tween");
         const pe::PanelSpec* game = m_panelRegistry.Find("Game");
-        if (!vp || !pe::PanelRegistry::InSpace(*vp, EditorWorkspace::Animation) ||
-            pe::PanelRegistry::WindowId(*vp, EditorWorkspace::Animation) == "Viewport")
-            fail("у пространства анимации нет своего окна вьюпорта");
+        for (const char* id : {"AnimViewport", "AnimHierarchy", "AnimInspector"}) {
+            const pe::PanelSpec* sp = m_panelRegistry.Find(id);
+            if (!sp || !pe::PanelRegistry::InSpace(*sp, EditorWorkspace::Animation) || !sp->InLayout)
+                fail(std::string("у пространства анимации нет панели ") + id);
+        }
+        for (const char* id : {"Viewport", "Hierarchy", "Inspector"})
+            if (const pe::PanelSpec* sp = m_panelRegistry.Find(id); sp && pe::PanelRegistry::InSpace(*sp, EditorWorkspace::Animation))
+                fail(std::string("панель уровня попала в пространство анимации: ") + id);
+        (void)vp;
         if (tw && pe::PanelRegistry::InSpace(*tw, EditorWorkspace::Animation)) fail("Tween попал в пространство анимации");
         if (game && pe::PanelRegistry::InSpace(*game, EditorWorkspace::Animation)) fail("Game попал в пространство анимации");
     }

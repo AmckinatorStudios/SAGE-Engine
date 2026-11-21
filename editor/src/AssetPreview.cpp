@@ -478,14 +478,6 @@ uint64_t AssetPreview::RenderScene(Scene& scene, int width, int height, float fi
                                    const glm::vec3& focus, const std::string& key) {
     width = std::clamp(width, 32, 2048);
     height = std::clamp(height, 32, 2048);
-    Framebuffer& target = TargetFor(key, width, height);
-    target.Resize(width, height);   // тот же размер — ничего не перевыделяется
-    target.Bind();
-
-    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
-    device.SetClearColor(0.13f, 0.14f, 0.17f, 1.0f);
-    device.Clear();
-
     // КАДР НЕ КВАДРАТНЫЙ — проекция по его сторонам, иначе шар в широком
     // превью становится эллипсом. Вписывание — по МЕНЬШЕЙ стороне: в узком и
     // высоком кадре камера отходит, чтобы форма не обрезалась по бокам.
@@ -499,6 +491,22 @@ uint64_t AssetPreview::RenderScene(Scene& scene, int width, int height, float fi
     const glm::mat4 view = glm::lookAt(eye, focus, glm::vec3(0.0f, 1.0f, 0.0f));
     const glm::mat4 proj =
         glm::perspective(glm::radians(35.0f), aspect, 0.05f, dist * 8.0f + 10.0f);
+    return RenderSceneView(scene, width, height, view, proj, eye, glm::vec3(0.13f, 0.14f, 0.17f), key);
+}
+
+uint64_t AssetPreview::RenderSceneView(Scene& scene, int width, int height, const glm::mat4& view,
+                                       const glm::mat4& proj, const glm::vec3& eye, const glm::vec3& clearColor,
+                                       const std::string& key) {
+    Init();
+    width = std::clamp(width, 32, 2048);
+    height = std::clamp(height, 32, 2048);
+    Framebuffer& target = TargetFor(key, width, height);
+    target.Resize(width, height);   // тот же размер — ничего не перевыделяется
+    target.Bind();
+
+    sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
+    device.SetClearColor(clearColor.x, clearColor.y, clearColor.z, 1.0f);
+    device.Clear();
 
     const LightingEnvironment env = StudioLight();
     sage::render::SceneColorInput input;

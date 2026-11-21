@@ -99,9 +99,10 @@ void AnimationPanel::DrawTimeline(EditorHost& host, ImVec2 size) {
     // --- Ключи --------------------------------------------------------------
     const float rowsTop = origin.y + kRulerHeight;
     int hotTrack = -1, hotKey = -1;
-    for (int i = 0; i < (int)m_clip.Tracks.size(); ++i) {
+    for (int row = 0; row < (int)m_rows.size(); ++row) {
+        const int i = m_rows[(size_t)row];
         const anim::Track& t = m_clip.Tracks[i];
-        const float y = rowsTop + kTrackHeight * (float)i + kTrackHeight * 0.5f;
+        const float y = rowsTop + kTrackHeight * (float)row + kTrackHeight * 0.5f;
         if (i == m_activeTrack) {
             dl->AddRectFilled(ImVec2(origin.x, y - kTrackHeight * 0.5f),
                               ImVec2(origin.x + avail.x, y + kTrackHeight * 0.5f),

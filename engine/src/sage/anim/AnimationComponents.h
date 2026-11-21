@@ -69,9 +69,35 @@ struct AnimationParams {
     // остаётся истиной навсегда, и первый же переход по нему срабатывает
     // вечно.
     std::unordered_map<std::string, bool> Triggers;
-    // Вес слоя («UpperBody» поверх ходьбы). Слоёв в проигрывателе пока нет —
-    // вес хранится и отдаётся тому, кто его понимает.
+    // Вес слоя по ИМЕНИ (AnimationLayer::Name) — то, что пишет
+    // `animator:SetLayerWeight("Wave", 0.5)`. Нет записи — вес из самого слоя.
     std::unordered_map<std::string, float> Layers;
+};
+
+// СЛОЙ АНИМАЦИИ: ещё один клип поверх основной позы (клипа компонента или
+// графа), с весом и маской. Смешивается только то, что в клипе слоя есть, и
+// только на костях маски (sage::anim::ApplyLayer).
+struct AnimationLayer {
+    std::string Name;               // по нему вес задают из скрипта (Params.Layers)
+    std::string ClipPath;           // .sageanim — кости по именам
+    float Weight = 1.0f;            // 0..1
+    // МАСКА: кости скелета, каждая вместе со всеми потомками («от плеча» —
+    // вся рука). Пусто — весь скелет. Имена проверяются по скелету модели:
+    // ненайденные считаются (MissingMaskBones) и показываются, а не угадываются.
+    std::vector<std::string> Mask;
+};
+
+// Рантайм слоя: привязанный к скелету клип, веса костей из маски, время.
+struct AnimationLayerState {
+    const sage::anim::Skeleton* BoundTo = nullptr;  // скелет, к которому привязан
+    std::string ClipFrom;                           // путь, из которого собран клип
+    std::vector<std::string> MaskFrom;              // маска, из которой собраны веса
+    sage::anim::AnimationClip Clip;
+    bool HasClip = false;
+    std::vector<float> JointWeights;                // пусто — весь скелет
+    float Time = 0.0f;
+    int MissingBones = 0;                           // каналов клипа без кости
+    int MissingMaskBones = 0;                       // имён маски без кости
 };
 
 struct AnimationComponent {
@@ -131,6 +157,17 @@ struct AnimationComponent {
     int MissingBones = 0;
     sage::anim::Animator Anim;                          // рантайм-состояние проигрывания
     AnimationParams Params;                             // рантайм (см. выше)
+
+    // Слои поверх основной позы — сохраняются со сценой.
+    std::vector<AnimationLayer> Layers;
+    std::vector<AnimationLayerState> LayerStates;              // рантайм
+    std::vector<sage::anim::AnimLayerPose> LayerPoses;          // рантайм: указатели в LayerStates
+    // Действующий вес слоя: из скрипта (Params.Layers), иначе свой.
+    float LayerWeight(size_t i) const {
+        if (i >= Layers.size()) return 0.0f;
+        auto it = Params.Layers.find(Layers[i].Name);
+        return it != Params.Layers.end() ? it->second : Layers[i].Weight;
+    }
 
     // Параметр графа из C++ — та же запись, что делает Lua animator:SetFloat.
     void SetFloat(const std::string& name, float value) { Params.Floats[name] = value; }

@@ -154,23 +154,12 @@ void AnimGraphPanel::DrawParams(EditorHost& host) {
             }
             for (AnimGraphNode& n : m_graph.Nodes)
                 if (n.Kind == AnimNodeKind::Float && n.Param == p.Name) n.Param = name;
-            if (auto it = m_values.find(p.Name); it != m_values.end()) {
-                const float v = it->second;
-                m_values.erase(it);
-                m_values[name] = v;
-            }
             p.Name = name;
             Changed();
         }
         ImGui::SameLine();
         if (EditorIcons::IconOnlyButton("trash", T("Remove parameter"))) removeAt = (int)i;
 
-        // Значение сейчас — только для предпросмотра; в файл идёт значение по умолчанию.
-        float& value = m_values.try_emplace(p.Name, p.Default).first->second;
-        {
-            ictl::UndoScope noUndo([] {});
-            ictl::SliderNumber(host, T("Preview value"), &value, p.Min, std::max(p.Max, p.Min + 0.001f));
-        }
         if (ictl::SubSection("ag_param_range", T("Default and range"), false)) {
             ictl::NumOpts o;
             o.Step = 0.05f;
@@ -185,7 +174,6 @@ void AnimGraphPanel::DrawParams(EditorHost& host) {
     }
     if (removeAt >= 0) {
         PushUndo();
-        m_values.erase(m_graph.Params[(size_t)removeAt].Name);
         m_graph.Params.erase(m_graph.Params.begin() + removeAt);
         Changed();
     }

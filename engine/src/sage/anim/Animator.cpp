@@ -215,6 +215,48 @@ void BlendPoses(const LocalPose& a, const LocalPose& b, float w, LocalPose& out)
     }
 }
 
+void ApplyLayer(const AnimLayerPose& layer, LocalPose& pose) {
+    if (!layer.Clip || layer.Weight <= 0.0f) return;
+    const int n = pose.Size();
+    const float base = std::min(layer.Weight, 1.0f);
+    for (const AnimChannel& ch : layer.Clip->Channels) {
+        if (ch.Joint < 0 || ch.Joint >= n) continue;
+        float w = base;
+        if (layer.JointWeights) w *= (ch.Joint < (int)layer.JointWeights->size()) ? (*layer.JointWeights)[ch.Joint] : 0.0f;
+        if (w <= 0.0f) continue;
+        glm::vec3 v; glm::quat q;
+        ch.Sample(layer.Time, v, q);
+        switch (ch.Target) {
+            case AnimPath::Translation: pose.T[ch.Joint] = glm::mix(pose.T[ch.Joint], v, w); break;
+            case AnimPath::Rotation:    pose.R[ch.Joint] = glm::slerp(pose.R[ch.Joint], q, w); break;
+            case AnimPath::Scale:       pose.S[ch.Joint] = glm::mix(pose.S[ch.Joint], v, w); break;
+        }
+    }
+}
+
+std::vector<float> MaskWeights(const Skeleton& skeleton, const std::vector<std::string>& bones, int* missing) {
+    const int n = skeleton.Count();
+    std::vector<char> picked((size_t)n, 0);
+    int lost = 0;
+    for (const std::string& name : bones) {
+        int found = -1;
+        for (int i = 0; i < n; ++i)
+            if (skeleton.Joints[(size_t)i].Name == name) { found = i; break; }
+        if (found < 0) ++lost;
+        else picked[(size_t)found] = 1;
+    }
+    if (missing) *missing = lost;
+    // Кость в маске, если выбрана она сама или любой её предок: маску задают
+    // «от плеча», и пальцы руки обязаны идти вместе с ней.
+    std::vector<float> out((size_t)n, 0.0f);
+    for (int i = 0; i < n; ++i) {
+        for (int j = i; j >= 0 && j < n; j = skeleton.Joints[(size_t)j].Parent) {
+            if (picked[(size_t)j]) { out[(size_t)i] = 1.0f; break; }
+        }
+    }
+    return out;
+}
+
 void Animator::SamplePose(int clipIndex, float time, LocalPose& out) const {
     const AnimationClip* clip =
         (clipIndex >= 0 && m_clips && clipIndex < (int)m_clips->size()) ? &(*m_clips)[clipIndex] : nullptr;
@@ -230,18 +272,21 @@ void Animator::ComputePoseBlended(float weight) {
     //    (weight: 0 -> целиком старый, 1 -> целиком новый). Позы смешиваются В
     //    ПРОСТРАНСТВЕ TRS (lerp T/S, slerp R), а не матриц — так суставы идут по
     //    кратчайшей дуге без «схлопывания» масштаба.
-    LocalPose pose;
+    LocalPose& pose = m_pose;
     if (m_external && m_external->Size() == n) {
         // Позу построил граф анимации — клипы аниматора не участвуют.
         pose = *m_external;
     } else {
         SamplePose(m_clip, m_time, pose);
         if (m_fadeFromClip >= 0 && weight < 1.0f) {
-            LocalPose from;
-            SamplePose(m_fadeFromClip, m_fadeFromTime, from);
-            BlendPoses(from, pose, weight, pose);
+            SamplePose(m_fadeFromClip, m_fadeFromTime, m_fadePose);
+            BlendPoses(m_fadePose, pose, weight, pose);
         }
     }
+    // Слои — поверх основной позы (клипа или графа) и ДО ручных
+    // переопределений: правка кости в редакторе и IK выигрывают и у слоя.
+    if (m_layers)
+        for (const AnimLayerPose& layer : *m_layers) ApplyLayer(layer, pose);
     std::vector<glm::vec3>& t = pose.T;
     std::vector<glm::quat>& r = pose.R;
     std::vector<glm::vec3>& s = pose.S;
@@ -284,7 +329,8 @@ void Animator::ComputePoseBlended(float weight) {
     }
 
     // 3. Локальные матрицы из TRS.
-    std::vector<glm::mat4> local(n);
+    std::vector<glm::mat4>& local = m_local;
+    local.resize((size_t)n);
     for (int i = 0; i < n; ++i) {
         local[i] = glm::translate(glm::mat4(1.0f), t[i]) * glm::mat4_cast(r[i]) *
                    glm::scale(glm::mat4(1.0f), s[i]);

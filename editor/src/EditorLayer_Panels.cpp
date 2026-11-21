@@ -35,12 +35,10 @@ void EditorLayer::RegisterPanels() {
     {
         PanelSpec s = make(EditorPanel::Viewport, "Viewport", "Viewport", "world", PanelSection::Scene,
                            [this](EditorHost&, bool* open, const std::string& id) { m_viewport.Draw(*this, open, id); });
-        // Один вьюпорт на сцену и анимацию: та же камера, тот же уровень, —
-        // но своё окно в каждой раскладке (PanelWindowId.h).
-        s.Spaces = panelspace::Scene | panelspace::Animation;
-        s.PerSpaceWindow = true;
+        // Вьюпорт уровня — только в сцене: у пространства Animation свой
+        // (сцена предпросмотра, animws/AnimStage.h).
+        s.Spaces = panelspace::Scene;
         s.SceneDock = {PanelDock::Center, 0};
-        s.AnimationDock = {PanelDock::Center, 0};
         s.InLayout = true;
         m_panelRegistry.Register(std::move(s));
     }
@@ -57,20 +55,16 @@ void EditorLayer::RegisterPanels() {
     {
         PanelSpec s = make(EditorPanel::Hierarchy, "Hierarchy", "Hierarchy", "hierarchy", PanelSection::Scene,
                            [this](EditorHost&, bool* open, const std::string& id) { m_hierarchy.Draw(*this, open, id); });
-        s.Spaces = panelspace::Scene | panelspace::Animation;
-        s.PerSpaceWindow = true;
+        s.Spaces = panelspace::Scene;
         s.SceneDock = {PanelDock::Left, 0};
-        s.AnimationDock = {PanelDock::Left, 0};
         s.InLayout = true;
         m_panelRegistry.Register(std::move(s));
     }
     {
         PanelSpec s = make(EditorPanel::Inspector, "Inspector", "Inspector", "inspector", PanelSection::Scene,
                            [this](EditorHost&, bool* open, const std::string& id) { m_inspector.Draw(*this, open, id); });
-        s.Spaces = panelspace::Scene | panelspace::Animation;
-        s.PerSpaceWindow = true;
+        s.Spaces = panelspace::Scene;
         s.SceneDock = {PanelDock::Right, 1};
-        s.AnimationDock = {PanelDock::Right, 0};
         s.InLayout = true;
         m_panelRegistry.Register(std::move(s));
     }
@@ -84,6 +78,30 @@ void EditorLayer::RegisterPanels() {
         s.SceneDock = {PanelDock::Right, 0};
         s.InLayout = true;
         m_panelRegistry.Register(std::move(s));
+    }
+
+    // --- Анимация: своя иерархия, вьюпорт и инспектор (animws/AnimPanels.h) --
+    {
+        auto animPanel = [this](const char* id, const char* title, const char* icon, PanelDock dock, auto&& draw) {
+            PanelSpec s;
+            s.Id = id;
+            s.Title = title;
+            s.Icon = icon;
+            s.Section = PanelSection::Animation;
+            s.Spaces = panelspace::Animation;
+            s.AnimationDock = {dock, 0};
+            s.InLayout = true;
+            s.DefaultVisible = true;
+            s.WrapWindow = false;
+            s.Draw = std::forward<decltype(draw)>(draw);
+            m_panelRegistry.Register(std::move(s));
+        };
+        animPanel("AnimViewport", "Viewport", "world", PanelDock::Center,
+                  [this](EditorHost& host, bool* open, const std::string& id) { m_animViewport.Draw(host, open, id); });
+        animPanel("AnimHierarchy", "Animation Hierarchy", "hierarchy", PanelDock::Left,
+                  [this](EditorHost& host, bool* open, const std::string& id) { m_animHierarchy.Draw(host, open, id); });
+        animPanel("AnimInspector", "Animation Inspector", "inspector", PanelDock::Right,
+                  [this](EditorHost& host, bool* open, const std::string& id) { m_animInspector.Draw(host, open, id); });
     }
 
     // --- Интерфейс -----------------------------------------------------------
@@ -134,7 +152,7 @@ void EditorLayer::RegisterPanels() {
         s.Spaces = panelspace::All;
         s.SceneDock = {PanelDock::Bottom, 1};
         s.InterfaceDock = {PanelDock::Bottom, 0};
-        s.AnimationDock = {PanelDock::Bottom, 0};
+        s.AnimationDock = {PanelDock::Bottom, 2};
         s.InLayout = true;
         m_panelRegistry.Register(std::move(s));
     }
@@ -145,7 +163,7 @@ void EditorLayer::RegisterPanels() {
         s.Spaces = panelspace::All;
         s.SceneDock = {PanelDock::Bottom, 0};
         s.InterfaceDock = {PanelDock::Bottom, 1};
-        s.AnimationDock = {PanelDock::Bottom, 1};
+        s.AnimationDock = {PanelDock::Bottom, 3};
         s.InLayout = true;
         m_panelRegistry.Register(std::move(s));
     }
@@ -154,12 +172,12 @@ void EditorLayer::RegisterPanels() {
         // Console; играет он на объекте сцены, и результат виден в общем
         // вьюпорте. В вёрстке он остаётся: им анимируют элементы интерфейса.
         // Сам решает про своё окно и закрытое состояние.
-        PanelSpec s = make(EditorPanel::Animation, "Animation", "Animation Clip", "anim", PanelSection::Animation,
+        PanelSpec s = make(EditorPanel::Animation, "Animation", "Animation Timeline", "anim", PanelSection::Animation,
                            [this](EditorHost&, bool* open, const std::string& id) { m_animation.Draw(*this, open, id); });
         s.Spaces = panelspace::Interface | panelspace::Animation;
         s.PerSpaceWindow = true;
         s.InterfaceDock = {PanelDock::Bottom, 2};
-        s.AnimationDock = {PanelDock::Bottom, 2};
+        s.AnimationDock = {PanelDock::Bottom, 0};
         s.InLayout = true;
         s.WrapWindow = false;
         s.DrawWhenHidden = true;
@@ -174,7 +192,7 @@ void EditorLayer::RegisterPanels() {
         s.Icon = "wire";
         s.Section = PanelSection::Animation;
         s.Spaces = panelspace::Animation;
-        s.AnimationDock = {PanelDock::Bottom, 3};
+        s.AnimationDock = {PanelDock::Bottom, 1};
         s.InLayout = true;
         s.DefaultVisible = true;
         s.WrapWindow = false;

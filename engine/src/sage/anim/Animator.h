@@ -53,6 +53,27 @@ void BlendPoses(const LocalPose& a, const LocalPose& b, float w, LocalPose& out)
 // Палитра BoneMatrices()[i] = global(joint i) * inverseBind(joint i) — именно то,
 // на что скиннинг-шейдер умножает позицию вершины (взвешенно по костям).
 // ---------------------------------------------------------------------------
+// --- СЛОИ И МАСКИ ------------------------------------------------------------
+//
+// Слой — ещё один клип поверх основной позы (клип компонента или граф): машет
+// рукой, пока ноги идут. Смешивается ТОЛЬКО то, что в клипе слоя есть: кость
+// без канала в нём остаётся от основной позы, а не уходит в позу покоя.
+// Вес слоя умножается на вес кости из маски — так «махать» достаётся только
+// руке, а не всему телу.
+struct AnimLayerPose {
+    const AnimationClip* Clip = nullptr;              // уже привязан к скелету (Bind)
+    float Time = 0.0f;
+    float Weight = 1.0f;                              // 0..1
+    const std::vector<float>* JointWeights = nullptr; // маска: вес кости; nullptr — весь скелет
+};
+// Накладывает слой на позу (см. выше).
+void ApplyLayer(const AnimLayerPose& layer, LocalPose& pose);
+// Маска по РЕАЛЬНОЙ иерархии: выбранные кости вместе со всеми потомками — 1,
+// остальные — 0. Имена, которых в скелете нет, не угадываются: их число —
+// в missing (вызывающий говорит об этом словами).
+std::vector<float> MaskWeights(const Skeleton& skeleton, const std::vector<std::string>& bones,
+                               int* missing = nullptr);
+
 class Animator {
 public:
     // Привязать скелет и набор клипов (указатели должны жить, пока жив Animator;
@@ -108,6 +129,9 @@ public:
     // Указатель не копируется и не владеется (как у SetPoseOverride). Поза не
     // того размера (скелет сменился) игнорируется. nullptr — снова свои клипы.
     void SetExternalPose(const LocalPose* pose) { m_external = pose; }
+    // Слои поверх основной позы (см. AnimLayerPose). Не владеем: вектор
+    // живёт у вызывающего и задаётся заново каждый кадр.
+    void SetLayers(const std::vector<AnimLayerPose>* layers) { m_layers = layers; }
     const LocalPose* ExternalPose() const { return m_external; }
 
     // --- Корневое движение (root motion) -----------------------------------
@@ -182,6 +206,13 @@ private:
     // Переопределения позы (не владеем — см. SetPoseOverride).
     const std::vector<JointPose>* m_overrides = nullptr;
     const LocalPose* m_external = nullptr;  // не владеем — см. SetExternalPose
+    const std::vector<AnimLayerPose>* m_layers = nullptr;
+    // Рабочие буферы позы: считаются каждый кадр у каждого персонажа, и
+    // заводить их заново на каждом вызове значило бы пять выделений памяти
+    // на персонажа за кадр.
+    LocalPose m_pose;
+    LocalPose m_fadePose;
+    std::vector<glm::mat4> m_local;
     bool m_rootMotion = false;
     bool m_hasPrevRoot = false;
     glm::vec3 m_prevRoot{0.0f};  // локальный перенос корня в прошлом кадре
