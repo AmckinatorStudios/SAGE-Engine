@@ -88,7 +88,7 @@ void EditorLayer::TickCursorLockProbe() {
             const bool freed = glfwGetInputMode(handle, GLFW_CURSOR) == GLFW_CURSOR_NORMAL;
             // Окно панели из проверки многооконности закрылось — захват о нём знает.
             const bool forgot = m_detachedProbeWindow == nullptr ||
-                                (cursorcapture::LastForgottenWindow() == m_detachedProbeWindow &&
+                                (cursorcapture::WasForgotten(m_detachedProbeWindow) &&
                                  window.CursorCaptureTarget() == handle);
             m_cursorProbeStep = -1;
             const bool steady = std::fabs(m_cursorSteadyDelta - 40.0f) < 0.01f;
