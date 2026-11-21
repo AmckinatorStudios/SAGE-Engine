@@ -245,8 +245,21 @@ bool SectionHeader(const char* id, const char* icon, const char* title, bool* op
 // header — зовётся сразу после строки-заголовка, пока она «последний
 // элемент» ImGui: туда вешают перетаскивание, приём и меню правой кнопки
 // (BeginDragDropSource, BeginPopupContextItem), не строя свой заголовок.
+//
+// actions — кнопки справа в строке (переименовать, убрать): у каждой своя
+// область нажатия, и щелчок по ним группу не сворачивает. Пока
+// actions->EditName не nullptr, на месте подписи стоит поле с этим текстом:
+// Enter — *EditResult = 1, Escape или уход фокуса — -1, иначе 0.
+struct SubSectionActions {
+    bool* Rename = nullptr;
+    bool* Remove = nullptr;
+    const char* RenameHint = nullptr;
+    const char* RemoveHint = nullptr;
+    std::string* EditName = nullptr;
+    int* EditResult = nullptr;
+};
 bool SubSection(const char* id, const char* title, bool defaultOpen = false,
-                const std::function<void()>& header = {});
+                const std::function<void()>& header = {}, const SubSectionActions* actions = nullptr);
 void EndSubSection();
 
 } // namespace sage::editor::ictl

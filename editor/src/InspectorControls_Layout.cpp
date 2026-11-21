@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <string>
 #include <vector>
@@ -234,22 +235,55 @@ bool BeginSection(const char* id, const char* title, bool defaultOpen, const cha
 
 void EndSection() { ImGui::Dummy(ImVec2(0.0f, K().SectionGap)); }
 
-bool SubSection(const char* id, const char* title, bool defaultOpen, const std::function<void()>& header) {
+bool SubSection(const char* id, const char* title, bool defaultOpen, const std::function<void()>& header,
+                const SubSectionActions* act) {
+    if (act && act->Rename) *act->Rename = false;
+    if (act && act->Remove) *act->Remove = false;
+    if (act && act->EditResult) *act->EditResult = 0;
     const std::string key = std::string("inspector.sub.") + id;
     bool open = prefs::GetBool(key, defaultOpen);
     ImGui::PushID(id);
     const ImVec2 p = ImGui::GetCursorScreenPos();
     const float h = ImGui::GetFrameHeight();
     const float w = ImGui::GetContentRegionAvail().x;
-    if (ImGui::InvisibleButton("##grp", ImVec2(w, h))) {
-        open = !open;
-        prefs::SetBool(key, open);
-    }
-    const bool hovered = ImGui::IsItemHovered();
-    if (header) header();
-    ImGui::PopID();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
     const float indent = K().Indent;
+    // Кнопки справа — квадраты высотой со строку; строка нажимается вся,
+    // кроме них (как шапка раздела, SectionHeader).
+    const int slots = act ? (act->Rename ? 1 : 0) + (act->Remove ? 1 : 0) : 0;
+    const float buttons = slots > 0 ? slots * h + (slots - 1) * 2.0f + 2.0f : 0.0f;
+    const bool editing = act && act->EditName;
+    bool hovered = false;
+    if (editing) {
+        // Подпись правится НА СВОЁМ МЕСТЕ: поле встаёт туда, где был текст.
+        // Сворачивания на это время нет — щелчок в поле не должен закрывать
+        // группу.
+        static ImGuiID s_editing = 0;
+        static char s_buf[128] = {};
+        const ImGuiID self = ImGui::GetID("##rename");
+        if (s_editing != self) {
+            std::snprintf(s_buf, sizeof(s_buf), "%s", act->EditName->c_str());
+            ImGui::SetKeyboardFocusHere();
+            s_editing = self;
+        }
+        ImGui::SetCursorScreenPos(ImVec2(p.x + indent, p.y));
+        ImGui::SetNextItemWidth(std::max(1.0f, w - indent - buttons));
+        const bool enter = ImGui::InputText("##rename", s_buf, sizeof(s_buf), ImGuiInputTextFlags_EnterReturnsTrue |
+                                                                               ImGuiInputTextFlags_AutoSelectAll);
+        *act->EditName = s_buf;
+        int result = 0;
+        if (enter) result = 1;
+        else if (ImGui::IsItemDeactivated() || ImGui::IsKeyPressed(ImGuiKey_Escape)) result = -1;
+        if (result != 0) s_editing = 0;
+        if (act->EditResult) *act->EditResult = result;
+    } else {
+        if (ImGui::InvisibleButton("##grp", ImVec2(std::max(1.0f, w - buttons), h))) {
+            open = !open;
+            prefs::SetBool(key, open);
+        }
+        hovered = ImGui::IsItemHovered();
+        if (header) header();
+    }
+    ImDrawList* dl = ImGui::GetWindowDrawList();
     if (hovered) dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), EditorTheme::Color32(Role::Hover), K().Rounding);
     // Шеврон в квадрате шириной Indent: подпись группы начинается там же,
     // где начнётся её содержимое.
@@ -257,12 +291,42 @@ bool SubSection(const char* id, const char* title, bool defaultOpen, const std::
     EditorIcons::Overlay(dl, std::floor(p.x + (indent - chev) * 0.5f), std::floor(p.y + (h - chev) * 0.5f), chev,
                          open ? "chevron-down" : "chevron-right",
                          Vec3(EditorTheme::IconTint(hovered ? State::Hover : State::Normal)));
-    // Подпись — до «###»: у раздела может быть переменный заголовок и
-    // постоянный ID.
-    std::string shown = title;
-    if (const size_t hash = shown.find("##"); hash != std::string::npos) shown.resize(hash);
-    dl->AddText(ImVec2(p.x + indent + 2.0f, p.y + ImGui::GetStyle().FramePadding.y),
-                EditorTheme::Color32(hovered ? Role::Text : Role::TextDim), shown.c_str());
+    if (!editing) {
+        // Подпись — до «###»: у раздела может быть переменный заголовок и
+        // постоянный ID.
+        std::string shown = title;
+        if (const size_t hash = shown.find("##"); hash != std::string::npos) shown.resize(hash);
+        dl->PushClipRect(p, ImVec2(p.x + w - buttons, p.y + h), true);
+        dl->AddText(ImVec2(p.x + indent + 2.0f, p.y + ImGui::GetStyle().FramePadding.y),
+                    EditorTheme::Color32(hovered ? Role::Text : Role::TextDim), shown.c_str());
+        dl->PopClipRect();
+    }
+    if (slots > 0) {
+        float bx = p.x + w - buttons + 2.0f;
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        if (act->Rename) {
+            ImGui::SetCursorScreenPos(ImVec2(bx, p.y));
+            *act->Rename = EditorIcons::IconOnlyButton("pencil", act->RenameHint ? act->RenameHint : T("Rename"));
+            bx += h + 2.0f;
+        }
+        if (act->Remove) {
+            ImGui::SetCursorScreenPos(ImVec2(bx, p.y));
+            // Как корзина в шапке раздела: значок красный всегда, подложка —
+            // только под курсором.
+            const ImVec4 danger = EditorTheme::Color(Role::Danger);
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, danger);
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive,
+                                  ImVec4(danger.x * 0.85f, danger.y * 0.85f, danger.z * 0.85f, danger.w));
+            const glm::vec3 hoverTint = Vec3(EditorTheme::Color(Role::TextOnAccent));
+            *act->Remove = EditorIcons::IconOnlyButton("trash", act->RemoveHint ? act->RemoveHint : T("Remove"),
+                                                       false, Vec3(danger), &hoverTint);
+            ImGui::PopStyleColor(2);
+        }
+        ImGui::PopStyleColor();
+        ImGui::SetCursorScreenPos(ImVec2(p.x, p.y + h));
+        ImGui::Dummy(ImVec2(0.0f, 0.0f));
+    }
+    ImGui::PopID();
     if (!open) return false;
     Groups().push_back({ImVec2(p.x + std::floor(indent * 0.5f), p.y + h)});
     ImGui::Indent(indent);

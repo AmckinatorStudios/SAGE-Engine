@@ -132,6 +132,79 @@ void Apply(EditorHost& host, ScriptComponent& sc, const ScriptOp& op) {
     }
 }
 
+std::string Trimmed(const std::string& text) {
+    const size_t a = text.find_first_not_of(" \t");
+    if (a == std::string::npos) return {};
+    const size_t b = text.find_last_not_of(" \t");
+    return text.substr(a, b - a + 1);
+}
+
+// Строки «имя — значение» одной части переменных: та же раскладка, что у
+// переменных объекта (VarsEditor.cpp).
+void DrawVarRows(EditorHost& host, std::vector<sage::vars::Var*>& vars, AssetPreview& preview) {
+    if (vars.empty()) return;
+    if (!ImGui::BeginTable("##script_vars", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX)) return;
+    ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.42f);
+    ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
+    for (sage::vars::Var* var : vars) {
+        ImGui::PushID(var->Name.c_str());
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        // Переменная, которой в скрипте больше нет, остаётся видна
+        // приглушённой: молча стереть настройку из-за опечатки в имени хуже,
+        // чем показать лишнюю строку.
+        if (!var->Declared) ImGui::BeginDisabled();
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted(var->Title().c_str());
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
+            std::string tip = var->Name;
+            if (!var->Tooltip.empty()) tip += "\n" + var->Tooltip;
+            if (!var->Declared) tip += std::string("\n") + T("The script no longer declares this variable");
+            ImGui::SetTooltip("%s", tip.c_str());
+        }
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(-1.0f);
+        // Снимок для отмены берёт сам рисовальщик значения (у ползунка он
+        // нужен ДО перетаскивания, а не после).
+        varsui::DrawValue(host, var->Name.c_str(), var->Data, var, &preview);
+        if (!var->Declared) ImGui::EndDisabled();
+        ImGui::PopID();
+    }
+    ImGui::EndTable();
+}
+
+// ПЕРЕМЕННЫЕ СКРИПТА — своей сворачиваемой секцией «Variables (N)»: длинный
+// список настроек не должен прятать слот файла. Внутри — сначала переменные
+// без группы, затем группы из объявления (`group = "Movement"`) в порядке
+// первого появления; внутри группы — порядок объявления. Группа — только
+// раскладка: имя переменной в коде и её значение от неё не зависят.
+void DrawScriptVariables(EditorHost& host, ScriptEntry& entry, const std::string& key, AssetPreview& preview) {
+    std::vector<sage::vars::Var>& all = entry.Fields.All();
+    if (all.empty()) return;
+    const std::string title = std::string(T("Variables")) + " (" + std::to_string(all.size()) + ")###vars";
+    if (!ictl::SubSection(key.c_str(), title.c_str(), true)) return;
+    std::vector<sage::vars::Var*> loose;
+    std::vector<std::string> groups;
+    for (sage::vars::Var& v : all) {
+        if (v.Group.empty()) loose.push_back(&v);
+        else if (std::find(groups.begin(), groups.end(), v.Group) == groups.end()) groups.push_back(v.Group);
+    }
+    DrawVarRows(host, loose, preview);
+    for (size_t g = 0; g < groups.size(); ++g) {
+        std::vector<sage::vars::Var*> part;
+        for (sage::vars::Var& v : all)
+            if (v.Group == groups[g]) part.push_back(&v);
+        ImGui::PushID((int)g);
+        const std::string groupKey = key + ".group." + groups[g];
+        if (ictl::SubSection(groupKey.c_str(), groups[g].c_str(), true)) {
+            DrawVarRows(host, part, preview);
+            ictl::EndSubSection();
+        }
+        ImGui::PopID();
+    }
+    ictl::EndSubSection();
+}
+
 } // namespace
 
 void InspectorPanel::DrawScriptSection(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm) {
@@ -157,6 +230,16 @@ void InspectorPanel::DrawScriptSection(EditorHost& host, GameObject obj, entt::r
         host.PushUndoSnapshot();
         sc.Groups.push_back(UniqueGroupName(sc));
     }
+
+    // Ключ раскрытия секций переменных — СВОЙ у каждого скрипта: объект и
+    // файл (и номер среди одинаковых файлов этого объекта), а не место в
+    // списке — после «Выполнять раньше» свёрнутое не должно раскрыться.
+    auto varsKey = [&](int i) {
+        int same = 0;
+        for (int k = 0; k < i; ++k) same += sc.Scripts[(size_t)k].Path == sc.Scripts[(size_t)i].Path ? 1 : 0;
+        return "script.vars." + std::to_string(obj.Id()) + "." + sc.Scripts[(size_t)i].Path + "." +
+               std::to_string(same);
+    };
 
     // Один блок скрипта: заголовок (перетаскивание, приём, меню) и, если
     // раскрыт, слот файла и переменные.
@@ -244,41 +327,7 @@ void InspectorPanel::DrawScriptSection(EditorHost& host, GameObject obj, entt::r
                 m_browseIsMesh = false;
                 m_browseIsMaterial = false;
             }
-            ScriptEntry& cur = sc.Scripts[(size_t)i];
-            if (!cur.Fields.Empty()) {
-                ictl::SeparatorText(T("Variables"));
-                // Имя слева, значение справа — та же раскладка, что у
-                // переменных объекта (VarsEditor.cpp). Раньше здесь стояли
-                // одни поля без имён, и какое число — скорость, а какое —
-                // прыжок, приходилось угадывать.
-                if (ImGui::BeginTable("##script_vars", 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_PadOuterX)) {
-                    ImGui::TableSetupColumn("name", ImGuiTableColumnFlags_WidthStretch, 0.42f);
-                    ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
-                    for (sage::vars::Var& var : cur.Fields.All()) {
-                        ImGui::TableNextRow();
-                        ImGui::TableSetColumnIndex(0);
-                        // Переменная, которой в скрипте больше нет, остаётся
-                        // видна приглушённой: молча стереть настройку из-за
-                        // опечатки в имени хуже, чем показать лишнюю строку.
-                        if (!var.Declared) ImGui::BeginDisabled();
-                        ImGui::AlignTextToFramePadding();
-                        ImGui::TextUnformatted(var.Title().c_str());
-                        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-                            std::string tip = var.Name;
-                            if (!var.Tooltip.empty()) tip += "\n" + var.Tooltip;
-                            if (!var.Declared) tip += std::string("\n") + T("The script no longer declares this variable");
-                            ImGui::SetTooltip("%s", tip.c_str());
-                        }
-                        ImGui::TableSetColumnIndex(1);
-                        ImGui::SetNextItemWidth(-1.0f);
-                        // Снимок для отмены берёт сам рисовальщик значения (у
-                        // ползунка он нужен ДО перетаскивания, а не после).
-                        varsui::DrawValue(host, var.Name.c_str(), var.Data, &var, &m_preview);
-                        if (!var.Declared) ImGui::EndDisabled();
-                    }
-                    ImGui::EndTable();
-                }
-            }
+            DrawScriptVariables(host, sc.Scripts[(size_t)i], varsKey(i), m_preview);
             ictl::EndSubSection();
         }
         ImGui::PopID();
@@ -293,33 +342,55 @@ void InspectorPanel::DrawScriptSection(EditorHost& host, GameObject obj, entt::r
         const std::string group = sc.Groups[g];
         const std::string id = "script.group." + group;
         ImGui::PushID((int)(1000 + g));
-        const bool open = ictl::SubSection(id.c_str(), group.c_str(), true, [&] {
-            AcceptScriptDrop(group, op);
-            if (Sage::UI::MenuScope menu; ImGui::BeginPopupContextItem("##group_ctx")) {
-                if (m_scriptGroupRenaming != group) {
-                    m_scriptGroupRenaming = group;
-                    std::snprintf(m_scriptGroupName, sizeof(m_scriptGroupName), "%s", group.c_str());
-                }
-                ImGui::SetNextItemWidth(ImGui::GetFontSize() * 12.0f);
-                if (ImGui::IsWindowAppearing()) ImGui::SetKeyboardFocusHere();
-                if (ImGui::InputText("##group_name", m_scriptGroupName, sizeof(m_scriptGroupName),
-                                     ImGuiInputTextFlags_EnterReturnsTrue)) {
-                    op.What = ScriptOp::RenameGroup;
-                    op.Group = group;
-                    op.Name = m_scriptGroupName;
-                    ImGui::CloseCurrentPopup();
-                }
-                EditorTheme::Hint(T("Enter renames the group"));
-                ImGui::Separator();
-                if (EditorIcons::MenuItem("trash", T("Remove Group"))) {
-                    op.What = ScriptOp::RemoveGroup;
-                    op.Group = group;
-                }
-                ImGui::EndPopup();
-            } else if (m_scriptGroupRenaming == group) {
+        // Переименовать и убрать — кнопками справа в строке группы, а не
+        // меню правой кнопки: действия видны и нажимаются сразу, и щелчок по
+        // ним группу не сворачивает (свои области нажатия, SubSectionActions).
+        bool renameClicked = false, removeClicked = false;
+        int editResult = 0;
+        ictl::SubSectionActions acts;
+        acts.Rename = &renameClicked;
+        acts.Remove = &removeClicked;
+        acts.RenameHint = T("Rename the group");
+        acts.RemoveHint = T("Remove the group: its scripts go back to the common list");
+        const bool editing = m_scriptGroupRenaming == group && m_scriptGroupEntity == obj.Id();
+        if (editing) {
+            acts.EditName = &m_scriptGroupEdit;
+            acts.EditResult = &editResult;
+        }
+        const bool open = ictl::SubSection(id.c_str(), group.c_str(), true, [&] { AcceptScriptDrop(group, op); }, &acts);
+        if (renameClicked) {
+            m_scriptGroupRenaming = group;
+            m_scriptGroupEntity = obj.Id();
+            m_scriptGroupEdit = group;
+            m_scriptGroupBadName = false;
+        }
+        if (removeClicked) {
+            op.What = ScriptOp::RemoveGroup;
+            op.Group = group;
+            if (editing) m_scriptGroupRenaming.clear();
+        }
+        if (editing && editResult != 0) {
+            const std::string name = Trimmed(m_scriptGroupEdit);
+            if (editResult < 0 || name == group) {
                 m_scriptGroupRenaming.clear();
+                m_scriptGroupBadName = false;
+            } else if (name.empty() || sc.HasGroup(name)) {
+                // Пустое или занятое имя не принимается: поле остаётся, рядом —
+                // почему. Escape вернёт прежнее.
+                m_scriptGroupBadName = true;
+            } else {
+                op.What = ScriptOp::RenameGroup;
+                op.Group = group;
+                op.Name = name;
+                m_scriptGroupRenaming.clear();
+                m_scriptGroupBadName = false;
             }
-        });
+        }
+        if (editing && editResult == 0 && m_scriptGroupBadName) {
+            ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
+            ImGui::TextUnformatted(T("The name is empty or already taken"));
+            ImGui::PopStyleColor();
+        }
         if (open) {
             bool any = false;
             for (int i = 0; i < (int)sc.Scripts.size(); ++i)

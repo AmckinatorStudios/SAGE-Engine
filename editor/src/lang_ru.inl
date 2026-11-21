@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 4181.
+// Язык: Русский. Строк: 4182.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -2516,8 +2516,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Введите имя"},
     {"Enter a project name",
      "Введите имя проекта"},
-    {"Enter renames the group",
-     "Enter — переименовать группу"},
     {"Enter starts a new line instead of submitting.",
      "Enter начинает новую строку, а не подтверждает ввод."},
     {"Enter text",
@@ -5572,8 +5570,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Убрать эмиттер"},
     {"Remove Goal",
      "Убрать цель"},
-    {"Remove Group",
-     "Убрать группу"},
     {"Remove IK",
      "Убрать обратную кинематику"},
     {"Remove Item",
@@ -5614,6 +5610,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Удалить последовательность"},
     {"Remove sub-emitter",
      "Убрать дочерний эффект"},
+    {"Remove the group: its scripts go back to the common list",
+     "Убрать группу: её скрипты вернутся в общий список"},
     {"Remove the layer: its objects stay without a layer",
      "Удалить слой: его объекты останутся без слоя"},
     {"Remove the link",
@@ -5636,6 +5634,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Переименовать ассет"},
     {"Rename Project",
      "Переименование проекта"},
+    {"Rename the group",
+     "Переименовать группу"},
     {"Rename...",
      "Переименовать…"},
     {"Render",
@@ -7198,6 +7198,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Имя не может содержать \\ / : * ? \" < > |"},
     {"The name cannot start or end with a space or a dot",
      "Имя не может начинаться или кончаться пробелом или точкой"},
+    {"The name is empty or already taken",
+     "Имя пустое или уже занято"},
     {"The name is too long (64 characters at most)",
      "Имя слишком длинное (не больше 64 символов)"},
     {"The name reaches the object's script as OnMessage(entity,\nname, data) — the same path SendMessage uses.",
