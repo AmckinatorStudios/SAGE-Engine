@@ -29,23 +29,24 @@ using sage::input::TriggerMode;
 
 namespace inputpanel_detail {
 
-// Подписи видов действий. Порядок совпадает с ActionType — на этом держится
-// перевод индекса комбо-бокса обратно в вид, и менять его нельзя.
+// Подписи видов ЗНАЧЕНИЯ. Порядок совпадает с ActionType — на этом держится
+// перевод индекса комбо-бокса обратно в вид, и менять его нельзя. «Кнопкой»
+// действие не называется: кнопка — физический источник, а не результат.
 inline const char* ActionTypeLabel(ActionType type) {
     switch (type) {
-        case ActionType::Digital: return T("Button (pressed / not pressed)");
-        case ActionType::Axis:    return T("Axis (-1 .. 1)");
-        case ActionType::Vector:  return T("Vector (two axes)");
+        case ActionType::Digital: return T("Boolean");
+        case ActionType::Axis:    return T("Axis");
+        case ActionType::Vector:  return T("Vector2");
     }
     return "";
 }
 
-// Короткая подпись — для бейджа в строке списка, где полная не влезает.
-inline const char* ActionTypeShort(ActionType type) {
+// Пояснение к виду — в подсказке и в окне действия.
+inline const char* ActionTypeHint(ActionType type) {
     switch (type) {
-        case ActionType::Digital: return T("Button");
-        case ActionType::Axis:    return T("Axis");
-        case ActionType::Vector:  return T("Vector");
+        case ActionType::Digital: return T("true / false");
+        case ActionType::Axis:    return T("A number, -1 .. 1");
+        case ActionType::Vector:  return T("Two numbers at once: movement, look");
     }
     return "";
 }
@@ -127,14 +128,24 @@ inline bool ContainsCaseInsensitive(const std::string& haystack, const std::stri
     return lower(haystack).find(lower(needle)) != std::string::npos;
 }
 
-// Все клавиши действия одной строкой — для строки списка.
-inline std::string BindingSummary(const Action& action) {
-    std::string out;
-    for (const Binding& b : action.Bindings()) {
-        if (!out.empty()) out += "   ";
-        out += b.ToString();
-    }
-    return out;
+// «Кейкап» — компактная плашка с названием источника. Рисунком, а не кнопкой:
+// в строке списка их десятки, и каждая кнопка ImGui — отдельный элемент со
+// своим идентификатором. warn — рамка предупреждения (конфликт).
+inline float KeycapWidth(const char* text) {
+    return ImGui::CalcTextSize(text).x + Sage::UI::Get().PaddingControl * 1.5f;
+}
+inline void DrawKeycap(ImDrawList* dl, ImVec2 pos, float h, const char* text, bool warn) {
+    const float w = KeycapWidth(text);
+    const ImU32 line = ImGui::GetColorU32(
+        warn ? EditorTheme::Color(EditorTheme::Role::Warn) : EditorTheme::Color(EditorTheme::Role::Line));
+    dl->AddRectFilled(pos, ImVec2(pos.x + w, pos.y + h),
+                      ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::Input)), 4.0f);
+    dl->AddRect(pos, ImVec2(pos.x + w, pos.y + h), line, 4.0f);
+    const ImVec2 ts = ImGui::CalcTextSize(text);
+    dl->AddText(ImVec2(pos.x + (w - ts.x) * 0.5f, pos.y + (h - ts.y) * 0.5f),
+                ImGui::GetColorU32(warn ? EditorTheme::Color(EditorTheme::Role::Warn)
+                                        : EditorTheme::Color(EditorTheme::Role::Text)),
+                text);
 }
 
 // Оси, которые нельзя поймать нажатием (см. BindingFromEvent). Список общий у

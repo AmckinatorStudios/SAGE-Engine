@@ -25,30 +25,24 @@ class EditorHost;
 // ЧТО ЗДЕСЬ ВИДНО И В КАКОМ ПОРЯДКЕ
 //
 // Панель отвечает на один вопрос — «что и на какой клавише», — и всё остальное
-// прячет до того момента, когда его спросят. Прежняя раскладка спрашивала
-// обратное: три колонки, и в каждой поля, до которых обычному человеку нет
-// дела. Приоритет контекста, отбор устройств, мёртвая зона и порог нажатия
-// стояли на экране ВСЕГДА, а «создать действие» пряталось тремя полями внизу
-// средней колонки — то есть самое частое действие было самым незаметным.
+// прячет до того момента, когда его спросят.
 //
-//   • СВЕРХУ — поиск и заметная кнопка «Действие». Ими работают каждый раз.
-//   • СЛЕВА — один список всех действий, сгруппированный по контекстам.
-//     Строка отвечает ровно на «что это и на чём висит»: имя, клавиши,
-//     вид, метка конфликта. Контекст — заголовок группы, а не третья колонка:
-//     контекстов в игре два-три, и отдельная колонка под них стоила больше,
-//     чем давала.
-//   • СПРАВА — свойства ВЫБРАННОГО действия: его клавиши, вид и то, что
-//     зависит от вида. Поведение свёрнуто: девять человек из десяти меняют
-//     клавишу, а не мёртвую зону.
-//   • НАСТРОЙКИ КОНТЕКСТА (приоритет, отбор устройств, удаление) — в меню у
-//     заголовка группы. Они про контекст, и место им там, где контекст назван.
+//   • СВЕРХУ — поиск, «+ Действие» и «+ Контекст». Сохранение и откат — не
+//     здесь: они общие для всего окна настроек (Cancel / Apply).
+//   • НИЖЕ — ОДИН список на всю ширину, сгруппированный по контекстам. Строка:
+//     имя, назначенное «кейкапами», вид значения, меню «⋯». Группа
+//     сворачивается; её приоритет, отбор устройств и удаление — в меню у
+//     заголовка. Выделения, перетаскивания и правой кнопки нет: всё, что можно
+//     сделать со строкой, написано в её меню.
+//   • ОКНО ДЕЙСТВИЯ — одно и для создания, и для правки: имя, контекст, вид
+//     значения, клавиши. Редкое (режим срабатывания, мёртвая зона, вклад осей)
+//     — в свёрнутой секции «Дополнительно». Правится ЧЕРНОВИК: «Отмена»
+//     отбрасывает всё, «Готово» применяет разом.
 //
-// Назначение клавиши сделано ЛОВЛЕЙ, а не выбором из списка. Список известных
-// источников — под сотню пунктов, и найти в нём «правый Alt» дольше, чем
-// нажать его. Ловля же отвечает ровно на тот вопрос, который человек себе и
-// задаёт: «пусть будет вот эта кнопка». Созданное действие сразу открывает
-// ловлю: действие без клавиши не срабатывает никогда, и оставлять человека
-// перед пустой строкой значит предлагать ему догадаться о втором шаге.
+// Назначение клавиши — ЛОВЛЯ ВНУТРИ ЭТОГО ЖЕ окна, а не вторая модалка поверх
+// первой: нажатие на «кейкап» или «+ Control» переводит его в режим «нажмите
+// клавишу». Список известных источников — под сотню пунктов, и найти в нём
+// «правый Alt» дольше, чем нажать его.
 // ---------------------------------------------------------------------------
 class InputPanel {
 public:
@@ -57,102 +51,63 @@ public:
     void DrawBody(EditorHost& host);
 
 private:
-    // Шапка: поиск, «Действие», сохранение, прочее меню.
-    void DrawHeader(EditorHost& host, sage::input::InputSystem& input);
-    // Список действий всех контекстов. Контекст — заголовок группы.
-    void DrawActionList(EditorHost& host, sage::input::InputSystem& input);
-    // Свойства, когда выделено больше одного: что можно сделать с набором.
-    void DrawMultiSelection(EditorHost& host, sage::input::InputSystem& input);
-    // Одна строка действия. true — по ней щёлкнули.
-    bool DrawActionRow(EditorHost& host, const sage::input::Action& action, bool selected);
-    // Меню настроек контекста у его заголовка.
-    void DrawContextMenu(EditorHost& host, sage::input::Context& ctx);
-    // Свойства выбранного действия. Возвращает true, если его попросили удалить.
-    bool DrawActionProperties(EditorHost& host, sage::input::Action& action,
-                              const std::string& contextName);
-    // Клавиши действия: плитки с назначенным, добавление, удаление.
-    void DrawControls(EditorHost& host, sage::input::Action& action,
-                      const std::string& contextName);
-    // То, что зависит от вида действия (кнопка/ось/вектор).
-    void DrawBehavior(EditorHost& host, sage::input::Action& action);
-    // Тонкая настройка ОДНОЙ привязки (вклад, половина вектора) — в меню у
-    // плитки: у кнопочного действия этих полей нет вовсе, а у осевого их
-    // трогают один раз при настройке.
-    void DrawBindingTuning(EditorHost& host, sage::input::Action& action, int index);
-
-    // Модалка ловли. Возвращает true в тот кадр, когда источник пойман.
-    bool DrawCaptureModal(EditorHost& host, sage::input::Binding& caught);
-    // Модалка «новое действие»: имя, вид, контекст — и сразу ловля.
-    void DrawNewActionModal(EditorHost& host, sage::input::InputSystem& input);
-    // Модалка «новый контекст»: имя и приоритет.
-    void DrawNewContextModal(EditorHost& host, sage::input::InputSystem& input);
-
-    // Кто ещё занял этот источник (пусто, если никто). Отдельной функцией,
-    // потому что вопрос задаётся и при показе привязки, и при назначении новой.
-    std::string ConflictWith(sage::input::InputSystem& input, const sage::input::Binding& binding,
-                             const sage::input::Action* self) const;
-    // Есть ли конфликт хоть у одной привязки действия — для метки в списке:
-    // видно СРАЗУ, не открывая действие, у кого клавиши спорят.
-    bool HasAnyConflict(sage::input::InputSystem& input, const sage::input::Action& action) const;
-
-    // Куда положить пойманный источник: имя контекста + имя действия + номер
-    // привязки (−1 — добавить новую). Строками, а не указателями: пока открыта
-    // модалка, человек не трогает список, но указатель на действие пережил бы
-    // не всякую правку, а имя переживает.
-    std::string m_captureContext;
-    std::string m_captureAction;
-    int m_captureBinding = -1;
-    bool m_captureOpen = false;
-
-    // --- ВЫДЕЛЕНИЕ ---------------------------------------------------------
-    //
     // Действие адресуется ПАРОЙ «контекст + имя»: имена уникальны внутри
-    // контекста, а не во всей раскладке, и «Attack» в игре и «Attack» в
-    // инвентаре — разные действия.
+    // контекста, а не во всей раскладке.
     struct Ref {
         std::string Context;
         std::string Name;
-        bool operator==(const Ref& o) const { return Context == o.Context && Name == o.Name; }
     };
 
-    // Набор, а не одно имя. Действия заводят пачками (девять боевых команд,
-    // шесть команд инвентаря), и правят их тоже пачками: перенести в другой
-    // контекст, удалить черновики. Пока выделение было одиночным, каждая такая
-    // правка означала одинаковое движение мышью столько раз, сколько действий.
-    std::vector<Ref> m_selection;
-    // Якорь для Shift-выбора диапазона — последняя строка, выбранная ЩЕЛЧКОМ
-    // (не Shift'ом): от неё и тянется диапазон, как в любом списке файлов.
-    Ref m_anchor;
+    // Шапка: поиск, «+ Действие», «+ Контекст», меню типовой раскладки.
+    void DrawHeader(EditorHost& host, sage::input::InputSystem& input);
+    // Список действий всех контекстов. Контекст — заголовок группы.
+    void DrawActionList(EditorHost& host, sage::input::InputSystem& input);
+    // Одна строка действия; меню строки (изменить / перенести / удалить).
+    void DrawActionRow(EditorHost& host, sage::input::InputSystem& input, sage::input::Context& ctx,
+                       const sage::input::Action& action);
+    // Меню настроек контекста у его заголовка.
+    void DrawContextMenu(EditorHost& host, sage::input::InputSystem& input,
+                         sage::input::Context& ctx);
 
-    bool IsSelected(const Ref& ref) const;
-    void SelectOnly(const Ref& ref);
-    void ToggleSelected(const Ref& ref);
-    // Диапазон от якоря до ref по ПОКАЗАННОМУ порядку строк: он зависит от
-    // поиска и свёрнутых групп, и считать его по хранимому порядку значило бы
-    // выделять невидимое.
-    void SelectRange(const std::vector<Ref>& visible, const Ref& to);
-    // Удалить всё выделенное. Отдельной функцией: зовётся и кнопкой, и Delete.
-    void DeleteSelection(EditorHost& host, sage::input::InputSystem& input);
-    // Перенести выделенное в другой контекст. Действие с таким именем там уже
-    // есть — пропускаем: слить два действия в одно значит потерять одно из них
-    // молча. Возвращает, сколько перенесено.
-    int MoveSelectionTo(EditorHost& host, sage::input::InputSystem& input,
-                        const std::string& targetContext);
+    // --- ОКНО ДЕЙСТВИЯ ------------------------------------------------------
+    // Открыть окно: новое действие в контексте / правка существующего.
+    void OpenNewAction(const std::string& context);
+    void OpenEditAction(sage::input::InputSystem& input, const Ref& ref);
+    void DrawActionModal(EditorHost& host, sage::input::InputSystem& input);
+    // Привязки черновика: кейкапы, добавление, ловля.
+    void DrawDraftControls(EditorHost& host, sage::input::InputSystem& input);
+    // «Дополнительно»: зависит от вида значения.
+    void DrawAdvanced(EditorHost& host);
+    // Применить черновик к раскладке. false — имя занято или пусто.
+    bool ApplyDraft(EditorHost& host, sage::input::InputSystem& input);
+    // Модалка «новый контекст»: имя и приоритет.
+    void DrawNewContextModal(EditorHost& host, sage::input::InputSystem& input);
 
-    // Первое выделенное — под свойства справа. Пусто, если не выделено ничего.
-    std::string m_selectedContext;
-    std::string m_selectedAction;
+    // Кто ещё занял этот источник (пусто, если никто).
+    std::string ConflictWith(sage::input::InputSystem& input, const sage::input::Binding& binding,
+                             const sage::input::Action* self) const;
+    // Есть ли конфликт хоть у одной привязки действия — для метки в списке.
+    bool HasAnyConflict(sage::input::InputSystem& input, const sage::input::Action& action) const;
 
-    // Поиск по всем действиям сразу: раскладка растёт (движение, обзор, десяток
-    // боевых команд, инвентарь), а искать глазами по группам дольше, чем
-    // набрать три буквы.
+    // ЧЕРНОВИК ДЕЙСТВИЯ. Окно правит копию, а не живое действие: так «Отмена»
+    // честна, а переименование и перенос между контекстами — одна операция.
+    struct Draft {
+        bool Open = false;
+        bool IsNew = true;
+        Ref Original;                     // что правим (для новых пусто)
+        char Name[64] = {0};
+        std::string Context;
+        int Type = 0;                     // ActionType
+        std::vector<sage::input::Binding> Bindings;
+        sage::input::ActionSettings Settings;
+        // Ловля: kNoCapture — нет; −1 — добавить новую; i — заменить привязку i.
+        int Capture = kNoCapture;
+        static constexpr int kNoCapture = -2;
+    };
+    Draft m_draft;
+
+    // Поиск по всем действиям сразу.
     char m_search[64] = {0};
-
-    // Модалка создания действия.
-    bool m_newActionOpen = false;
-    char m_newActionName[64] = {0};
-    int m_newActionType = 0;
-    std::string m_newActionContext;
 
     // Модалка создания контекста.
     bool m_newContextOpen = false;
