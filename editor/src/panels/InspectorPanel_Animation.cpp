@@ -107,84 +107,134 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
             }
             if (ImGui::Button(T("Reload"))) { am->Ready = false; am->Model = nullptr; }
 
-            // --- КЛИП ФАЙЛОМ ---------------------------------------------
+            // --- ГРАФ АНИМАЦИИ -------------------------------------------
             //
-            // Слот ассета, а не номер в списке: номер зависит от порядка клипов
-            // в модели и молча меняется при переэкспорте (см. AnimationComponent).
-            // Пустой слот — играем клип из самой модели, как раньше.
-            ImGui::TextUnformatted(T("Clip file"));
-            const assetslot::Result clipSlot =
-                assetslot::Draw(host, "animclip", assetslot::Kind::Animation, am->ClipPath,
-                                &m_preview, T("Playing a clip from the model itself"));
-            if (clipSlot.Changed) {
+            // Задан граф — позу строит он, и выбор клипа ниже не нужен: два
+            // источника позы на одном скелете дали бы позу, которую никто не
+            // заказывал.
+            ImGui::TextUnformatted(T("Animation graph"));
+            assetslot::Actions graphActions;
+            graphActions.SuggestedName = "NewAnimGraph";
+            // Граф откроется в пространстве Animation и заиграет на этом объекте
+            // (он выбран) в общем вьюпорте.
+            graphActions.Edit = [&host, am] {
+                host.OpenAnimGraph(sage::PathToUtf8(host.CurrentProject().Dir() / sage::PathFromUtf8(am->GraphPath)));
+            };
+            const assetslot::Result graphSlot =
+                assetslot::Draw(host, "animgraph", assetslot::Kind::AnimGraph, am->GraphPath, &m_preview,
+                                T("No graph: a single clip plays"), &graphActions);
+            if (graphSlot.Changed) {
                 host.PushUndoSnapshot();
-                am->ClipPath = clipSlot.Path;
+                am->GraphPath = graphSlot.Path;
             }
-            if (clipSlot.BrowseRequested) {
+            if (graphSlot.BrowseRequested) {
                 FileBrowser::Config c;
-                c.Title = T("Choose an animation clip");
-                c.Filters = assetslot::Extensions(assetslot::Kind::Animation);
-                c.FilterLabel = T("Animation");
-                // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+                c.Title = T("Choose an animation graph");
+                c.Filters = assetslot::Extensions(assetslot::Kind::AnimGraph);
+                c.FilterLabel = T("Animation graph");
                 c.StartDir = c.Root = assetslot::ProjectRoot(host);
                 m_browser.Open(c);
-                m_browseTarget = &am->ClipPath;
+                m_browseTarget = &am->GraphPath;
                 m_browseIsShader = false;
                 m_browseIsMesh = false;
                 m_browseIsMaterial = false;
             }
-            if (!am->ClipPath.empty() && am->MissingBones > 0) {
-                // Клип от другого персонажа подходит частично — и молчать об
-                // этом нельзя: «двигается половина скелета» иначе не объяснить.
-                ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn),
-                                   T("%d bones of the clip are missing from this skeleton"),
-                                   am->MissingBones);
-            }
-
-            // Вынуть клипы модели в файлы — то же действие, что импорт
-            // материалов, и в том же месте, где о них вспоминают.
-            if (hasModelRef && EditorIcons::Button("import", T("Extract clips to files"),
-                                                   T("Writes every clip of the model next to it\n"
-                                                     "as .sageanim. Existing files are kept."))) {
-                const ClipImportResult r = ImportModelClips(host.CurrentProject(), mesh->Ref.path);
-                if (r.Found == 0) {
-                    host.SetStatusMessage(T("The model has no animation clips"));
-                } else {
-                    host.SetStatusMessage(T("Clips: ") + std::to_string(r.Found) +
-                                          T(", files written: ") + std::to_string(r.Created));
-                    // Первый клип сразу назначаем: иначе человек нажал кнопку,
-                    // файлы появились, а объект не двинулся — и непонятно, что
-                    // ещё от него хотят.
-                    if (am->ClipPath.empty() && !r.Refs.empty()) {
-                        host.PushUndoSnapshot();
-                        am->ClipPath = r.Refs.front();
+            if (!am->GraphPath.empty()) {
+                if (const sage::anim::AnimGraph* g = am->Graph.Graph()) {
+                    // Параметры графа — живые: то же, что делает скрипт
+                    // animator:SetFloat. В сцену не пишутся — это состояние игры.
+                    sage::editor::ictl::UndoScope noUndo([] {});
+                    for (const sage::anim::AnimGraphParam& p : g->Params) {
+                        float v = am->GetFloat(p.Name);
+                        if (sage::editor::ictl::SliderNumber(host, p.Name.c_str(), &v, p.Min, std::max(p.Max, p.Min + 0.001f)))
+                            am->SetFloat(p.Name, v);
                     }
+                    for (const std::string& problem : am->Graph.Problems())
+                        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", problem.c_str());
+                } else if (am->Model) {
+                    ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
+                                       T("The graph could not be read (see the console)"));
                 }
-            }
+            } else {
+                // --- КЛИП ФАЙЛОМ ---------------------------------------------
+                //
+                // Слот ассета, а не номер в списке: номер зависит от порядка клипов
+                // в модели и молча меняется при переэкспорте (см. AnimationComponent).
+                // Пустой слот — играем клип из самой модели, как раньше.
+                ImGui::TextUnformatted(T("Clip file"));
+                const assetslot::Result clipSlot =
+                    assetslot::Draw(host, "animclip", assetslot::Kind::Animation, am->ClipPath,
+                                    &m_preview, T("Playing a clip from the model itself"));
+                if (clipSlot.Changed) {
+                    host.PushUndoSnapshot();
+                    am->ClipPath = clipSlot.Path;
+                }
+                if (clipSlot.BrowseRequested) {
+                    FileBrowser::Config c;
+                    c.Title = T("Choose an animation clip");
+                    c.Filters = assetslot::Extensions(assetslot::Kind::Animation);
+                    c.FilterLabel = T("Animation");
+                    // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
+                    c.StartDir = c.Root = assetslot::ProjectRoot(host);
+                    m_browser.Open(c);
+                    m_browseTarget = &am->ClipPath;
+                    m_browseIsShader = false;
+                    m_browseIsMesh = false;
+                    m_browseIsMaterial = false;
+                }
+                if (!am->ClipPath.empty() && am->MissingBones > 0) {
+                    // Клип от другого персонажа подходит частично — и молчать об
+                    // этом нельзя: «двигается половина скелета» иначе не объяснить.
+                    ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn),
+                                       T("%d bones of the clip are missing from this skeleton"),
+                                       am->MissingBones);
+                }
 
-            // Список клипов — из проигрывателя (модель уже загружена системой).
-            int clipCount = am->Anim.ClipCount();
-            if (clipCount > 0 && am->ClipPath.empty()) {
-                if (am->Clip >= clipCount) am->Clip = 0;
-                std::string preview = am->Anim.ClipName(am->Clip);
-                if (ictl::BeginDropdown("Clip", preview.c_str())) {
-                    for (int i = 0; i < clipCount; ++i) {
-                        bool sel = (am->Clip == i);
-                        if (ImGui::Selectable(am->Anim.ClipName(i).c_str(), sel) && i != am->Clip) {
-                            am->Clip = i;
-                            // Плавный кросс-фейд к выбранному клипу (или резко, если 0).
-                            if (am->BlendTime > 0.0f) am->Anim.CrossFade(i, am->BlendTime, am->Loop);
-                            else am->Anim.Play(i, am->Loop);
+                // Вынуть клипы модели в файлы — то же действие, что импорт
+                // материалов, и в том же месте, где о них вспоминают.
+                if (hasModelRef && EditorIcons::Button("import", T("Extract clips to files"),
+                                                       T("Writes every clip of the model next to it\n"
+                                                         "as .sageanim. Existing files are kept."))) {
+                    const ClipImportResult r = ImportModelClips(host.CurrentProject(), mesh->Ref.path);
+                    if (r.Found == 0) {
+                        host.SetStatusMessage(T("The model has no animation clips"));
+                    } else {
+                        host.SetStatusMessage(T("Clips: ") + std::to_string(r.Found) +
+                                              T(", files written: ") + std::to_string(r.Created));
+                        // Первый клип сразу назначаем: иначе человек нажал кнопку,
+                        // файлы появились, а объект не двинулся — и непонятно, что
+                        // ещё от него хотят.
+                        if (am->ClipPath.empty() && !r.Refs.empty()) {
+                            host.PushUndoSnapshot();
+                            am->ClipPath = r.Refs.front();
                         }
                     }
-                    ictl::EndDropdown();
                 }
-                ifield::Float(host, T("Blend Time"), &am->BlendTime, 0.01f, 0.0f, 2.0f);
-                if (am->Anim.Fading())
-                    ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Info), T("cross-fading %.0f%%"),
-                                       am->Anim.FadeWeight() * 100.0f);
-            } else if (clipCount == 0) {
-                ImGui::TextDisabled("%s", T("No animation clips (bind pose)"));
+
+                // Список клипов — из проигрывателя (модель уже загружена системой).
+                int clipCount = am->Anim.ClipCount();
+                if (clipCount > 0 && am->ClipPath.empty()) {
+                    if (am->Clip >= clipCount) am->Clip = 0;
+                    std::string preview = am->Anim.ClipName(am->Clip);
+                    if (ictl::BeginDropdown("Clip", preview.c_str())) {
+                        for (int i = 0; i < clipCount; ++i) {
+                            bool sel = (am->Clip == i);
+                            if (ImGui::Selectable(am->Anim.ClipName(i).c_str(), sel) && i != am->Clip) {
+                                am->Clip = i;
+                                // Плавный кросс-фейд к выбранному клипу (или резко, если 0).
+                                if (am->BlendTime > 0.0f) am->Anim.CrossFade(i, am->BlendTime, am->Loop);
+                                else am->Anim.Play(i, am->Loop);
+                            }
+                        }
+                        ictl::EndDropdown();
+                    }
+                    ifield::Float(host, T("Blend Time"), &am->BlendTime, 0.01f, 0.0f, 2.0f);
+                    if (am->Anim.Fading())
+                        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Info), T("cross-fading %.0f%%"),
+                                           am->Anim.FadeWeight() * 100.0f);
+                } else if (clipCount == 0) {
+                    ImGui::TextDisabled("%s", T("No animation clips (bind pose)"));
+                }
             }
             ifield::Float(host, T("Speed"), &am->Speed, 0.02f, 0.0f, 8.0f);
             if (ifield::Check(host, T("Loop"), &am->Loop)) am->Anim.Play(am->Clip, am->Loop);

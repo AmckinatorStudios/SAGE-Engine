@@ -49,6 +49,9 @@ add_executable(SageEditor WIN32
     src/selftest/SelfTestPanels.cpp
     src/selftest/SelfTestGIBake.cpp
     src/selftest/SelfTestAiGraph.cpp
+    src/selftest/SelfTestAnimGraph.cpp
+    src/selftest/SelfTestAssetsBrowser.cpp
+    src/selftest/SelfTestPivot.cpp
     src/selftest/SelfTestVisualScript.cpp
     src/selftest/SelfTestScenesGone.cpp
     src/selftest/SelfTestPrimitives.cpp
@@ -123,6 +126,10 @@ add_executable(SageEditor WIN32
     src/panels/InspectorPanel_Effects.cpp
     src/panels/InspectorPanel_RenderTexture.cpp
     src/panels/InspectorPanel_Ai.cpp
+    src/panels/InspectorPanel_Script.cpp
+    src/animgraph/AnimGraphPanel.cpp
+    src/animgraph/AnimGraphPanel_Canvas.cpp
+    src/animgraph/AnimGraphPanel_Sides.cpp
     src/aigraph/AiGraphPanel.cpp
     src/aigraph/AiGraphPanel_Sides.cpp
     src/aigraph/AiGraphPanel_Check.cpp
@@ -133,9 +140,13 @@ add_executable(SageEditor WIN32
     src/panels/InspectorPanel_Ui.cpp
     src/panels/ViewportPanel.cpp
     src/panels/ViewportPanel_Pilot.cpp
+    src/panels/ViewportPanel_Gizmo.cpp
+    src/panels/InspectorPanel_Pivot.cpp
     src/panels/GamePanel.cpp
     src/panels/AssetsPanel.cpp
     src/panels/AssetsPanel_Tile.cpp
+    src/panels/AssetsPanel_Item.cpp
+    src/panels/AssetsPanel_View.cpp
     src/panels/AssetsPanel_Files.cpp
     src/panels/AssetsPanel_Import.cpp
     src/panels/EnvironmentPanel.cpp

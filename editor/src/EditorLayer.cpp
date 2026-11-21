@@ -496,6 +496,7 @@ void EditorLayer::OnRender() {
     m_renderer.PrepareReflections(*m_scene, env);      // карта окружения до всех проходов
     m_renderer.RenderShadow(*m_scene, env, m_camera); // общая карта теней (Viewport + Game)
     m_renderer.SetShowBounds(m_tools.ShowBounds);
+    m_renderer.SetShowSkeleton(m_tools.ShowSkeleton);
     m_renderer.SetColliderGizmo(m_tools.ColliderGizmo);
     // Отладочная графика игры (Debug:DrawLine) — только пока игра идёт. В
     // режиме правки скриптов нет, и показывать нечего.

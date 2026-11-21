@@ -159,8 +159,15 @@ public:
     // Таблица экземпляра скрипта этой сущности — то, что `other:GetScript()`
     // отдаёт Lua. nil, если скрипта нет: спрашивать у камня его логику —
     // обычное дело, а не ошибка.
-    sol::object ScriptOf(GameObject object);
+    //
+    // Скриптов у объекта может быть несколько: без имени — первый по списку,
+    // с именем (`GetScript("Health")`) — тот, чей файл так называется (имя
+    // файла без расширения или путь целиком).
+    sol::object ScriptOf(GameObject object, const std::string& name = {});
+    // Таблица одного экземпляра (nil, если его нет).
+    sol::object SelfOf(InstanceId id);
     // Позвать метод чужого скрипта прямо из Lua (`enemy:Call("TakeDamage", 20)`).
+    // Зовётся у ПЕРВОГО скрипта объекта, где такой метод есть.
     sol::object InvokeOn(GameObject object, const std::string& method, sol::variadic_args args);
 
     // Перевод значений движка в Lua и обратно — один на весь бэкенд.
@@ -226,6 +233,7 @@ private:
         // Методы в порядке объявления в файле: тесты идут в том порядке, в
         // каком их написали, а не в порядке хеш-таблицы.
         std::vector<std::string> Methods;
+        std::string Path;        // файл — по нему GetScript("Имя") выбирает скрипт
     };
 
     // Один тест в очереди: корутина метода test_* своего экземпляра.
@@ -344,7 +352,11 @@ private:
     ScriptServices m_services;
 
     std::unordered_map<InstanceId, Instance> m_instances;
-    std::unordered_map<uint32_t, InstanceId> m_byEntity;
+    std::unordered_map<uint32_t, std::vector<InstanceId>> m_byEntity;
+    // Экземпляры этого языка у объекта в порядке исполнения: порядок знает
+    // рантайм (перезагрузка не двигает скрипт в конец), без него — порядок
+    // создания.
+    std::vector<InstanceId> InstancesOf(GameObject object) const;
     std::unordered_map<std::string, Chunk> m_chunks;
     // Runtime SAGE Lua (sage/lang/SagePrelude): ставится в конструкторе.
     void InstallSage();

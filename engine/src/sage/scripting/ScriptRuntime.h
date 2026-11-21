@@ -1,4 +1,5 @@
 #pragma once
+#include <deque>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -27,6 +28,12 @@
 // (`other:GetScript("Enemy")`, `enemy:Call("TakeDamage", 20)`), то есть по
 // объекту сцены надо найти его скрипт. Указатель на экземпляр чужого рантайма
 // при этом наружу не отдаётся — только номер.
+//
+// СКРИПТОВ У ОБЪЕКТА МОЖЕТ БЫТЬ НЕСКОЛЬКО (ScriptComponent::Scripts). Каждый —
+// отдельный экземпляр со своим состоянием, полями, счётчиком ошибок и
+// перезагрузкой; ошибка или пропавший файл одного не трогает соседей. Хуки
+// кадра идут в порядке подключения: объекты по порядку сцены, внутри объекта
+// — по порядку в списке компонента.
 // ---------------------------------------------------------------------------
 namespace sage::scripting {
 
@@ -36,6 +43,10 @@ struct LiveScript {
     LanguageBackend* Backend = nullptr;
     InstanceId Instance = kInvalidInstance;
     std::string Path;          // как записано в сцене
+    // Место в ScriptComponent::Scripts объекта; -1 — подключён кодом мимо
+    // компонента (плагин). По нему инспектор и перезагрузка находят «тот же»
+    // скрипт, когда у объекта их несколько и пути могут совпадать.
+    int Slot = -1;
     long long Stamp = 0;
     // Значения публичных полей ЭТОГО объекта (из сцены). Хранятся здесь,
     // потому что перезагрузка пересобирает экземпляр с нуля: без копии
@@ -81,28 +92,41 @@ public:
 
     // --- Экземпляры ----------------------------------------------------------
 
-    // Привязывает скрипт к объекту. false — файла нет или он не собрался;
-    // причина уже в консоли. Существующий скрипт этого объекта снимается.
+    // Привязывает скрипт к объекту ВМЕСТО всех его скриптов (прежний смысл
+    // для плагинов и кода, собирающего объект с одним скриптом). false —
+    // файла нет или он не собрался; причина уже в консоли.
     bool Attach(GameObject owner, const std::string& path, const sage::vars::Table& fields);
+    // Добавляет ещё один скрипт объекту, не трогая остальные. nullptr —
+    // файла нет или он не собрался (причина в консоли); соседи работают.
+    // Указатель живёт до конца кадра (уборка снятых — в Dispatch).
+    LiveScript* Add(GameObject owner, const std::string& path, const sage::vars::Table& fields, int slot = -1);
     // Подключение пачкой (запуск сцены): Attach внутри Begin/EndBatch не зовёт
     // Start сразу, а EndBatch зовёт Start всех в порядке подключения — когда
     // каждый скрипт уже может найти любого соседа.
     void BeginBatch();
     void EndBatch();
 
-    // Снимает скрипт объекта (зовёт OnDisable/OnDestroy).
+    // Снимает ВСЕ скрипты объекта (зовёт OnDisable/OnDestroy).
     void Detach(entt::entity entity);
     void DetachAll();
 
+    // Первый скрипт объекта (по порядку списка) — для мест, где «скрипт
+    // объекта» один по смыслу.
     LiveScript* Find(entt::entity entity);
     const LiveScript* Find(entt::entity entity) const;
+    // Все живые скрипты объекта в порядке исполнения.
+    std::vector<LiveScript*> FindAll(entt::entity entity);
+    // Первый скрипт объекта, у которого есть метод: `enemy:Call("TakeDamage")`
+    // и связи инспектора адресуют МЕТОД объекта, не зная, какой из его
+    // скриптов его объявил.
+    LiveScript* FindMethod(entt::entity entity, const std::string& method);
 
     // --- Кадр ----------------------------------------------------------------
 
     // Зовёт хук у ВСЕХ живых скриптов (Update/FixedUpdate/LateUpdate).
     void Dispatch(Hook hook, float dt);
 
-    // Зовёт хук у скрипта одной сущности (столкновения, зоны).
+    // Зовёт хук у скриптов одной сущности (столкновения, зоны) — у каждого.
     void DispatchTo(entt::entity entity, Hook hook, GameObject other);
     void DispatchNamed(entt::entity entity, Hook hook, const std::string& name);
     // Всем скриптам, у которых хук есть: OnKeyDown("Space") и подобное —
@@ -128,7 +152,7 @@ public:
     void SetEnabled(entt::entity entity, bool enabled);
 
     // Тесты на языке скриптов (ScriptTests.h): поставить в очередь тесты
-    // скрипта объекта, шагнуть очередь, сколько осталось.
+    // скриптов объекта, шагнуть очередь, сколько осталось.
     int QueueTests(entt::entity entity);
     void TickTests(float dt, std::vector<TestResult>& finished);
     int PendingTests() const;
@@ -163,6 +187,14 @@ public:
 
 private:
     void StartScript(LiveScript& live);
+    // Язык и исходник файла; нет — сообщает в консоль и отвечает false.
+    bool Open(GameObject owner, const std::string& path, LanguageBackend*& backend, ScriptSource& src);
+    LiveScript* Spawn(LanguageBackend& backend, const ScriptSource& src, GameObject owner,
+                      const sage::vars::Table& fields, int slot);
+    // OnDisable/OnDestroy и освобождение одного экземпляра.
+    void Kill(LiveScript& s);
+    // Пересобрать экземпляр по свежему исходнику, сохранив значения полей.
+    bool Rebuild(LiveScript& s, const ScriptSource& src);
     // Один вызов хука с разбором ошибки и гашением повторов.
     void Guard(LiveScript& s, bool ok, ScriptError& err, Hook hook);
     // В реестр проблем (Problems.h) с объяснением; subject — объект.
@@ -185,18 +217,29 @@ private:
     ScriptServices m_services;
     std::filesystem::path m_projectDir;
 
-    // Вектор, а не map: скриптов десятки, порядок обхода кадра обязан быть
+    // Последовательность, а не map: порядок обхода кадра обязан быть
     // стабильным (иначе поведение игры зависит от раскладки хеша), а поиск по
     // сущности закрыт отдельным индексом.
-    std::vector<LiveScript> m_scripts;
-    std::unordered_map<uint32_t, size_t> m_index;
+    //
+    // deque, а не vector: хук вправе породить объект со скриптом
+    // (Instantiate в Start/Update), и у vector это перевыделение ПОСРЕДИ
+    // вызова — ссылка на текущий скрипт, по которой потом пишется счётчик
+    // ошибок и Started, повисала. deque при добавлении в конец адресов не
+    // двигает.
+    std::deque<LiveScript> m_scripts;
+    std::unordered_map<uint32_t, std::vector<size_t>> m_index;
     bool m_dirtyIndex = false;
     void Reindex();
 
     ErrorSink m_sink;
     // Запуск сцены целиком: Start всех — после того, как подключены все.
     int m_batch = 0;
-    std::vector<entt::entity> m_pendingStart;
+    struct PendingStart {
+        entt::entity Entity;
+        LanguageBackend* Backend;
+        InstanceId Instance;
+    };
+    std::vector<PendingStart> m_pendingStart;
     // Сколько падений одного скрипта терпим, прежде чем замолчать.
     static constexpr int kMaxErrors = 3;
 };

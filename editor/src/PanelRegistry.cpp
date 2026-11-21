@@ -115,6 +115,14 @@ std::string PanelRegistry::WindowId(const PanelSpec& spec, EditorWorkspace works
     return spec.PerSpaceWindow ? panelid::For(spec.Id.c_str(), workspace) : spec.Id;
 }
 
+const PanelPlace& PanelRegistry::PlaceIn(const PanelSpec& spec, EditorWorkspace workspace) {
+    switch (workspace) {
+        case EditorWorkspace::Interface: return spec.InterfaceDock;
+        case EditorWorkspace::Animation: return spec.AnimationDock;
+        default: return spec.SceneDock;
+    }
+}
+
 bool PanelRegistry::InSpace(const PanelSpec& spec, EditorWorkspace workspace) {
     return (spec.Spaces & (1u << (unsigned)workspace)) != 0;
 }
@@ -154,11 +162,11 @@ void PanelRegistry::DrawMenuSection(PanelSection section) {
 void PanelRegistry::DrawDetachMenu(EditorWorkspace workspace) {
     // По разделам, как в самом меню Window: два десятка окон одним столбцом
     // читаются только целиком.
-    static const PanelSection kOrder[] = {PanelSection::Scene, PanelSection::Interface, PanelSection::Shared,
-                                          PanelSection::Tools, PanelSection::Plugins};
-    static const char* const kTitles[] = {"Scene", "Interface", "Shared", "Tools", "Plugins"};
+    static const PanelSection kOrder[] = {PanelSection::Scene, PanelSection::Interface, PanelSection::Animation,
+                                          PanelSection::Shared, PanelSection::Tools, PanelSection::Plugins};
+    static const char* const kTitles[] = {"Scene", "Interface", "Animation", "Shared", "Tools", "Plugins"};
     bool first = true;
-    for (int k = 0; k < 5; ++k) {
+    for (int k = 0; k < 6; ++k) {
         bool header = false;
         for (const PanelSpec* s : All()) {
             if (!s->Detachable || !s->InMenu || s->Section != kOrder[k]) continue;
@@ -185,12 +193,10 @@ void PanelRegistry::ForEachDocked(EditorWorkspace workspace,
                                   const std::function<void(const std::string&, PanelDock)>& dock) const {
     std::vector<const Entry*> list;
     for (const auto& e : m_entries) {
-        const PanelPlace& p = workspace == EditorWorkspace::Interface ? e->Spec.InterfaceDock : e->Spec.SceneDock;
+        const PanelPlace& p = PlaceIn(e->Spec, workspace);
         if (p.Slot != PanelDock::None && InSpace(e->Spec, workspace)) list.push_back(e.get());
     }
-    auto place = [workspace](const Entry* e) {
-        return workspace == EditorWorkspace::Interface ? e->Spec.InterfaceDock : e->Spec.SceneDock;
-    };
+    auto place = [workspace](const Entry* e) { return PlaceIn(e->Spec, workspace); };
     std::stable_sort(list.begin(), list.end(),
                      [&](const Entry* a, const Entry* b) { return place(a).Order < place(b).Order; });
     for (const Entry* e : list) dock(WindowId(e->Spec, workspace), place(e).Slot);

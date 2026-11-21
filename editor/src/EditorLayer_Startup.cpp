@@ -299,10 +299,7 @@ void EditorLayer::InitEditorServices() {
 
     NewScene(ProjectTemplateKind::Demo);
 
-    m_camera.Position = {6.5f, 5.0f, 6.5f};
-    m_camera.Yaw = -135.0f;
-    m_camera.Pitch = -28.0f;
-    m_camera.ProcessMouse(0.0f, 0.0f);
+    ViewportPanel::ResetCamera(m_camera);
 
     // Дефолтные пути диалогов теперь инициализирует DialogsPanel (в конструкторе).
     // До открытия проекта папки ассетов ещё нет — панель всё равно ничего не

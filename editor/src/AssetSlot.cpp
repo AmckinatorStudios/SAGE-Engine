@@ -63,7 +63,8 @@ std::unordered_map<std::string, Cached>& Cache() {
 
 } // namespace
 
-uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
+uint64_t Cover(AssetPreview* preview, const fs::path& path, int size, bool* pending) {
+    if (pending) *pending = false;
     if (path.empty()) return 0;
     const std::string key = path.string();
     const std::string ext = Lower(path.extension().string());
@@ -71,7 +72,11 @@ uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
     // Картинки не рендерятся — они уже картинки. Берутся из кэша ОБЛОЖЕК
     // (Thumbnails.h): уменьшенные, фоном. Через GetTexture картинка 4096²
     // декодировалась в кадре целиком ради квадратика в инспекторе.
-    if (KindOf(path) == Kind::Texture) return thumbs::Get(path, thumbs::Size::Tile).Id;
+    if (KindOf(path) == Kind::Texture) {
+        const thumbs::Thumb t = thumbs::Get(path, thumbs::Size::Tile);
+        if (pending) *pending = t.Loading;
+        return t.Id;
+    }
     if (!preview) return 0;
 
     const bool renderable = ext == ".sagemat" || ext == ".sageprefab" || ext == ".sagemesh" ||
@@ -93,6 +98,7 @@ uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
     static int lastRenderFrame = -1;
     if (lastRenderFrame == frame) {
         // Очередь занята этим кадром — отдаём прошлую обложку, если была.
+        if (pending) *pending = true;
         return it != cache.end() ? it->second.Id : 0;
     }
 
@@ -111,9 +117,12 @@ uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
     } else {
         // Модель — фоном (AssetPreview::RenderModelCover): пока идёт разбор,
         // слот показывает прошлую обложку или значок.
-        bool pending = false;
-        id = preview->RenderModelCover(key, size, bufferKey, pending);
-        if (pending) return it != cache.end() ? it->second.Id : 0;
+        bool parsing = false;
+        id = preview->RenderModelCover(key, size, bufferKey, parsing);
+        if (parsing) {
+            if (pending) *pending = true;
+            return it != cache.end() ? it->second.Id : 0;
+        }
     }
     lastRenderFrame = frame;
     cache[key] = Cached{id, provisional ? -1 : stamp, frame, shot, shot ? shot->Fingerprint() : 0};
@@ -159,6 +168,7 @@ Kind KindOf(const fs::path& path) {
     if (ext == ".sageuistyle") return Kind::UiStyle;
     if (ext == ".sageui") return Kind::Interface;
     if (ext == ".aigraph") return Kind::AiGraph;
+    if (ext == ".sageanimgraph") return Kind::AnimGraph;
     if (ext == ".sgraph" || ext == ".vgraph") return Kind::VisualScript;   // .vgraph — старые файлы
     // Модели спрашиваются у РЕЕСТРА импортёров, а не у списка здесь: движок
     // умеет .obj/.gltf/.glb/.fbx/.blend/.bbmodel и пополняется плагинами.
@@ -188,6 +198,7 @@ const char* KindName(Kind kind) {
         case Kind::UiStyle:  return T("interface style");
         case Kind::Interface: return T("interface");
         case Kind::AiGraph:  return T("AI graph");
+        case Kind::AnimGraph: return T("animation graph");
         case Kind::VisualScript: return T("script graph");
         default:             return T("file");
     }
@@ -210,6 +221,7 @@ const char* KindIcon(Kind kind) {
         case Kind::UiStyle:  return "ui-panel";
         case Kind::Interface: return "layout";
         case Kind::AiGraph:  return "wire";
+        case Kind::AnimGraph: return "anim";
         case Kind::VisualScript: return "wire";
         default:             return "file";
     }
@@ -231,6 +243,7 @@ std::vector<std::string> Extensions(Kind kind) {
         case Kind::UiStyle:  return {".sageuistyle"};
         case Kind::Interface: return {".sageui"};
         case Kind::AiGraph:  return {".aigraph"};
+        case Kind::AnimGraph: return {".sageanimgraph"};
         case Kind::VisualScript: return {".sgraph", ".vgraph"};
         // У папки расширений нет: диалог выбирает КАТАЛОГ, а подсказка «поддер-
         // живаются…» в отказе остаётся пустой — перечислять там нечего.
@@ -256,7 +269,7 @@ void BeginDrag(const fs::path& path, AssetPreview* preview) {
 
 bool CanCreate(Kind kind) {
     return kind == Kind::Material || kind == Kind::Script || kind == Kind::Scene || kind == Kind::VisualScript ||
-           kind == Kind::AiGraph;
+           kind == Kind::AiGraph || kind == Kind::AnimGraph;
 }
 
 namespace {
@@ -283,6 +296,7 @@ sage::editor::createasset::What CreateWhat(Kind kind) {
     switch (kind) {
         case Kind::Material: return W::Material;
         case Kind::Scene: return W::Scene;
+        case Kind::AnimGraph: return W::AnimGraph;
         default: return W::Script;
     }
 }
@@ -495,6 +509,7 @@ Result Draw(EditorHost& host, const char* id, Kind kind, const std::string& path
                 req.Name = actions && !actions->SuggestedName.empty() ? actions->SuggestedName
                            : kind == Kind::Material ? "NewMaterial"
                            : kind == Kind::Scene    ? "NewScene"
+                           : kind == Kind::AnimGraph ? "NewAnimGraph"
                                                     : "NewScript";
                 req.Done = [slotKey](const fs::path& made) { CreatedForSlot()[slotKey] = made.string(); };
                 sage::editor::createasset::Open(req);

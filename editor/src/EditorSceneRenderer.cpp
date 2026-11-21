@@ -680,6 +680,11 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
     // Вид редактора показывает и заслонённую часть гизмо — бледно (см. DebugDraw).
     m_debugDraw->SetHiddenLineAlpha(0.22f);
     m_debugDraw->Flush(outView, outProj, h);
+    if (m_showSkeleton) {
+        DrawSkeletons(scene, selection);
+        m_debugDraw->SetHiddenLineAlpha(1.0f);
+        m_debugDraw->Flush(outView, outProj, h);
+    }
 
     // Кайма выделения — поверх ИТОГОВОГО кадра (постоянная ширина в пикселях,
     // читаемая независимо от размера объекта и дистанции).

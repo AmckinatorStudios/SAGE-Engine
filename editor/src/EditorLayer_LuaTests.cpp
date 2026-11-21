@@ -79,7 +79,7 @@ bool EditorLayer::RunLuaTests(const std::vector<std::string>& requested) {
         // Объект на файл: тест — обычный скрипт объекта, и у него есть всё, что
         // есть у скрипта в игре (self, публичные поля, сигналы своего объекта).
         GameObject runner = m_scene->CreateObject("LuaTest · " + fs::path(file).filename().string());
-        m_scene->Registry().emplace_or_replace<ScriptComponent>(runner.Entity()).Path = file;
+        m_scene->Registry().emplace_or_replace<ScriptComponent>(runner.Entity(), file);
         if (!scripting->Attach(runner)) {
             // Файл не собрался — это провал теста, а не «тестов нет».
             ++m_luaTests.Failed;

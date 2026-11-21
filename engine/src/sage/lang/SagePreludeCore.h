@@ -377,7 +377,9 @@ function S.getComponent(go, T)
         if T.__engine == "Transform" then return go.transform end
         return go:GetComponent(T.__engine)
     end
-    local script = go:GetScript()
+    -- Скриптов у объекта может быть несколько: сначала тот, чей файл объявил
+    -- класс T, потом первый (класс, объявленный не в своём файле).
+    local script = (type(T.__path) == "string" and T.__path ~= "" and go:GetScript(T.__path)) or go:GetScript()
     if script ~= nil and S.is(script, T) then return script end
     -- Скрипт ещё не стартовал (Start впереди): класс известен по таблице.
     if script ~= nil and rawget(script, "__class") == nil then

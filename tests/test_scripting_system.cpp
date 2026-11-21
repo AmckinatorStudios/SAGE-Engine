@@ -188,14 +188,13 @@ end
 return Hero
 )LUA");
 
-    ScriptComponent sc;
-    sc.Path = path;
-    sc.Fields = ParseFields(path, "");
+    ScriptComponent sc(path);
+    sc.Scripts[0].Fields = ParseFields(path, "");
     sage::vars::Var speed;
     speed.Name = "Speed";
     speed.Data = sage::vars::Value(4.0f);
     speed.Declared = true;
-    sc.Fields.Put(speed);
+    sc.Scripts[0].Fields.Put(speed);
     scene.Registry().emplace<ScriptComponent>(obj.Entity(), sc);
 
     auto sys = MakeSystem(scene);
@@ -492,14 +491,13 @@ TEST(ScriptSystem_shipped_fps_example_runs) {
     GameObject camera = scene.CreateObject("Camera");
     scene.Registry().emplace<CameraComponent>(camera.Entity());
 
-    ScriptComponent sc;
-    sc.Path = script.string();
+    ScriptComponent sc(script.string());
     // Ссылка на камеру — как её расставили бы мышью в инспекторе.
     sage::vars::Var cameraField;
     cameraField.Name = "Camera";
     cameraField.Data = sage::vars::Value(sage::vars::EntityRef{camera.Id()});
     cameraField.Declared = true;
-    sc.Fields.Put(cameraField);
+    sc.Scripts[0].Fields.Put(cameraField);
     scene.Registry().emplace<ScriptComponent>(hero.Entity(), sc);
 
     sage::input::InputSystem input;
@@ -616,13 +614,12 @@ TEST(ScriptSystem_shipped_fps_example_walks_and_looks_the_right_way) {
     scene.Registry().emplace<CameraComponent>(camera.Entity());
     scene.SetParent(camera.Entity(), hero.Entity());
 
-    ScriptComponent sc;
-    sc.Path = script.string();
+    ScriptComponent sc(script.string());
     sage::vars::Var cameraField;
     cameraField.Name = "Camera";
     cameraField.Data = sage::vars::Value(sage::vars::EntityRef{camera.Id()});
     cameraField.Declared = true;
-    sc.Fields.Put(cameraField);
+    sc.Scripts[0].Fields.Put(cameraField);
     scene.Registry().emplace<ScriptComponent>(hero.Entity(), sc);
 
     sage::input::InputSystem input;
@@ -707,13 +704,12 @@ TEST(ScriptSystem_shipped_fps_with_camera_on_the_body_keeps_the_body_upright) {
     scene.Registry().emplace<CharacterControllerComponent>(hero.Entity());
     scene.Registry().emplace<CameraComponent>(hero.Entity()).Primary = true;
 
-    ScriptComponent sc;
-    sc.Path = script.string();
+    ScriptComponent sc(script.string());
     sage::vars::Var cameraField;
     cameraField.Name = "Camera";
     cameraField.Data = sage::vars::Value(sage::vars::EntityRef{hero.Id()});
     cameraField.Declared = true;
-    sc.Fields.Put(cameraField);
+    sc.Scripts[0].Fields.Put(cameraField);
     scene.Registry().emplace<ScriptComponent>(hero.Entity(), sc);
 
     sage::input::InputSystem input;

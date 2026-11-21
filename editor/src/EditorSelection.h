@@ -36,7 +36,12 @@ public:
     // первичным. -1 игнорируется: «ничего» нельзя ни добавить, ни снять.
     void Toggle(int id);
 
-    void Clear() { m_items.clear(); m_primary = -1; }
+    void Clear() { m_items.clear(); m_primary = -1; ++m_changes; }
+
+    // Сколько раз выделение задавали. Растёт и при повторном выборе того же
+    // объекта: тот, кто занял инспектор своим элементом (узел графа), по нему
+    // понимает, что человек снова выбрал объект.
+    unsigned Changes() const { return m_changes; }
 
     // --- Замок инспектора ---------------------------------------------------
     //
@@ -52,6 +57,7 @@ public:
 private:
     std::vector<int> m_items;   // весь набор; последний — первичный
     int m_primary = -1;
+    unsigned m_changes = 0;
 
     bool m_locked = false;
     int m_lockedEntityId = -1;

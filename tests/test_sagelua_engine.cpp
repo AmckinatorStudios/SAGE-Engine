@@ -85,13 +85,12 @@ end
     }
     CHECK_TRUE(declared.Find("awake") == nullptr);   // private — не в инспекторе
 
-    ScriptComponent sc;
-    sc.Path = path;
+    ScriptComponent sc(path);
     sage::vars::Var mine;
     mine.Name = "speed";
     mine.Data = sage::vars::Value(4.0f);
     mine.Declared = true;
-    sc.Fields.Put(mine);
+    sc.Scripts[0].Fields.Put(mine);
     scene.Registry().emplace<ScriptComponent>(obj.Entity(), sc);
 
     auto sys = MakeSystem(scene);

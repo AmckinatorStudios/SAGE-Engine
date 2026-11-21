@@ -56,7 +56,7 @@ namespace assetslot {
 // выбирается именно она. Без этого типа такое поле оставалось бы единственным
 // местом редактора, где путь набирают руками.
 enum class Kind { Any, Model, Material, Texture, Script, Shader, Prefab, Scene, Audio,
-                  Animation, Folder, Font, Effect, UiStyle, AiGraph, VisualScript, Interface };
+                  Animation, Folder, Font, Effect, UiStyle, AiGraph, VisualScript, Interface, AnimGraph };
 
 // Тип файла по расширению. Единственное место, где расширения превращаются в
 // смысл: раньше эти списки были переписаны в семи местах и уже разошлись —
@@ -88,7 +88,10 @@ inline const char* kPayload = "SAGE_ASSET_PATH";
 //
 // preview может быть nullptr: картинки обложкой служат сами себе и рисуются без
 // него, а модели и материалы без него просто не получают обложку.
-uint64_t Cover(AssetPreview* preview, const std::filesystem::path& path, int size);
+// pending (необязательно) — обложка ещё снимается или читается: 0 тогда
+// означает «подождите», а не «превью не бывает». Нужно подсказке под
+// курсором — крутилка и «нет превью» говорят разное.
+uint64_t Cover(AssetPreview* preview, const std::filesystem::path& path, int size, bool* pending = nullptr);
 
 // Начать перетаскивание ассета (панель Assets, слоты, дерево проекта).
 // Рисует под курсором обложку и имя — тащат обычно из десятка похожих файлов.

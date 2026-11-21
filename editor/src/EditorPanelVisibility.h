@@ -57,5 +57,9 @@ private:
         true,   // InterfaceViewport
         true,   // InterfaceInspector
         true,   // InterfacePreview
+        // Клип анимации открывается входом в пространство «Анимация»
+        // (EditorLayer::SetWorkspace): вёрстка без него выглядит как прежде.
+        false,  // Animation
+        false,  // Tween — окно под задачу
     };
 };

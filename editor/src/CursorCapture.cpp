@@ -1,5 +1,9 @@
 #include "CursorCapture.h"
 
+#include <algorithm>
+#include <vector>
+
+
 #include <GLFW/glfw3.h>
 #include <imgui_impl_glfw.h>
 
@@ -14,14 +18,19 @@ void (*s_destroyWindow)(ImGuiViewport*) = nullptr;
 // Флаг NoMouseCursorChange поставлен ЭТИМ модулем (а не человеком в
 // настройках) — снимать его только тогда.
 bool s_cursorChangeLocked = false;
-void* s_lastForgotten = nullptr;
+std::vector<void*> s_forgotten;
 } // namespace
 
-void* LastForgottenWindow() { return s_lastForgotten; }
+bool WasForgotten(void* handle) {
+    return std::find(s_forgotten.begin(), s_forgotten.end(), handle) != s_forgotten.end();
+}
 
 void ForgetPlatformWindow(void* handle) {
     if (!handle) return;
-    s_lastForgotten = handle;
+    // Без роста без предела: окна платформы создаются и закрываются всю
+    // сессию, а самопроверке нужен только недавний хвост.
+    if (s_forgotten.size() >= 64) s_forgotten.erase(s_forgotten.begin());
+    s_forgotten.push_back(handle);
     sage::Application::Get().GetWindow().ForgetWindow((GLFWwindow*)handle);
 }
 

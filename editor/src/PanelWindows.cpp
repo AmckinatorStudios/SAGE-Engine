@@ -58,6 +58,14 @@ const Default kDefaults[] = {
     {"ConsoleUI",   false,  900.0f, 420.0f},
     {"AnimationUI", false, 1000.0f, 360.0f},
     {"TweenUI",     false, 1000.0f, 360.0f},
+    // Пространство анимации: вьюпорт, иерархия, инспектор и низ — свои окна.
+    {"ViewportAnim",  false, 1100.0f, 700.0f},
+    {"HierarchyAnim", false,  380.0f, 720.0f},
+    {"InspectorAnim", false,  460.0f, 820.0f},
+    {"AssetsAnim",    false,  900.0f, 520.0f},
+    {"ConsoleAnim",   false,  900.0f, 420.0f},
+    {"AnimationAnim", false, 1000.0f, 360.0f},
+    {"AnimGraph",     false, 1100.0f, 420.0f},
 };
 
 struct State {

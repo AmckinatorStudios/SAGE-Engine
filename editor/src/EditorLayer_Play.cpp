@@ -161,6 +161,9 @@ void EditorLayer::FocusPlayTarget() {
         m_panels[EditorPanel::InterfacePreview] = true;
         m_uiPreview.RequestFocus();
     } else {
+        // Окно игры — в пространстве сцены; уровень у них один, и переход
+        // игру не останавливает (SetWorkspace).
+        if (m_workspace == EditorWorkspace::Animation) SetWorkspace(EditorWorkspace::Scene);
         m_game.RequestFocus();
     }
 }

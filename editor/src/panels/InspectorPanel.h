@@ -69,7 +69,7 @@ void DrawRenderTextureSection(EditorHost& host, GameObject obj, entt::registry& 
 
 class InspectorPanel {
 public:
-    void Draw(EditorHost& host, bool* open);
+    void Draw(EditorHost& host, bool* open, const std::string& windowId = "Inspector");
 
     // Освободить GPU-ресурсы превью, пока контекст жив (см. AssetPreview).
     void Shutdown() { m_preview.Shutdown(); }
@@ -199,6 +199,10 @@ private:
     // указатель на поле компонента: диалог отвечает через кадр, а сцену за это
     // время могут перезагрузить (undo, открытие другой сцены).
     int m_browseScriptEntity = -1;
+    int m_browseScriptSlot = -1;     // какой из скриптов объекта (ScriptComponent::Scripts)
+    // Переименование группы скриптов: какая группа и набираемое имя.
+    std::string m_scriptGroupRenaming;
+    char m_scriptGroupName[64] = {};
     // То же для звукового файла и по той же причине: диалог отвечает через
     // кадр, а сцену за это время могут перезагрузить.
     int m_browseAudioEntity = -1;
@@ -250,6 +254,7 @@ private:
     void DrawAnimationSections(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm);
     void DrawEffectSections(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm);
     void DrawAiSection(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm);
+    void DrawScriptSection(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm);
     void DrawVisualScriptSection(EditorHost& host, GameObject obj, entt::registry& reg, EntityRemovals& rm);
     void DrawAddComponentMenu(EditorHost& host, GameObject obj);
     char m_addComponentFilter[64] = ""; // поиск в списке компонентов

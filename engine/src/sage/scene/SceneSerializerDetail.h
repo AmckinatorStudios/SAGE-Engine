@@ -70,6 +70,10 @@ std::shared_ptr<sage::gi::GIState> GIFromJson(const json& g);
 void SaveAssetRef(json& j, const char* key, const std::string& path);
 std::string LoadAssetRef(const json& j, const char* key);
 void SaveGIStatic(json& j, const GIStaticComponent& gs);
+// Скрипты объекта: один без групп — прежними ключами "script"/"scriptVars",
+// иначе списком "scripts" и группами "scriptGroups". Читает оба вида.
+void SaveScripts(json& j, const ScriptComponent& sc);
+void LoadScripts(const json& j, ScriptComponent& sc);
 GIStaticComponent ParseGIStatic(const json& gj);
 void SaveCamera(json& j, const CameraComponent& cam);
 CameraComponent ParseCamera(const json& cj);

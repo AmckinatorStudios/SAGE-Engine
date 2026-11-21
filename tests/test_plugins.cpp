@@ -94,7 +94,7 @@ end
 
     Scene scene("plugins");
     GameObject obj = scene.CreateObject("Coin");
-    scene.Registry().emplace<ScriptComponent>(obj.Entity()).Path = coin;
+    scene.Registry().emplace<ScriptComponent>(obj.Entity(), coin);
 
     sage::scripting::ScriptingSystem sys;
     sys.AddBackend(sage::scripting::MakeLuaBackend({}));

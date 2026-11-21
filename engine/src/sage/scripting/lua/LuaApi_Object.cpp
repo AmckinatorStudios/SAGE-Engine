@@ -385,15 +385,27 @@ void RegisterObject(Backend& backend) {
         // Скрипт на объект — и сразу в работу (Start зовётся здесь же):
         // объект, собранный кодом, не должен ждать перезапуска сцены, чтобы
         // ожить. Возвращает таблицу нового скрипта (как GetScript).
+        // Скрипт ДОБАВЛЯЕТСЯ к уже висящим, а не заменяет их: у объекта их
+        // может быть несколько, и чужой скрипт, добавивший свой, не вправе
+        // молча снять соседей.
         if (name == "Script") {
             const std::string path = str("path", "");
             if (path.empty()) throw std::runtime_error("AddComponent(Script): нужен путь — {path = \"assets/scripts/x.lua\"}");
             ScriptingSystem* system = self->Services().System;
             if (!system) throw std::runtime_error("AddComponent(Script): система скриптинга не привязана");
-            reg.emplace_or_replace<ScriptComponent>(e).Path = path;
-            if (!system->Attach(r.Obj))
+            ScriptComponent& sc = reg.get_or_emplace<ScriptComponent>(e);
+            sc.Add(path);
+            const size_t slot = sc.Scripts.size() - 1;
+            LiveScript* live = system->AttachScript(r.Obj, slot);
+            if (!live) {
+                // Не собрался — строка в компоненте не остаётся: иначе следующий
+                // запуск сцены снова споткнулся бы о скрипт, которого никто не
+                // просил сохранять.
+                ScriptComponent* now = reg.try_get<ScriptComponent>(e);
+                if (now && slot < now->Scripts.size()) now->Scripts.erase(now->Scripts.begin() + (long)slot);
                 throw std::runtime_error("AddComponent(Script): скрипт '" + path + "' не загрузился (причина — в консоли)");
-            return self->ScriptOf(r.Obj);
+            }
+            return live->Backend == self ? self->SelfOf(live->Instance) : sol::object(sol::lua_nil);
         }
         // Свет, камера и вид объекта — чтобы собранный кодом объект мог светить,
         // смотреть и быть покрашенным (а твины — менять яркость, угол и цвет).
@@ -527,7 +539,9 @@ void RegisterObject(Backend& backend) {
 
     // Скрипты разговаривают друг с другом через объект, а не через глобальные
     // переменные: `other:GetScript()` и `enemy:Call("TakeDamage", 20)`.
-    ot["GetScript"] = [self](ObjectRef& r) { return self->ScriptOf(r.Obj); };
+    ot["GetScript"] = [self](ObjectRef& r, sol::optional<std::string> name) {
+        return self->ScriptOf(r.Obj, name.value_or(std::string()));
+    };
     ot["Call"] = [self](ObjectRef& r, const std::string& method, sol::variadic_args args) {
         return self->InvokeOn(r.Obj, method, args);
     };

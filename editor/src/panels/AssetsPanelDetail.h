@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include "imgui.h"
+
 class EditorHost;
 
 // Общее для файлов панели Assets (AssetsPanel*.cpp). Только для них.
@@ -19,33 +21,57 @@ inline std::string ToLower(std::string s) {
     return s;
 }
 
-// Габариты карточки-тайла. ВАЖНО: высота тайла включает и плашку, и подпись —
-// раньше подпись рисовалась DrawList'ом НИЖЕ InvisibleButton'а (высотой лишь в
-// плашку), выходила за границы item'а, и строки грида налезали друг на друга
-// («неровность»). Теперь весь тайл — единый item, всё внутри его границ.
-constexpr float kTileW = 104.0f;
-constexpr float kTileInset = 8.0f; // внутренний отступ карточки
-// Обложка КВАДРАТНАЯ у всех типов ассетов.
+// Габариты карточки-тайла — ОТ МАСШТАБА (регулятор в шапке). ВАЖНО: высота
+// тайла включает и плашку, и подпись — раньше подпись рисовалась DrawList'ом
+// НИЖЕ InvisibleButton'а (высотой лишь в плашку), выходила за границы item'а,
+// и строки грида налезали друг на друга. Теперь весь тайл — единый item.
 //
-// Раньше она была 88x54 — вытянутый прямоугольник. Для трёхбуквенного тега это
-// было неважно, но превью в него вписывается по меньшей стороне, то есть по
-// высоте: от карточки шириной 88 под картинку работали 54 пикселя, а остальное
-// оставалось пустым. Квадрат отдаёт превью всю ширину и заодно выравнивает
-// сетку — карточки разных типов перестают отличаться пропорциями.
+// Обложка КВАДРАТНАЯ у всех типов: превью вписывается по меньшей стороне, и
+// вытянутая плашка отдавала картинке лишь часть карточки.
 //
-// Высота плашки подобрана так, чтобы её ВИДИМАЯ область (kTileW - 2*inset по
-// ширине, kSwatchH - inset по высоте) была квадратом.
-constexpr float kSwatchH = kTileW - kTileInset;
-// Подпись — РОВНО ОДНА строка. Раньше под неё отводилось 34 пикселя «на одну-две
-// строки», но рисовалась всегда одна: каждая карточка несла полторы строки
-// пустоты, и сетка выглядела рыхлой.
-constexpr float kLabelH = 22.0f;
-// Под подписью ДВЕ строки: имя и тип. Тип — это второй вопрос к файлу («что это
-// вообще такое»), и раньше на него отвечали только трёхбуквенная метка в углу
-// обложки и значок. Для .obj, .gltf и .sagemesh метка разная, а предмет один —
-// модель; словом это сказано один раз и одинаково.
-constexpr float kTileH = kSwatchH + kLabelH * 2.0f + 8.0f;
-constexpr float kTileSpacing = 12.0f;
+// Под обложкой — имя и, если карточка не мелкая, тип («Модель»): тип — второй
+// вопрос к файлу, но в карточке 64 px на него нет места, и там остаётся имя.
+struct TileMetrics {
+    float W = 104.0f;
+    float Inset = 8.0f;
+    float SwatchH = 96.0f;   // видимая область обложки — квадрат (W - 2*Inset)
+    float LabelH = 20.0f;
+    bool KindLine = true;
+    float H = 0.0f;
+    float Spacing = 10.0f;
+};
+inline TileMetrics MetricsFor(float tileW, float lineH) {
+    TileMetrics m;
+    m.W = tileW;
+    m.Inset = tileW < 80.0f ? 5.0f : 7.0f;
+    m.SwatchH = tileW - m.Inset;
+    m.LabelH = lineH + 4.0f;
+    m.KindLine = tileW >= 88.0f;
+    m.H = m.SwatchH + m.LabelH * (m.KindLine ? 2.0f : 1.0f) + 4.0f;
+    m.Spacing = tileW < 80.0f ? 6.0f : 10.0f;
+    return m;
+}
+
+// Что это за файл одним словом и как он выглядит (AssetsPanel_Tile.cpp).
+std::string KindLabel(const std::filesystem::path& path, bool isDir);
+struct AssetStyle {
+    ImVec4 Color;
+    std::string Tag;
+    const char* Icon;
+};
+AssetStyle StyleForPath(const std::filesystem::path& path, bool isDir);
+
+// Обрезка строки многоточием по ширине — ПО ГРАНИЦАМ СИМВОЛОВ UTF-8:
+// побайтовая резала кириллическое имя посреди буквы, и на карточке выходил
+// мусорный знак. cut — true, если обрезали.
+std::string TruncateToWidth(const std::string& s, float maxWidth, bool* cut = nullptr);
+// То же, но многоточие В СЕРЕДИНЕ: «item_...017.txt». Имена файлов одной папки
+// чаще различаются концом (номер, расширение), и обрезка справа делала сотню
+// карточек одинаковыми «item_...».
+std::string TruncateMiddle(const std::string& s, float maxWidth, bool* cut = nullptr);
+
+// Время правки (fscache::Stamp) — «2026-11-21 14:05» по местному времени.
+std::string FormatStamp(long long stamp);
 
 // Спутники моделей и регистрация в базе ассетов (AssetsPanel_Files.cpp).
 std::vector<std::string> MtlTextureNames(const std::filesystem::path& mtl);

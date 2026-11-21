@@ -130,9 +130,47 @@ struct Transform {
         m[0] *= Scale.x;
         m[1] *= Scale.y;
         m[2] *= Scale.z;
-        m[3] = glm::vec4(Position, 1.0f);
+        m[3] = glm::vec4(Position + PivotShift(m), 1.0f);
         return m;
     }
+
+    // ТОЧКА ОПОРЫ (pivot) — в координатах объекта: вокруг неё объект
+    // поворачивается и масштабируется. Матрица с ней:
+    //
+    //     T(Position) · T(Pivot) · R · S · T(−Pivot)
+    //
+    // Position при этом значит то же, что и без опоры: у неповёрнутого
+    // объекта единичного масштаба он стоит ровно там, где стоял, — старые
+    // сцены (Pivot = 0) не сдвигаются ни на миллиметр, а Position остаётся
+    // «где объект», а не «где опора». Поворот и масштаб держат на месте точку
+    // Position + Pivot.
+    //
+    // Опора внутри GetMatrix/SetFromMatrix, а не в редакторе, потому что
+    // мировую матрицу читают все — рендер, физика, иерархия, гизмо: каждый
+    // из них получает вращение вокруг опоры без единой своей строчки.
+    glm::vec3 Pivot{0.0f};
+
+    // Сменить опору, НЕ сдвигая объект: Position компенсирует разницу, и
+    // мировая матрица остаётся прежней. Именно так опору меняет человек —
+    // перенос опоры не должен двигать геометрию.
+    void SetPivotKeepPlace(const glm::vec3& pivot) {
+        const glm::mat4 m = GetMatrix();
+        const glm::vec3 d = Pivot - pivot;
+        Position += d - glm::mat3(m) * d;
+        Pivot = pivot;
+    }
+
+    // Где опора в пространстве родителя (там же стоит гизмо поворота).
+    glm::vec3 PivotPoint() const { return Position + Pivot; }
+
+private:
+    // Сдвиг переноса от опоры: Pivot − R·S·Pivot. Ноль — без опоры.
+    glm::vec3 PivotShift(const glm::mat4& rs) const {
+        if (Pivot == glm::vec3(0.0f)) return glm::vec3(0.0f);
+        return Pivot - glm::mat3(rs) * Pivot;
+    }
+
+public:
 
     // Обратное GetMatrix: матрица -> Position/Rotation/Scale.
     //
@@ -144,8 +182,10 @@ struct Transform {
     // ImGuizmo, у неё другой порядок) даёт ДРУГИЕ углы, и объект прыгает при
     // первом же касании. Один раз здесь, рядом со сборкой матрицы, — и спорить
     // двум реализациям не о чем.
+    // Опора (Pivot) сохраняется: Position вычисляется так, чтобы GetMatrix
+    // собрал ту же матрицу при той же опоре.
     void SetFromMatrix(const glm::mat4& m) {
-        Position = glm::vec3(m[3]);
+        Position = glm::vec3(m[3]) - PivotShift(m);
 
         glm::vec3 scale(glm::length(glm::vec3(m[0])), glm::length(glm::vec3(m[1])),
                         glm::length(glm::vec3(m[2])));

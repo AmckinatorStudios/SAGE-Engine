@@ -573,7 +573,7 @@ void AnimationPanel::Draw(EditorHost& host, bool* open, const std::string& windo
         --m_focusFrames;
     }
     ImGui::SetNextWindowSize(ImVec2(960.0f, 320.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(sage::editor::panelid::Title("anim", T("Animation"), windowId).c_str(), open,
+    if (!ImGui::Begin(sage::editor::panelid::Title("anim", T("Animation Clip"), windowId).c_str(), open,
                      panelwindows::WindowFlags("Animation"))) {
         ImGui::End();
         return;

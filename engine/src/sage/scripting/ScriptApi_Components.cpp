@@ -137,8 +137,15 @@ void ScriptEngine::RegisterComponentTypes() {
         "Dirty", &DecalComponent::Dirty,
         "Triangles", sol::readonly(&DecalComponent::Triangles)
     );
+    // Path — первый скрипт объекта: так поле читали и писали, когда скрипт
+    // был один; запись в пустой компонент добавляет скрипт.
     m_lua.new_usertype<ScriptComponent>("ScriptComponent",
-        "Path", &ScriptComponent::Path
+        "Path", sol::property(
+            [](const ScriptComponent& sc) { return sc.FirstPath(); },
+            [](ScriptComponent& sc, const std::string& path) {
+                if (sc.Scripts.empty()) sc.Add(path);
+                else sc.Scripts.front().Path = path;
+            })
     );
 
     // --- Материал -----------------------------------------------------------

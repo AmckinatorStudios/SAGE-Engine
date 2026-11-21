@@ -145,6 +145,12 @@ public:
                               bool& pending);
 
     // Угол обзора превью — крутится мышью в панели.
+    // ЖИВАЯ СЦЕНА — кадр сцены, которую ведёт вызывающий (предпросмотр графа
+    // анимации: персонаж двигается, сцена обновляется каждый кадр). Свет,
+    // камера по орбите и вывод — те же, что у обложек.
+    uint64_t RenderLiveScene(Scene& scene, int size, const glm::vec3& focus, float fitRadius,
+                             const std::string& key);
+
     void Orbit(float dYaw, float dPitch);
     void Zoom(float delta);
     void ResetView();

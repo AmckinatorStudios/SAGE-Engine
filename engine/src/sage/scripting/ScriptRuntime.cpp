@@ -145,20 +145,37 @@ void ScriptRuntime::Reindex() {
     m_index.clear();
     for (size_t i = 0; i < m_scripts.size(); ++i)
         if (!m_scripts[i].Dead)
-            m_index[(uint32_t)entt::to_integral(m_scripts[i].Owner.Entity())] = i;
+            m_index[(uint32_t)entt::to_integral(m_scripts[i].Owner.Entity())].push_back(i);
     m_dirtyIndex = false;
+}
+
+std::vector<LiveScript*> ScriptRuntime::FindAll(entt::entity entity) {
+    std::vector<LiveScript*> out;
+    if (m_dirtyIndex) Reindex();
+    auto it = m_index.find((uint32_t)entt::to_integral(entity));
+    if (it == m_index.end()) return out;
+    for (size_t i : it->second)
+        if (i < m_scripts.size() && !m_scripts[i].Dead) out.push_back(&m_scripts[i]);
+    return out;
 }
 
 LiveScript* ScriptRuntime::Find(entt::entity entity) {
     if (m_dirtyIndex) Reindex();
     auto it = m_index.find((uint32_t)entt::to_integral(entity));
     if (it == m_index.end()) return nullptr;
-    LiveScript& s = m_scripts[it->second];
-    return s.Dead ? nullptr : &s;
+    for (size_t i : it->second)
+        if (i < m_scripts.size() && !m_scripts[i].Dead) return &m_scripts[i];
+    return nullptr;
 }
 
 const LiveScript* ScriptRuntime::Find(entt::entity entity) const {
     return const_cast<ScriptRuntime*>(this)->Find(entity);
+}
+
+LiveScript* ScriptRuntime::FindMethod(entt::entity entity, const std::string& method) {
+    for (LiveScript* s : FindAll(entity))
+        if (s->Instance != kInvalidInstance && s->Backend->HasMethod(s->Instance, method)) return s;
+    return nullptr;
 }
 
 InstanceId ScriptRuntime::Build(LanguageBackend& backend, const ScriptSource& src,
@@ -191,18 +208,19 @@ sage::vars::Table ScriptRuntime::MergeFields(LanguageBackend& backend, const Scr
     return merged;
 }
 
-bool ScriptRuntime::Attach(GameObject owner, const std::string& path,
-                           const sage::vars::Table& fields) {
-    if (!owner.Valid() || path.empty()) return false;
-    LanguageBackend* backend = BackendFor(path);
+bool ScriptRuntime::Open(GameObject owner, const std::string& path, LanguageBackend*& backend,
+                         ScriptSource& src) {
+    backend = BackendFor(path);
     if (!backend) {
         ScriptError err;
         err.File = path;
         err.Message = "нет языка скриптов для этого файла";
-        Report(err);
+        Report(err, owner.Name());
+        ReportConsequence("script.not-started", sage::Severity::Error, path, owner.Name(),
+                          "Объект «" + owner.Name() + "» остался без скрипта " + path,
+                          "Для расширения этого файла нет языка — объект работает без него.");
         return false;
     }
-    ScriptSource src;
     if (!ReadSource(path, src)) {
         ScriptError err;
         err.What = ScriptError::Kind::Missing;
@@ -214,22 +232,47 @@ bool ScriptRuntime::Attach(GameObject owner, const std::string& path,
                           "Файла скрипта нет — объект работает без него.");
         return false;
     }
+    return true;
+}
 
-    Detach(owner.Entity()); // один объект — один скрипт
+bool ScriptRuntime::Attach(GameObject owner, const std::string& path,
+                           const sage::vars::Table& fields) {
+    if (!owner.Valid() || path.empty()) return false;
+    LanguageBackend* backend = nullptr;
+    ScriptSource src;
+    if (!Open(owner, path, backend, src)) return false;
+    Detach(owner.Entity()); // прежний смысл: этот скрипт — ВМЕСТО всех
+    return Spawn(*backend, src, owner, fields, -1) != nullptr;
+}
 
-    const sage::vars::Table merged = MergeFields(*backend, src, fields);
-    const InstanceId id = Build(*backend, src, owner, merged);
-    if (id == kInvalidInstance) return false;
+LiveScript* ScriptRuntime::Add(GameObject owner, const std::string& path, const sage::vars::Table& fields,
+                               int slot) {
+    if (!owner.Valid() || path.empty()) return nullptr;
+    LanguageBackend* backend = nullptr;
+    ScriptSource src;
+    if (!Open(owner, path, backend, src)) return nullptr;
+    return Spawn(*backend, src, owner, fields, slot);
+}
+
+LiveScript* ScriptRuntime::Spawn(LanguageBackend& backend, const ScriptSource& src, GameObject owner,
+                                 const sage::vars::Table& fields, int slot) {
+    const sage::vars::Table merged = MergeFields(backend, src, fields);
+    const InstanceId id = Build(backend, src, owner, merged);
+    if (id == kInvalidInstance) return nullptr;
 
     LiveScript s;
     s.Owner = owner;
-    s.Backend = backend;
+    s.Backend = &backend;
     s.Instance = id;
-    s.Path = path;
+    s.Path = src.Path;
+    s.Slot = slot;
     s.Stamp = src.Stamp;
     s.Fields = merged;
     m_scripts.push_back(std::move(s));
-    m_dirtyIndex = true;
+    // Индекс дописывается сразу, без полной пересборки: добавление в конец
+    // номеров прежних записей не меняет.
+    if (!m_dirtyIndex) m_index[(uint32_t)entt::to_integral(owner.Entity())].push_back(m_scripts.size() - 1);
+    LiveScript& live = m_scripts.back();
 
     // Start зовётся СРАЗУ: скрипт, созданный посреди кадра (Instantiate), не
     // должен ждать следующего кадра, чтобы себя настроить. Кроме запуска
@@ -237,11 +280,13 @@ bool ScriptRuntime::Attach(GameObject owner, const std::string& path,
     // иначе Start первого скрипта, обратившегося к соседу
     // (`Scene.find("Player"):call(...)`), не находил бы у соседа скрипта.
     if (m_batch > 0) {
-        m_pendingStart.push_back(owner.Entity());
-        return true;
+        m_pendingStart.push_back({owner.Entity(), &backend, id});
+        return &live;
     }
-    StartScript(m_scripts.back());
-    return true;
+    // Скрипт, снявший свой объект прямо в Start, подключён честно: ответ —
+    // запись (Dead её отличит), а не «не загрузился».
+    StartScript(live);
+    return &live;
 }
 
 void ScriptRuntime::StartScript(LiveScript& live) {
@@ -263,43 +308,46 @@ void ScriptRuntime::BeginBatch() { ++m_batch; }
 
 void ScriptRuntime::EndBatch() {
     if (m_batch == 0 || --m_batch > 0) return;
-    // По ОДНОМУ и заново ищем: Start вправе создать объект со скриптом, и
-    // вектор скриптов перевыделится.
-    std::vector<entt::entity> pending;
+    // По ОДНОМУ и заново ищем: Start вправе создать объект со скриптом или
+    // снять соседа.
+    std::vector<PendingStart> pending;
     pending.swap(m_pendingStart);
-    for (entt::entity e : pending)
-        if (LiveScript* s = Find(e)) StartScript(*s);
+    for (const PendingStart& p : pending)
+        for (LiveScript* s : FindAll(p.Entity))
+            if (s->Backend == p.Backend && s->Instance == p.Instance) {
+                StartScript(*s);
+                break;
+            }
+}
+
+void ScriptRuntime::Kill(LiveScript& s) {
+    if (s.Dead) return;
+    // Помечается ДО хуков: OnDestroy, позвавший снятие своего же объекта,
+    // не должен войти сюда второй раз.
+    s.Dead = true;
+    m_dirtyIndex = true;
+    const InstanceId id = s.Instance;
+    if (id == kInvalidInstance) return;
+    ScriptError err;
+    if (s.Enabled && s.Started && s.Backend->Has(id, Hook::OnDisable))
+        s.Backend->Call(id, Hook::OnDisable, 0.0f, err);
+    if (s.Backend->Has(id, Hook::OnDestroy)) s.Backend->Call(id, Hook::OnDestroy, 0.0f, err);
+    s.Backend->Destroy(id);
+    s.Instance = kInvalidInstance;
 }
 
 void ScriptRuntime::Detach(entt::entity entity) {
-    LiveScript* s = Find(entity);
-    if (!s) return;
-    ScriptError err;
-    if (s->Enabled && s->Backend->Has(s->Instance, Hook::OnDisable))
-        s->Backend->Call(s->Instance, Hook::OnDisable, 0.0f, err);
-    if (s->Backend->Has(s->Instance, Hook::OnDestroy))
-        s->Backend->Call(s->Instance, Hook::OnDestroy, 0.0f, err);
-    s->Backend->Destroy(s->Instance);
-    s->Instance = kInvalidInstance;
-    s->Dead = true;
-    m_dirtyIndex = true;
+    for (LiveScript* s : FindAll(entity)) Kill(*s);
 }
 
 void ScriptRuntime::DetachAll() {
-    for (LiveScript& s : m_scripts) {
-        if (s.Dead || s.Instance == kInvalidInstance) continue;
-        ScriptError err;
-        if (s.Enabled && s.Backend->Has(s.Instance, Hook::OnDisable))
-            s.Backend->Call(s.Instance, Hook::OnDisable, 0.0f, err);
-        if (s.Backend->Has(s.Instance, Hook::OnDestroy))
-            s.Backend->Call(s.Instance, Hook::OnDestroy, 0.0f, err);
-        s.Backend->Destroy(s.Instance);
-        s.Instance = kInvalidInstance;
-        s.Dead = true;
-    }
+    // По индексу: OnDestroy вправе создать объект со скриптом — он тоже
+    // должен быть снят, а не брошен живым в языке.
+    for (size_t i = 0; i < m_scripts.size(); ++i) Kill(m_scripts[i]);
     m_scripts.clear();
     m_index.clear();
     m_dirtyIndex = false;
+    m_pendingStart.clear();
 }
 
 void ScriptRuntime::Report(const ScriptError& err, const std::string& subject) {
@@ -384,19 +432,21 @@ void ScriptRuntime::Dispatch(Hook hook, float dt) {
 }
 
 void ScriptRuntime::DispatchTo(entt::entity entity, Hook hook, GameObject other) {
-    LiveScript* s = Find(entity);
-    if (!s || s->Muted || !s->Enabled) return;
-    if (!s->Backend->Has(s->Instance, hook)) return;
-    ScriptError err;
-    Guard(*s, s->Backend->CallWith(s->Instance, hook, other, err), err, hook);
+    for (LiveScript* s : FindAll(entity)) {
+        if (s->Dead || s->Muted || !s->Enabled || !s->Backend->Has(s->Instance, hook)) continue;
+        ScriptError err;
+        const bool ok = s->Backend->CallWith(s->Instance, hook, other, err);
+        Guard(*s, ok, err, hook);
+    }
 }
 
 void ScriptRuntime::DispatchNamed(entt::entity entity, Hook hook, const std::string& name) {
-    LiveScript* s = Find(entity);
-    if (!s || s->Muted || !s->Enabled) return;
-    if (!s->Backend->Has(s->Instance, hook)) return;
-    ScriptError err;
-    Guard(*s, s->Backend->CallNamed(s->Instance, hook, name, err), err, hook);
+    for (LiveScript* s : FindAll(entity)) {
+        if (s->Dead || s->Muted || !s->Enabled || !s->Backend->Has(s->Instance, hook)) continue;
+        ScriptError err;
+        const bool ok = s->Backend->CallNamed(s->Instance, hook, name, err);
+        Guard(*s, ok, err, hook);
+    }
 }
 
 bool ScriptRuntime::AnyHas(Hook a, Hook b) const {
@@ -428,7 +478,7 @@ bool ScriptRuntime::Invoke(entt::entity entity, const std::string& method,
 
 bool ScriptRuntime::Invoke(entt::entity entity, const std::string& method,
                            const std::vector<sage::vars::Value>& args, std::vector<sage::vars::Value>& results) {
-    LiveScript* s = Find(entity);
+    LiveScript* s = FindMethod(entity, method);
     if (!s) return false;
     ScriptError err;
     const bool ok = s->Backend->Invoke(s->Instance, method, args, results, err);
@@ -440,9 +490,10 @@ bool ScriptRuntime::Invoke(entt::entity entity, const std::string& method,
 }
 
 int ScriptRuntime::QueueTests(entt::entity entity) {
-    LiveScript* s = Find(entity);
-    if (!s || s->Instance == kInvalidInstance) return 0;
-    return s->Backend->QueueTests(s->Instance, s->Path);
+    int n = 0;
+    for (LiveScript* s : FindAll(entity))
+        if (s->Instance != kInvalidInstance) n += s->Backend->QueueTests(s->Instance, s->Path);
+    return n;
 }
 
 void ScriptRuntime::TickTests(float dt, std::vector<TestResult>& finished) {
@@ -457,7 +508,7 @@ int ScriptRuntime::PendingTests() const {
 
 bool ScriptRuntime::InvokeEvent(entt::entity entity, const std::string& method,
                                 const sage::events::Event& event) {
-    LiveScript* s = Find(entity);
+    LiveScript* s = FindMethod(entity, method);
     if (!s) return false;
     ScriptError err;
     const bool ok = s->Backend->InvokeEvent(s->Instance, method, event, err);
@@ -469,13 +520,16 @@ bool ScriptRuntime::InvokeEvent(entt::entity entity, const std::string& method,
 }
 
 void ScriptRuntime::SetEnabled(entt::entity entity, bool enabled) {
-    LiveScript* s = Find(entity);
-    if (!s || s->Enabled == enabled) return;
-    s->Enabled = enabled;
-    const Hook hook = enabled ? Hook::OnEnable : Hook::OnDisable;
-    if (!s->Backend->Has(s->Instance, hook)) return;
-    ScriptError err;
-    Guard(*s, s->Backend->Call(s->Instance, hook, 0.0f, err), err, hook);
+    for (LiveScript* s : FindAll(entity)) {
+        if (s->Enabled == enabled) continue;
+        s->Enabled = enabled;
+        const Hook hook = enabled ? Hook::OnEnable : Hook::OnDisable;
+        // До Start края нет: OnEnable придёт из самого StartScript.
+        if (!s->Started || !s->Backend->Has(s->Instance, hook)) continue;
+        ScriptError err;
+        const bool ok = s->Backend->Call(s->Instance, hook, 0.0f, err);
+        Guard(*s, ok, err, hook);
+    }
 }
 
 void ScriptRuntime::Tick(float dt) {
@@ -490,8 +544,38 @@ void ScriptRuntime::Sweep() {
     Reindex();
 }
 
+// Новый экземпляр собирается РЯДОМ со старым и заменяет его только если
+// собрался: скрипт с опечаткой не убивает рабочий. Значения полей — те же,
+// что у объекта, плюс умолчания переменных, появившихся в файле.
+bool ScriptRuntime::Rebuild(LiveScript& s, const ScriptSource& src) {
+    // Копии — до Build: файл при выполнении вправе породить объект со
+    // скриптом, и всё, что читается из s после, читается заново.
+    LanguageBackend* backend = s.Backend;
+    const GameObject owner = s.Owner;
+    sage::vars::Table fields = MergeFields(*backend, src, s.Fields);
+    const InstanceId fresh = Build(*backend, src, owner, fields);
+    if (fresh == kInvalidInstance) return false; // прежний экземпляр остаётся жить
+    const InstanceId old = s.Instance;
+    s.Fields = std::move(fields);
+    s.Instance = fresh;
+    s.Errors = 0;
+    s.Muted = false;
+    s.Started = true;
+    ScriptError err;
+    if (backend->Has(old, Hook::OnDestroy)) backend->Call(old, Hook::OnDestroy, 0.0f, err);
+    backend->Destroy(old);
+    if (backend->Has(fresh, Hook::Start)) {
+        ScriptError startErr;
+        const bool ok = backend->Call(fresh, Hook::Start, 0.0f, startErr);
+        Guard(s, ok, startErr, Hook::Start);
+    }
+    return true;
+}
+
 int ScriptRuntime::ReloadChanged() {
     int reloaded = 0;
+    // По индексу: пересборка выполняет файл и Start, а они вправе породить
+    // объект со скриптом.
     for (size_t i = 0; i < m_scripts.size(); ++i) {
         LiveScript& s = m_scripts[i];
         if (s.Dead || s.Stamp == 0) continue; // из пакета — перезагружать нечего
@@ -501,25 +585,7 @@ int ScriptRuntime::ReloadChanged() {
         // Штамп запоминаем СРАЗУ, даже если скрипт не собрался: иначе одна и та
         // же опечатка писалась бы в консоль шестьдесят раз в секунду.
         s.Stamp = src.Stamp;
-        // Объявление могло измениться вместе с файлом: новая переменная
-        // обязана приехать со своим умолчанием, а уже настроенная — остаться.
-        s.Fields = MergeFields(*s.Backend, src, s.Fields);
-        const InstanceId fresh = Build(*s.Backend, src, s.Owner, s.Fields);
-        if (fresh == kInvalidInstance) continue; // прежний экземпляр остаётся жить
-        ScriptError err;
-        if (s.Backend->Has(s.Instance, Hook::OnDestroy))
-            s.Backend->Call(s.Instance, Hook::OnDestroy, 0.0f, err);
-        s.Backend->Destroy(s.Instance);
-        s.Instance = fresh;
-        s.Errors = 0;
-        s.Muted = false;
-        s.Started = false;
-        if (s.Backend->Has(fresh, Hook::Start)) {
-            ScriptError startErr;
-            Guard(s, s.Backend->Call(fresh, Hook::Start, 0.0f, startErr), startErr, Hook::Start);
-        }
-        s.Started = true;
-        ++reloaded;
+        if (Rebuild(s, src)) ++reloaded;
     }
     if (reloaded > 0) LOG_INFO("Script") << "перечитано скриптов: " << reloaded;
     return reloaded;
@@ -527,27 +593,13 @@ int ScriptRuntime::ReloadChanged() {
 
 int ScriptRuntime::Reload(const std::string& path) {
     int reloaded = 0;
-    for (LiveScript& s : m_scripts) {
+    for (size_t i = 0; i < m_scripts.size(); ++i) {
+        LiveScript& s = m_scripts[i];
         if (s.Dead || s.Path != path) continue;
         ScriptSource src;
         if (!ReadSource(s.Path, src)) continue;
-        s.Fields = MergeFields(*s.Backend, src, s.Fields);
-        const InstanceId fresh = Build(*s.Backend, src, s.Owner, s.Fields);
-        if (fresh == kInvalidInstance) continue;
-        ScriptError err;
-        if (s.Backend->Has(s.Instance, Hook::OnDestroy))
-            s.Backend->Call(s.Instance, Hook::OnDestroy, 0.0f, err);
-        s.Backend->Destroy(s.Instance);
-        s.Instance = fresh;
         s.Stamp = src.Stamp;
-        s.Errors = 0;
-        s.Muted = false;
-        if (s.Backend->Has(fresh, Hook::Start)) {
-            ScriptError startErr;
-            Guard(s, s.Backend->Call(fresh, Hook::Start, 0.0f, startErr), startErr, Hook::Start);
-        }
-        s.Started = true;
-        ++reloaded;
+        if (Rebuild(s, src)) ++reloaded;
     }
     return reloaded;
 }

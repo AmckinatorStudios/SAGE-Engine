@@ -74,8 +74,17 @@ inline bool ShowsHoverPreview(PreviewSource s) { return s != PreviewSource::Icon
 // показать только картинки и подпись).
 // projectDir — папка проекта: по ней находится снимок сцены (.sage). Пусто —
 // сцена получит значок типа, как и всё, у чего обложки нет.
+//
+// info (необязательно) — то, что вызывающий уже знает о файле: тип словом и
+// дата правки. С ним подсказка есть И У ФАЙЛОВ БЕЗ КАРТИНКИ — компактная, без
+// площадки: имя, тип, размер, дата (панель ассетов). Без него — как раньше:
+// значки подсказки не получают (файловый диалог).
+struct HoverInfo {
+    std::string Kind;       // «Модель», «Текстура»
+    std::string Modified;   // «2026-11-21 14:05»
+};
 void DrawHoverPreview(const std::filesystem::path& full, bool isDir, const std::string& name,
                       uintmax_t bytes, AssetPreview* preview,
-                      const std::filesystem::path& projectDir = {});
+                      const std::filesystem::path& projectDir = {}, const HoverInfo* info = nullptr);
 
 } // namespace sage::editor::covers

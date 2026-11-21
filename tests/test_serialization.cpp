@@ -212,7 +212,7 @@ TEST(Scene_string_roundtrip_entities_and_transforms) {
     // Скрипт пережил round-trip.
     const ScriptComponent* sc = loaded->Registry().try_get<ScriptComponent>(la.Entity());
     CHECK_TRUE(sc != nullptr);
-    if (sc) CHECK_EQ(sc->Path, std::string("scripts/spin.lua"));
+    if (sc) CHECK_EQ(sc->FirstPath(), std::string("scripts/spin.lua"));
 
     GameObject lb = FindByName(*loaded, "Beta");
     CHECK_TRUE(lb.Valid());

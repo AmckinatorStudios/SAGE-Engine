@@ -34,7 +34,7 @@ int ScriptingSystem::AttachScene(Scene& scene) {
     std::vector<GameObject> owners;
     auto view = scene.Registry().view<ScriptComponent>();
     for (auto e : view)
-        if (!view.get<ScriptComponent>(e).Path.empty()) owners.emplace_back(&scene.Registry(), e);
+        if (!view.get<ScriptComponent>(e).Scripts.empty()) owners.emplace_back(&scene.Registry(), e);
     auto order = [](const GameObject& o) -> long long {
         const IdComponent* id = o.Registry()->try_get<IdComponent>(o.Entity());
         return id ? (long long)id->Id : (1ll << 40) + (long long)entt::to_integral(o.Entity());
@@ -44,10 +44,9 @@ int ScriptingSystem::AttachScene(Scene& scene) {
     // Start всех — после подключения всех (см. ScriptRuntime::BeginBatch).
     m_runtime.BeginBatch();
     m_attachedPlugins = AttachPlugins(scene);
-    for (GameObject& o : owners) {
-        const ScriptComponent& sc = o.Registry()->get<ScriptComponent>(o.Entity());
-        if (m_runtime.Attach(o, sc.Path, sc.Fields)) ++attached;
-    }
+    // Внутри объекта — по порядку списка, группы на него не влияют. Ошибка
+    // или пропавший файл одного скрипта не мешает подключить следующие.
+    for (GameObject& o : owners) attached += AttachComponent(o);
     m_runtime.EndBatch();
     InstallLinks(scene);
     return attached;
@@ -130,10 +129,10 @@ int ScriptingSystem::InstallLinksOf(Scene& scene, entt::entity e) {
             // имени метода лучше увидеть в консоли до того, как пойдёшь
             // проверять кнопку.
             if (const LiveScript* s = m_runtime.Find(target.Entity())) {
-                if (!s->Backend->HasMethod(s->Instance, link.Method))
+                if (!m_runtime.FindMethod(target.Entity(), link.Method))
                     LOG_ERROR("Signals") << "Связь «" << title << "» объекта '" << ownerName
-                                         << "': в скрипте " << s->Path << " объекта '" << targetName
-                                         << "' нет метода " << link.Method;
+                                         << "': ни в одном скрипте объекта '" << targetName << "' ("
+                                         << s->Path << "…) нет метода " << link.Method;
             } else {
                 LOG_ERROR("Signals") << "Связь «" << title << "» объекта '" << ownerName
                                      << "': у объекта '" << targetName << "' нет скрипта — "
@@ -185,9 +184,9 @@ void ScriptingSystem::CallLink(Scene& scene, const sage::signals::Link& link,
                              << target.Name() << "' нет скрипта — " << link.Method << "() не вызван";
         return;
     }
-    if (!s->Backend->HasMethod(s->Instance, link.Method)) {
-        LOG_ERROR("Signals") << "Связь «" << title << "» объекта '" << ownerName << "': в скрипте "
-                             << s->Path << " объекта '" << target.Name() << "' нет метода "
+    if (!m_runtime.FindMethod(target.Entity(), link.Method)) {
+        LOG_ERROR("Signals") << "Связь «" << title << "» объекта '" << ownerName
+                             << "': ни в одном скрипте объекта '" << target.Name() << "' нет метода "
                              << link.Method;
         return;
     }
@@ -195,10 +194,36 @@ void ScriptingSystem::CallLink(Scene& scene, const sage::signals::Link& link,
     m_runtime.InvokeEvent(target.Entity(), link.Method, event);
 }
 
+int ScriptingSystem::AttachComponent(GameObject object) {
+    const ScriptComponent* sc = object.Registry()->try_get<ScriptComponent>(object.Entity());
+    if (!sc) return 0;
+    // Копия списка: Start подключённого скрипта вправе добавить объекту ещё
+    // один (AddComponent), и вектор компонента перевыделится посреди обхода.
+    const std::vector<ScriptEntry> entries = sc->Scripts;
+    int attached = 0;
+    for (size_t i = 0; i < entries.size(); ++i) {
+        // Пустая строка — скрипт добавлен в инспекторе, файл ещё не выбран:
+        // это незаконченная настройка, а не ошибка.
+        if (entries[i].Path.empty()) continue;
+        if (m_runtime.Add(object, entries[i].Path, entries[i].Fields, (int)i)) ++attached;
+    }
+    return attached;
+}
+
+LiveScript* ScriptingSystem::AttachScript(GameObject object, size_t slot) {
+    if (!object.Valid()) return nullptr;
+    const ScriptComponent* sc = object.Registry()->try_get<ScriptComponent>(object.Entity());
+    if (!sc || slot >= sc->Scripts.size() || sc->Scripts[slot].Path.empty()) return nullptr;
+    const ScriptEntry entry = sc->Scripts[slot];
+    return m_runtime.Add(object, entry.Path, entry.Fields, (int)slot);
+}
+
 bool ScriptingSystem::Attach(GameObject object) {
     if (!object.Valid()) return false;
-    const ScriptComponent* sc = object.Registry()->try_get<ScriptComponent>(object.Entity());
-    const bool attached = sc && !sc->Path.empty() && m_runtime.Attach(object, sc->Path, sc->Fields);
+    // Повторное подключение (объект пересоздан) — ВМЕСТО прежних экземпляров,
+    // а не в добавок к ним: иначе Update звался бы дважды за кадр.
+    m_runtime.Detach(object.Entity());
+    const bool attached = AttachComponent(object) > 0;
     // Связи объекта, появившегося посреди игры (префаб), ставятся так же, как
     // у объектов, бывших в сцене с начала.
     if (Scene* scene = m_runtime.Services().ScenePtr) InstallLinks(*scene, object.Entity());

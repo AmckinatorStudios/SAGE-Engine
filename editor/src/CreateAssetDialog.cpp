@@ -52,6 +52,7 @@ AssetsPanel::CreateKind KindFor(What kind) {
         case What::Folder: return AssetsPanel::CreateKind::Folder;
         case What::Scene: return AssetsPanel::CreateKind::Scene;
         case What::Material: return AssetsPanel::CreateKind::Material;
+        case What::AnimGraph: return AssetsPanel::CreateKind::AnimGraph;
         case What::TextFile: return AssetsPanel::CreateKind::TextFile;
         default: return AssetsPanel::CreateKind::None;   // логика — через свой вид
     }
@@ -71,6 +72,7 @@ const char* TitleOf(What kind) {
         case What::Folder: return T("New folder");
         case What::Scene: return T("New scene");
         case What::Material: return T("New material");
+        case What::AnimGraph: return T("New animation graph");
         case What::TextFile: return T("New text file");
         case What::Shader: return T("New shader");
         case What::Script:
@@ -380,6 +382,7 @@ void Draw(EditorHost& host) {
             // Граф — сразу в его редактор: Script Graph — в Script Graph, AI
             // Graph — в AI Graph; выбор типа однозначно задаёт и редактор.
             if (lk && lk->Open && s.Req.OpenAfter) lk->Open(host, created);
+            if (s.Req.Kind == What::AnimGraph && s.Req.OpenAfter) host.OpenAnimGraph(sage::PathToUtf8(created));
             host.SetStatusMessage(T("Created: ") + sage::PathToUtf8(created.filename()));
             s.Open = false;
             ImGui::CloseCurrentPopup();

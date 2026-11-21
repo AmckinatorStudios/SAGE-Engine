@@ -37,7 +37,7 @@ namespace Sage::UI { class CommandRegistry; }
 namespace sage::editor {
 
 // Раздел меню «Окно». Порядок перечисления — порядок разделов в меню.
-enum class PanelSection { Scene, Interface, Shared, Tools, Plugins };
+enum class PanelSection { Scene, Interface, Animation, Shared, Tools, Plugins };
 
 // Место в раскладке доков по умолчанию (своё в каждом пространстве).
 enum class PanelDock { None, Left, Right, Bottom, Center };
@@ -52,7 +52,9 @@ struct PanelPlace {
 namespace panelspace {
 constexpr unsigned Scene = 1u << (unsigned)EditorWorkspace::Scene;
 constexpr unsigned Interface = 1u << (unsigned)EditorWorkspace::Interface;
+constexpr unsigned Animation = 1u << (unsigned)EditorWorkspace::Animation;
 constexpr unsigned Both = Scene | Interface;
+constexpr unsigned All = Scene | Interface | Animation;
 } // namespace panelspace
 
 struct PanelSpec {
@@ -70,6 +72,7 @@ struct PanelSpec {
     bool PerSpaceWindow = false;          // своё окно в каждом пространстве
     PanelPlace SceneDock;                 // место в раскладке пространства сцены
     PanelPlace InterfaceDock;             // ... и пространства интерфейса
+    PanelPlace AnimationDock;             // ... и пространства анимации
 
     bool InLayout = false;       // часть постоянной раскладки: её возвращает «Сбросить раскладку»
     bool Detachable = true;      // есть в меню «Отдельным окном»
@@ -118,6 +121,8 @@ public:
     // Имя окна панели в пространстве (PerSpaceWindow — с суффиксом).
     static std::string WindowId(const PanelSpec& spec, EditorWorkspace workspace);
     static bool InSpace(const PanelSpec& spec, EditorWorkspace workspace);
+    // Место панели в раскладке этого пространства.
+    static const PanelPlace& PlaceIn(const PanelSpec& spec, EditorWorkspace workspace);
 
     // Отрисовка всех панелей пространства (видимых; DrawWhenHidden — всех).
     void DrawPanels(EditorHost& host, EditorWorkspace workspace);

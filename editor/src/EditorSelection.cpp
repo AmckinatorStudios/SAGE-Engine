@@ -7,12 +7,14 @@ bool EditorSelection::Contains(int id) const {
 }
 
 void EditorSelection::SetPrimary(int id) {
+    ++m_changes;
     m_primary = id;
     m_items.clear();
     if (id != -1) m_items.push_back(id);
 }
 
 void EditorSelection::Set(const std::vector<int>& ids, bool additive) {
+    ++m_changes;
     if (!additive) m_items.clear();
     for (int id : ids) {
         if (id == -1) continue;
@@ -26,6 +28,7 @@ void EditorSelection::Set(const std::vector<int>& ids, bool additive) {
 }
 
 void EditorSelection::Toggle(int id) {
+    ++m_changes;
     if (id == -1) return;
     auto it = std::find(m_items.begin(), m_items.end(), id);
     if (it != m_items.end()) {

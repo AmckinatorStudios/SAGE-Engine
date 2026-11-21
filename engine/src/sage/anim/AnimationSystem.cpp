@@ -63,6 +63,7 @@ static void EnsureReady(AnimationComponent& am, const std::string& path) {
         am.MorphWeights.clear();
         am.OwnClips.clear();
         am.ClipResolvedFrom.clear();
+        am.Graph.Unbind();   // граф держит указатели на скелет прежней модели
     }
     if (am.Ready) return;
     am.Ready = true;
@@ -154,6 +155,46 @@ static void EnsureClipFile(AnimationComponent& am) {
     if (!am.Playing) am.Anim.Stop();
 }
 
+// Граф анимации: файл читается при смене пути и после сохранения любого графа
+// (AnimGraphRevision), привязка к скелету — при смене графа или модели.
+static void EnsureGraph(AnimationComponent& am) {
+    if (!am.GraphPath.empty()) {
+        const uint64_t rev = AnimGraphRevision();
+        if (am.GraphResolvedFrom != am.GraphPath || am.GraphRevision != rev) {
+            am.GraphResolvedFrom = am.GraphPath;
+            am.GraphRevision = rev;
+            try {
+                am.GraphAsset = std::make_shared<const AnimGraph>(
+                    LoadAnimGraph(sage::AssetDatabase::Instance().LocatePath(am.GraphPath)));
+            } catch (const std::exception& e) {
+                LOG_ERROR("Anim") << "Граф анимации не прочитан '" << am.GraphPath << "': " << e.what();
+                am.GraphAsset = nullptr;
+            }
+        }
+    } else if (!am.GraphResolvedFrom.empty()) {
+        am.GraphResolvedFrom.clear();
+        am.GraphAsset = nullptr;
+    }
+    if (!am.Model || !am.GraphAsset) {
+        if (am.Graph.Bound()) am.Graph.Unbind();
+        return;
+    }
+    if (am.Graph.Graph() == am.GraphAsset.get() && am.Graph.BoundSkeleton() == &am.Model->GetSkeleton()) return;
+    am.Graph.Bind(am.GraphAsset, &am.Model->GetSkeleton(), &am.Model->Clips(),
+                  [](const std::string& path, ClipAsset& out, std::string& err) {
+                      try {
+                          out = LoadClip(sage::AssetDatabase::Instance().LocatePath(path));
+                          return true;
+                      } catch (const std::exception& e) {
+                          err = e.what();
+                          return false;
+                      }
+                  });
+    for (const std::string& p : am.Graph.Problems()) LOG_WARN("Anim") << "Граф анимации: " << p;
+    if (am.Graph.MissingBones() > 0)
+        LOG_WARN("Anim") << "Граф анимации: " << am.Graph.MissingBones()
+                         << " каналов клипов не нашли костей в скелете " << am.ResolvedFrom;
+}
 
 // --- Обратная кинематика поверх позы ---------------------------------------
 //
@@ -322,14 +363,16 @@ void UpdateAnimators(Scene& scene, float dt) {
         AnimationComponent& am = view.get<AnimationComponent>(e);
         EnsureReady(am, SkinnedPathOf(scene, e));
         EnsureClipFile(am);
+        EnsureGraph(am);
         if (!am.Model) continue;
         am.Anim.SetSpeed(am.Speed);
+        const bool graph = am.Graph.Bound();
         // Смена Clip в компоненте (редактор/скрипт) -> плавный кросс-фейд к нему
         // (или мгновенно, если BlendTime<=0). Anim.CurrentClip() сразу становится
         // новым, поэтому переход не перезапускается каждый кадр.
         int want = am.Clip;
         int clipCount = (int)am.Model->Clips().size();
-        if (clipCount > 0 && want >= 0 && want < clipCount && want != am.Anim.CurrentClip()) {
+        if (!graph && clipCount > 0 && want >= 0 && want < clipCount && want != am.Anim.CurrentClip()) {
             if (am.BlendTime > 0.0f) am.Anim.CrossFade(want, am.BlendTime, am.Loop);
             else am.Anim.Play(want, am.Loop);
         }
@@ -338,6 +381,16 @@ void UpdateAnimators(Scene& scene, float dt) {
         // переопределение (иначе снять его было бы нечем).
         am.Anim.SetPoseOverride(am.PoseOverrides.empty() ? nullptr : &am.PoseOverrides);
         am.Anim.SetRootMotion(am.RootMotion);
+        if (graph) {
+            // Параметры — из общего словаря компонента: его пишут скрипты и
+            // C++ (SetFloat), граф только читает.
+            for (const auto& [name, value] : am.Params.Floats) am.Graph.SetFloat(name, value);
+            am.Graph.Update(am.Playing ? dt * am.Speed : 0.0f);
+            // Указатель — каждый кадр: хранилище компонентов может переехать.
+            am.Anim.SetExternalPose(&am.Graph.Pose());
+        } else {
+            am.Anim.SetExternalPose(nullptr);
+        }
         am.Anim.Update(am.Playing ? dt : 0.0f); // 0 dt: держим текущую позу
 
         // Корневое движение переносим на трансформ сущности. Поворотом

@@ -9,6 +9,8 @@
 #  сборка детерминирована и не зависит от переконфигурации CMake).
 # ============================================================================
 set(SAGE_ENGINE_SOURCES
+    src/sage/anim/AnimGraph.cpp
+    src/sage/anim/AnimGraphInstance.cpp
     src/sage/anim/AnimProperty.cpp
     src/sage/anim/AnimationSystem.cpp
     src/sage/anim/Animator.cpp
