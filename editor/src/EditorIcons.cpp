@@ -342,9 +342,10 @@ void CheckDuplicateId(const char* what) {
 }
 
 float TextGap() {
-    // От высоты строки, а не константой в пикселях: масштаб интерфейса меняет
-    // шрифт, и зазор обязан меняться вместе с ним.
-    return std::floor(ImGui::GetFontSize() * 0.42f);
+    // Один зазор на весь редактор (Kit::IconGap, уже под масштаб): раньше у
+    // кнопки он считался от кегля, а у группы и шапки был свой — соседние
+    // кнопки с одинаковым значком и подписью выходили разной ширины.
+    return EditorTheme::KitMetrics().IconGap;
 }
 
 float LabeledWidth(float line, const char* text) {
@@ -371,7 +372,8 @@ float DrawLabeled(ImDrawList* dl, ImVec2 pos, float line, const char* icon, ImU3
 
 bool Button(const char* icon, const char* label, const char* tooltip, bool active) {
     const float h = ImGui::GetFrameHeight();
-    const float icon_s = std::floor(h * 0.68f);
+    // Размер значка — токен kit, как в группе, шапке и кнопке без подписи.
+    const float icon_s = std::floor(EditorTheme::KitMetrics().IconSize);
     ImGui::PushID(label);
     CheckDuplicateId(label);
     // Нажатое состояние — акцент ПОДЛОЖКОЙ, а не заливкой.
@@ -388,7 +390,9 @@ bool Button(const char* icon, const char* label, const char* tooltip, bool activ
     // Значок и подпись — ОДНИМ блоком (DrawLabeled), а не двумя отдельными
     // рисунками: зазор между ними и вертикальное выравнивание обязаны быть
     // такими же, как во всех остальных местах редактора.
-    const ImVec2 pad = ImGui::GetStyle().FramePadding;
+    // Поле по X — токен kit (как в ButtonGroup), а не FramePadding окна: тот
+    // меняется вокруг (меню, таблицы) и делал кнопки разной ширины.
+    const ImVec2 pad(EditorTheme::KitMetrics().ButtonPadX, 0.0f);
     const float content = LabeledWidth(icon_s, label);
     const ImVec2 size(content + pad.x * 2.0f, h);
     const ImVec2 cursor = ImGui::GetCursorScreenPos();
@@ -426,7 +430,7 @@ bool IconOnlyButton(const char* icon, const char* tooltip, bool active, const gl
     // выбрать его цвет надо до того, как он ляжет на залитую подложку.
     const bool hovered = ImGui::IsItemHovered();
     const glm::vec3 use = (hovered && hoverTint) ? *hoverTint : tint;
-    const float icon_s = std::floor(h * 0.64f);
+    const float icon_s = std::floor(EditorTheme::KitMetrics().IconSize);
     const float off = std::floor((h - icon_s) * 0.5f);
     DrawAt(ImGui::GetWindowDrawList(), ImVec2(cursor.x + off, cursor.y + off), icon_s, icon,
            Col(Resolve(use)));

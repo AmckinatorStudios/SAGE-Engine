@@ -136,9 +136,9 @@ int ButtonGroup(const char* id, const GroupItem* items, int count, ButtonLook lo
     const float h = ImGui::GetFrameHeight();
     const int cols = columns > 0 ? std::min(columns, count) : count;
     const int rows = (count + cols - 1) / cols;
-    // Значок-кнопка — того же размера, что одиночная IconOnlyButton (доля
-    // высоты поля); с подписью — кегля текста.
-    const float icon = look == ButtonLook::IconOnly ? std::floor(h * 0.64f) : std::floor(K().IconSize);
+    // Значок — один размер (токен kit) и с подписью, и без: иначе кнопка без
+    // подписи рядом с подписанной выглядела бы другим весом.
+    const float icon = std::floor(K().IconSize);
     const float pad = look == ButtonLook::Compact ? K().ButtonPadXCompact : K().ButtonPadX;
     // Сегменты РАВНЫЕ: по самому широкому содержимому (или квадраты).
     float seg = h;
@@ -146,7 +146,7 @@ int ButtonGroup(const char* id, const GroupItem* items, int count, ButtonLook lo
         for (int i = 0; i < count; ++i) {
             const std::string text = Visible(items[i].Text);
             float c = text.empty() ? 0.0f : ImGui::CalcTextSize(text.c_str()).x;
-            if (items[i].Icon) c += icon + (text.empty() ? 0.0f : K().TagGap);
+            if (items[i].Icon) c += icon + (text.empty() ? 0.0f : K().IconGap);
             seg = std::max(seg, std::floor(c + pad * 2.0f));
         }
     }
@@ -170,6 +170,7 @@ int ButtonGroup(const char* id, const GroupItem* items, int count, ButtonLook lo
         ImGui::BeginDisabled(!it.Enabled);
         if (ImGui::InvisibleButton("##b", ImVec2(sw, h))) clicked = i;
         const bool hovered = ImGui::IsItemHovered(), held = ImGui::IsItemActive();
+        const bool focused = ImGui::IsItemFocused();
         // Подсказка — и у погашенной кнопки: она объясняет, почему кнопка
         // сейчас недоступна.
         if (it.Tooltip && *it.Tooltip && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
@@ -190,19 +191,24 @@ int ButtonGroup(const char* id, const GroupItem* items, int count, ButtonLook lo
         if (const ImU32 fill = EditorTheme::SegmentFill(st == State::Disabled ? State::Normal : st))
             dl->AddRectFilled(a, ImVec2(a.x + sw, a.y + h), fill, K().Rounding,
                               corners ? corners : ImDrawFlags_RoundCornersNone);
+        // Фокус клавиатуры — рамка внутри сегмента: геометрию не меняет.
+        if (focused && it.Enabled)
+            dl->AddRect(ImVec2(a.x + 1.0f, a.y + 1.0f), ImVec2(a.x + sw - 1.0f, a.y + h - 1.0f),
+                        EditorTheme::ControlBorder(State::Focused), K().Rounding);
         const State tint = it.Active ? State::Active : hovered ? State::Hover : st;
         const std::string text = look == ButtonLook::IconOnly ? std::string() : Visible(it.Text);
         const float tw = text.empty() ? 0.0f : ImGui::CalcTextSize(text.c_str()).x;
-        const float cw = (it.Icon ? icon : 0.0f) + tw + (it.Icon && tw > 0.0f ? K().TagGap : 0.0f);
+        const float cw = (it.Icon ? icon : 0.0f) + tw + (it.Icon && tw > 0.0f ? K().IconGap : 0.0f);
         float x = std::floor(a.x + std::max(K().ButtonPadXCompact, (sw - cw) * 0.5f));
         dl->PushClipRect(a, ImVec2(a.x + sw - 2.0f, a.y + h), true);
         if (it.Icon) {
             EditorIcons::Overlay(dl, x, std::floor(a.y + (h - icon) * 0.5f), icon, it.Icon,
                                  Vec3(EditorTheme::IconTint(tint)));
-            x += icon + K().TagGap;
+            x += icon + K().IconGap;
         }
         if (tw > 0.0f)
-            dl->AddText(ImVec2(x, a.y + ImGui::GetStyle().FramePadding.y),
+            // По середине сегмента по фактической высоте строки, как значок.
+            dl->AddText(ImVec2(x, std::floor(a.y + (h - ImGui::GetTextLineHeight()) * 0.5f)),
                         EditorTheme::Color32(!it.Enabled ? EditorTheme::Role::TextFaint
                                              : it.Active ? EditorTheme::Role::Accent
                                                          : EditorTheme::Role::Text),

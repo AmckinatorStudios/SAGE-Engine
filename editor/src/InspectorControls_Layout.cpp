@@ -184,10 +184,10 @@ bool SectionHeader(const char* id, const char* icon, const char* title, bool* op
     const float is = K().IconSize;
     if (icon && *icon) {
         EditorIcons::Overlay(dl, x, p.y + std::floor((h - is) * 0.5f), is, icon);
-        x += is + K().LabelGap;
+        x += is + K().IconGap;
     }
     const std::string upper = UpperTitle(title);
-    dl->AddText(ImVec2(x, p.y + (h - ImGui::GetTextLineHeight()) * 0.5f), EditorTheme::Color32(Role::Text),
+    dl->AddText(ImVec2(x, std::floor(p.y + (h - ImGui::GetTextLineHeight()) * 0.5f)), EditorTheme::Color32(Role::Text),
                 upper.c_str());
     // Шеврон — у правого края, перед кнопками: вниз — раскрыт, вправо — свёрнут.
     const float chev = std::floor(side * K().ChevronIcon);

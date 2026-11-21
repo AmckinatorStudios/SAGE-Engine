@@ -184,7 +184,8 @@ struct Kit {
     float Rounding = 4.0f;        // скругление полей и групп (= тема, RadiusFrame)
     float SeparatorThickness = 1.0f;
     float SeparatorInset = 3.0f;  // отступ внутреннего разделителя от края рамки
-    float IconSize = 16.0f;       // значок рядом с текстом (= кегль)
+    float IconSize = 16.0f;       // значок во ВСЕХ контролах одной высоты (= кегль)
+    float IconGap = 6.0f;         // значок → подпись: один зазор у всех кнопок и шапок
     float ChevronIcon = 0.62f;    // шеврон списка: доля высоты поля
     float TagPad = 10.0f;         // метка оси: поля вокруг буквы
     float TagInset = 3.0f;        // метка оси внутри сегмента
