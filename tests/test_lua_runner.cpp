@@ -37,7 +37,7 @@ std::vector<sage::scripting::TestResult> Run(const std::string& body, int maxFra
     Scene scene("t");
     const std::string path = Write("run", body);
     GameObject o = scene.CreateObject("Runner");
-    scene.Registry().emplace<ScriptComponent>(o.Entity()).Path = path;
+    scene.Registry().emplace<ScriptComponent>(o.Entity(), path);
     auto sys = MakeSystem(scene);
     sys->AttachScene(scene);
     sys->RunTests(o);

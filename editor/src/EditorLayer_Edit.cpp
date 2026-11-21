@@ -109,30 +109,39 @@ void EditorLayer::MergeScriptVars(GameObject object) {
     if (!object.Valid()) return;
     entt::registry& reg = m_scene->Registry();
     ScriptComponent* sc = reg.try_get<ScriptComponent>(object.Entity());
-    if (!sc || sc->Path.empty()) return;
+    if (!sc) return;
+    // Каждый скрипт — со СВОИМ объявлением и в свою таблицу: одноимённые
+    // переменные двух скриптов — разные настройки.
+    for (ScriptEntry& entry : sc->Scripts) {
+        if (entry.Path.empty()) continue;
+        // Путь в сцене относителен корню проекта — тем же способом, каким его
+        // разрешают меш, материал и текстура.
+        std::filesystem::path full = entry.Path;
+        if (full.is_relative() && m_project.Loaded()) full = m_project.Dir() / full;
+        std::error_code ec;
+        // Файла нет — значения не трогаем: его могли временно убрать или
+        // переименовать, и настройка должна дожить до его возвращения.
+        if (!std::filesystem::exists(full, ec)) continue;
 
-    // Путь в сцене относителен корню проекта — тем же способом, каким его
-    // разрешают меш, материал и текстура.
-    std::filesystem::path full = sc->Path;
-    if (full.is_relative() && m_project.Loaded()) full = m_project.Dir() / full;
-    std::error_code ec;
-    if (!std::filesystem::exists(full, ec)) return;
+        std::ifstream in(full, std::ios::binary);
+        if (!in) continue;
+        const std::string source((std::istreambuf_iterator<char>(in)),
+                                 std::istreambuf_iterator<char>());
 
-    std::ifstream in(full, std::ios::binary);
-    if (!in) return;
-    const std::string source((std::istreambuf_iterator<char>(in)),
-                             std::istreambuf_iterator<char>());
+        // Поля объявляет САМ СКРИПТ, на своём языке; редактор только спрашивает
+        // (см. sage/scripting/ScriptFields.h) — про Lua он не знает ничего.
+        // Пустое объявление тоже сливается: скрипт, убравший ВСЕ переменные,
+        // иначе оставлял бы их в инспекторе как действующие. Значения при
+        // этом не стираются, а гаснут (Var::Declared) — и вернутся, если
+        // переменную объявят снова.
+        const sage::vars::Table declaration = sage::scripting::ParseFields(entry.Path, source);
 
-    // Поля объявляет САМ СКРИПТ, на своём языке; редактор только спрашивает
-    // (см. sage/scripting/ScriptFields.h) — про Lua он не знает ничего.
-    const sage::vars::Table declaration = sage::scripting::ParseFields(sc->Path, source);
-    if (declaration.Empty()) return;
-
-    // Значения ЭТОГО объекта живут в самом компоненте скрипта: они объявлены
-    // скриптом и принадлежат паре «объект + скрипт». Слияние сохраняет уже
-    // расставленные настройки и добавляет новые со значением по умолчанию
-    // (см. Table::MergeDeclaration).
-    sc->Fields.MergeDeclaration(declaration);
+        // Значения ЭТОГО объекта живут в самом компоненте скрипта: они объявлены
+        // скриптом и принадлежат паре «объект + скрипт». Слияние сохраняет уже
+        // расставленные настройки и добавляет новые со значением по умолчанию
+        // (см. Table::MergeDeclaration).
+        entry.Fields.MergeDeclaration(declaration);
+    }
 }
 
 // Стопки снимков и их правила живут в EditorHistory — здесь остаётся только

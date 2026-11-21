@@ -41,6 +41,7 @@ add_executable(sage_tests
     test_environment.cpp
     test_lua_runner.cpp
     test_lua_simple.cpp
+    test_multi_script.cpp
     test_ai.cpp
     test_ai_lua.cpp
     test_ai_graph.cpp

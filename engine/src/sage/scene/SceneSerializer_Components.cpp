@@ -36,6 +36,58 @@ std::string LoadAssetRef(const json& j, const char* key) {
     return resolved.empty() ? path : resolved;
 }
 
+// ПРЕЖНИЙ ВИД ДЛЯ ОДНОГО СКРИПТА. Это самый частый случай, и в нём файл
+// сцены остаётся байт в байт прежним: дифф в git не шумит от обновления
+// редактора, а сцену по-прежнему открывает и редактор до списка скриптов.
+// Список пишется, только когда без него не обойтись.
+void SaveScripts(json& j, const ScriptComponent& sc) {
+    const bool single = sc.Scripts.size() == 1 && sc.Groups.empty() && sc.Scripts[0].Group.empty() &&
+                        !sc.Scripts[0].Path.empty();
+    if (single) {
+        SaveAssetRef(j, "script", sc.Scripts[0].Path);
+        // Значения публичных переменных скрипта — рядом с самим скриптом:
+        // они принадлежат ЭТОМУ объекту, а не файлу, и без них скрипт при
+        // следующей загрузке получил бы умолчания вместо настройки.
+        if (!sc.Scripts[0].Fields.Empty()) j["scriptVars"] = VarsToJson(sc.Scripts[0].Fields);
+        return;
+    }
+    // Пустой список тоже пишется: компонент без выбранного файла раньше
+    // исчезал при сохранении, и добавленный «на потом» скрипт терялся молча.
+    json list = json::array();
+    for (const ScriptEntry& entry : sc.Scripts) {
+        json e = json::object();
+        SaveAssetRef(e, "path", entry.Path);
+        if (!entry.Fields.Empty()) e["vars"] = VarsToJson(entry.Fields);
+        if (!entry.Group.empty()) e["group"] = entry.Group;
+        list.push_back(std::move(e));
+    }
+    j["scripts"] = std::move(list);
+    if (!sc.Groups.empty()) j["scriptGroups"] = sc.Groups;
+}
+
+void LoadScripts(const json& j, ScriptComponent& sc) {
+    sc = ScriptComponent{};
+    if (j.contains("scripts") && j["scripts"].is_array()) {
+        if (j.contains("scriptGroups") && j["scriptGroups"].is_array())
+            for (const json& g : j["scriptGroups"])
+                if (g.is_string() && !g.get<std::string>().empty() && !sc.HasGroup(g.get<std::string>()))
+                    sc.Groups.push_back(g.get<std::string>());
+        for (const json& e : j["scripts"]) {
+            if (!e.is_object()) continue;
+            ScriptEntry& entry = sc.Add(LoadAssetRef(e, "path"));
+            if (e.contains("vars")) VarsFromJson(e["vars"], entry.Fields);
+            entry.Group = e.value("group", std::string());
+            // Группа, которой нет в списке (файл правили руками), — заводится,
+            // а не теряется вместе с раскладкой.
+            if (!entry.Group.empty() && !sc.HasGroup(entry.Group)) sc.Groups.push_back(entry.Group);
+        }
+        return;
+    }
+    // Сцена до списка скриптов: один скрипт и его переменные.
+    ScriptEntry& entry = sc.Add(LoadAssetRef(j, "script"));
+    if (j.contains("scriptVars")) VarsFromJson(j["scriptVars"], entry.Fields);
+}
+
 void SaveGIStatic(json& j, const GIStaticComponent& gs) {
     j["giStatic"]["lightmapped"] = gs.Lightmapped;
     j["giStatic"]["texelScale"] = gs.TexelScale;

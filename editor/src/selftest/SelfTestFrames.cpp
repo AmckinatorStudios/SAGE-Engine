@@ -378,14 +378,14 @@ void EditorLayer::CheckLuaTestsFrame() {
     bool inspectorOk = false;
     {
         GameObject probe = m_scene->CreateObject("LuaVarsProbe");
-        m_scene->Registry().emplace<ScriptComponent>(probe.Entity()).Path =
-            "assets/scripts/examples/Player.lua";
+        m_scene->Registry().emplace<ScriptComponent>(probe.Entity(), "assets/scripts/examples/Player.lua");
         MergeScriptVars(probe);
-        const ScriptComponent& sc = m_scene->Registry().get<ScriptComponent>(probe.Entity());
-        const sage::vars::Var* speed = sc.Fields.Find("speed");
-        const sage::vars::Var* jump = sc.Fields.Find("jump_force");
+        const sage::vars::Table& fields =
+            m_scene->Registry().get<ScriptComponent>(probe.Entity()).Scripts.front().Fields;
+        const sage::vars::Var* speed = fields.Find("speed");
+        const sage::vars::Var* jump = fields.Find("jump_force");
         inspectorOk = speed && jump && speed->Data.Type() == sage::vars::Kind::Float &&
-                      std::fabs(speed->Data.AsFloat() - 5.0f) < 1e-5f && sc.Fields.Find("direction") == nullptr;
+                      std::fabs(speed->Data.AsFloat() - 5.0f) < 1e-5f && fields.Find("direction") == nullptr;
         m_scene->RemoveObject(probe.Id());
         if (!inspectorOk) LOG_ERROR("Editor") << "LUA_TESTS:   инспектор не показал speed/jump_force у Player.lua";
     }

@@ -70,7 +70,7 @@ struct World {
     GameObject Spawn(const std::string& name, const std::string& file, const std::string& body) {
         files.push_back(Write(file, body));
         GameObject o = scene.CreateObject(name);
-        scene.Registry().emplace<ScriptComponent>(o.Entity()).Path = file;
+        scene.Registry().emplace<ScriptComponent>(o.Entity(), file);
         return o;
     }
     void Start() { sys->AttachScene(scene); }

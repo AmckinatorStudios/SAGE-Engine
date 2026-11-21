@@ -58,11 +58,17 @@ void InspectorPanel::Draw(EditorHost& host, bool* open, const std::string& windo
             // Скрипт адресован СУЩНОСТИ, а не полю: за кадр ожидания сцену могли
             // перезагрузить, и указатель на поле компонента уже никуда не годился бы.
             GameObject target = host.CurrentScene().Get(m_browseScriptEntity);
+            const int slot = m_browseScriptSlot;
             m_browseScriptEntity = -1;
+            m_browseScriptSlot = -1;
             if (target.Valid()) {
                 host.PushUndoSnapshot();
-                host.CurrentScene().Registry().emplace_or_replace<ScriptComponent>(
-                    target.Entity(), ScriptComponent{picked});
+                // Файл меняется у ОДНОГО скрипта: раньше компонент заменялся
+                // целиком, и вместе с ним пропадали значения переменных (а теперь
+                // пропадали бы и соседние скрипты).
+                ScriptComponent& sc = host.CurrentScene().Registry().get_or_emplace<ScriptComponent>(target.Entity());
+                if (slot >= 0 && slot < (int)sc.Scripts.size()) sc.Scripts[(size_t)slot].Path = picked;
+                else sc.Add(picked);
             }
         } else if (m_browseAudioEntity >= 0) {
             // Звук адресован сущности — ровно как скрипт выше.

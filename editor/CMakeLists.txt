@@ -125,6 +125,7 @@ add_executable(SageEditor WIN32
     src/panels/InspectorPanel_Effects.cpp
     src/panels/InspectorPanel_RenderTexture.cpp
     src/panels/InspectorPanel_Ai.cpp
+    src/panels/InspectorPanel_Script.cpp
     src/animgraph/AnimGraphPanel.cpp
     src/animgraph/AnimGraphPanel_Canvas.cpp
     src/animgraph/AnimGraphPanel_Sides.cpp

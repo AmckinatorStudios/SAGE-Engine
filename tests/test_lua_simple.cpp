@@ -68,9 +68,7 @@ struct World {
         const std::string path = Write(file, body);
         files.push_back(path);
         GameObject o = scene.CreateObject(name);
-        auto& sc = scene.Registry().emplace<ScriptComponent>(o.Entity());
-        sc.Path = path;
-        sc.Fields = fields;
+        scene.Registry().emplace<ScriptComponent>(o.Entity(), path, fields);
         return o;
     }
     void Start() { sys->AttachScene(scene); }
@@ -390,7 +388,7 @@ TEST(LuaSimple_instances_are_isolated_and_legacy_style_still_works) {
     const std::string body = "count = 0\nfunction Update(dt) count = count + 1 end\n";
     GameObject a = w.Spawn("A", "shared", body);
     GameObject b = w.scene.CreateObject("B");
-    w.scene.Registry().emplace<ScriptComponent>(b.Entity()).Path = w.files.back();
+    w.scene.Registry().emplace<ScriptComponent>(b.Entity(), w.files.back());
     GameObject legacy = w.Spawn("Old", "legacy", R"(
 function OnUpdate(entity, dt)
     entity.Transform.Position.x = entity.Transform.Position.x + 1

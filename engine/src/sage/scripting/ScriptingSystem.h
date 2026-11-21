@@ -81,6 +81,9 @@ public:
     // Объект и всё его поддерево — то, что поставил префаб или добавила
     // сцена поверх сцены. Возвращает, сколько скриптов привязано.
     int AttachSubtree(GameObject root);
+    // Подключает ОДИН скрипт объекта (место slot в ScriptComponent::Scripts),
+    // не трогая остальные: скрипт, добавленный посреди игры кодом.
+    LiveScript* AttachScript(GameObject object, size_t slot);
     void Detach(GameObject object) {
         if (object.Valid()) m_runtime.Detach(object.Entity());
     }
@@ -165,6 +168,8 @@ private:
     void DispatchKeys();
 
     int AttachPlugins(Scene& scene);
+    // Все скрипты компонента объекта по порядку; сколько подключилось.
+    int AttachComponent(GameObject object);
 
     ScriptRuntime m_runtime;
     std::vector<sage::plugins::Manifest> m_plugins;

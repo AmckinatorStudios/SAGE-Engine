@@ -119,7 +119,7 @@ struct Reports {
 
 GameObject AddScript(Scene& scene, const char* objectName, const std::string& path) {
     GameObject o = scene.CreateObject(objectName);
-    scene.Registry().emplace<ScriptComponent>(o.Entity()).Path = path;
+    scene.Registry().emplace<ScriptComponent>(o.Entity(), path);
     return o;
 }
 

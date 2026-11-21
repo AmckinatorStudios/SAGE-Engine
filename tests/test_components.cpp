@@ -71,7 +71,7 @@ TEST(Components_survive_a_scene_round_trip) {
     cc.Primary = true;
 
     GameObject script = scene.CreateObject("Script");
-    script.Registry()->emplace<ScriptComponent>(script.Entity()).Path = "assets/scripts/x.lua";
+    script.Registry()->emplace<ScriptComponent>(script.Entity(), "assets/scripts/x.lua");
 
     GameObject body = scene.CreateObject("Body");
     RigidBodyComponent& rb = body.Registry()->emplace<RigidBodyComponent>(body.Entity());
@@ -110,7 +110,7 @@ TEST(Components_survive_a_scene_round_trip) {
     GameObject s = Find<ScriptComponent>(*loaded);
     CHECK_TRUE(s.Valid());
     if (s.Valid()) {
-        CHECK_TRUE(s.Registry()->get<ScriptComponent>(s.Entity()).Path == "assets/scripts/x.lua");
+        CHECK_TRUE(s.Registry()->get<ScriptComponent>(s.Entity()).FirstPath() == "assets/scripts/x.lua");
     }
 
     GameObject b = Find<RigidBodyComponent>(*loaded);

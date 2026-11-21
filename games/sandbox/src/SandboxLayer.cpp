@@ -58,7 +58,7 @@ void SandboxLayer::OnAttach() {
     m_scripts->BindScene(m_scene);
     auto view = m_scene.Registry().view<ScriptComponent>();
     for (auto e : view) {
-        m_scripts->AttachScript(GameObject(&m_scene.Registry(), e), view.get<ScriptComponent>(e).Path);
+        m_scripts->AttachScript(GameObject(&m_scene.Registry(), e), view.get<ScriptComponent>(e).FirstPath());
     }
 
     m_camera.Position = {6.5f, 5.0f, 6.5f};

@@ -496,6 +496,7 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
     inst.Owner = owner;
     inst.Env = env;
     inst.Methods = sage::scripting::ParseMethods(source.Path, source.Text);
+    inst.Path = source.Path;
     sol::object returned = result.get<sol::object>();
     if (returned.get_type() == sol::type::table) {
         inst.Class = returned.as<sol::table>();
@@ -526,7 +527,7 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
 
     m_instances[id] = std::move(inst);
     EnsureEventTap();
-    if (owner.Valid()) m_byEntity[(uint32_t)entt::to_integral(owner.Entity())] = id;
+    if (owner.Valid()) m_byEntity[(uint32_t)entt::to_integral(owner.Entity())].push_back(id);
     return id;
 }
 
@@ -542,7 +543,11 @@ void Backend::Destroy(InstanceId id) {
     {
         const uint32_t key = (uint32_t)entt::to_integral(it->second.Owner.Entity());
         auto e = m_byEntity.find(key);
-        if (e != m_byEntity.end() && e->second == id) m_byEntity.erase(e);
+        if (e != m_byEntity.end()) {
+            std::vector<InstanceId>& ids = e->second;
+            ids.erase(std::remove(ids.begin(), ids.end(), id), ids.end());
+            if (ids.empty()) m_byEntity.erase(e);
+        }
     }
     m_instances.erase(it);
 }
@@ -684,22 +689,69 @@ void Backend::Reset() {
     }
 }
 
-sol::object Backend::ScriptOf(GameObject object) {
-    if (!object.Valid()) return sol::lua_nil;
+std::vector<InstanceId> Backend::InstancesOf(GameObject object) const {
+    std::vector<InstanceId> out;
+    if (!object.Valid()) return out;
+    if (m_services.System) {
+        for (LiveScript* s : m_services.System->Runtime().FindAll(object.Entity()))
+            if (s->Backend == this && s->Instance != kInvalidInstance) out.push_back(s->Instance);
+        return out;
+    }
     auto it = m_byEntity.find((uint32_t)entt::to_integral(object.Entity()));
-    if (it == m_byEntity.end()) return sol::lua_nil;
-    Instance* inst = Get(it->second);
-    if (!inst) return sol::lua_nil;
-    return inst->Self;
+    if (it != m_byEntity.end()) out = it->second;
+    return out;
+}
+
+namespace {
+// «Health», «health.lua», «assets/scripts/health.lua» — всё это один скрипт.
+bool ScriptNamed(const std::string& path, const std::string& name) {
+    if (name.empty()) return true;
+    auto lower = [](std::string t) {
+        for (char& c : t) c = (char)std::tolower((unsigned char)c);
+        for (char& c : t)
+            if (c == '\\') c = '/';
+        return t;
+    };
+    const std::string p = lower(path), n = lower(name);
+    if (p == n) return true;
+    const size_t slash = p.find_last_of('/');
+    const std::string file = slash == std::string::npos ? p : p.substr(slash + 1);
+    if (file == n) return true;
+    const size_t dot = file.find_last_of('.');
+    return dot != std::string::npos && file.compare(0, dot, n) == 0 && dot == n.size();
+}
+} // namespace
+
+sol::object Backend::SelfOf(InstanceId id) {
+    Instance* inst = Get(id);
+    return inst ? sol::object(inst->Self) : sol::object(sol::lua_nil);
+}
+
+sol::object Backend::ScriptOf(GameObject object, const std::string& name) {
+    for (InstanceId id : InstancesOf(object)) {
+        Instance* inst = Get(id);
+        if (inst && ScriptNamed(inst->Path, name)) return inst->Self;
+    }
+    return sol::lua_nil;
 }
 
 sol::object Backend::InvokeOn(GameObject object, const std::string& method,
                               sol::variadic_args args) {
     if (!object.Valid()) return sol::lua_nil;
-    auto it = m_byEntity.find((uint32_t)entt::to_integral(object.Entity()));
-    if (it == m_byEntity.end()) {
-        // Скрипт объекта — на другом языке: вызов идёт через рантайм, значения
-        // — общим словарём движка (vars::Value) туда и обратно.
+    // Первый скрипт ЭТОГО языка с таким методом; нет — может быть, метод у
+    // скрипта на другом языке: тогда через рантайм, значения — общим словарём
+    // движка (vars::Value) туда и обратно.
+    InstanceId target = kInvalidInstance;
+    Instance* inst = nullptr;
+    for (InstanceId id : InstancesOf(object)) {
+        Instance* candidate = Get(id);
+        if (candidate && MethodOf(*candidate, method).valid()) {
+            target = id;
+            inst = candidate;
+            break;
+        }
+    }
+    if (!inst) {
         if (!m_services.System) return sol::lua_nil;
         std::vector<sage::vars::Value> in, out;
         for (const sol::stack_proxy& a : args) in.push_back(FromLua(sol::object(a)));
@@ -707,11 +759,9 @@ sol::object Backend::InvokeOn(GameObject object, const std::string& method,
             return sol::lua_nil;
         return ToLua(out.front());
     }
-    Instance* inst = Get(it->second);
-    if (!inst) return sol::lua_nil;
     sol::protected_function call = MethodOf(*inst, method);
     if (!call.valid()) return sol::lua_nil;
-    CurrentScope scope(*this, it->second);
+    CurrentScope scope(*this, target);
     sol::protected_function_result result = inst->Simple ? call(args) : call(inst->Self, args);
     if (!result.valid()) {
         ScriptError err;

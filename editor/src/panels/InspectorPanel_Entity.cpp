@@ -577,75 +577,8 @@ void InspectorPanel::DrawEntityProperties(EditorHost& host) {
         if (ImGui::Button(T("Remove##netreplicated"))) rm.Net = true;
     }
 
-    if (reg.all_of<ScriptComponent>(obj.Entity()) && EditorTheme::SectionHeader("script", T("Script" "###Script"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Script,
-                                       T("Runs in Play mode: Start, Update, FixedUpdate, collisions"))) {
-        if (ScriptComponent* sc = reg.try_get<ScriptComponent>(obj.Entity())) {
-            // Тот же слот, что у меша, материала и текстур (см. AssetSlot.h):
-            // обложка, приём перетаскивания с проверкой типа, «показать в
-            // Assets». Раньше здесь было поле ввода пути, и .lua приходилось
-            // печатать наизусть, хотя он тут же в дереве проекта.
-            // «+» в слоте создаёт скрипт (язык — в окне «Создать…») с именем
-            // объекта и сразу вешает его; «править» открывает в редакторе кода.
-            assetslot::Actions actions;
-            for (char c : obj.Name())
-                actions.SuggestedName += (std::isalnum((unsigned char)c) || c == '_') ? c : '_';
-            const assetslot::Result r =
-                assetslot::Draw(host, "script", assetslot::Kind::Script, sc->Path, &m_preview,
-                                T("No script attached"), &actions);
-            if (r.Changed) {
-                host.PushUndoSnapshot();
-                sc->Path = r.Path;
-            }
-            if (r.BrowseRequested) {
-                FileBrowser::Config c;
-                c.Title = T("Choose a script");
-                c.Filters = assetslot::Extensions(assetslot::Kind::Script);
-                c.FilterLabel = T("Scripts (*.lua, *.slua)");
-                // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
-                c.StartDir = c.Root = assetslot::ProjectRoot(host);
-                m_browser.Open(c);
-                // Цель — СУЩНОСТЬ, а не указатель на поле компонента: диалог
-                // отвечает через кадр, а за этот кадр сцену могут перезагрузить
-                // (undo, открытие другой сцены), и указатель повис бы.
-                m_browseTarget = nullptr;
-                m_browseScriptEntity = obj.Id();
-                m_browseIsShader = false;
-                m_browseIsMesh = false;
-                m_browseIsMaterial = false;
-            }
-
-            // --- ПЕРЕМЕННЫЕ, ОБЪЯВЛЕННЫЕ САМИМ СКРИПТОМ --------------------
-            //
-            // Здесь, внутри секции скрипта, а не отдельным списком: «какой
-            // скрипт» и «с какими настройками» — один вопрос. И ничего, кроме
-            // них: галочек «выполнять ли Update» и «как исполнять» у компонента
-            // нет намеренно — на них нет осмысленного ответа со стороны
-            // человека, собирающего уровень (см. ScriptComponent.h).
-            //
-            // Объявление подмешивается ПЕРЕД показом, а не однажды при
-            // назначении файла: .lua правят снаружи редактора, и переменная,
-            // добавленная в скрипт минуту назад, обязана появиться здесь сама.
-            if (!sc->Path.empty()) host.MergeScriptVars(obj);
-            if (!sc->Fields.Empty()) {
-                ImGui::Separator();
-                ImGui::TextUnformatted(T("Variables"));
-                for (sage::vars::Var& var : sc->Fields.All()) {
-                    // Переменная, которой в скрипте больше нет, остаётся видна
-                    // приглушённой: молча стереть настройку из-за опечатки в
-                    // имени хуже, чем показать лишнюю строку.
-                    if (!var.Declared) ImGui::BeginDisabled();
-                    // Снимок для отмены берёт сам рисовальщик значения (у
-                    // ползунка он нужен ДО перетаскивания, а не после).
-                    varsui::DrawValue(host, var.Name.c_str(), var.Data, &var, &m_preview);
-                    if (!var.Declared) {
-                        ImGui::EndDisabled();
-                        if (ImGui::IsItemHovered())
-                            ImGui::SetTooltip("%s", T("The script no longer declares this variable"));
-                    }
-                }
-            }
-        }
-    }
+    // Скрипты объекта, их группы и переменные — InspectorPanel_Script.cpp.
+    DrawScriptSection(host, obj, reg, rm);
 
     // --- ПУБЛИЧНЫЕ ПЕРЕМЕННЫЕ И ССЫЛКИ ---------------------------------------
     //

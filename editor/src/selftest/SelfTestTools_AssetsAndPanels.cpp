@@ -421,7 +421,7 @@ bool EditorLayer::SelfTestToolsAssetsAndPanels() {
                         ok = false;
                     }
                     const ScriptComponent* sc = r2.try_get<ScriptComponent>(e2);
-                    if (!sc || sc->Path != "assets/selftest_script.lua") {
+                    if (!sc || sc->FirstPath() != "assets/selftest_script.lua") {
                         LOG_ERROR("Editor") << "SELFTEST: путь скрипта не сохранился";
                         ok = false;
                     }

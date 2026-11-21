@@ -172,18 +172,18 @@ bool EditorLayer::SelfTestToolsLayoutAndData() {
         // принадлежат паре «объект + скрипт» (см. ScriptComponent.h).
         ScriptComponent* doorScript =
             m_scene->Registry().try_get<ScriptComponent>(door.Entity());
-        if (!doorScript || doorScript->Fields.Size() != 3) {
+        if (!doorScript || doorScript->Scripts.front().Fields.Size() != 3) {
             LOG_ERROR("Editor") << "SELFTEST: объявление скрипта не дошло до переменных объекта";
             ok = false;
         } else {
-            if (doorScript->Fields.Find("damage") == nullptr ||
-                std::abs(doorScript->Fields.Find("damage")->Max - 100.0f) > 0.01f) {
+            if (doorScript->Scripts.front().Fields.Find("damage") == nullptr ||
+                std::abs(doorScript->Scripts.front().Fields.Find("damage")->Max - 100.0f) > 0.01f) {
                 LOG_ERROR("Editor") << "SELFTEST: границы объявленной переменной потерялись";
                 ok = false;
             }
             // Человек правит значения в инспекторе.
-            doorScript->Fields.Set("speed", sage::vars::Value(9.5f));
-            doorScript->Fields.Set("target", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
+            doorScript->Scripts.front().Fields.Set("speed", sage::vars::Value(9.5f));
+            doorScript->Scripts.front().Fields.Set("target", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
         }
 
         // Кнопка со связью из инспектора: «On Click → SelfTestDoor.Open()».
@@ -226,10 +226,10 @@ bool EditorLayer::SelfTestToolsLayoutAndData() {
                 loadedDoor.Valid()
                     ? m_scene->Registry().try_get<ScriptComponent>(loadedDoor.Entity())
                     : nullptr;
-            if (!lv || std::abs(lv->Fields.Get("speed").AsFloat() - 9.5f) > 0.01f) {
+            if (!lv || std::abs(lv->Scripts.front().Fields.Get("speed").AsFloat() - 9.5f) > 0.01f) {
                 LOG_ERROR("Editor") << "SELFTEST: значение переменной не пережило сохранение";
                 ok = false;
-            } else if (lv->Fields.Get("target").AsEntity().Id != loadedKey.Id()) {
+            } else if (lv->Scripts.front().Fields.Get("target").AsEntity().Id != loadedKey.Id()) {
                 LOG_ERROR("Editor") << "SELFTEST: ссылка на объект не пережила сохранение";
                 ok = false;
             }

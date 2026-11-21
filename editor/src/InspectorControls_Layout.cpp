@@ -234,7 +234,7 @@ bool BeginSection(const char* id, const char* title, bool defaultOpen, const cha
 
 void EndSection() { ImGui::Dummy(ImVec2(0.0f, K().SectionGap)); }
 
-bool SubSection(const char* id, const char* title, bool defaultOpen) {
+bool SubSection(const char* id, const char* title, bool defaultOpen, const std::function<void()>& header) {
     const std::string key = std::string("inspector.sub.") + id;
     bool open = prefs::GetBool(key, defaultOpen);
     ImGui::PushID(id);
@@ -246,6 +246,7 @@ bool SubSection(const char* id, const char* title, bool defaultOpen) {
         prefs::SetBool(key, open);
     }
     const bool hovered = ImGui::IsItemHovered();
+    if (header) header();
     ImGui::PopID();
     ImDrawList* dl = ImGui::GetWindowDrawList();
     const float indent = K().Indent;

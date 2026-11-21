@@ -473,7 +473,7 @@ void TestGameLayer::AttachSceneScripts(const std::string& sceneName) {
     auto view = scene->Registry().view<ScriptComponent>();
     for (auto e : view) {
         try {
-            engine->AttachScript(GameObject(&scene->Registry(), e), view.get<ScriptComponent>(e).Path);
+            engine->AttachScript(GameObject(&scene->Registry(), e), view.get<ScriptComponent>(e).FirstPath());
             ++attached;
         } catch (const std::exception& ex) {
             LOG_ERROR("TestGame") << "Скрипт не привязался: " << ex.what();

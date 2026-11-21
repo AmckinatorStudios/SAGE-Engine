@@ -498,7 +498,7 @@ void EditorLayer::ApplyStartupHooks() {
         // Переменные, объявленные скриптом, лежат в его компоненте — рядом с
         // файлом, который их объявил (см. ScriptComponent.h).
         if (ScriptComponent* sc = reg.try_get<ScriptComponent>(door.Entity()))
-            sc->Fields.Set("needs", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
+            sc->Scripts.front().Fields.Set("needs", sage::vars::Value(sage::vars::EntityRef{key.Id()}));
 
         GameObject button = m_scene->CreateObject("Кнопка «Открыть»");
         sage::ui::Element t;

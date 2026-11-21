@@ -43,10 +43,15 @@ struct VarsProxy {
     // заведённые человеком объекту БЕЗ скрипта (точка появления, зона,
     // кнопка), живут в VarsComponent. Для скрипта это одно и то же имя, и
     // разделять их в его глазах значило бы заставить помнить, кто где.
-    sage::vars::Table* Fields() const {
+    // Скриптов у объекта может быть несколько: переменная — у ПЕРВОГО, кто
+    // её объявил (порядок списка), чтобы чтение и запись попадали в одно место.
+    sage::vars::Table* Fields(const std::string& name) const {
         if (!Valid()) return nullptr;
         ScriptComponent* sc = Reg->try_get<ScriptComponent>(Entity);
-        return sc ? &sc->Fields : nullptr;
+        if (!sc) return nullptr;
+        for (ScriptEntry& entry : sc->Scripts)
+            if (entry.Fields.Find(name)) return &entry.Fields;
+        return nullptr;
     }
     sage::vars::Table* Own(bool create) const {
         if (!Valid()) return nullptr;
@@ -58,8 +63,7 @@ struct VarsProxy {
     // показывает её рядом с файлом, и писать её надо туда же, иначе значение
     // из скрипта и значение в инспекторе разойдутся молча.
     sage::vars::Table* For(const std::string& name, bool create) const {
-        if (sage::vars::Table* f = Fields())
-            if (f->Find(name)) return f;
+        if (sage::vars::Table* f = Fields(name)) return f;
         if (sage::vars::Table* o = Own(false))
             if (o->Find(name)) return o;
         return create ? Own(true) : nullptr;
@@ -188,9 +192,12 @@ void ScriptEngine::RegisterVarsApi() {
         },
         sol::meta_function::length,
         [](VarsProxy& p) -> int {
-            const sage::vars::Table* fields = p.Fields();
+            int n = 0;
+            if (p.Valid())
+                if (const ScriptComponent* sc = p.Reg->try_get<ScriptComponent>(p.Entity))
+                    for (const ScriptEntry& entry : sc->Scripts) n += (int)entry.Fields.Size();
             const sage::vars::Table* own = p.Own(false);
-            return (fields ? (int)fields->Size() : 0) + (own ? (int)own->Size() : 0);
+            return n + (own ? (int)own->Size() : 0);
         });
 
     // Точка входа: obj:Vars(). Метод, а не поле, потому что поле usertype
@@ -208,7 +215,8 @@ void ScriptEngine::RegisterVarsApi() {
         if (!o.Valid()) return out;
         int i = 1;
         if (const ScriptComponent* sc = o.Registry()->try_get<ScriptComponent>(o.Entity()))
-            for (const sage::vars::Var& v : sc->Fields.All()) out[i++] = v.Name;
+            for (const ScriptEntry& entry : sc->Scripts)
+                for (const sage::vars::Var& v : entry.Fields.All()) out[i++] = v.Name;
         if (const VarsComponent* c = o.Registry()->try_get<VarsComponent>(o.Entity()))
             for (const sage::vars::Var& v : c->Values.All()) out[i++] = v.Name;
         return out;
@@ -219,7 +227,8 @@ void ScriptEngine::RegisterVarsApi() {
     go["HasVar"] = [](GameObject& o, const std::string& name) -> bool {
         if (!o.Valid()) return false;
         if (const ScriptComponent* sc = o.Registry()->try_get<ScriptComponent>(o.Entity()))
-            if (sc->Fields.Find(name)) return true;
+            for (const ScriptEntry& entry : sc->Scripts)
+                if (entry.Fields.Find(name)) return true;
         const VarsComponent* c = o.Registry()->try_get<VarsComponent>(o.Entity());
         return c && c->Values.Find(name) != nullptr;
     };

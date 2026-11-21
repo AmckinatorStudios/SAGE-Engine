@@ -242,7 +242,11 @@ bool SectionHeader(const char* id, const char* icon, const char* title, bool* op
 // Вложенная группа внутри раздела («▸ Коробка», «▸ Дополнительно»): строка-
 // заголовок и содержимое с единым отступом и линией слева. Раскрытие
 // запоминается между запусками.
-bool SubSection(const char* id, const char* title, bool defaultOpen = false);
+// header — зовётся сразу после строки-заголовка, пока она «последний
+// элемент» ImGui: туда вешают перетаскивание, приём и меню правой кнопки
+// (BeginDragDropSource, BeginPopupContextItem), не строя свой заголовок.
+bool SubSection(const char* id, const char* title, bool defaultOpen = false,
+                const std::function<void()>& header = {});
 void EndSubSection();
 
 } // namespace sage::editor::ictl

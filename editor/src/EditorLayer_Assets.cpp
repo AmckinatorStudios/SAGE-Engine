@@ -240,7 +240,13 @@ bool EditorLayer::ApplyAssetToEntity(int entityId, const fs::path& asset) {
     }
     if (ext == ".lua" || ext == ".slua") {
         PushUndoSnapshot();
-        m_scene->Registry().emplace_or_replace<ScriptComponent>(obj.Entity(), ScriptComponent{ref});
+        // Скрипт ДОБАВЛЯЕТСЯ к уже висящим: брошенный на объект файл — ещё одно
+        // поведение, а не замена прежних с их настройками. Тот же файл второй
+        // раз не вешается — повторный бросок почти всегда случайность.
+        ScriptComponent& sc = m_scene->Registry().get_or_emplace<ScriptComponent>(obj.Entity());
+        bool already = false;
+        for (const ScriptEntry& e : sc.Scripts) already = already || e.Path == ref;
+        if (!already) sc.Add(ref);
         SetStatusMessage(T("Script assigned: ") + asset.filename().string());
         return true;
     }

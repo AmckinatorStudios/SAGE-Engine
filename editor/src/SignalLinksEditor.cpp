@@ -97,21 +97,31 @@ std::vector<suggest::Item> EventItems(EditorHost& host, const entt::registry& re
 std::vector<std::string> ScriptMethodsOf(EditorHost& host, GameObject target) {
     if (!target.Valid()) return {};
     const ScriptComponent* sc = target.Registry()->try_get<ScriptComponent>(target.Entity());
-    if (!sc || sc->Path.empty()) return {};
-    std::filesystem::path full = sc->Path;
-    if (full.is_relative() && host.CurrentProject().Loaded()) full = host.CurrentProject().Dir() / full;
-
+    if (!sc) return {};
+    // Методы ВСЕХ скриптов объекта: связь адресует метод объекта, а в игре
+    // зовётся первый скрипт, где он есть (ScriptRuntime::FindMethod).
+    std::vector<std::string> out;
     static std::map<std::string, CachedMethods> cache;
-    CachedMethods& c = cache[full.string()];
-    const long long stamp = StampOf(full);
-    if (stamp == c.Stamp) return c.Methods;
-    c.Stamp = stamp;
-    c.Methods.clear();
-    std::ifstream in(full, std::ios::binary);
-    if (!in) return {};
-    const std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-    c.Methods = sage::scripting::ParseMethods(sc->Path, source);
-    return c.Methods;
+    for (const ScriptEntry& entry : sc->Scripts) {
+        if (entry.Path.empty()) continue;
+        std::filesystem::path full = entry.Path;
+        if (full.is_relative() && host.CurrentProject().Loaded()) full = host.CurrentProject().Dir() / full;
+
+        CachedMethods& c = cache[full.string()];
+        const long long stamp = StampOf(full);
+        if (stamp != c.Stamp) {
+            c.Stamp = stamp;
+            c.Methods.clear();
+            std::ifstream in(full, std::ios::binary);
+            if (in) {
+                const std::string source((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                c.Methods = sage::scripting::ParseMethods(entry.Path, source);
+            }
+        }
+        for (const std::string& m : c.Methods)
+            if (std::find(out.begin(), out.end(), m) == out.end()) out.push_back(m);
+    }
+    return out;
 }
 
 bool DrawSignalLinks(EditorHost& host, GameObject obj) {
