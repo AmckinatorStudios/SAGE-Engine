@@ -290,6 +290,18 @@ void DialogsPanel::Draw(EditorHost& host) {
                     selected ? EditorTheme::Color32(EditorTheme::Role::Accent)
                              : EditorTheme::Color32(EditorTheme::Role::Line),
                     rounding, 0, selected ? 2.0f : 1.0f);
+                // Галочка выбранной карточки — тремя штрихами ImDrawList, без
+                // нового значка в шрифте.
+                if (selected) {
+                    const float r = Scaled(9.0f);
+                    const ImVec2 c(max.x - Scaled(8.0f) - r, pos.y + Scaled(8.0f) + r);
+                    dl->AddCircleFilled(c, r, EditorTheme::Color32(EditorTheme::Role::Accent));
+                    const ImVec2 pts[3] = {ImVec2(c.x - r * 0.45f, c.y + r * 0.02f),
+                                           ImVec2(c.x - r * 0.1f, c.y + r * 0.38f),
+                                           ImVec2(c.x + r * 0.5f, c.y - r * 0.32f)};
+                    dl->AddPolyline(pts, 3, EditorTheme::Color32(EditorTheme::Role::TextOnAccent),
+                                    ImDrawFlags_None, Scaled(2.0f));
+                }
                 const ImU32 textCol = EditorTheme::Color32(t.Available ? EditorTheme::Role::Text
                                                                        : EditorTheme::Role::TextFaint);
                 const float iconSize = Scaled(32.0f);
@@ -389,8 +401,10 @@ void DialogsPanel::Draw(EditorHost& host) {
         }
         if (builder.Finished() && !running) {
             if (builder.Succeeded()) {
+                ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
                 ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Ok), T("Built: %s"),
                                    sage::PathToUtf8(builder.GameDir()).c_str());
+                ImGui::PopTextWrapPos();
             } else if (!builder.Error().empty()) {
                 ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + width);
                 ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Danger), "%s",
@@ -413,7 +427,10 @@ void DialogsPanel::Draw(EditorHost& host) {
             if (ImGui::Button(T("Build"), btn)) {
                 std::string err;
                 m_error.clear();
-                if (!host.StartBuildGame(outDir, err, m_targetId)) m_error = err;
+                if (!host.StartBuildGame(outDir, err, m_targetId)) {
+                    m_error = err;
+                    m_buildRefresh = true; // runtime мог исчезнуть: карточки покажут правду
+                }
             }
             ImGui::EndDisabled();
             if (builder.Finished() && builder.Succeeded()) {
