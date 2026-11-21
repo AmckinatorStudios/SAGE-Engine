@@ -205,6 +205,8 @@ public:
     }
     AnimGraphPanel& AnimGraphWindow() { return m_animGraph; }
     AnimStage* AnimationStage() override { return &m_animStage; }
+    void EditAnimation(int objectId, const std::string& resource) override;
+    bool CreateAnimationClip(int objectId, bool skeletal) override;
     bool AnimGraphPreviewActive() const override { return m_animGraph.PreviewActive(); }
     void OpenVisualScript(const std::string& graphPath) override {
         m_panelRegistry.SetVisible("VisualScript", true);

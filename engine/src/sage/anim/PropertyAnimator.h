@@ -28,8 +28,14 @@ struct PropertyAnimatorComponent {
     std::string ClipPath;
 
     bool Playing = true;
-    bool Loop = true;       // перебивает Loop самого клипа: одно движение может
-                            // быть и петлёй фона, и разовым откликом на нажатие
+    // ПОВТОР — СВОЙСТВО КЛИПА (PropertyClip::Loop). Раньше компонент всегда
+    // перебивал его своим Loop = true, и галочка «Loop» в самом клипе ни на
+    // что не влияла. Теперь клип решает сам, а компонент перебивает его
+    // только явно (LoopOverride): одно движение бывает и петлёй фона, и
+    // разовым откликом на нажатие.
+    bool LoopOverride = false;
+    bool Loop = true;       // действует только при LoopOverride
+    bool EffectiveLoop(const sage::anim::PropertyClip& clip) const { return LoopOverride ? Loop : clip.Loop; }
     float Speed = 1.0f;
     float Time = 0.0f;      // текущее время внутри клипа, секунды
 

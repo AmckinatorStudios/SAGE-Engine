@@ -8,6 +8,7 @@
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
 #include "../HotkeyScope.h"
+#include "../InspectorControls.h"
 #include "../EditorTheme.h"
 #include "../Localization.h"
 #include "../PanelWindowId.h"
@@ -24,12 +25,15 @@
 
 namespace fs = std::filesystem;
 namespace anim = sage::anim;
+namespace ictl = sage::editor::ictl;
 
 namespace animpanel_detail {
 
 constexpr float kTrackHeight = 22.0f;
 constexpr float kKeyRadius = 5.0f;
-constexpr float kRulerHeight = 22.0f;
+// Высота шкалы времени — не меньше строки с кнопкой «+ Дорожка» над списком:
+// иначе строки списка и строки ключей разъезжались на разницу высот.
+inline float RulerHeight() { return std::max(22.0f, ImGui::GetFrameHeight() + 2.0f); }
 
 // Путь к объекту ОТ ВЛАДЕЛЬЦА КЛИПА. Владелец — выбранный объект: клип
 // адресует не «сущность номер сорок», а «мой ребёнок по имени Icon», иначе он

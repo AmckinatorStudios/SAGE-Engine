@@ -382,7 +382,16 @@ void AnimStage::FrameTarget() {
     if (!any) {
         std::vector<entt::entity> all;
         Walk(*m_scene, StageRoot().Entity(), all);
-        for (entt::entity e : all) grow(glm::vec3(m_scene->WorldMatrix(e)[3]));
+        // Объект — точкой и размером: у одного куба «габарит» из одних
+        // центров нулевой, и камера вставала вплотную.
+        for (entt::entity e : all) {
+            const glm::mat4 w = m_scene->WorldMatrix(e);
+            const glm::vec3 c(w[3]);
+            const float r = 0.5f * std::max({glm::length(glm::vec3(w[0])), glm::length(glm::vec3(w[1])),
+                                             glm::length(glm::vec3(w[2]))});
+            grow(c - glm::vec3(r));
+            grow(c + glm::vec3(r));
+        }
     }
     if (!any) {
         m_focus = glm::vec3(0.0f, 1.0f, 0.0f);

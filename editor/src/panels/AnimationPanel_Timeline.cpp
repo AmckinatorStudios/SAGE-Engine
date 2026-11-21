@@ -59,7 +59,7 @@ void AnimationPanel::DrawTimeline(EditorHost& host, ImVec2 size) {
         if (step > 1e4f) break;
     }
     step *= kMults[mult];
-    dl->AddRectFilled(origin, ImVec2(origin.x + avail.x, origin.y + kRulerHeight),
+    dl->AddRectFilled(origin, ImVec2(origin.x + avail.x, origin.y + RulerHeight()),
                       ImGui::GetColorU32(ImGuiCol_FrameBg));
     for (float t = std::floor(m_scroll / step) * step; toX(t) < origin.x + avail.x; t += step) {
         const float x = toX(t);
@@ -85,19 +85,19 @@ void AnimationPanel::DrawTimeline(EditorHost& host, ImVec2 size) {
     for (const anim::Marker& m : m_clip.Markers) {
         const float x = toX(m.Time);
         if (x < origin.x || x > origin.x + avail.x) continue;
-        dl->AddLine(ImVec2(x, origin.y + kRulerHeight), ImVec2(x, origin.y + avail.y),
+        dl->AddLine(ImVec2(x, origin.y + RulerHeight()), ImVec2(x, origin.y + avail.y),
                     IM_COL32(120, 230, 180, 120), 1.0f);
-        const ImVec2 tri[3] = {{x - 5.0f, origin.y + kRulerHeight - 7.0f},
-                               {x + 5.0f, origin.y + kRulerHeight - 7.0f},
-                               {x, origin.y + kRulerHeight}};
+        const ImVec2 tri[3] = {{x - 5.0f, origin.y + RulerHeight() - 7.0f},
+                               {x + 5.0f, origin.y + RulerHeight() - 7.0f},
+                               {x, origin.y + RulerHeight()}};
         dl->AddConvexPolyFilled(tri, 3, IM_COL32(120, 230, 180, 230));
         if (!m.Name.empty())
-            dl->AddText(ImVec2(x + 6.0f, origin.y + kRulerHeight - 8.0f),
+            dl->AddText(ImVec2(x + 6.0f, origin.y + RulerHeight() - 8.0f),
                         IM_COL32(150, 240, 200, 220), m.Name.c_str());
     }
 
     // --- Ключи --------------------------------------------------------------
-    const float rowsTop = origin.y + kRulerHeight;
+    const float rowsTop = origin.y + RulerHeight();
     int hotTrack = -1, hotKey = -1;
     for (int row = 0; row < (int)m_rows.size(); ++row) {
         const int i = m_rows[(size_t)row];
@@ -151,7 +151,7 @@ void AnimationPanel::DrawTimeline(EditorHost& host, ImVec2 size) {
     // --- Мышь ---------------------------------------------------------------
     ImGui::InvisibleButton("##tl_area", avail, ImGuiButtonFlags_MouseButtonLeft |
                                                    ImGuiButtonFlags_MouseButtonRight);
-    const bool overRuler = hovered && mouse.y < origin.y + kRulerHeight;
+    const bool overRuler = hovered && mouse.y < origin.y + RulerHeight();
 
     if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         if (overRuler) {
@@ -179,8 +179,37 @@ void AnimationPanel::DrawTimeline(EditorHost& host, ImVec2 size) {
                 PushUndo();
             }
         } else {
-            m_selection.clear();
-            m_dragPlayhead = true;   // щелчок по пустому месту — перевод времени
+            // Пустое место среди дорожек — рамка выделения (с Ctrl — в
+            // добавок). Время переводят по шкале сверху: раньше щелчок мимо
+            // ключа сбрасывал выделение и прыгал бегунком, и выделить
+            // несколько ключей можно было только по одному.
+            if (!ImGui::GetIO().KeyCtrl) m_selection.clear();
+            m_boxSelect = true;
+            m_boxFrom = mouse;
+        }
+    }
+
+    if (m_boxSelect) {
+        const ImVec2 lo(std::min(m_boxFrom.x, mouse.x), std::min(m_boxFrom.y, mouse.y));
+        const ImVec2 hi(std::max(m_boxFrom.x, mouse.x), std::max(m_boxFrom.y, mouse.y));
+        dl->AddRectFilled(lo, hi, IM_COL32(120, 170, 255, 30));
+        dl->AddRect(lo, hi, IM_COL32(120, 170, 255, 160));
+        if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+            m_boxSelect = false;
+            for (int row = 0; row < (int)m_rows.size(); ++row) {
+                const int ti = m_rows[(size_t)row];
+                const float y = rowsTop + kTrackHeight * (float)row + kTrackHeight * 0.5f;
+                if (y < lo.y || y > hi.y) continue;
+                const anim::Track& t = m_clip.Tracks[(size_t)ti];
+                for (int k = 0; k < (int)t.Keys.size(); ++k) {
+                    const float x = toX(t.Keys[(size_t)k].Time);
+                    if (x < lo.x || x > hi.x) continue;
+                    const KeyRef ref{ti, k};
+                    if (std::find(m_selection.begin(), m_selection.end(), ref) == m_selection.end())
+                        m_selection.push_back(ref);
+                    m_activeTrack = ti;
+                }
+            }
         }
     }
 
@@ -200,6 +229,14 @@ void AnimationPanel::DrawTimeline(EditorHost& host, ImVec2 size) {
     if (m_dragKeys) {
         if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
             m_dragKeys = false;
+            // Ключи снова по времени: проигрывание считает их упорядоченными,
+            // а ключ, перетащенный за соседа, иначе ломал бы отрезки. Выделение
+            // переезжает вместе с ключами.
+            std::vector<int> tracks;
+            for (const KeyRef& r : m_selection)
+                if (std::find(tracks.begin(), tracks.end(), r.Track) == tracks.end()) tracks.push_back(r.Track);
+            for (int t : tracks) ResortTrack(t);
+            SyncSceneToTime(host);
         } else {
             float d = toTime(mouse.x) - m_dragStartTime;
             if (!ImGui::GetIO().KeyAlt) d = std::round(d / 0.05f) * 0.05f;
@@ -228,128 +265,5 @@ void AnimationPanel::DrawTimeline(EditorHost& host, ImVec2 size) {
     }
     m_scroll = std::max(0.0f, m_scroll);
 
-    ImGui::EndChild();
-}
-
-
-void AnimationPanel::DrawCurve(EditorHost& host, ImVec2 size) {
-    (void)host;
-    ImGui::BeginChild("##curve", size, ImGuiChildFlags_Borders);
-    if (m_selection.empty() || m_selection[0].Track >= (int)m_clip.Tracks.size()) {
-        ImGui::TextDisabled("%s", T("Select a key to see its curve."));
-        ImGui::EndChild();
-        return;
-    }
-    const KeyRef& ref = m_selection[0];
-    anim::Track& track = m_clip.Tracks[ref.Track];
-    if (ref.Key < 0 || ref.Key >= (int)track.Keys.size()) {
-        ImGui::EndChild();
-        return;
-    }
-    anim::Key& key = track.Keys[ref.Key];
-
-    // --- Чем идёт значение от этого ключа -----------------------------------
-    ImGui::BeginDisabled(!Editable());
-    int interp = (int)key.Out;
-    const char* names[] = {T("Constant"), T("Linear"), T("Bezier")};
-    ImGui::SetNextItemWidth(140.0f);
-    if (ImGui::Combo(T("Interpolation"), &interp, names, 3)) {
-        PushUndo();
-        // Интерполяция ставится ВСЕМУ выделенному набору: выделили пять
-        // ключей и сказали «ступенькой» — значит всем пяти, а не первому.
-        for (const KeyRef& r : m_selection) {
-            if (r.Track < (int)m_clip.Tracks.size() &&
-                r.Key < (int)m_clip.Tracks[r.Track].Keys.size())
-                m_clip.Tracks[r.Track].Keys[r.Key].Out = (anim::Interp)interp;
-        }
-    }
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(90.0f);
-    if (ImGui::DragFloat(T("Time"), &key.Time, 0.01f, 0.0f, 600.0f, "%.2f s")) {
-        m_dirty = true;
-        std::sort(track.Keys.begin(), track.Keys.end(),
-                  [](const anim::Key& a, const anim::Key& b) { return a.Time < b.Time; });
-    }
-    ImGui::SameLine();
-    const anim::PropertyType* p = anim::FindProperty(track.Property);
-    const int comps = p ? p->Components : 4;
-    ImGui::SetNextItemWidth(200.0f);
-    if (ImGui::DragScalarN(T("Value"), ImGuiDataType_Float, &key.Value.x, comps, 0.05f))
-        m_dirty = true;
-    ImGui::EndDisabled();
-
-    // --- Сама кривая --------------------------------------------------------
-    //
-    // ЗАЧЕМ ОНА ЗДЕСЬ. Разгон и торможение — это ХАРАКТЕР движения, и числами
-    // касательных он не читается: «0.42, 0» не говорит ничего никому. Кривая
-    // говорит всё с одного взгляда, и тянут её за те же две точки.
-    const ImVec2 avail = ImGui::GetContentRegionAvail();
-    if (avail.x < 40.0f || avail.y < 30.0f) { ImGui::EndChild(); return; }
-    const ImVec2 a = ImGui::GetCursorScreenPos();
-    const ImVec2 b(a.x + avail.x, a.y + avail.y);
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    dl->AddRectFilled(a, b, IM_COL32(18, 20, 24, 255));
-    dl->AddRect(a, b, IM_COL32(255, 255, 255, 30));
-
-    const float pad = 12.0f;
-    auto toPix = [&](float u, float v) {
-        return ImVec2(a.x + pad + u * (avail.x - pad * 2.0f),
-                      b.y - pad - v * (avail.y - pad * 2.0f));
-    };
-    // Сетка «ноль — единица» по обеим осям: без неё не видно, где прямая.
-    dl->AddLine(toPix(0, 0), toPix(1, 0), IM_COL32(255, 255, 255, 25));
-    dl->AddLine(toPix(0, 1), toPix(1, 1), IM_COL32(255, 255, 255, 25));
-    dl->AddLine(toPix(0, 0), toPix(0, 1), IM_COL32(255, 255, 255, 25));
-    dl->AddLine(toPix(1, 0), toPix(1, 1), IM_COL32(255, 255, 255, 25));
-    dl->AddLine(toPix(0, 0), toPix(1, 1), IM_COL32(255, 255, 255, 40));
-
-    // Кривая рисуется ТЕМ ЖЕ СЧЁТОМ, которым движение и считается: отдельная
-    // формула для рисунка однажды разойдётся с настоящей, и человек будет
-    // настраивать одно, а получать другое.
-    if (ref.Key + 1 < (int)track.Keys.size()) {
-        const anim::Key& next = track.Keys[ref.Key + 1];
-        anim::Track probe;
-        probe.Keys = {key, next};
-        const float t0 = key.Time, t1 = next.Time;
-        const float dv = next.Value.x - key.Value.x;
-        ImVec2 prev = toPix(0.0f, 0.0f);
-        for (int i = 1; i <= 64; ++i) {
-            const float u = (float)i / 64.0f;
-            const float v = std::fabs(dv) > 1e-6f
-                                ? (anim::Sample(probe, t0 + (t1 - t0) * u).x - key.Value.x) / dv
-                                : u;
-            const ImVec2 cur = toPix(u, v);
-            dl->AddLine(prev, cur, IM_COL32(255, 190, 90, 230), 1.6f);
-            prev = cur;
-        }
-        // Ручки касательных — те же управляющие точки, что в счёте.
-        if (key.Out == anim::Interp::Bezier) {
-            const ImVec2 h1 = toPix(key.OutTangent.x, key.OutTangent.y);
-            const ImVec2 h2 = toPix(1.0f + next.InTangent.x, 1.0f + next.InTangent.y);
-            dl->AddLine(toPix(0, 0), h1, IM_COL32(120, 200, 255, 160));
-            dl->AddLine(toPix(1, 1), h2, IM_COL32(120, 200, 255, 160));
-            dl->AddCircleFilled(h1, 4.0f, IM_COL32(120, 200, 255, 255));
-            dl->AddCircleFilled(h2, 4.0f, IM_COL32(120, 200, 255, 255));
-
-            // Тянутся мышью: числами касательную не подбирают.
-            if (Editable()) {
-                const ImVec2 m = ImGui::GetMousePos();
-                auto grab = [&](const ImVec2& h, glm::vec2& tangent, bool fromEnd) {
-                    if (!ImGui::IsMouseDown(ImGuiMouseButton_Left)) return;
-                    if (std::fabs(m.x - h.x) > 7.0f || std::fabs(m.y - h.y) > 7.0f) return;
-                    const float u = (m.x - a.x - pad) / std::max(avail.x - pad * 2.0f, 1.0f);
-                    const float v = (b.y - pad - m.y) / std::max(avail.y - pad * 2.0f, 1.0f);
-                    tangent = fromEnd ? glm::vec2(u - 1.0f, v - 1.0f) : glm::vec2(u, v);
-                    m_dirty = true;
-                };
-                grab(h1, key.OutTangent, false);
-                grab(h2, track.Keys[ref.Key + 1].InTangent, true);
-            }
-        }
-    } else {
-        dl->AddText(ImVec2(a.x + pad, a.y + pad), IM_COL32(150, 150, 160, 200),
-                    T("The last key: there is nothing after it to draw."));
-    }
-    ImGui::Dummy(avail);
     ImGui::EndChild();
 }

@@ -188,14 +188,56 @@ bool EditorLayer::SelfTestAnimWorkspace() {
         if (realAm.ClipPath != clips.Refs.front()) fail("клип объекта уровня подменён");
     }
 
+    // 6. Кнопки компонентов в Inspector: «Create Clip» заводит файл, назначает
+    // его объекту и открывает в Animation; «Edit» открывает назначенное.
+    std::string createdSkeletal;
+    {
+        GameObject box = m_scene->CreateObject("AnimWS Box");
+        SetWorkspace(EditorWorkspace::Scene);
+        if (!CreateAnimationClip(box.Id(), false)) fail("Create Clip клипа свойств не сработал");
+        const auto* pa = m_scene->Registry().try_get<PropertyAnimatorComponent>(box.Entity());
+        const std::string boxClip = pa ? sage::AssetDatabase::Instance().LocatePath(pa->ClipPath) : std::string();
+        if (!pa || pa->ClipPath.empty() || !fs::exists(sage::PathFromUtf8(boxClip)))
+            fail("Create Clip не назначил файл .sageclip объекту");
+        if (m_workspace != EditorWorkspace::Animation) fail("Create Clip не открыл пространство Animation");
+        if (!m_animation.HasClipOpen() || m_animation.ClipOwner(*this) != box.Entity())
+            fail("созданный клип свойств не открыт для своего объекта");
+        if (m_animStage.TargetId() != box.Id()) fail("Create Clip не сделал объект целью предпросмотра");
+        m_animStage.SetTarget(*this, -1);
+        m_scene->RemoveObject(box.Id());
+        if (!boxClip.empty()) fs::remove(sage::PathFromUtf8(boxClip), ec);
+
+        SetWorkspace(EditorWorkspace::Scene);
+        auto& heroAm = m_scene->Registry().get<AnimationComponent>(hero.Entity());
+        heroAm.GraphPath = "unused.sageanimgraph";
+        if (!CreateAnimationClip(hero.Id(), true)) fail("Create Clip скелетного клипа не сработал");
+        createdSkeletal = sage::AssetDatabase::Instance().LocatePath(heroAm.ClipPath);
+        if (heroAm.ClipPath.empty() || heroAm.ClipPath == clips.Refs.front()) fail("скелетный клип не назначен");
+        if (!heroAm.GraphPath.empty()) fail("новый клип не снял граф: источники позы должны исключать друг друга");
+        try {
+            if (!sage::anim::LoadClip(createdSkeletal).Editable) fail("созданный скелетный клип не editable");
+        } catch (const std::exception& e) {
+            fail(std::string("созданный скелетный клип не читается: ") + e.what());
+        }
+        if (m_workspace != EditorWorkspace::Animation || m_animStage.TargetId() != hero.Id() || !m_animation.HasClipOpen())
+            fail("скелетный клип не открыт в Animation");
+
+        // «Edit» назначенного клипа модели — тот же путь.
+        SetWorkspace(EditorWorkspace::Scene);
+        EditAnimation(hero.Id(), clips.Refs.front());
+        if (m_workspace != EditorWorkspace::Animation || m_animStage.TargetId() != hero.Id() || !m_animation.HasClipOpen())
+            fail("Edit не открыл клип объекта в Animation");
+    }
+
     m_animStage.SetTarget(*this, -1);
     m_scene->RemoveObject(hero.Id());
     SetWorkspace(EditorWorkspace::Scene);
+    if (!createdSkeletal.empty()) fs::remove(sage::PathFromUtf8(createdSkeletal), ec);
     fs::remove_all(dir, ec);
     fs::remove(path, ec);
     if (ok)
         LOG_INFO("Editor") << "ANIM_WORKSPACE: OK — копия цели, ключ кости из гизмо, сохранение и воспроизведение "
-                              "клипа, граф и параметры только в предпросмотре, слой с маской, уровень не тронут";
+                              "клипа, граф и параметры только в предпросмотре, слой с маской, уровень не тронут, Create Clip/Edit из Inspector";
     return ok;
 #endif
 }

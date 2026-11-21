@@ -8,7 +8,13 @@
 // ===========================================================================
 #include "TestFramework.h"
 
+#include "sage/anim/PropertyAnimator.h"
 #include "sage/anim/PropertyClip.h"
+#include "sage/scene/Scene.h"
+#include "sage/scene/SceneSerializer.h"
+
+#include <memory>
+#include <nlohmann/json.hpp>
 
 #include <cmath>
 
@@ -192,4 +198,114 @@ TEST(PropertyClip_bezier_with_default_tangents_is_a_straight_line) {
         const float t = (float)i / 10.0f;
         CHECK_NEAR(sage::anim::Sample(bez, t).x, sage::anim::Sample(lin, t).x, 1e-3f);
     }
+}
+
+TEST(PropertyClip_sort_keys_reports_where_each_key_went) {
+    // Перетаскивание ключа мимо соседа: выделение в редакторе идёт за ключом по
+    // возвращённой перестановке, а не остаётся на старом номере.
+    Track t;
+    t.Keys.resize(3);
+    t.Keys[0].Time = 0.0f;
+    t.Keys[1].Time = 2.0f;   // перетащен вправо мимо ключа 2
+    t.Keys[2].Time = 1.0f;
+    t.Keys[1].Value.x = 7.0f;
+    const std::vector<int> moved = sage::anim::SortKeys(t);
+    CHECK_TRUE(moved.size() == 3);
+    CHECK_EQ(moved[0], 0);
+    CHECK_EQ(moved[1], 2);
+    CHECK_EQ(moved[2], 1);
+    CHECK_NEAR(t.Keys[2].Value.x, 7.0f, 1e-6f);
+    CHECK_NEAR(t.Keys[1].Time, 1.0f, 1e-6f);
+}
+
+TEST(PropertyClip_tangents_are_clamped_to_their_segment) {
+    Key k;
+    k.OutTangent = glm::vec2(1.7f, 3.0f);
+    k.InTangent = glm::vec2(0.4f, -2.0f);
+    sage::anim::ClampTangents(k);
+    CHECK_NEAR(k.OutTangent.x, 1.0f, 1e-6f);
+    CHECK_NEAR(k.OutTangent.y, 3.0f, 1e-6f);   // по значению не ограничено
+    CHECK_NEAR(k.InTangent.x, 0.0f, 1e-6f);
+    k.OutTangent.x = -0.5f;
+    k.InTangent.x = -1.5f;
+    sage::anim::ClampTangents(k);
+    CHECK_NEAR(k.OutTangent.x, 0.0f, 1e-6f);
+    CHECK_NEAR(k.InTangent.x, -1.0f, 1e-6f);
+}
+
+TEST(PropertyClip_in_tangent_of_a_linear_key_after_a_bezier_survives_the_file) {
+    // Сегмент a→b берёт исходящую касательную a и ВХОДЯЩУЮ b. Если b сам
+    // линейный, его входящая всё равно формирует кривую — раньше она не
+    // писалась, и форма сегмента менялась после сохранения.
+    PropertyClip clip;
+    clip.Name = "Ease";
+    clip.Duration = 1.0f;
+    Track tr;
+    tr.Target = "";
+    tr.Property = "object.position";
+    sage::anim::SetKey(tr, 0.0f, glm::vec4(0.0f), Interp::Bezier);
+    sage::anim::SetKey(tr, 1.0f, glm::vec4(1.0f), Interp::Linear);
+    tr.Keys[0].OutTangent = glm::vec2(0.1f, 0.8f);
+    tr.Keys[1].InTangent = glm::vec2(-0.2f, -0.05f);
+    clip.Tracks.push_back(tr);
+    const float before = sage::anim::Sample(clip.Tracks[0], 0.5f).x;
+
+    PropertyClip back;
+    std::string err;
+    CHECK_TRUE(sage::anim::FromJsonString(sage::anim::ToJsonString(clip), back, err));
+    CHECK_TRUE(back.Tracks.size() == 1 && back.Tracks[0].Keys.size() == 2);
+    if (back.Tracks.size() == 1 && back.Tracks[0].Keys.size() == 2) {
+        CHECK_NEAR(back.Tracks[0].Keys[1].InTangent.x, -0.2f, 1e-5f);
+        CHECK_NEAR(back.Tracks[0].Keys[1].InTangent.y, -0.05f, 1e-5f);
+        CHECK_NEAR(sage::anim::Sample(back.Tracks[0], 0.5f).x, before, 1e-5f);
+    }
+}
+
+TEST(PropertyAnimator_loop_follows_the_clip_unless_overridden) {
+    PropertyClip clip;
+    clip.Loop = false;
+    PropertyAnimatorComponent a;
+    CHECK_TRUE(!a.EffectiveLoop(clip));   // по умолчанию решает клип
+    clip.Loop = true;
+    CHECK_TRUE(a.EffectiveLoop(clip));
+    a.LoopOverride = true;
+    a.Loop = false;
+    CHECK_TRUE(!a.EffectiveLoop(clip));   // явное «сыграть один раз»
+}
+
+TEST(PropertyAnimator_old_scene_loop_migrates_to_override) {
+    // Сцена до переноса повтора в клип: ключа loopOverride нет. «loop: false»
+    // было выбором человека и остаётся переопределением; «loop: true» —
+    // значением по умолчанию, теперь решает клип.
+    Scene scene("pa");
+    GameObject on = scene.CreateObject("On");
+    GameObject off = scene.CreateObject("Off");
+    scene.Registry().emplace<PropertyAnimatorComponent>(on.Entity());
+    scene.Registry().emplace<PropertyAnimatorComponent>(off.Entity());
+    nlohmann::json j = nlohmann::json::parse(SceneSerializer::SaveToString(scene));
+    for (auto& obj : j["objects"]) {
+        if (!obj.contains("propertyAnimator")) continue;
+        obj["propertyAnimator"].erase("loopOverride");
+        obj["propertyAnimator"]["loop"] = obj.value("name", "") == "On";
+    }
+    std::unique_ptr<Scene> old = SceneSerializer::LoadFromString(j.dump());
+    auto get = [&](const char* name) {
+        GameObject o = old->FindByName(name);
+        return o.Valid() ? old->Registry().try_get<PropertyAnimatorComponent>(o.Entity()) : nullptr;
+    };
+    const auto* pOn = get("On");
+    const auto* pOff = get("Off");
+    CHECK_TRUE(pOn && pOff);
+    if (pOn && pOff) {
+        CHECK_TRUE(!pOn->LoopOverride);
+        CHECK_TRUE(pOff->LoopOverride && !pOff->Loop);
+    }
+    // Новая сцена хранит переопределение как есть.
+    PropertyAnimatorComponent& c = scene.Registry().get<PropertyAnimatorComponent>(on.Entity());
+    c.LoopOverride = true;
+    c.Loop = true;
+    std::unique_ptr<Scene> again = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    GameObject o = again->FindByName("On");
+    const auto* p = o.Valid() ? again->Registry().try_get<PropertyAnimatorComponent>(o.Entity()) : nullptr;
+    CHECK_TRUE(p && p->LoopOverride && p->Loop);
 }

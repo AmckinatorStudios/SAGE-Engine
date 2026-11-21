@@ -85,86 +85,88 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
     // что она обязана сказать, — ЕСТЬ ЛИ ЧТО анимировать: компонент,
     // добавленный к кубу, обязан объяснить, почему ничего не происходит.
     if (reg.all_of<AnimationComponent>(obj.Entity()) && EditorTheme::SectionHeader("anim", T("Animation" "###Animation"), ImGuiTreeNodeFlags_DefaultOpen, &rm.Animation,
-                                       T("Skeleton comes from the Mesh model"))) {
+                                       T("Skeletal animation: a clip or a graph plays on the skeleton of the Mesh model"))) {
         if (AnimationComponent* am = reg.try_get<AnimationComponent>(obj.Entity())) {
             const MeshRendererComponent* mesh = reg.try_get<MeshRendererComponent>(obj.Entity());
             const bool hasModelRef = mesh && mesh->Ref.type == MeshRef::Type::Model &&
                                      !mesh->Ref.path.empty();
             if (!hasModelRef) {
-                // РАНЬШЕ ЗДЕСЬ ЗАВОДИЛОСЬ ДЕМО-ЩУПАЛЬЦЕ. Компонент, добавленный
-                // к объекту без модели, показывал шевелящийся отросток — то есть
-                // на вопрос «почему не работает моя анимация» отвечал чужой
-                // работающей анимацией. Теперь ответ словами и по делу.
                 ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
                                    T("No model in Mesh — there is nothing to animate"));
                 ImGui::TextDisabled("%s", T("Put a model with a skeleton into Mesh (.glb/.gltf/.fbx)."));
             }
-            // Модель есть, а скелета в ней нет — это тот самый случай, который
-            // ТЗ требует объяснять словами, а не молчанием.
             if (hasModelRef && am->Ready && !am->Model) {
                 ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
                                    T("This model has no skeleton — nothing to animate"));
             }
-            if (ImGui::Button(T("Reload"))) { am->Ready = false; am->Model = nullptr; }
 
-            // --- ГРАФ АНИМАЦИИ -------------------------------------------
-            //
-            // Задан граф — позу строит он, и выбор клипа ниже не нужен: два
-            // источника позы на одном скелете дали бы позу, которую никто не
-            // заказывал.
-            ImGui::TextUnformatted(T("Animation graph"));
-            assetslot::Actions graphActions;
-            graphActions.SuggestedName = "NewAnimGraph";
-            // Граф откроется в пространстве Animation и заиграет на этом объекте
-            // (он выбран) в общем вьюпорте.
-            graphActions.Edit = [&host, am] {
-                host.OpenAnimGraph(sage::PathToUtf8(host.CurrentProject().Dir() / sage::PathFromUtf8(am->GraphPath)));
-            };
-            const assetslot::Result graphSlot =
-                assetslot::Draw(host, "animgraph", assetslot::Kind::AnimGraph, am->GraphPath, &m_preview,
-                                T("No graph: a single clip plays"), &graphActions);
-            if (graphSlot.Changed) {
-                host.PushUndoSnapshot();
-                am->GraphPath = graphSlot.Path;
+            // ИСТОЧНИК ПОЗЫ — КЛИП ИЛИ ГРАФ, и выбран всегда один. Раньше оба
+            // слота висели рядом, и, назначив оба, человек не знал, какой
+            // играет (играл граф). Переключение снимает другой источник —
+            // одним шагом отмены.
+            const bool graphMode = !am->GraphPath.empty() || m_animUseGraph[obj.Id()];
+            ictl::GroupItem modes[2];
+            modes[0].Text = T("Clip");
+            modes[0].Tooltip = T("One clip plays on the skeleton");
+            modes[0].Active = !graphMode;
+            modes[1].Text = T("Graph");
+            modes[1].Tooltip = T("An animation graph blends several clips by its parameters");
+            modes[1].Active = graphMode;
+            if (const int hit = ictl::ButtonGroup("##anim_source", modes, 2, ictl::ButtonLook::Standard); hit >= 0) {
+                if (hit == 0 && graphMode) {
+                    if (!am->GraphPath.empty()) host.PushUndoSnapshot();
+                    am->GraphPath.clear();
+                    m_animUseGraph[obj.Id()] = false;
+                } else if (hit == 1 && !graphMode) {
+                    if (!am->ClipPath.empty()) host.PushUndoSnapshot();
+                    am->ClipPath.clear();
+                    m_animUseGraph[obj.Id()] = true;
+                }
             }
-            if (graphSlot.BrowseRequested) {
-                FileBrowser::Config c;
-                c.Title = T("Choose an animation graph");
-                c.Filters = assetslot::Extensions(assetslot::Kind::AnimGraph);
-                c.FilterLabel = T("Animation graph");
-                c.StartDir = c.Root = assetslot::ProjectRoot(host);
-                m_browser.Open(c);
-                m_browseTarget = &am->GraphPath;
-                m_browseIsShader = false;
-                m_browseIsMesh = false;
-                m_browseIsMaterial = false;
-            }
-            if (!am->GraphPath.empty()) {
-                if (const sage::anim::AnimGraph* g = am->Graph.Graph()) {
-                    // Параметры графа — живые: то же, что делает скрипт
-                    // animator:SetFloat. В сцену не пишутся — это состояние игры.
-                    sage::editor::ictl::UndoScope noUndo([] {});
-                    for (const sage::anim::AnimGraphParam& p : g->Params) {
-                        float v = am->GetFloat(p.Name);
-                        if (sage::editor::ictl::SliderNumber(host, p.Name.c_str(), &v, p.Min, std::max(p.Max, p.Min + 0.001f)))
-                            am->SetFloat(p.Name, v);
-                    }
+
+            const int objId = obj.Id();
+            if (graphMode) {
+                assetslot::Actions graphActions;
+                graphActions.SuggestedName = obj.Name() + "Graph";
+                graphActions.Edit = [&host, objId, am] { host.EditAnimation(objId, am->GraphPath); };
+                const assetslot::Result graphSlot =
+                    assetslot::Draw(host, "animgraph", assetslot::Kind::AnimGraph, am->GraphPath, &m_preview,
+                                    T("No graph: create one or drop a .sageanimgraph"), &graphActions);
+                if (graphSlot.Changed) {
+                    host.PushUndoSnapshot();
+                    am->GraphPath = graphSlot.Path;
+                    if (!graphSlot.Path.empty()) am->ClipPath.clear();
+                }
+                if (graphSlot.BrowseRequested) {
+                    FileBrowser::Config c;
+                    c.Title = T("Choose an animation graph");
+                    c.Filters = assetslot::Extensions(assetslot::Kind::AnimGraph);
+                    c.FilterLabel = T("Animation graph");
+                    c.StartDir = c.Root = assetslot::ProjectRoot(host);
+                    m_browser.Open(c);
+                    m_browseTarget = &am->GraphPath;
+                    m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
+                }
+                if (!am->GraphPath.empty()) {
+                    if (EditorIcons::Button("wire", T("Edit Graph"), T("Opens the graph in the Animation workspace")))
+                        host.EditAnimation(objId, am->GraphPath);
+                    if (am->Model && !am->Graph.Graph())
+                        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
+                                           T("The graph could not be read (see the console)"));
                     for (const std::string& problem : am->Graph.Problems())
                         ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", problem.c_str());
-                } else if (am->Model) {
-                    ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
-                                       T("The graph could not be read (see the console)"));
+                } else {
+                    ImGui::TextDisabled("%s", T("Create a graph with + in the slot, or drop one from Assets."));
                 }
             } else {
-                // --- КЛИП ФАЙЛОМ ---------------------------------------------
-                //
-                // Слот ассета, а не номер в списке: номер зависит от порядка клипов
-                // в модели и молча меняется при переэкспорте (см. AnimationComponent).
-                // Пустой слот — играем клип из самой модели, как раньше.
-                ImGui::TextUnformatted(T("Clip file"));
+                // КЛИП ФАЙЛОМ; пусто — клип из самой модели по номеру (сцены до
+                // появления файлов клипов, модели с невынутыми клипами).
+                assetslot::Actions clipActions;
+                clipActions.Create = [&host, objId] { host.CreateAnimationClip(objId, true); };
+                clipActions.Edit = [&host, objId, am] { host.EditAnimation(objId, am->ClipPath); };
                 const assetslot::Result clipSlot =
-                    assetslot::Draw(host, "animclip", assetslot::Kind::Animation, am->ClipPath,
-                                    &m_preview, T("Playing a clip from the model itself"));
+                    assetslot::Draw(host, "animclip", assetslot::Kind::Animation, am->ClipPath, &m_preview,
+                                    T("Playing a clip from the model itself"), &clipActions);
                 if (clipSlot.Changed) {
                     host.PushUndoSnapshot();
                     am->ClipPath = clipSlot.Path;
@@ -174,73 +176,80 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                     c.Title = T("Choose an animation clip");
                     c.Filters = assetslot::Extensions(assetslot::Kind::Animation);
                     c.FilterLabel = T("Animation");
-                    // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
                     c.StartDir = c.Root = assetslot::ProjectRoot(host);
                     m_browser.Open(c);
                     m_browseTarget = &am->ClipPath;
-                    m_browseIsShader = false;
-                    m_browseIsMesh = false;
-                    m_browseIsMaterial = false;
+                    m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
                 }
                 if (!am->ClipPath.empty() && am->MissingBones > 0) {
-                    // Клип от другого персонажа подходит частично — и молчать об
-                    // этом нельзя: «двигается половина скелета» иначе не объяснить.
                     ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn),
                                        T("%d bones of the clip are missing from this skeleton"),
                                        am->MissingBones);
                 }
-
-                // Вынуть клипы модели в файлы — то же действие, что импорт
-                // материалов, и в том же месте, где о них вспоминают.
-                if (hasModelRef && EditorIcons::Button("import", T("Extract clips to files"),
-                                                       T("Writes every clip of the model next to it\n"
-                                                         "as .sageanim. Existing files are kept."))) {
-                    const ClipImportResult r = ImportModelClips(host.CurrentProject(), mesh->Ref.path);
-                    if (r.Found == 0) {
-                        host.SetStatusMessage(T("The model has no animation clips"));
-                    } else {
-                        host.SetStatusMessage(T("Clips: ") + std::to_string(r.Found) +
-                                              T(", files written: ") + std::to_string(r.Created));
-                        // Первый клип сразу назначаем: иначе человек нажал кнопку,
-                        // файлы появились, а объект не двинулся — и непонятно, что
-                        // ещё от него хотят.
-                        if (am->ClipPath.empty() && !r.Refs.empty()) {
-                            host.PushUndoSnapshot();
-                            am->ClipPath = r.Refs.front();
+                // Править — назначенный клип; создать — свой клип для этого
+                // скелета, сразу назначенный и открытый.
+                if (!am->ClipPath.empty()) {
+                    if (EditorIcons::Button("anim", T("Edit Clip"), T("Opens the clip in the Animation workspace")))
+                        host.EditAnimation(objId, am->ClipPath);
+                } else {
+                    if (EditorIcons::Button("plus", T("Create Clip"),
+                                            T("A new editable clip for this skeleton: assigned and opened")))
+                        host.CreateAnimationClip(objId, true);
+                    // Клипы, встроенные в модель: выбор по имени и вынос в файлы.
+                    const int clipCount = am->Anim.ClipCount();
+                    if (clipCount > 0) {
+                        if (am->Clip >= clipCount) am->Clip = 0;
+                        std::string preview = am->Anim.ClipName(am->Clip);
+                        if (ictl::BeginDropdown(T("Model clip"), preview.c_str())) {
+                            for (int i = 0; i < clipCount; ++i) {
+                                if (ImGui::Selectable(am->Anim.ClipName(i).c_str(), am->Clip == i) && i != am->Clip) {
+                                    host.PushUndoSnapshot();
+                                    am->Clip = i;
+                                }
+                            }
+                            ictl::EndDropdown();
                         }
+                    } else if (am->Model) {
+                        ImGui::TextDisabled("%s", T("No animation clips (bind pose)"));
                     }
-                }
-
-                // Список клипов — из проигрывателя (модель уже загружена системой).
-                int clipCount = am->Anim.ClipCount();
-                if (clipCount > 0 && am->ClipPath.empty()) {
-                    if (am->Clip >= clipCount) am->Clip = 0;
-                    std::string preview = am->Anim.ClipName(am->Clip);
-                    if (ictl::BeginDropdown("Clip", preview.c_str())) {
-                        for (int i = 0; i < clipCount; ++i) {
-                            bool sel = (am->Clip == i);
-                            if (ImGui::Selectable(am->Anim.ClipName(i).c_str(), sel) && i != am->Clip) {
-                                am->Clip = i;
-                                // Плавный кросс-фейд к выбранному клипу (или резко, если 0).
-                                if (am->BlendTime > 0.0f) am->Anim.CrossFade(i, am->BlendTime, am->Loop);
-                                else am->Anim.Play(i, am->Loop);
+                    if (hasModelRef && clipCount > 0 &&
+                        EditorIcons::Button("import", T("Extract clips to files"),
+                                            T("Writes every clip of the model next to it\n"
+                                              "as .sageanim (read only). Existing files are kept."))) {
+                        const ClipImportResult r = ImportModelClips(host.CurrentProject(), mesh->Ref.path);
+                        if (r.Found == 0) {
+                            host.SetStatusMessage(T("The model has no animation clips"));
+                        } else {
+                            host.SetStatusMessage(T("Clips: ") + std::to_string(r.Found) +
+                                                  T(", files written: ") + std::to_string(r.Created));
+                            if (am->ClipPath.empty() && !r.Refs.empty()) {
+                                host.PushUndoSnapshot();
+                                am->ClipPath = r.Refs.front();
                             }
                         }
-                        ictl::EndDropdown();
                     }
-                    ifield::Float(host, T("Blend Time"), &am->BlendTime, 0.01f, 0.0f, 2.0f);
-                    if (am->Anim.Fading())
-                        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Info), T("cross-fading %.0f%%"),
-                                           am->Anim.FadeWeight() * 100.0f);
-                } else if (clipCount == 0) {
-                    ImGui::TextDisabled("%s", T("No animation clips (bind pose)"));
                 }
             }
-            ifield::Float(host, T("Speed"), &am->Speed, 0.02f, 0.0f, 8.0f);
-            if (ifield::Check(host, T("Loop"), &am->Loop)) am->Anim.Play(am->Clip, am->Loop);
-            ImGui::SameLine();
-            ifield::Check(host, T("Playing"), &am->Playing);
-            ifield::Check(host, T("Root Motion"), &am->RootMotion);
+            // ЗАПУСК — свойство объекта: начинает ли он играть сам. Остальное —
+            // редкие правки экземпляра — в Advanced: скорость и повтор задаёт
+            // ресурс, а в игре ими управляет скрипт (animator:SetSpeed…).
+            ifield::Check(host, T("Play On Start"), &am->Playing);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", T("Starts playing when the game starts. Scripts can play and stop it any time."));
+            if (ictl::SubSection(("anim_adv_" + std::to_string(objId)).c_str(), T("Advanced"), false)) {
+                ifield::Float(host, T("Speed"), &am->Speed, 0.02f, 0.0f, 8.0f);
+                if (ifield::Check(host, T("Loop"), &am->Loop)) am->Anim.Play(am->Clip, am->Loop);
+                ifield::Float(host, T("Blend Time"), &am->BlendTime, 0.01f, 0.0f, 2.0f);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", T("Cross-fade when the clip of this object changes"));
+                ifield::Check(host, T("Root Motion"), &am->RootMotion);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", T("The root bone moves the object instead of the model"));
+                if (!am->Layers.empty())
+                    ImGui::TextDisabled(T("Layers: %d (edit in the Animation workspace)"), (int)am->Layers.size());
+                if (ImGui::Button(T("Reload"))) { am->Ready = false; am->Model = nullptr; }
+                ictl::EndSubSection();
+            }
         }
     }
 
@@ -248,25 +257,23 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
     //
     // ОТДЕЛЬНО ОТ «Animation», И ЭТО НЕ ДУБЛИРОВАНИЕ. Тот компонент играет
     // движение КОСТЕЙ модели, этот — движение СВОЙСТВ объекта и его детей
-    // (положение, цвет, прозрачность, размер). Скелета для него не нужно:
-    // мигающая кнопка интерфейса и всплывающая подсказка — это он.
-    //
-    // ИМЕННО ЭТОТ КОМПОНЕНТ ОТВЕЧАЕТ НА ВОПРОС «ЧТО ИГРАЕТ ЭТОТ ОБЪЕКТ».
-    // Пока его не было видно в инспекторе, клип существовал только внутри
-    // инструмента анимации: объект «анимировался», но в сцене не было ничего,
-    // что это подтверждало бы, и после закрытия редактора движение пропадало.
+    // (положение, цвет, прозрачность, размер). Создать и править клип можно
+    // прямо отсюда: не надо сначала идти в Animation и искать кнопку.
     if (reg.all_of<PropertyAnimatorComponent>(obj.Entity()) &&
         EditorTheme::SectionHeader("clock", T("Property Animation" "###Property Animation"),
                                    ImGuiTreeNodeFlags_DefaultOpen, &rm.PropertyAnim,
                                    T("Plays a .sageclip: properties of this object and its children"))) {
         if (PropertyAnimatorComponent* pa = reg.try_get<PropertyAnimatorComponent>(obj.Entity())) {
+            const int objId = obj.Id();
+            assetslot::Actions clipActions;
+            clipActions.Create = [&host, objId] { host.CreateAnimationClip(objId, false); };
+            clipActions.Edit = [&host, objId, pa] { host.EditAnimation(objId, pa->ClipPath); };
             const assetslot::Result clipSlot =
                 assetslot::Draw(host, "propclip", assetslot::Kind::Animation, pa->ClipPath,
-                                &m_preview, T("No clip — nothing is playing"));
+                                &m_preview, T("No clip — nothing is playing"), &clipActions);
             if (clipSlot.Changed) {
                 host.PushUndoSnapshot();
                 pa->ClipPath = clipSlot.Path;
-                // Путь сменился — старый клип в памяти больше не тот.
                 pa->Clip.reset();
                 pa->Ready = false;
             }
@@ -275,24 +282,31 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                 c.Title = T("Choose an animation clip");
                 c.Filters = assetslot::Extensions(assetslot::Kind::Animation);
                 c.FilterLabel = T("Animation");
-                // Диалог заперт в проекте: ассет выбирается ИЗНУТРИ (см. assetslot::ProjectRoot).
                 c.StartDir = c.Root = assetslot::ProjectRoot(host);
                 m_browser.Open(c);
                 m_browseTarget = &pa->ClipPath;
-                m_browseIsShader = false;
-                m_browseIsMesh = false;
-                m_browseIsMaterial = false;
+                m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
             }
             if (pa->ClipPath.empty()) {
-                ImGui::TextDisabled("%s", T("Create a clip in the Animation tool and it lands here."));
-            } else if (EditorIcons::Button("anim", T("Edit the clip"),
-                                           T("Opens this clip in the Animation tool"))) {
-                host.OpenAnimationClip(pa->ClipPath);
+                if (EditorIcons::Button("plus", T("Create Clip"),
+                                        T("Writes a .sageclip into Assets, assigns it here and opens it")))
+                    host.CreateAnimationClip(objId, false);
+            } else if (EditorIcons::Button("anim", T("Edit"), T("Opens this clip in the Animation workspace"))) {
+                host.EditAnimation(objId, pa->ClipPath);
             }
-            ifield::Check(host, T("Playing"), &pa->Playing);
-            ImGui::SameLine();
-            ifield::Check(host, T("Loop"), &pa->Loop);
-            ifield::Float(host, T("Speed"), &pa->Speed, 0.02f, 0.0f, 8.0f);
+            ifield::Check(host, T("Play On Start"), &pa->Playing);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", T("Starts playing when the game starts. Scripts can play and stop it any time."));
+            if (ictl::SubSection(("propanim_adv_" + std::to_string(objId)).c_str(), T("Advanced"), false)) {
+                // Повтор — свойство клипа; здесь его можно перебить для этого
+                // объекта (одно движение — и петля фона, и разовый отклик).
+                ifield::Check(host, T("Override Loop"), &pa->LoopOverride);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("%s", T("Off: the clip decides whether it loops. On: this object decides."));
+                if (pa->LoopOverride) ifield::Check(host, T("Loop"), &pa->Loop);
+                ifield::Float(host, T("Speed"), &pa->Speed, 0.02f, 0.0f, 8.0f);
+                ictl::EndSubSection();
+            }
         }
     }
 
