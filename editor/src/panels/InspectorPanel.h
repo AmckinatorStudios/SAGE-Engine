@@ -133,6 +133,11 @@ private:
                             const std::string& path, bool preview);
     // Какие материалы раскрыты для правки прямо в секции Mesh (по пути).
     std::string m_inlineMaterial;
+    // Форма и сглаживание крупного превью материала (индекс в списке форм:
+    // шар, куб, плоскость, цилиндр, конус, капсула). Живут в панели, а не в
+    // материале: это способ СМОТРЕТЬ, и переключение материалов их не сбрасывает.
+    int m_materialShape = 0;
+    bool m_materialFlat = false;
     bool m_materialLabelsFit = true;   // подписи полей материала видны целиком (самопроверка)
 public:
     bool MaterialLabelsFit() const { return m_materialLabelsFit; }

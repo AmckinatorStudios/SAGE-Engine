@@ -49,7 +49,7 @@ const std::vector<MaterialRenderField>& MaterialRenderFields() {
          [](MaterialRender& r, int v) { r.Cull = (CullFaces)v; },
          kCullKeys, kCullLabels, 3},
         {"blend", "Смешение", MaterialRenderField::Kind::Enum,
-         MaterialRenderField::Group::Render, nullptr, nullptr, 0.0f, 0.0f,
+         MaterialRenderField::Group::Transparency, nullptr, nullptr, 0.0f, 0.0f,
          "Как полупрозрачная поверхность ложится на то, что за ней.\n"
          "«Обычное» — цвет поверх с прозрачностью.\n"
          "«Сложение» — цвет прибавляется к фону: свет, огонь, искры, светила.\n"
@@ -71,7 +71,7 @@ const std::vector<MaterialRenderField>& MaterialRenderFields() {
          "0 — не пользуется, 1 — зеркало. Не выводится из шероховатости:\n"
          "гладкий шар тоже гладкий, но плоскости он не принадлежит."},
         {"alphaCutoff", "Порог отсечения", MaterialRenderField::Kind::Float,
-         MaterialRenderField::Group::Render, nullptr, &MaterialRender::AlphaCutoff, 0.0f, 1.0f,
+         MaterialRenderField::Group::Transparency, nullptr, &MaterialRender::AlphaCutoff, 0.0f, 1.0f,
          "Пиксель с альфой ниже порога не рисуется вовсе.\n"
          "0 — режима нет: альфа текстуры не смотрится.\n"
          "Нужен листве, траве, решёткам — всему, что вырезано альфой:\n"
