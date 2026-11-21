@@ -1,8 +1,10 @@
 #pragma once
 #include "../ProjectTemplates.h"
 #include <string>
+#include <vector>
 
 #include "FileBrowser.h"
+#include "EditorHost.h"
 
 class EditorHost;
 
@@ -46,6 +48,12 @@ public:
 
 private:
     std::string m_buildDirProject; // для какого проекта выставлена папка сборки
+    // Окно сборки: выбранная платформа, её профили (опрос диска — при открытии
+    // окна, не каждый кадр) и имя игры по правилам GameBuild (GameInfo::FileName).
+    std::string m_targetId;
+    std::vector<BuildTargetInfo> m_targets;
+    std::string m_buildFileName;
+    bool m_buildRefresh = true;
 
     // Обзор файловой системы. Раньше КАЖДЫЙ путь здесь вводился руками, и это
     // была не мелочь: человек не помнит абсолютный путь к своему проекту, а

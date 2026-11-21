@@ -90,8 +90,110 @@ bool EditorLayer::HasAnyScene() const {
 }
 
 
+namespace {
+
+// Профили сборки. Состав подтверждён CI (windows.yml, linux.yml, macos.yml);
+// кросс-компиляции нет — runtime чужой платформы кладут готовым.
+struct TargetProfile { const char* Id; const char* Name; const char* Arch; const char* Player; };
+const TargetProfile kTargets[] = {
+    {"windows-x64", "Windows", "x64", "SagePlayer.exe"},
+    {"linux-x64", "Linux", "x64", "SagePlayer"},
+    {"macos-arm64", "macOS", "ARM64", "SagePlayer"},
+};
+
+const char* NativeTargetId() {
+#if defined(_WIN32)
+    return "windows-x64";
+#elif defined(__APPLE__)
+    return "macos-arm64";
+#else
+    return "linux-x64";
+#endif
+}
+
+// Места нативного SagePlayer: SAGE_PLAYER_PATH, затем стандартные — ОТ СВОЕГО
+// БИНАРНИКА, а не от текущей папки (ярлык запускает из «Документов»).
+std::vector<fs::path> NativePlayerCandidates() {
+#ifdef _WIN32
+    const char* playerName = "SagePlayer.exe";
+#else
+    const char* playerName = "SagePlayer";
+#endif
+    const fs::path exeDir = sage::ExecutableDir();
+    std::vector<fs::path> candidates;
+    if (const fs::path p = sage::EnvPath("SAGE_PLAYER_PATH"); !p.empty())
+        candidates.push_back(p);
+    if (!exeDir.empty()) {
+        candidates.push_back(exeDir / playerName);                        // установка: рядом с редактором
+        candidates.push_back(exeDir / "runtime" / playerName);            // установка с подпапками
+        candidates.push_back(exeDir.parent_path() / "runtime" / playerName); // дерево сборки
+        candidates.push_back(exeDir / ".." / "runtime" / playerName);
+    }
+    candidates.push_back(fs::path("..") / "runtime" / playerName); // запуск из папки сборки
+    candidates.push_back(fs::path(".") / playerName);
+    return candidates;
+}
+
+fs::path FirstExistingFile(const std::vector<fs::path>& candidates) {
+    std::error_code ec;
+    for (const fs::path& c : candidates)
+        if (fs::exists(c, ec) && !fs::is_directory(c, ec)) return c;
+    return {};
+}
+
+// Общий поиск runtime по ID профиля. SAGE_PLAYER_PATH и прежние места
+// действуют только для нативной платформы; остальные — runtime/<id>/ строго в
+// двух местах (рядом с редактором и в дереве сборки), без обхода диска.
+BuildTargetInfo FindRuntime(const std::string& id) {
+    BuildTargetInfo t;
+    const TargetProfile* prof = nullptr;
+    for (const TargetProfile& p : kTargets)
+        if (id == p.Id) prof = &p;
+    t.Id = id;
+    if (!prof) {
+        t.UnavailableReason = T("Unknown build platform");
+        return t;
+    }
+    t.Name = prof->Name;
+    t.Architecture = prof->Arch;
+
+    std::vector<fs::path> candidates;
+    if (id == NativeTargetId()) {
+        candidates = NativePlayerCandidates();
+    } else {
+        const fs::path exeDir = sage::ExecutableDir();
+        if (!exeDir.empty()) {
+            candidates.push_back(exeDir / "runtime" / prof->Id / prof->Player);
+            candidates.push_back(exeDir.parent_path() / "runtime" / prof->Id / prof->Player);
+        }
+    }
+    const fs::path player = FirstExistingFile(candidates);
+    if (player.empty()) {
+        t.UnavailableReason = std::string(T("SagePlayer not found for this platform: put it into runtime/")) +
+                              prof->Id + "/";
+        return t;
+    }
+    std::error_code ec;
+    if (!fs::is_directory(player.parent_path() / "assets", ec)) {
+        t.UnavailableReason = T("The assets folder is missing next to SagePlayer");
+        return t;
+    }
+    t.PlayerPath = player;
+    t.Available = true;
+    return t;
+}
+
+} // namespace
+
+std::vector<BuildTargetInfo> EditorLayer::BuildTargets() const {
+    std::vector<BuildTargetInfo> out;
+    for (const TargetProfile& p : kTargets) out.push_back(FindRuntime(p.Id));
+    return out;
+}
+
+
 bool EditorLayer::PrepareBuild(const fs::path& outputDir, GameBuilder::Request& req,
-                               std::string& err) {
+                               std::string& err, const std::string& targetId) {
     if (!m_project.Loaded()) {
         err = "No project open";
         return false;
@@ -135,45 +237,21 @@ bool EditorLayer::PrepareBuild(const fs::path& outputDir, GameBuilder::Request& 
                               "Назначить: ПКМ по сцене в панели Assets.";
     }
 
-    // 1. Собранный SagePlayer: явный SAGE_PLAYER_PATH, иначе стандартные
-    // места относительно редактора (../runtime в дереве сборки, рядом с exe).
-#ifdef _WIN32
-    const char* playerName = "SagePlayer.exe";
-    std::string exeSuffix = ".exe";
-#else
-    const char* playerName = "SagePlayer";
-    std::string exeSuffix;
-#endif
-    // Ищем ОТ СВОЕГО БИНАРНИКА, а не от текущей папки.
-    //
-    // Здесь стояли только относительные пути («./SagePlayer», «../runtime/
-    // SagePlayer»), то есть поиск шёл от ТЕКУЩЕЙ ПАПКИ ПРОЦЕССА. В дереве
-    // сборки это совпадало с папкой редактора и работало, а у человека,
-    // запустившего установленный редактор ярлыком, текущей папкой оказывались
-    // «Документы» — и сборка игры падала с «SagePlayer not found» при плеере,
-    // лежащем в двух шагах, рядом с самим редактором. Текущая папка — это
-    // откуда ЗАПУСКАЮТ, а не куда УСТАНОВЛЕНО (ровно та же ошибка, из-за
-    // которой появился sage/core/Paths.h).
-    const fs::path exeDir = sage::ExecutableDir();
-    std::vector<fs::path> candidates;
-    if (const fs::path p = sage::EnvPath("SAGE_PLAYER_PATH"); !p.empty())
-        candidates.push_back(p);
-    if (!exeDir.empty()) {
-        candidates.push_back(exeDir / playerName);                        // установка: рядом с редактором
-        candidates.push_back(exeDir / "runtime" / playerName);            // установка с подпапками
-        candidates.push_back(exeDir.parent_path() / "runtime" / playerName); // дерево сборки
-        candidates.push_back(exeDir / ".." / "runtime" / playerName);
-    }
-    candidates.push_back(fs::path("..") / "runtime" / playerName); // запуск из папки сборки
-    candidates.push_back(fs::path(".") / playerName);
-
+    // 1. Собранный SagePlayer. Выбрана платформа в окне — берём её runtime;
+    // пустой targetId (синхронная сборка, самопроверки) — прежний нативный поиск.
     std::error_code ec;
     fs::path player;
-    for (const fs::path& candidate : candidates) {
-        if (fs::exists(candidate, ec) && !fs::is_directory(candidate, ec)) {
-            player = candidate;
-            break;
+    std::vector<fs::path> candidates;
+    if (!targetId.empty()) {
+        const BuildTargetInfo target = FindRuntime(targetId);
+        if (!target.Available) {
+            err = target.UnavailableReason;
+            return false;
         }
+        player = target.PlayerPath;
+    } else {
+        candidates = NativePlayerCandidates();
+        player = FirstExistingFile(candidates);
     }
     if (player.empty()) {
         // Сообщение называет ВСЕ просмотренные места. «Не найдено» без списка
@@ -210,9 +288,10 @@ bool EditorLayer::BuildGame(const fs::path& outputDir, std::string& err) {
 }
 
 
-bool EditorLayer::StartBuildGame(const fs::path& outputDir, std::string& err) {
+bool EditorLayer::StartBuildGame(const fs::path& outputDir, std::string& err,
+                                 const std::string& targetId) {
     GameBuilder::Request req;
-    if (!PrepareBuild(outputDir, req, err)) return false;
+    if (!PrepareBuild(outputDir, req, err, targetId)) return false;
     if (!m_builder.Start(req)) {
         err = T("A build is already running");
         return false;
