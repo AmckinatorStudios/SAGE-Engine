@@ -110,6 +110,7 @@ void AssetPreview::Shutdown() {
     m_fbo.reset();
     m_targets.clear();
     m_sphere.reset();
+    m_shapeMesh.reset();
     m_sky.reset();
     m_reflections = sage::render::ReflectionSystem{};
     m_ready = false;
@@ -135,6 +136,24 @@ uint64_t AssetPreview::RenderMaterial(const std::shared_ptr<Material>& material,
     Init();
     if (!m_sphere) return 0;
     return Render(m_sphere, {material}, size, 1.0f, key);
+}
+
+uint64_t AssetPreview::RenderMaterial(const std::shared_ptr<Material>& material, int width, int height,
+                                      MeshRef::Type shape, bool flat) {
+    Init();
+    if (!m_sphere) return 0;
+    if (!m_shapeMesh || m_shapeType != shape || m_shapeFlat != flat) {
+        sage::render::PrimitiveParams params;
+        params.Flat = flat;
+        m_shapeMesh = ResourceManager::Instance().GetPrimitive(shape, params);
+        m_shapeType = shape;
+        m_shapeFlat = flat;
+    }
+    if (!m_shapeMesh) return 0;
+    // Вписывание — ОТНОСИТЕЛЬНО ШАРА: шар остаётся ровно таким, каким был
+    // всегда, а куб, цилиндр и капсула — в той же мере, не вылезая из кадра.
+    const float fit = BoundingRadius(*m_shapeMesh) / BoundingRadius(*m_sphere);
+    return Render(m_shapeMesh, {material}, width, height, fit, std::string());
 }
 
 uint64_t AssetPreview::RenderMesh(const std::shared_ptr<Mesh>& mesh, int size,
@@ -330,13 +349,13 @@ void AssetPreview::ReleaseTarget(const std::string& key) {
     m_outputs.erase(key);
 }
 
-Framebuffer& AssetPreview::TargetFor(const std::string& key, int size) {
+Framebuffer& AssetPreview::TargetFor(const std::string& key, int width, int height) {
     if (key.empty()) {
-        if (!m_fbo) m_fbo.emplace(size, size);
+        if (!m_fbo) m_fbo.emplace(width, height);
         return *m_fbo;
     }
     auto it = m_targets.find(key);
-    if (it == m_targets.end()) it = m_targets.emplace(key, Framebuffer(size, size)).first;
+    if (it == m_targets.end()) it = m_targets.emplace(key, Framebuffer(width, height)).first;
     return it->second;
 }
 
@@ -351,6 +370,12 @@ void AssetPreview::ForgetProject() {
 
 uint64_t AssetPreview::Render(const std::shared_ptr<Mesh>& mesh,
                               const std::vector<std::shared_ptr<Material>>& materials, int size,
+                              float fitRadius, const std::string& key) {
+    return Render(mesh, materials, size, size, fitRadius, key);
+}
+
+uint64_t AssetPreview::Render(const std::shared_ptr<Mesh>& mesh,
+                              const std::vector<std::shared_ptr<Material>>& materials, int width, int height,
                               float fitRadius, const std::string& key) {
     if (!mesh) return 0;
 
@@ -388,7 +413,7 @@ uint64_t AssetPreview::Render(const std::shared_ptr<Mesh>& mesh,
     } else {
         mr.Color = glm::vec3(0.78f, 0.78f, 0.80f);
     }
-    return RenderScene(scene, size, fitRadius, glm::vec3(0.0f), key);
+    return RenderScene(scene, width, height, fitRadius, glm::vec3(0.0f), key);
 }
 
 uint64_t AssetPreview::RenderPrefab(const std::string& path, int size, const std::string& key) {
@@ -449,26 +474,31 @@ uint64_t AssetPreview::RenderLiveScene(Scene& scene, int size, const glm::vec3& 
     return RenderScene(scene, size, fitRadius, focus, key);
 }
 
-uint64_t AssetPreview::RenderScene(Scene& scene, int size, float fitRadius,
+uint64_t AssetPreview::RenderScene(Scene& scene, int width, int height, float fitRadius,
                                    const glm::vec3& focus, const std::string& key) {
-    size = std::clamp(size, 32, 1024);
-    Framebuffer& target = TargetFor(key, size);
-    target.Resize(size, size);
+    width = std::clamp(width, 32, 2048);
+    height = std::clamp(height, 32, 2048);
+    Framebuffer& target = TargetFor(key, width, height);
+    target.Resize(width, height);   // тот же размер — ничего не перевыделяется
     target.Bind();
 
     sage::rhi::GraphicsDevice& device = sage::Application::Get().Device();
     device.SetClearColor(0.13f, 0.14f, 0.17f, 1.0f);
     device.Clear();
 
+    // КАДР НЕ КВАДРАТНЫЙ — проекция по его сторонам, иначе шар в широком
+    // превью становится эллипсом. Вписывание — по МЕНЬШЕЙ стороне: в узком и
+    // высоком кадре камера отходит, чтобы форма не обрезалась по бокам.
+    const float aspect = (float)width / (float)height;
     const float yaw = glm::radians(m_yaw);
     const float pitch = glm::radians(m_pitch);
-    const float dist = m_distance * fitRadius;
+    const float dist = m_distance * fitRadius / std::min(1.0f, aspect);
     const glm::vec3 eye = focus + glm::vec3(dist * std::cos(pitch) * std::sin(yaw),
                                             dist * std::sin(pitch),
                                             dist * std::cos(pitch) * std::cos(yaw));
     const glm::mat4 view = glm::lookAt(eye, focus, glm::vec3(0.0f, 1.0f, 0.0f));
     const glm::mat4 proj =
-        glm::perspective(glm::radians(35.0f), 1.0f, 0.05f, dist * 8.0f + 10.0f);
+        glm::perspective(glm::radians(35.0f), aspect, 0.05f, dist * 8.0f + 10.0f);
 
     const LightingEnvironment env = StudioLight();
     sage::render::SceneColorInput input;
@@ -483,7 +513,7 @@ uint64_t AssetPreview::RenderScene(Scene& scene, int size, float fitRadius,
     input.ShadingMode = 0;
     input.OcclusionCulling = false;
     input.Time = 0.0f;   // анимированные материалы в превью стоят на месте
-    input.Reflection = m_reflections.Binding(size, size);
+    input.Reflection = m_reflections.Binding(width, height);
 
     sage::render::RenderSceneColor(scene, m_batch, input);
 
@@ -491,19 +521,19 @@ uint64_t AssetPreview::RenderScene(Scene& scene, int size, float fitRadius,
     // «только тон-маппинг» (PostChain::Completed).
     Framebuffer* out = nullptr;
     if (key.empty()) {
-        if (!m_outFbo) m_outFbo.emplace(size, size);
+        if (!m_outFbo) m_outFbo.emplace(width, height);
         out = &*m_outFbo;
     } else {
         auto it = m_outputs.find(key);
-        if (it == m_outputs.end()) it = m_outputs.emplace(key, Framebuffer(size, size)).first;
+        if (it == m_outputs.end()) it = m_outputs.emplace(key, Framebuffer(width, height)).first;
         out = &it->second;
     }
-    out->Resize(size, size);
+    out->Resize(width, height);
     if (!m_post) m_post = std::make_unique<sage::render::PostFX>();
     out->Bind();
     m_post->ResetHistory();
-    m_post->Render(target.ColorTexture(), target.DepthTexture(), size, size, proj, view,
-                   sage::render::PostChain{}, out, 0, 0, size, size);
+    m_post->Render(target.ColorTexture(), target.DepthTexture(), width, height, proj, view,
+                   sage::render::PostChain{}, out, 0, 0, width, height);
 
     device.BindDefaultFramebuffer();
     return out->NativeColorTexture();

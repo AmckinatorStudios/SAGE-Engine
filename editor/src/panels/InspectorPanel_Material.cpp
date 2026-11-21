@@ -176,54 +176,65 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
     // по слепку путей (шесть сравнений строк, если ничего не менялось).
     ResourceManager::Instance().RefreshMaterialTextures(*material);
 
-    // --- 3D-превью ------------------------------------------------------------
+    // --- 3D-ПРЕВЬЮ — СВЕРХУ, ВНЕ КАТЕГОРИЙ ------------------------------------
     //
-    // Раньше материал показывался КВАДРАТИКОМ ЦВЕТА albedo. По нему нельзя
-    // понять ничего из того, ради чего материал и настраивают: металл или
-    // диэлектрик, гладкий или матовый, как легла карта нормалей. Всё это видно
-    // только на изогнутой поверхности при свете.
+    // Материал настраивают, глядя на него: металл или диэлектрик, гладкий или
+    // матовый, как легла карта нормалей. Поэтому превью не сворачивается и
+    // занимает всю ширину инспектора, а не квадрат 220 точек сбоку. Кадр —
+    // по ширине панели, высота — три четверти от неё (в разумных пределах);
+    // проекция строится по его сторонам (AssetPreview::RenderMaterial).
     if (preview) {
-        const float side = std::min(ImGui::GetContentRegionAvail().x, 220.0f);
-        const uint64_t tex = m_preview.RenderMaterial(material, (int)side);
+        static const MeshRef::Type kShapes[] = {MeshRef::Type::Sphere, MeshRef::Type::Cube,
+                                                MeshRef::Type::Plane, MeshRef::Type::Cylinder,
+                                                MeshRef::Type::Cone, MeshRef::Type::Capsule};
+        m_materialShape = std::clamp(m_materialShape, 0, 5);
+        const float w = std::floor(ImGui::GetContentRegionAvail().x);
+        const float h = std::floor(std::clamp(w * 0.75f, 160.0f, 420.0f));
+        // Буфер — в пикселях экрана, а не в точках интерфейса: на мониторе с
+        // масштабом 2 превью иначе было бы мыльным.
+        const float scale = std::max(1.0f, ImGui::GetIO().DisplayFramebufferScale.x);
+        const uint64_t tex = w > 1.0f ? m_preview.RenderMaterial(material, (int)(w * scale), (int)(h * scale),
+                                                                 kShapes[m_materialShape], m_materialFlat)
+                                      : 0;
         if (tex) {
             const ImVec2 p0 = ImGui::GetCursorScreenPos();
-            // КАРТИНКА + НЕВИДИМАЯ КНОПКА ПОВЕРХ, а не «реакция по наведению».
-            //
-            // Пока вращение слушало IsMouseHovered, оно обрывалось на границе
-            // картинки: увёл курсор на пиксель в сторону — и шар замер посреди
-            // жеста, хотя кнопка ещё зажата. Настоящая кнопка захватывает мышь
-            // до отпускания, и крутить можно размашисто, как во вьюпорте.
+            ImGui::Image((ImTextureID)(std::intptr_t)tex, ImVec2(w, h), ImVec2(0, 1), ImVec2(1, 0));
+            // КАРТИНКА + НЕВИДИМАЯ КНОПКА ПОВЕРХ: кнопка захватывает мышь до
+            // отпускания, и вращение не обрывается на границе картинки.
             ImGui::SetCursorScreenPos(p0);
-            ImGui::Image((ImTextureID)(std::intptr_t)tex, ImVec2(side, side), ImVec2(0, 1),
-                         ImVec2(1, 0));
-            ImGui::SetCursorScreenPos(p0);
-            ImGui::InvisibleButton("##preview_drag", ImVec2(side, side));
-            const bool hot = ImGui::IsItemHovered();
-            if (ImGui::IsItemActive()) {
+            ImGui::InvisibleButton("##preview_drag", ImVec2(w, h));
+            if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left, 0.0f)) {
                 const ImVec2 d = ImGui::GetIO().MouseDelta;
                 m_preview.Orbit(d.x * 0.5f, -d.y * 0.5f);
             }
-            // КОЛЕСО ОТДАЁТСЯ ПРЕВЬЮ, пока курсор над ним.
-            //
-            // Инспектор — прокручиваемая панель, и колесо по умолчанию
-            // достаётся ЕЙ: прокрутка выигрывала у приближения через раз, и
-            // выглядело это как «колесо иногда не работает». Владение ключом
-            // решает спор в пользу того, на что смотрят.
-            if (hot) {
+            if (ImGui::IsItemHovered()) {
+                // Колесо — превью, пока курсор над ним: иначе его забирала
+                // прокрутка инспектора, и приближение срабатывало через раз.
                 ImGui::SetItemKeyOwner(ImGuiKey_MouseWheelY);
                 const float wheel = ImGui::GetIO().MouseWheel;
                 if (wheel != 0.0f) m_preview.Zoom(wheel);
-                ImGui::SetTooltip("%s", T("Drag to turn, wheel to zoom"));
+                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) m_preview.ResetView();
+                ImGui::SetTooltip("%s", T("Drag to turn, wheel to zoom, double-click to reset"));
             }
         }
+        // Под картинкой — одна строка: форма, сглаживание формы, сброс вида.
+        // Smooth/Flat — это нормали ГЕОМЕТРИИ превью, а не фильтрация текстур
+        // (у той свои «Сглаживание/Ближайший пиксель» в разделе Textures).
+        const char* shapes[] = {T("Sphere"), T("Cube"), T("Plane"), T("Cylinder"), T("Cone"), T("Capsule")};
+        ictl::Combo("##preview_shape", &m_materialShape, shapes, 6, ictl::DropLook::Compact);
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T("Preview shape"));
         ImGui::SameLine();
-        ImGui::BeginGroup();
-        ImGui::TextDisabled("%s", T("Preview"));
-        // Кнопка-значок вместо подписи: «Сбросить вид» занимало полстроки рядом
-        // с картинкой, а нажимают её редко и понимают по значку сразу.
-        if (EditorIcons::IconOnlyButton("refresh", T("Reset the preview view")))
-            m_preview.ResetView();
-        ImGui::EndGroup();
+        ictl::GroupItem shading[2];
+        shading[0].Text = T("Smooth");
+        shading[0].Tooltip = T("Smooth shading of the preview shape");
+        shading[0].Active = !m_materialFlat;
+        shading[1].Text = T("Flat");
+        shading[1].Tooltip = T("Flat faces of the preview shape");
+        shading[1].Active = m_materialFlat;
+        const int pick = ictl::ButtonGroup("##preview_shading", shading, 2, ictl::ButtonLook::Standard);
+        if (pick >= 0) m_materialFlat = pick == 1;
+        ImGui::SameLine(ImGui::GetContentRegionMax().x - ImGui::GetFrameHeight());
+        if (EditorIcons::IconOnlyButton("refresh", T("Reset the preview view"))) m_preview.ResetView();
         ImGui::Spacing();
     }
 
@@ -291,108 +302,99 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
         return;
     }
 
-    // Базовый цвет — ВМЕСТЕ с непрозрачностью: у материала это два поля файла
-    // (Albedo и Opacity), но смотрят на них как на один цвет «какой он и
-    // насколько просвечивает». Ползунок «Непрозрачность» ниже правит то же число.
-    Sage::UI::ColorFieldAlpha(T("Albedo"), &material->Albedo.x, &material->Opacity);
-    sage::editor::ResetField(&host, *material, material->Albedo);
-    Sage::UI::ColorField3(T("Emissive"), &material->Emissive.x);
-    sage::editor::ResetField(&host, *material, material->Emissive);
-    // Сила свечения отдельным ползунком, и его предел заметно больше единицы:
-    // bloom срабатывает от яркости ВЫШЕ 1 (EngineConfig::BloomThreshold), а цвет
-    // в редакторе зажат в 0..1. Без множителя «свечение» оставалось бы просто
-    // светлым цветом без ореола.
-    ifield::Float(host, T("Emissive Strength"), &material->EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
-    sage::editor::ResetField(&host, *material, material->EmissiveStrength);
-    // Рамка элемента включает подпись: вышла за край — подпись обрезана.
-    m_materialLabelsFit = ImGui::GetItemRectMax().x <=
-                          ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x + 0.5f;
-    if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("%s", T("Emissive multiplier. Values above 1 produce a bloom halo."));
+    // ПЯТЬ КАТЕГОРИЙ, каждая сворачивается сама по себе, раскрытие
+    // запоминается (настройки редактора) и не зависит от выбранного материала.
+    // В инспекторе ассета это разделы (BeginSection); внутри секции Mesh
+    // объекта — подгруппы (SubSection): разделы в разделе выглядели бы
+    // второй панелью.
+    auto beginCat = [&](const char* id, const char* title, bool open, const char* icon) {
+        return preview ? ictl::BeginSection(id, title, open, icon) : ictl::SubSection(id, title, open);
+    };
+    auto endCat = [&] {
+        if (preview) ictl::EndSection();
+        else ictl::EndSubSection();
+    };
+
+    // --- MATERIAL: цвет, свечение, металл, шероховатость ---------------------
+    if (beginCat("material.cat.material", T("Material"), true, "material")) {
+        // BASE COLOR — ТОЛЬКО RGB. Прозрачность у материала одна — Opacity в
+        // разделе Transparency; альфа в цветовом поле была вторым входом в то
+        // же число, и цвет, выбранный пипеткой, молча менял прозрачность.
+        // С картой Base Color Map цвет умножается на неё (белый — карта как
+        // есть), без карты он и есть цвет поверхности.
+        Sage::UI::ColorField3(T("Base Color"), &material->Albedo.x);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Main colour of the surface. With a Base Color Map it multiplies the map:\n"
+                                      "white keeps the map's own colours."));
+        sage::editor::ResetField(&host, *material, material->Albedo);
+        Sage::UI::ColorField3(T("Emissive Color"), &material->Emissive.x);
+        sage::editor::ResetField(&host, *material, material->Emissive);
+        // Сила свечения отдельным ползунком, и его предел заметно больше
+        // единицы: bloom срабатывает от яркости ВЫШЕ 1, а цвет зажат в 0..1.
+        ifield::Float(host, T("Emissive Strength"), &material->EmissiveStrength, 0.05f, 0.0f, 20.0f, "%.2f");
+        sage::editor::ResetField(&host, *material, material->EmissiveStrength);
+        // Рамка элемента включает подпись: вышла за край — подпись обрезана.
+        m_materialLabelsFit = ImGui::GetItemRectMax().x <=
+                              ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x + 0.5f;
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Emissive multiplier. Values above 1 produce a bloom halo."));
+        ifield::Slider(host, T("Metallic"), &material->Metallic, 0.0f, 1.0f);
+        sage::editor::ResetField(&host, *material, material->Metallic);
+        ifield::Slider(host, T("Roughness"), &material->Roughness, 0.0f, 1.0f);
+        sage::editor::ResetField(&host, *material, material->Roughness);
+        endCat();
     }
 
-    // PBR (metallic-roughness) — основной путь освещения (Cook-Torrance).
-    ictl::SeparatorText(T("PBR"));
-    // Справка по картам — при наведении на заголовок, а не двумя строками под ними.
-    EditorTheme::Hint(T("Normal: tangent-space (OpenGL). Metallic/Rough/AO use R channel."));
-    EditorTheme::Hint(T("Map value multiplies the factor above; Enter applies the path."));
-    EditorTheme::Hint(T("Edits apply live to every entity using this material."));
-    ifield::Slider(host, T("Metallic"), &material->Metallic, 0.0f, 1.0f);
-    sage::editor::ResetField(&host, *material, material->Metallic);
-    ifield::Slider(host, T("Roughness"), &material->Roughness, 0.0f, 1.0f);
-    sage::editor::ResetField(&host, *material, material->Roughness);
-
-    // Слоты текстур: превью, путь, «Обзор…», «Из Assets», «Очистить».
+    // --- TEXTURES: карты и их фильтрация -------------------------------------
     //
-    // Раньше здесь стояли пять голых полей ввода, применявшихся по Enter: путь
-    // к текстуре надо было ЗНАТЬ и напечатать без опечатки, а единственной
-    // обратной связью была строчка в консоли. Слот показывает саму картинку —
-    // назначено ли что-то и то ли это, что хотели, видно сразу.
-    //
-    // ОДНИМ СВОРАЧИВАЕМЫМ СПИСКОМ. Шесть слотов по высоте обложки занимали
-    // полтора экрана инспектора, и до прозрачности и рендера приходилось
-    // листать мимо карт, которых у материала чаще всего две. В заголовке —
-    // сколько карт назначено: свёрнутый список всё равно говорит, что внутри.
-    int maps = 0;
-    for (const std::string* p : {&material->TexturePath, &material->NormalMapPath, &material->MetallicMapPath,
-                                 &material->RoughnessMapPath, &material->EmissiveMap, &material->AOMapPath})
-        if (!p->empty()) ++maps;
-    char texturesLabel[96];
-    std::snprintf(texturesLabel, sizeof(texturesLabel), "%s (%d / 6)###MaterialTextures", T("Textures"), maps);
-    const bool texturesOpen =
-        ictl::SubSection("material_textures", texturesLabel, true);
-    EditorTheme::Hint(T("Albedo, normal, metallic, roughness, emissive and AO maps of the material"));
-    if (texturesOpen) {
-        DrawTextureSlot(host, "Albedo", material->TexturePath, material->AlbedoTex,
-                        T("Base colour. Multiplied by the Albedo above."), *material);
-        DrawTextureSlot(host, "Normal", material->NormalMapPath, material->NormalTex,
+    // Подписи — по тому, ЧТО карта задаёт: «Base Color Map» рядом с полем
+    // «Base Color», а не два разных «Albedo». Имена полей файла и API те же.
+    if (beginCat("material.cat.textures", T("Textures"), true, "texture")) {
+        DrawTextureSlot(host, T("Base Color Map"), material->TexturePath, material->AlbedoTex,
+                        T("Image of the surface. Multiplied by Base Color."), *material);
+        DrawTextureSlot(host, T("Normal Map"), material->NormalMapPath, material->NormalTex,
                         T("Normal map, tangent space (OpenGL: green is up)."), *material);
-        DrawTextureSlot(host, "Metallic", material->MetallicMapPath, material->MetallicTex,
-                        T("Channel R. Multiplied by the Metallic factor above."), *material);
-        DrawTextureSlot(host, "Roughness", material->RoughnessMapPath, material->RoughnessTex,
-                        T("Channel R. Multiplied by the Roughness factor above."), *material);
-        DrawTextureSlot(host, "Emissive", material->EmissiveMap, material->EmissiveTex,
-                        T("Where it glows and where it does not. Multiplied by the emissive colour and strength."), *material);
-        DrawTextureSlot(host, "AO", material->AOMapPath, material->AOTex,
+        DrawTextureSlot(host, T("Metallic Map"), material->MetallicMapPath, material->MetallicTex,
+                        T("Channel R. Multiplied by Metallic."), *material);
+        DrawTextureSlot(host, T("Roughness Map"), material->RoughnessMapPath, material->RoughnessTex,
+                        T("Channel R. Multiplied by Roughness."), *material);
+        DrawTextureSlot(host, T("Emissive Map"), material->EmissiveMap, material->EmissiveTex,
+                        T("Where it glows and where it does not. Multiplied by the emissive colour and strength."),
+                        *material);
+        DrawTextureSlot(host, T("AO Map"), material->AOMapPath, material->AOTex,
                         T("Ambient occlusion, channel R. Empty means AO = 1."), *material);
-
-        // ФИЛЬТРАЦИЯ — сразу под картами: решают её, глядя на картинку (чёткие
-        // пиксели или сглаживание), а не на поведение рендера. Подписи и ключи —
-        // из той же таблицы, что пишет файл (MaterialRenderFields).
+        // ФИЛЬТРАЦИЯ — под картами: решают её, глядя на картинку. Подписи и
+        // ключи — из таблицы, что пишет файл (MaterialRenderFields).
         for (const MaterialRenderField& f : MaterialRenderFields()) {
             if (std::strcmp(f.Key, "filtering") != 0 || !f.GetEnum || !f.SetEnum) continue;
             int value = f.GetEnum(material->Render);
-            if (ictl::Combo(T("Filtering"), &value, f.EnumLabels, f.EnumCount))
-                f.SetEnum(material->Render, value);
+            if (ictl::Combo(T("Filtering"), &value, f.EnumLabels, f.EnumCount)) f.SetEnum(material->Render, value);
             if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
         }
-        ictl::EndSubSection();
+        endCat();
     }
 
-    // ПОВТОР ТЕКСТУРЫ («тайлинг») — ЗДЕСЬ, среди карт, а не в поведении рендера.
-    // Настраивают его, глядя на текстуру: пол в сто метров с одной растянутой
-    // плиткой — это вопрос к карте, а не к тому, как рисуются грани. Какие
-    // свойства сюда попадают, решает таблица (MaterialRenderFields), а не этот
-    // файл: формат .sagemat от переезда подписи не меняется.
-    ictl::SeparatorText(T("Tiling"));
-    {
+    // --- TILING: повтор и сдвиг ----------------------------------------------
+    //
+    // Повтор двигает ТЕКСТУРЫ — без загруженной карты ему нечего двигать, и
+    // поля, ни на что не влияющие, выключены (с объяснением). Состояние
+    // считается каждый кадр: назначили или убрали карту — раздел ожил сам.
+    if (beginCat("material.cat.tiling", T("Tiling"), false, "grid")) {
+        const bool anyMap = material->AlbedoTex || material->NormalTex || material->MetallicTex ||
+                            material->RoughnessTex || material->EmissiveTex || material->AOTex;
+        if (!anyMap) EditorTheme::Hint(T("Assign a texture in Textures: tiling moves texture maps"));
+        ImGui::BeginDisabled(!anyMap);
         using Mode = MaterialRender::TilingMode;
-        // РЕЖИМ ПЕРВЫМ: от него зависит, что вообще значат числа ниже, и
-        // показывать поле «Повтор по Y» там, где оно ни на что не влияет,
-        // значит обещать настройку, которой нет.
+        // РЕЖИМ ПЕРВЫМ: от него зависит, что значат числа ниже.
         const char* kModes[] = {T("Uniform"), T("Per axis"), T("Per object size")};
         int mode = (int)material->Render.Tiling;
-        if (ictl::Combo(T("Tiling mode"), &mode, kModes, 3))
-            material->Render.Tiling = (Mode)std::clamp(mode, 0, 2);
-        if (ImGui::IsItemHovered())
+        if (ictl::Combo(T("Tiling mode"), &mode, kModes, 3)) material->Render.Tiling = (Mode)std::clamp(mode, 0, 2);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
             ImGui::SetTooltip("%s", T("Uniform — one number for both axes.\n"
                                       "Per axis — width and height apart (planks, brickwork).\n"
                                       "Per object size — repeats PER METRE: the tile keeps its\n"
                                       "physical size however the object is scaled."));
-
-        // ПРЕДЕЛОВ ПОЛЗУНКА ЗДЕСЬ НЕТ: повтор берут и сотнями (мелкий песок на
-        // большом поле), и долями (одна картинка на пол-объекта). Прежний
-        // потолок 64 не пропускал даже введённое числом значение.
+        // Пределов ползунка нет: повтор берут и сотнями, и долями.
         const float kMin = 0.001f, kMax = 512.0f;
         if (material->Render.Tiling == Mode::Uniform) {
             float uniform = material->Render.UVScaleX;
@@ -405,13 +407,11 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
                 material->Render.UVScaleY = std::clamp(tiling[1], kMin, kMax);
             }
         }
-        if (ImGui::IsItemHovered()) {
+        if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("How many times the texture repeats across the UV.\n"
-              "Without it a picture on a large object is stretched over its whole length."));
-        }
+                                      "Without it a picture on a large object is stretched over its whole length."));
         if (material->Render.Tiling == Mode::WorldSize)
             EditorTheme::Hint(T("Repeats per metre of each face: a 4 x 1 x 2 box gets 4 x 1 tiles in front and 2 x 1 on the side."));
-
         float offset[2] = {material->Render.UVOffsetX, material->Render.UVOffsetY};
         if (ictl::DragVec(&host, T("Offset"), offset, 2, 0.01f, -64.0f, 64.0f, "%.3f")) {
             material->Render.UVOffsetX = std::clamp(offset[0], -64.0f, 64.0f);
@@ -420,42 +420,43 @@ void InspectorPanel::DrawMaterialFields(EditorHost& host, const std::shared_ptr<
         if (ImGui::IsItemHovered())
             ImGui::SetTooltip("%s", T("Shifts the texture in tiles: a seam landing in the middle\n"
                                       "of a wall is cheaper to move than to re-model."));
+        ImGui::EndDisabled();
+        endCat();
     }
 
-
-    ictl::SeparatorText(T("Transparency"));
-    ifield::Slider(host, T("Opacity"), &material->Opacity, 0.0f, 1.0f);
-    sage::editor::ResetField(&host, *material, material->Opacity);
-
-    // Своего шейдера у обычного материала нет: материал-шейдер — отдельный
-    // вид, создаётся «Создать → Шейдер» и показывается своим инспектором выше.
-
-    // Свойства рендера рисуются ПО ТАБЛИЦЕ (MaterialRenderFields). Новая
-    // возможность рендера появляется в инспекторе сама — от неё требуется поле
-    // и строка таблицы, а не ещё одна правка здесь. Раньше каждое такое
-    // свойство надо было дописать в пяти местах, и панель редактора отставала
-    // от формата файла чаще всего: её забывали.
-    ictl::SeparatorText(T("Render"));
-    for (const MaterialRenderField& f : MaterialRenderFields()) {
-        // Своё место в инспекторе есть не у всех: повтор текстуры показан выше,
-        // среди карт (см. MaterialRenderField::Group).
-        if (f.In != MaterialRenderField::Group::Render) continue;
-        if (f.Type == MaterialRenderField::Kind::Enum && f.GetEnum && f.SetEnum) {
-            // Подписи берутся ИЗ ТАБЛИЦЫ как есть — она же единственный источник
-            // правды о свойствах рендера, и вторым списком названий здесь мы
-            // завели бы ровно то расхождение, от которого таблица и заведена.
-            int value = f.GetEnum(material->Render);
-            const int count = std::min(f.EnumCount, 8);
-            if (ictl::Combo(f.Label, &value, f.EnumLabels, count))
-                f.SetEnum(material->Render, value);
-        } else if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
-            ictl::Check(f.Label, &(material->Render.*f.AsBool));
-        } else if (f.AsFloat) {
-            ifield::Slider(host, f.Label, &(material->Render.*f.AsFloat), f.Min, f.Max);
+    // Свойства рендера рисуются ПО ТАБЛИЦЕ (MaterialRenderFields): новое
+    // свойство попадает в свою категорию само — по MaterialRenderField::Group.
+    auto drawRenderFields = [&](MaterialRenderField::Group group) {
+        for (const MaterialRenderField& f : MaterialRenderFields()) {
+            if (f.In != group) continue;
+            if (f.Type == MaterialRenderField::Kind::Enum && f.GetEnum && f.SetEnum) {
+                int value = f.GetEnum(material->Render);
+                if (ictl::Combo(f.Label, &value, f.EnumLabels, std::min(f.EnumCount, 8)))
+                    f.SetEnum(material->Render, value);
+            } else if (f.Type == MaterialRenderField::Kind::Bool && f.AsBool) {
+                ictl::Check(f.Label, &(material->Render.*f.AsBool));
+            } else if (f.AsFloat) {
+                ifield::Slider(host, f.Label, &(material->Render.*f.AsFloat), f.Min, f.Max);
+            }
+            if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
         }
-        if (f.Tooltip && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", f.Tooltip);
+    };
+
+    // --- TRANSPARENCY: непрозрачность — ЕДИНСТВЕННОЕ место, где она правится -
+    if (beginCat("material.cat.transparency", T("Transparency"), false, "eye")) {
+        ifield::Slider(host, T("Opacity"), &material->Opacity, 0.0f, 1.0f);
+        sage::editor::ResetField(&host, *material, material->Opacity);
+        if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("%s", T("Below 1 the material is drawn in the transparent pass (blending, back to front)."));
+        drawRenderFields(MaterialRenderField::Group::Transparency);
+        endCat();
     }
 
+    // --- RENDER: остальное поведение отрисовки -------------------------------
+    if (beginCat("material.cat.render", T("Render"), false, "gear")) {
+        drawRenderFields(MaterialRenderField::Group::Render);
+        endCat();
+    }
 
     drawSave();
 }

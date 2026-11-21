@@ -9,6 +9,7 @@
 #include <glm/glm.hpp>
 
 #include "sage/ecs/RenderBatch.h"
+#include "sage/ecs/RenderComponents.h"
 #include "sage/render/Framebuffer.h"
 #include "sage/render/PostFX.h"
 #include "sage/render/Reflection.h"
@@ -67,6 +68,13 @@ public:
     // 0 — превью недоступно.
     uint64_t RenderMaterial(const std::shared_ptr<Material>& material, int size,
                             const std::string& key = {});
+    // КРУПНОЕ ПРЕВЬЮ МАТЕРИАЛА в инспекторе: кадр width × height (проекция — по
+    // соотношению сторон, форма вписывается по меньшей стороне), примитив
+    // shape и его сглаживание: flat — грани плоские (PrimitiveParams::Flat).
+    // Это свойство ГЕОМЕТРИИ превью, а не фильтрации текстур. Рисуется в общий
+    // буфер (key == ""); камера (Orbit/Zoom) от смены формы не сбрасывается.
+    uint64_t RenderMaterial(const std::shared_ptr<Material>& material, int width, int height,
+                            MeshRef::Type shape, bool flat);
 
     // То же для модели: меш вписывается в кадр по своим габаритам.
     //
@@ -165,10 +173,16 @@ private:
     // префаб отличаются только тем, что в сцене, — свет, камера, окружение и
     // проход у них обязаны быть одни и те же, иначе «превью» и «превью» стали
     // бы двумя разными картинками одного и того же материала.
-    uint64_t RenderScene(Scene& scene, int size, float fitRadius, const glm::vec3& focus,
+    uint64_t RenderScene(Scene& scene, int width, int height, float fitRadius, const glm::vec3& focus,
                          const std::string& key);
+    uint64_t RenderScene(Scene& scene, int size, float fitRadius, const glm::vec3& focus,
+                         const std::string& key) {
+        return RenderScene(scene, size, size, fitRadius, focus, key);
+    }
+    uint64_t Render(const std::shared_ptr<Mesh>& mesh, const std::vector<std::shared_ptr<Material>>& materials,
+                    int width, int height, float fitRadius, const std::string& key);
     // Буфер под ключ (см. комментарий про key выше).
-    Framebuffer& TargetFor(const std::string& key, int size);
+    Framebuffer& TargetFor(const std::string& key, int width, int height);
 
     // Фоновые разборы моделей для обложек (см. RenderModelCover). Путь — ключ.
     struct ModelCoverJob;
@@ -190,6 +204,12 @@ private:
     std::optional<SkyRenderer> m_sky;
     sage::render::ReflectionSystem m_reflections;
     std::shared_ptr<Mesh> m_sphere;
+    // Форма крупного превью — ДЕРЖИТСЯ здесь: вариант примитива (Flat),
+    // который никто не держит, кэш ресурсов убирает, и без этой ссылки он
+    // собирался бы заново каждый кадр.
+    std::shared_ptr<Mesh> m_shapeMesh;
+    MeshRef::Type m_shapeType = MeshRef::Type::Sphere;
+    bool m_shapeFlat = false;
     bool m_ready = false;
 
     float m_yaw = 35.0f;

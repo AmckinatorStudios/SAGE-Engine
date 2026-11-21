@@ -1130,3 +1130,23 @@ TEST(Scene_migration_unhides_folders) {
 
 
 
+
+// КАТЕГОРИИ ИНСПЕКТОРА МАТЕРИАЛА — по назначению свойства: смешение и порог
+// отсечения правят вместе с непрозрачностью (Transparency), фильтрация и
+// повтор — среди карт (Textures), остальное — Render. Группа — свойство
+// интерфейса: файл от неё не зависит (round-trip выше проходит по той же
+// таблице).
+TEST(Material_render_fields_are_grouped_by_purpose) {
+    auto groupOf = [](const char* key) {
+        for (const MaterialRenderField& f : MaterialRenderFields())
+            if (std::string(f.Key) == key) return (int)f.In;
+        return -1;
+    };
+    using G = MaterialRenderField::Group;
+    CHECK_EQ(groupOf("blend"), (int)G::Transparency);
+    CHECK_EQ(groupOf("alphaCutoff"), (int)G::Transparency);
+    CHECK_EQ(groupOf("filtering"), (int)G::Textures);
+    CHECK_EQ(groupOf("tilingMode"), (int)G::Textures);
+    for (const char* key : {"cull", "depthBias", "planarReflectivity", "translucency", "unlit"})
+        CHECK_EQ(groupOf(key), (int)G::Render);
+}
