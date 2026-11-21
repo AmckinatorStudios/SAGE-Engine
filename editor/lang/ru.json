@@ -4169,6 +4169,18 @@
     "Reset camera": "Сбросить камеру",
     "Select an object with a skeleton to pick one of its clips.": "Выберите объект со скелетом, чтобы взять один из его клипов.",
     "Select an object with a skeleton: the graph plays on it in the Viewport": "Выберите объект со скелетом: граф заиграет на нём во вьюпорте",
-    "Skeleton of animated models": "Скелет анимированных моделей"
+    "Skeleton of animated models": "Скелет анимированных моделей",
+    "Modified: %s": "Изменён: %s",
+    "No preview: the file could not be read": "Нет превью: файл не прочитался",
+    "The name cannot contain / \\ or :": "В имени не может быть / \\ и :",
+    "Hidden path levels": "Скрытые уровни пути",
+    "Cards with previews": "Карточки с превью",
+    "Table: name, type, size, date": "Таблица: имя, тип, размер, дата",
+    "Card size (Ctrl + wheel)": "Размер карточек (Ctrl + колесо)",
+    "Row height (Ctrl + wheel)": "Высота строк (Ctrl + колесо)",
+    "Modified": "Изменён",
+    "Ascending": "По возрастанию",
+    "Descending": "По убыванию",
+    "Sort order (folders always first)": "Порядок (папки всегда первыми)"
   }
 }

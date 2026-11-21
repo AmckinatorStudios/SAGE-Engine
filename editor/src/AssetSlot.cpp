@@ -63,7 +63,8 @@ std::unordered_map<std::string, Cached>& Cache() {
 
 } // namespace
 
-uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
+uint64_t Cover(AssetPreview* preview, const fs::path& path, int size, bool* pending) {
+    if (pending) *pending = false;
     if (path.empty()) return 0;
     const std::string key = path.string();
     const std::string ext = Lower(path.extension().string());
@@ -71,7 +72,11 @@ uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
     // Картинки не рендерятся — они уже картинки. Берутся из кэша ОБЛОЖЕК
     // (Thumbnails.h): уменьшенные, фоном. Через GetTexture картинка 4096²
     // декодировалась в кадре целиком ради квадратика в инспекторе.
-    if (KindOf(path) == Kind::Texture) return thumbs::Get(path, thumbs::Size::Tile).Id;
+    if (KindOf(path) == Kind::Texture) {
+        const thumbs::Thumb t = thumbs::Get(path, thumbs::Size::Tile);
+        if (pending) *pending = t.Loading;
+        return t.Id;
+    }
     if (!preview) return 0;
 
     const bool renderable = ext == ".sagemat" || ext == ".sageprefab" || ext == ".sagemesh" ||
@@ -93,6 +98,7 @@ uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
     static int lastRenderFrame = -1;
     if (lastRenderFrame == frame) {
         // Очередь занята этим кадром — отдаём прошлую обложку, если была.
+        if (pending) *pending = true;
         return it != cache.end() ? it->second.Id : 0;
     }
 
@@ -111,9 +117,12 @@ uint64_t Cover(AssetPreview* preview, const fs::path& path, int size) {
     } else {
         // Модель — фоном (AssetPreview::RenderModelCover): пока идёт разбор,
         // слот показывает прошлую обложку или значок.
-        bool pending = false;
-        id = preview->RenderModelCover(key, size, bufferKey, pending);
-        if (pending) return it != cache.end() ? it->second.Id : 0;
+        bool parsing = false;
+        id = preview->RenderModelCover(key, size, bufferKey, parsing);
+        if (parsing) {
+            if (pending) *pending = true;
+            return it != cache.end() ? it->second.Id : 0;
+        }
     }
     lastRenderFrame = frame;
     cache[key] = Cached{id, provisional ? -1 : stamp, frame, shot, shot ? shot->Fingerprint() : 0};

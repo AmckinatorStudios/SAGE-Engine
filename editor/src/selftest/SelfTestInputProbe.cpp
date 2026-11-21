@@ -1,4 +1,5 @@
 #include "SelfTestCommon.h"
+#include "FsCache.h"
 
 // ============================================================================
 //  МЫШЬ В ЖИВОМ КАДРЕ: щелчок по вьюпорту проверяется НАСТОЯЩИМ щелчком
@@ -497,6 +498,68 @@ void EditorLayer::TickInputProbe() {
             io.AddKeyEvent(ImGuiKey_Escape, false);
             m_probeWait = 2;
             break;
+        case 36: {
+            // ТАБЛИЦА ВЕДЁТ СЕБЯ КАК СЕТКА. Вид в панели ассетов меняет только
+            // правую область, а выбор, Ctrl-щелчок и Delete — общие
+            // (AssetsPanel::ItemBehavior). Проверяем их настоящими щелчками
+            // по строкам таблицы, как выше — по карточкам сетки.
+            m_assetsCwd = m_project.AssetsDir();
+            std::error_code mk;
+            fs::create_directories(m_assetsCwd, mk);
+            std::ofstream(m_assetsCwd / "aaa_selftest_row1.txt") << "1\n";
+            std::ofstream(m_assetsCwd / "aaa_selftest_row2.txt") << "2\n";
+            sage::editor::fscache::Invalidate(m_assetsCwd);
+            m_probeListWasGrid = m_assets.View() == AssetsPanel::ViewMode::Grid;
+            m_assets.SetView(AssetsPanel::ViewMode::List);
+            m_assets.SetSearch("aaa_selftest_row");
+            m_assets.RequestFocus();
+            m_probeWait = 4;
+            break;
+        }
+        case 37:
+            if (m_assets.TileCount() < 2) { fail("в таблице ассетов нет двух строк"); break; }
+            press(m_assets.TileCenter(0));
+            break;
+        case 38:
+            release();
+            m_probeWait = 2;
+            break;
+        case 39:
+            io.AddKeyEvent(ImGuiMod_Ctrl, true);
+            press(m_assets.TileCenter(1));
+            break;
+        case 40:
+            release();
+            io.AddKeyEvent(ImGuiMod_Ctrl, false);
+            m_probeWait = 3;
+            break;
+        case 41:
+            if (m_assets.SelectionSet().size() != 2) {
+                fail(("Ctrl-щелчок в таблице ассетов: выбрано " +
+                      std::to_string(m_assets.SelectionSet().size()) + " вместо двух").c_str());
+            }
+            io.AddKeyEvent(ImGuiKey_Delete, true);
+            break;
+        case 42:
+            io.AddKeyEvent(ImGuiKey_Delete, false);
+            m_probeWait = 2;
+            break;
+        case 43:
+            if (!m_assets.DeletePending()) fail("Delete в таблице ассетов не спросил об удалении");
+            io.AddKeyEvent(ImGuiKey_Escape, true);
+            break;
+        case 44:
+            io.AddKeyEvent(ImGuiKey_Escape, false);
+            m_probeWait = 2;
+            break;
+        case 45: {
+            std::error_code rc;
+            fs::remove(m_assetsCwd / "aaa_selftest_row1.txt", rc);
+            fs::remove(m_assetsCwd / "aaa_selftest_row2.txt", rc);
+            m_assets.SetSearch("");
+            if (m_probeListWasGrid) m_assets.SetView(AssetsPanel::ViewMode::Grid);
+            break;
+        }
         default:
             if (!m_probeFailed) LOG_INFO("Editor") << "VIEWPORT_INPUT: OK — щелчок по пустому "
                                                       "снимает выбор и во вьюпорте, и в списке "
@@ -505,7 +568,8 @@ void EditorLayer::TickInputProbe() {
                                                       "выбирает диапазон, Delete спрашивает об "
                                                       "удалении файла и не трогает при этом сцену, "
                                                       "Ctrl+D даёт одну копию, «Собрать» "
-                                                      "открывает окно сборки";
+                                                      "открывает окно сборки, таблица ассетов "
+                                                      "выбирает и удаляет как сетка";
             m_probeStep = -1;
             return;
     }

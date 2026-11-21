@@ -133,7 +133,7 @@ void EditorLayer::ApplyStartupHooks() {
             "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
             "SAGE_EDITOR_SHOW_CONSOLE",  "SAGE_EDITOR_SHOW_PROBLEMS",
             "SAGE_EDITOR_SHOW_PLUGINS",   "SAGE_EDITOR_SHADER_DEMO",  "SAGE_EDITOR_LIGHT_COOKIE", "SAGE_EDITOR_PRIMITIVES",
-            "SAGE_EDITOR_OPEN_ANIMGRAPH",
+            "SAGE_EDITOR_OPEN_ANIMGRAPH", "SAGE_EDITOR_SHOW_ASSETS",
         };
         for (const char* name : kHeadless) {
             if (std::getenv(name)) { m_headlessProject = true; break; }
@@ -146,6 +146,21 @@ void EditorLayer::ApplyStartupHooks() {
             if (!CreateProject(".", "sage_headless_project", DefaultProjectTemplate(), err))
                 LOG_ERROR("Editor") << "Не удалось создать проект для headless-прогона: " << err;
         }
+    }
+
+    // Панель Assets с папкой-образцом — для скриншот-проверки сетки и таблицы
+    // (длинные и кириллические имена, большие папки, картинки): папка
+    // SAGE_EDITOR_SHOW_ASSETS копируется в assets/ и открывается в панели;
+    // SAGE_EDITOR_SHOW_ASSETS_SUB — вложенная папка внутри неё (длинный путь).
+    if (const std::filesystem::path src = sage::EnvPath("SAGE_EDITOR_SHOW_ASSETS");
+        !src.empty() && m_project.Loaded()) {
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        const fs::path dst = m_project.AssetsDir() / src.filename();
+        fs::copy(src, dst, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+        if (ec) LOG_ERROR("Editor") << "SAGE_EDITOR_SHOW_ASSETS: " << ec.message();
+        m_assetsCwd = dst / sage::EnvPath("SAGE_EDITOR_SHOW_ASSETS_SUB");
+        m_assets.RequestFocus();
     }
 
     // Окно Animation Graph с графом из файла — для скриншот-проверки окна и

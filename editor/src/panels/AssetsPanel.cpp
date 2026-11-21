@@ -78,183 +78,24 @@ fs::path AssetsPanel::AssetsRoot(EditorHost& host) {
 // бывает после открытия другого проекта и после удаления папки, в которой
 // стояли: молча остаться «нигде» хуже, чем вернуться в корень.
 void AssetsPanel::ClampCwd(EditorHost& host) {
+    namespace fscache = sage::editor::fscache;
     const fs::path root = AssetsRoot(host);
     fs::path& cwd = host.AssetsCwd();
-    std::error_code ec;
-    if (!fs::exists(cwd, ec)) { cwd = root; return; }
-    const fs::path c = fs::weakly_canonical(cwd, ec);
-    const fs::path r = fs::weakly_canonical(root, ec);
+    // «assets/Models/» и «assets/Models» — одна папка, но у первого пустое
+    // имя: путь показал бы лишний сегмент, а сравнения с деревом не сошлись бы.
+    while (!cwd.has_filename() && cwd.has_parent_path() && cwd.parent_path() != cwd) cwd = cwd.parent_path();
+    // Папки нет (удалили — здесь или проводником) — поднимаемся к БЛИЖАЙШЕЙ
+    // уцелевшей, а не в корень: удалили «Characters» — остаёмся в «Models»,
+    // откуда и смотрели. С памятью (FsCache): вопрос задаётся каждый кадр.
+    while (fscache::Stamp(cwd, 0.5) == 0 && cwd.has_parent_path() && cwd.parent_path() != cwd)
+        cwd = cwd.parent_path();
+    const fs::path& c = fscache::Canonical(cwd);
+    const fs::path& r = fscache::Canonical(root);
     for (fs::path p = c; ; p = p.parent_path()) {
         if (p == r) return;                  // внутри корня — всё в порядке
         if (!p.has_parent_path() || p.parent_path() == p) break;
     }
     cwd = root;
-}
-
-void AssetsPanel::DrawBreadcrumb(EditorHost& host) {
-    fs::path& cwd = host.AssetsCwd();
-    // Цепочка обрывается на КОРНЕ ПАНЕЛИ: показывать дорогу туда, куда всё
-    // равно не пустят, — значит обещать несуществующий ход.
-    const fs::path root = AssetsRoot(host);
-
-    std::vector<fs::path> chain;
-    std::error_code cec;
-    const fs::path& rootCanon = sage::editor::fscache::Canonical(root);
-    for (fs::path p = cwd; p.has_parent_path(); p = p.parent_path()) {
-        chain.push_back(p);
-        if (sage::editor::fscache::Canonical(p) == rootCanon) break;
-        if (p.parent_path() == p) break; // достигли корня файловой системы
-    }
-    std::reverse(chain.begin(), chain.end());
-
-    // Хвост, а не вся цепочка, и хвост ПО ШИРИНЕ ОКНА. Без проекта cwd — это
-    // абсолютный путь вроде /home/user/work/<длинный-uuid>/assets: полная
-    // цепочка съедала строку целиком и выталкивала за край окна всё, что стояло
-    // правее. Начало пути всё равно никому не нужно — нужно то место, где
-    // стоишь, и дорога на пару шагов назад. Сколько шагов поместится, столько и
-    // показываем: панель Assets сужают до трети экрана, и фиксированное число
-    // сегментов при такой ширине снова полезло бы за край.
-    const float avail = ImGui::GetContentRegionAvail().x - 24.0f; // запас под «…/»
-    const float sepW = ImGui::CalcTextSize(" / ").x;
-    float used = 0.0f;
-    size_t first = chain.size();
-    while (first > 0) {
-        std::string seg = chain[first - 1].filename().string();
-        if (seg.empty()) seg = chain[first - 1].string();
-        const float w = ImGui::CalcTextSize(seg.c_str()).x + 8.0f + sepW;
-        if (first < chain.size() && used + w > avail) break;
-        used += w;
-        --first;
-    }
-
-    // Кнопки хлебных крошек — без рамки: это путь, а не ряд кнопок. Рамка
-    // появляется под курсором, чтобы было видно, что по сегменту можно кликнуть.
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, ImGui::GetStyle().FramePadding.y));
-    if (first > 0) {
-        ImGui::TextDisabled("...");
-        ImGui::SameLine(0, 2);
-        ImGui::TextDisabled("/");
-        ImGui::SameLine(0, 2);
-    }
-    for (size_t i = first; i < chain.size(); ++i) {
-        std::string seg = chain[i].filename().string();
-        if (seg.empty()) seg = chain[i].string();
-        ImGui::PushID(static_cast<int>(i));
-        // Текущая папка — не кнопка: щёлкать по ней некуда, и подсветка при
-        // наведении обещала бы переход, которого не будет.
-        if (i + 1 == chain.size()) {
-            ImGui::AlignTextToFramePadding();
-            ImGui::TextUnformatted(seg.c_str());
-        } else if (ImGui::Button(seg.c_str())) {
-            cwd = chain[i];
-        }
-        ImGui::PopID();
-        if (i + 1 < chain.size()) { ImGui::SameLine(0, 2); ImGui::TextDisabled("/"); ImGui::SameLine(0, 2); }
-    }
-    ImGui::PopStyleVar();
-    ImGui::PopStyleColor();
-}
-
-
-void AssetsPanel::DrawFolderNode(EditorHost& host, const fs::path& dir, int depth) {
-    // Подпапки и «та ли это папка» — с памятью (FsCache.h): дерево рисуется
-    // каждый кадр, и листать диск на каждую его строку в каждом кадре — это и
-    // был заметный кусок просевшего FPS на наборе с сотней папок.
-    namespace fscache = sage::editor::fscache;
-    const std::vector<fs::path>& subdirs = fscache::List(dir, 0.5).Dirs;
-
-    fs::path& cwd = host.AssetsCwd();
-    const bool current = fscache::Canonical(cwd) == fscache::Canonical(dir);
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth |
-                               ImGuiTreeNodeFlags_DrawLinesNone;
-    if (subdirs.empty()) flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-    if (current) flags |= ImGuiTreeNodeFlags_Selected;
-    // Корень раскрыт сразу: свёрнутое дерево из одной строки не отвечает ни на
-    // один вопрос и требует лишнего щелчка каждый раз.
-    if (depth == 0) ImGui::SetNextItemOpen(true, ImGuiCond_FirstUseEver);
-
-    ImGui::PushID(dir.string().c_str());
-    const ImVec2 rowPos = ImGui::GetCursorScreenPos();
-    const float indent = ImGui::GetTreeNodeToLabelSpacing();
-    // Строка — в общие линии дерева (ui/TreeLines.h): у папки с подпапками
-    // горизонталь от родителя кончается ДО стрелки, а не перечёркивает её.
-    m_treeLines.Row(rowPos.y, depth, rowPos.x + ImGui::GetStyle().FramePadding.x, rowPos.x + indent,
-                    !subdirs.empty());
-    const bool open = ImGui::TreeNodeEx("##folder", flags, "%s", "");
-    // Значок и цвет — ТЕ ЖЕ, что в сетке, и из того же источника.
-    //
-    // Здесь стояло `subdirs.empty() ? "folder" : "folder-full"` — то есть
-    // заполненность считалась по ОДНИМ ПОДПАПКАМ. Папка с полусотней текстур и
-    // без единой подпапки выглядела в дереве пустой, а в сетке — полной: два
-    // места отвечали на один вопрос по-разному, и верным было второе.
-    // FolderIcon (см. ниже) знает про содержимое целиком и про служебные
-    // сайдкары .meta, которые содержимым не считаются.
-    //
-    // Значок и подпись — одной парой с общим зазором (EditorIcons::DrawLabeled),
-    // а не двумя пробелами в формате.
-    {
-        glm::vec3 tint(0.85f, 0.68f, 0.32f);
-        sage::editor::foldercolors::Get(dir, tint);
-        const ImVec4 c(tint.x, tint.y, tint.z, 1.0f);
-        EditorIcons::DrawLabeled(ImGui::GetWindowDrawList(), ImVec2(rowPos.x + indent, rowPos.y),
-                                 ImGui::GetTextLineHeight(), FolderIcon(dir), ImGui::GetColorU32(c),
-                                 dir.filename().string().c_str(),
-                                 ImGui::GetColorU32(ImGuiCol_Text));
-    }
-    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) cwd = dir;
-
-    // ЦВЕТНАЯ МЕТКА СТАВИТСЯ И ОТСЮДА. Меню было только у карточки в сетке:
-    // метку видно в обоих местах, а назначить её можно было ровно в одном —
-    // причём не в том, где папки и ищут. Подменю общее (см. FolderColors.h),
-    // поэтому палитра в дереве и в сетке не разъедется.
-    if (Sage::UI::MenuScope folderMenu; ImGui::BeginPopupContextItem("##folder_menu")) {
-        ImGui::TextDisabled("%s", dir.filename().string().c_str());
-        ImGui::Separator();
-        sage::editor::foldercolors::DrawPaletteMenu(dir);
-        if (EditorIcons::MenuItem("folder", T("Show in Assets"))) cwd = dir;
-        ImGui::EndPopup();
-    }
-    // Бросок файла на папку дерева — перенос в неё: то же, что и в сетке.
-    // Бросок ОБЪЕКТА из иерархии — новый префаб в этой папке.
-    if (ImGui::BeginDragDropTarget()) {
-        if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("SAGE_ASSET_PATH"))
-            MoveGroupIntoFolder(host, dragset::Assets(p), dir);
-        AcceptObjectAsPrefab(host, dir);
-        ImGui::EndDragDropTarget();
-    }
-    if (open && !subdirs.empty()) {
-        for (const fs::path& sub : subdirs) DrawFolderNode(host, sub, depth + 1);
-        // Линии связи — те же, что в иерархии (ui/TreeLines.h): встроенная в
-        // ImGui горизонталь обрывается далеко от значка папки, а своя копия здесь
-        // вела линию сквозь стрелку раскрытия.
-        m_treeLines.Draw(rowPos, indent, depth + 1);
-        ImGui::TreePop();
-    }
-    ImGui::PopID();
-}
-
-void AssetsPanel::DrawFolderTree(EditorHost& host) {
-    ImGui::BeginChild("##assets_tree", ImVec2(m_treeWidth, 0), ImGuiChildFlags_Borders);
-    m_treeLines.Clear();
-    // Корень дерева — assets/, а не папка проекта: см. AssetsRoot().
-    DrawFolderNode(host, AssetsRoot(host), 0);
-    ImGui::EndChild();
-
-    // Разделитель: ширину дерева правят перетаскиванием. Не настройка в меню —
-    // её меняют на глаз, пока смотрят на имена, которые не помещаются.
-    ImGui::SameLine(0.0f, 0.0f);
-    ImGui::InvisibleButton("##assets_split", ImVec2(6.0f, ImGui::GetContentRegionAvail().y));
-    if (ImGui::IsItemActive()) m_treeWidth += ImGui::GetIO().MouseDelta.x;
-    m_treeWidth = std::clamp(m_treeWidth, 120.0f, 420.0f);
-    if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
-        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
-        const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
-        ImGui::GetWindowDrawList()->AddRectFilled(
-            ImVec2((a.x + b.x) * 0.5f - 1.0f, a.y), ImVec2((a.x + b.x) * 0.5f + 1.0f, b.y),
-            ImGui::GetColorU32(ImGuiCol_NavHighlight));
-    }
-    ImGui::SameLine(0.0f, 0.0f);
 }
 
 // Открыть файл — по одному правилу для двойного щелчка и пункта меню
@@ -412,15 +253,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
                                               ImGuiInputTextFlags_EnterReturnsTrue);
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
         if (enterPressed || ImGui::Button(T("Rename"), ImVec2(120, 0))) {
-            fs::path target;
-            if (!RenameAsset(m_renameTarget, m_renameBuf, target, m_error)) {
-                LOG_ERROR("Editor") << "Asset rename failed: " << m_error;
-            } else {
-                sage::editor::foldercolors::Rename(m_renameTarget, target);
-                if (m_selected == m_renameTarget) m_selected = target;
-                for (fs::path& p : m_multi) if (p == m_renameTarget) p = target;
-                sage::AssetDatabase::Instance().ScanProject(
-                    host.CurrentProject().Dir().string());
+            if (ApplyRename(host, m_renameTarget, m_renameBuf, m_error)) {
                 m_renameTarget.clear();
                 m_error.clear();
                 ImGui::CloseCurrentPopup();
@@ -456,13 +289,7 @@ void AssetsPanel::DrawModals(EditorHost& host) {
         ImGui::TextDisabled("%s", T("This cannot be undone."));
         ImGui::PushStyleColor(ImGuiCol_Button, EditorTheme::Color(EditorTheme::Role::Danger));
         if (ImGui::Button(T("Delete"), ImVec2(120, 0))) {
-            for (const fs::path& victim : m_deleteTargets) {
-                DeleteAsset(victim);
-                if (m_selected == victim) m_selected.clear();
-                auto it = std::find(m_multi.begin(), m_multi.end(), victim);
-                if (it != m_multi.end()) m_multi.erase(it);
-            }
-            host.AssetsDeleted(m_deleteTargets);
+            ApplyDelete(host, m_deleteTargets);
             m_deleteTargets.clear();
             ImGui::CloseCurrentPopup();
         }
@@ -504,11 +331,11 @@ void sage::editor::assetspanel_detail::AcceptObjectAsPrefab(EditorHost& host, co
 }
 
 void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId) {
+    if (!m_prefsLoaded) LoadPrefs();
     // Бюджет превью на кадр: см. ThumbnailFor.
     m_thumbRenderedThisFrame = false;
     Project& project = host.CurrentProject();
     ClampCwd(host);
-    fs::path& cwd = host.AssetsCwd();
 
     // Просьба вывести вкладку вперёд: панель делит место с консолью, и пока
     // впереди консоль, панели ассетов в кадре нет вовсе (см. RequestFocus).
@@ -519,49 +346,10 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
     ImGui::Begin(sage::editor::panelid::Title("folder-full", T("Assets"), windowId).c_str(), open,
                      panelwindows::WindowFlags("Assets"));
 
-    // --- Шапка панели: две строки с ЯСНЫМ разделением обязанностей ---
-    //
-    // Раньше здесь в одну строку выкладывались SmallButton «Вверх», хлебные
-    // крошки, обычная кнопка «Импорт…» и следом поле поиска во всю ширину.
-    // Виджеты разной высоты в одном ряду и строка поиска, ничем не отделённая
-    // от содержимого, и читались как «интерфейс кривой и смешанный»: глазу не
-    // за что зацепиться, потому что группы не выделены. Теперь первая строка —
-    // ТОЛЬКО навигация (где я нахожусь), вторая — ТОЛЬКО действия над этой
-    // папкой (что я здесь ищу и что приношу), и все виджеты в ряду одной высоты.
-    // Выше корня проекта панель не поднимается: снаружи проекта её файлы
-    // редактору не принадлежат, а ссылка на них не переживёт сборку игры.
-    const fs::path root = AssetsRoot(host);
-    std::error_code upec;
-    const bool atRoot = sage::editor::fscache::Canonical(cwd) ==
-                        sage::editor::fscache::Canonical(root);
-    (void)upec;
-    const bool canGoUp = cwd.has_parent_path() && !atRoot;
-    ImGui::BeginDisabled(!canGoUp);
-    if (EditorIcons::IconOnlyButton("up", T("Up"))) cwd = cwd.parent_path();
-    ImGui::EndDisabled();
-    ImGui::SameLine(0, 6);
-    DrawBreadcrumb(host);
+    DrawHeader(host);
 
-    // Внесение файлов со стороны. До сих пор этого не было вовсе: панель умела
-    // ходить по папкам проекта и создавать пустые ассеты, а положить в проект
-    // СВОЮ модель или картинку можно было только мимо редактора — проводником.
-    // Человек при этом обычно шёл другим путём: выбирал файл прямо из «Загрузок»
-    // через «Обзор…», получал в сцене абсолютный путь и рабочий вид ровно до
-    // первой сборки игры (см. Project::AssetRef).
-    const float importW = ImGui::CalcTextSize(T("Import...")).x +
-                          ImGui::GetFrameHeight() * 0.68f + ImGui::GetStyle().FramePadding.x * 3.0f;
-    // Через Sage::UI: одно поле поиска на весь редактор — с иконкой внутри,
-    // тем же отступом и той же высотой, что в консоли и в палитре команд. Три
-    // самодельных поля выглядели тремя разными полями.
-    const float searchW = std::max(120.0f, ImGui::GetContentRegionAvail().x - importW -
-                                               ImGui::GetStyle().ItemSpacing.x);
-    Sage::UI::SearchField("assets_search", m_search, sizeof(m_search), T("Search..."), searchW);
-    ImGui::SameLine();
-    DrawImportButton(host);
-
-    // Сломанные ссылки — В ПАНЕЛИ, а не только в логе. Именно молчание и было
-    // исходной болезнью: сцена грузилась, объект стоял на месте, просто без
-    // модели, и заметить это можно было лишь случайно.
+    // Сломанные ссылки — В ПАНЕЛИ, а не только в логе: сцена грузилась, объект
+    // стоял без модели, и заметить это можно было лишь случайно.
     const auto& broken = sage::AssetDatabase::Instance().Broken();
     if (!broken.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Danger));
@@ -584,125 +372,47 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
             }
         }
     }
-    ImGui::Separator();
 
     // Какой проект обслуживаем (метки папок лежат в нём). Дёшево: перечитывает
     // файл только при СМЕНЕ проекта.
     sage::editor::foldercolors::SetProject(host.CurrentProject().Dir());
 
+    // Дерево — ОДНО на оба вида: переключатель меняет только правую область.
     DrawFolderTree(host);
 
-    ImGui::BeginChild("##assets_scroll");
+    // С Ctrl колесо — масштабу (ниже), и прокрутка в этот момент не нужна.
+    ImGui::BeginChild("##assets_scroll", ImVec2(0, 0), ImGuiChildFlags_None,
+                      ImGui::GetIO().KeyCtrl ? ImGuiWindowFlags_NoScrollWithMouse : ImGuiWindowFlags_None);
     namespace rectselect = sage::editor::rectselect;
     m_rectActive = rectselect::Begin(m_rect);
     m_rectHits.clear();
-    std::error_code ec;
-    // Содержимое папки — из кэша листингов (FsCache.h): перечитывается, когда
-    // меняется время правки самой папки (добавили, удалили, переименовали), а
-    // не в каждом кадре. Сайдкары .meta кэш не показывает: это служебная
-    // запись движка (GUID ассета, см. AssetDatabase) — по одной НА КАЖДЫЙ
-    // файл, и папка с двадцатью ассетами показывала бы сорок карточек.
-    const sage::editor::fscache::Listing& listing = sage::editor::fscache::List(cwd, 0.0);
-    const std::vector<fs::path>& dirs = listing.Dirs;
-    const std::vector<fs::path>& files = listing.Files;
-
-    std::string filter = ToLower(m_search);
-    auto matches = [&](const fs::path& p) {
-        if (filter.empty()) return true;
-        return ToLower(p.filename().string()).find(filter) != std::string::npos;
-    };
-
-    // Единый ритм по вертикали между строками грида — как горизонтальный зазор.
-    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(kTileSpacing, kTileSpacing));
-    float availWidth = ImGui::GetContentRegionAvail().x;
-    int columns = std::max(1, static_cast<int>((availWidth + kTileSpacing) / (kTileW + kTileSpacing)));
-    int col = 0;
-    bool any = false;
-    // Порядок карточек НА ЭКРАНЕ собирается ДО отрисовки: по нему считается
-    // диапазон Shift-выбора, а щелчок разбирается внутри DrawTile — то есть
-    // раньше, чем нарисуются карточки ниже (см. m_visibleOrder).
-    m_visibleOrder.clear();
-    for (const auto& d : dirs) if (matches(d)) m_visibleOrder.push_back(d);
-    for (const auto& f : files) if (matches(f)) m_visibleOrder.push_back(f);
-
     m_tileCenters.clear();
-    auto placeTile = [&](const fs::path& p, bool isDir) {
-        any = true;
-        if (col > 0) ImGui::SameLine(0, kTileSpacing);
-        DrawTile(host, p, isDir);
-        // Где карточка на экране: самопроверка щёлкает по ней по-настоящему
-        // (см. EditorLayer::TickInputProbe).
-        const ImVec2 mn = ImGui::GetItemRectMin(), mx = ImGui::GetItemRectMax();
-        m_tileCenters.push_back(ImVec2((mn.x + mx.x) * 0.5f, (mn.y + mx.y) * 0.5f));
-        col = (col + 1) % columns;
-    };
-    for (const auto& d : dirs) if (matches(d)) placeTile(d, true);
-    for (const auto& f : files) if (matches(f)) placeTile(f, false);
-    ImGui::PopStyleVar();
+    RefreshItems(host);
 
-    // Обложки файлов, которых в этой папке нет, больше не нужны — отпускаем и
-    // их буферы. Иначе за сеанс блуждания по проекту накопился бы буфер на
-    // КАЖДЫЙ ассет, который когда-либо показали, и все они висели бы в
-    // видеопамяти до выхода из редактора.
-    for (auto it = m_thumbs.begin(); it != m_thumbs.end();) {
-        std::error_code exists;
-        if (fs::path(it->first).parent_path() == cwd && fs::exists(it->first, exists)) {
-            ++it;
-            continue;
-        }
-        m_preview.ReleaseTarget(it->first);
-        it = m_thumbs.erase(it);
+    // Ctrl + колесо — масштаб содержимого, как в проводнике: смотрят на сетку,
+    // а не на ползунок в шапке.
+    if (ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows) && ImGui::GetIO().KeyCtrl &&
+        ImGui::GetIO().MouseWheel != 0.0f) {
+        const float step = ImGui::GetIO().MouseWheel > 0.0f ? 1.0f : -1.0f;
+        if (m_view == ViewMode::Grid) SetTileSize(m_tileSize + step * 12.0f);
+        else SetRowHeight(m_rowHeight + step * 4.0f);
     }
-    if (!any) {
+
+    if (m_view == ViewMode::Grid) DrawGrid(host);
+    else DrawList(host);
+
+    if (m_items.empty()) {
         ImGui::Spacing();
         ImGui::TextDisabled("%s", m_search[0] ? T("Nothing matches the search.")
                                              : T("This folder is empty."));
         ImGui::TextDisabled("%s", T("Right-click to create a folder, script, material or text file."));
     }
 
-    // Создание ассетов — ПКМ по пустому месту (не по тайлу: у тайлов своё меню).
-    // Отступы темы для меню: всплывающее окно наследует стиль, действующий в
-    // момент открытия (см. Sage::UI::MenuScope). Время жизни MenuScope
-    // держится в границах if — иначе деструктор снялся бы после EndChild()/
-    // End() этого окна, и ImGui решил бы, что стиль не сняли вовсе.
+    // Создание ассетов — ПКМ по пустому месту (у элементов своё меню).
+    // MenuScope — в границах if: деструктор снимается до EndChild()/End().
     if (Sage::UI::MenuScope createCtxMenu; ImGui::BeginPopupContextWindow("##assets_create_ctx",
                                        ImGuiPopupFlags_MouseButtonRight | ImGuiPopupFlags_NoOpenOverItems)) {
-        // ОДИН ПУНКТ НА ВИД, настройки — в окне (CreateAssetDialog.h): язык
-        // скрипта, цвет папки. Пункта «скрипт» было два («.lua» и «.slua»), и
-        // язык выбирали по расширению в меню, не видя, чем они различаются.
-        // Создаётся в открытой папке; сцена — всегда в assets/Scenes.
-        namespace ca = sage::editor::createasset;
-        auto startCreate = [this, &host](ca::What kind, const char* defaultName) {
-            ca::Request req;
-            req.Kind = kind;
-            req.Name = defaultName;
-            req.Dir = kind == ca::What::Scene && host.CurrentProject().Loaded() ? host.CurrentProject().ScenesDir()
-                                                                                : host.AssetsCwd();
-            req.OpenAfter = true;   // граф — сразу в его редактор
-            req.Done = [this, &host, kind](const fs::path& made) {
-                if (kind == ca::What::Scene) host.AssetsCwd() = made.parent_path();
-                m_selected = made;
-                m_multi = {made};
-            };
-            ca::Open(req);
-        };
-        if (EditorIcons::MenuItem("folder-plus", T("Folder..."))) startCreate(ca::What::Folder, "NewFolder");
-        if (EditorIcons::MenuItem("scene", T("Scene..."))) startCreate(ca::What::Scene, "NewScene");
-        // Логика — один пункт на все виды (LogicKinds.h): Lua, SAGE Lua, Visual
-        // Script, задача, AI Graph и языки плагинов выбираются в окне.
-        if (EditorIcons::MenuItem("script", T("Script or graph..."))) startCreate(ca::What::Script, "NewScript");
-        if (EditorIcons::MenuItem("material", T("Material..."))) startCreate(ca::What::Material, "NewMaterial");
-        if (EditorIcons::MenuItem("anim", T("Animation graph..."))) startCreate(ca::What::AnimGraph, "NewAnimGraph");
-        // Шейдер — из шаблона (вода, освещённый, без света, экран): готовый
-        // контракт движка и параметры, которые инспектор покажет ползунками.
-        if (EditorIcons::MenuItem("shader", T("Shader..."))) startCreate(ca::What::Shader, "NewShader");
-        if (EditorIcons::MenuItem("file", T("Text file..."))) startCreate(ca::What::TextFile, "notes");
-        ImGui::Separator();
-        if (EditorIcons::MenuItem("refresh", T("Convert the whole folder to engine formats"))) ConvertFolderHere(host);
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", T("Models and images in this folder (including nested) -> .sagemesh/.sagetex.\n"
-              "Already converted files are skipped, sources stay in place."));
-        }
+        DrawCreateMenu(host);
         ImGui::EndPopup();
     }
 
@@ -731,7 +441,17 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
         !ImGui::GetIO().WantTextInput && m_renameTarget.empty() &&
         !sage::editor::createasset::IsOpen() && m_deleteTargets.empty() &&
         !ImGui::IsAnyItemActive() && ImGui::IsKeyPressed(ImGuiKey_Delete)) {
-        m_deleteTargets = m_multi;   // дальше — обычная модалка подтверждения
+        // Только ВИДИМОЕ выделенное: файл из прошлой папки или скрытый
+        // поиском клавишей не удаляется — человек его не видит.
+        m_deleteTargets = DeletableSelection();
+    }
+    // Ctrl+A — всё, что видно в папке (с учётом поиска).
+    if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput &&
+        !ImGui::IsAnyItemActive() && ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false) &&
+        !m_visibleOrder.empty()) {
+        m_multi = m_visibleOrder;
+        m_selected = m_visibleOrder.back();
+        m_anchor = m_visibleOrder.front();
     }
 
     // Рамка выделения. Начинается только в пустом месте сетки: над карточкой

@@ -177,7 +177,12 @@ bool AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const
     }
 
     if (m_selected == source) m_selected = target;
+    if (m_anchor == source) m_anchor = target;
     for (fs::path& p : m_multi) if (p == source) p = target;
+    // Листинги обеих папок — заново сейчас, а не по времени правки папки.
+    sage::editor::fscache::Invalidate(source.parent_path());
+    sage::editor::fscache::Invalidate(folder);
+    m_itemsTime = -1.0;
     // Метка едет с папкой: иначе раскладка рассыпалась бы от первого переезда.
     sage::editor::foldercolors::Rename(source, target);
     // Пересканировать проект: база ассетов помнит пути, и после переезда её
@@ -221,9 +226,25 @@ bool AssetsPanel::RenameAsset(const fs::path& path, const std::string& newName,
         err = T("The name cannot be empty");
         return false;
     }
-    const fs::path target = path.parent_path() / newName;
+    // ИМЯ, А НЕ ПУТЬ. «../x» или «sub/x» уводили файл из папки — а то и из
+    // assets/, куда панель сама не пускает (см. AssetsRoot), и без .meta-
+    // сайдкара на новом месте ссылки сцен на файл ломались.
+    if (newName.find_first_of("/\\:") != std::string::npos || newName == "." || newName == "..") {
+        err = T("The name cannot contain / \\ or :");
+        return false;
+    }
+    const fs::path target = path.parent_path() / fs::u8path(newName);
+    // То же имя — не ошибка: Enter в окне без правки означает «оставить как есть»,
+    // а отвечал «файл с таким именем уже есть».
+    if (target.filename() == path.filename()) {
+        outRenamed = path;
+        return true;
+    }
     std::error_code ec;
-    if (fs::exists(target, ec)) {
+    // Смена одного регистра («rock.png» -> «Rock.png») на Windows и macOS —
+    // тот же файл: exists() отвечает «да», хотя переименование законно.
+    const bool sameFile = fs::exists(target, ec) && fs::equivalent(path, target, ec);
+    if (fs::exists(target, ec) && !sameFile) {
         err = T("A file with this name already exists");
         return false;
     }
@@ -247,7 +268,14 @@ bool AssetsPanel::RenameAsset(const fs::path& path, const std::string& newName,
 void AssetsPanel::DeleteAsset(const fs::path& path) {
     std::error_code ec;
     fs::remove_all(path, ec);
-    if (ec) LOG_ERROR("Editor") << "Asset delete failed: " << ec.message();
+    // Файл остался (занят другой программой, нет прав) — сайдкар НЕ трогаем:
+    // .meta — это GUID ассета, и без него уцелевший файл стал бы для проекта
+    // новым, а ссылки сцен на него — битыми.
+    std::error_code still;
+    if (ec || fs::exists(path, still)) {
+        LOG_ERROR("Editor") << "Asset delete failed: " << (ec ? ec.message() : path.string());
+        return;
+    }
     for (const char* sidecar : {".meta", ".sageimport"}) {
         std::error_code sec;
         fs::remove(path.string() + sidecar, sec);

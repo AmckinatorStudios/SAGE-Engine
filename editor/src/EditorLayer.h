@@ -504,6 +504,7 @@ private:
     bool SelfTestVisualScript();     // Visual Scripting: свой редактор, узлы, компонент в Play
     bool SelfTestAiGraph();          // SAGE AI Graph: библиотека, редактор графов, компонент AI в Play
     bool SelfTestAnimGraph();        // SAGE Animation Graph: ассет, окно, компонент, сохранение сцены
+    bool SelfTestAssetsBrowser();    // панель Assets: порядок, поиск, выделение, операции, настройки вида
     bool SelfTestPivot();            // опора Transform: положения, отмена, гизмо, иерархия, сцена
     bool SelfTestShaders();          // шаблоны шейдеров собираются, умолчания доходят
     bool SelfTestScenesGone();       // удалили все сцены — редактор живёт; виды логики «Создать…»
@@ -623,6 +624,7 @@ private:
     int m_groupProbe = 0;            // подшаг проверки перетаскивания группы
     std::vector<int> m_groupIds;     // порядок строк группы до броска
     int m_probeVictimId = -1; // объект, на котором проверяется, что Delete не утёк из панели
+    bool m_probeListWasGrid = true; // вид панели ассетов до проверки таблицы (вернуть после)
     int m_probeObjectsBefore = 0; // сколько было объектов до Ctrl+D
     float m_probeYaw = 0.0f;  // угол камеры до щелчка по гизмо
     bool m_probeFailed = false;

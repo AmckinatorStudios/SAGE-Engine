@@ -68,7 +68,64 @@ public:
     const std::vector<std::filesystem::path>& SelectionSet() const { return m_multi; }
     // Выбрать ассет программно — нужно headless-прогонам и переходу «показать
     // в Assets» из других панелей.
-    void Select(const std::filesystem::path& p) { m_selected = p; m_multi = {p}; }
+    // Пустой путь — снять выбор.
+    void Select(const std::filesystem::path& p) {
+        m_selected = p;
+        m_anchor = p;
+        m_multi.clear();
+        if (!p.empty()) m_multi.push_back(p);
+    }
+
+    // --- Вид содержимого ------------------------------------------------------
+    //
+    // ДВА ВИДА ОДНОЙ ПАПКИ: сетка карточек (узнать файл по обложке) и таблица
+    // (сравнить размеры и даты, отсортировать). Дерево папок слева и шапка —
+    // одни на оба вида: переключатель меняет только правую область, и всё, что
+    // делают с файлом (выбор, меню, перетаскивание, удаление), идёт через один
+    // и тот же код (ItemBehavior), а не через две копии.
+    enum class ViewMode { Grid, List };
+    enum class SortBy { Name, Type, Size, Modified };
+    // Пределы масштаба: карточка от «много мелких» до «крупная обложка»,
+    // строка таблицы — от плотной до строки с заметной миниатюрой.
+    static constexpr float kTileMin = 64.0f, kTileMax = 200.0f, kTileDefault = 104.0f;
+    static constexpr float kRowMin = 20.0f, kRowMax = 48.0f, kRowDefault = 24.0f;
+    static constexpr float kTreeMin = 120.0f, kTreeMax = 420.0f, kTreeDefault = 190.0f;
+
+    ViewMode View() const { return m_view; }
+    float TileSize() const { return m_tileSize; }
+    float RowHeight() const { return m_rowHeight; }
+    float TreeWidth() const { return m_treeWidth; }
+    SortBy Sort() const { return m_sortBy; }
+    bool SortDescending() const { return m_sortDesc; }
+    // Сеттеры ЗАПИСЫВАЮТ настройку (EditorPrefs): вид и масштаб — привычка
+    // человека, а не проекта, и переживают перезапуск.
+    void SetView(ViewMode v);
+    void SetTileSize(float px);
+    void SetRowHeight(float px);
+    void SetTreeWidth(float px);
+    void SetSort(SortBy by, bool descending);
+    // Перечитать настройки из EditorPrefs (первый кадр; самопроверка).
+    void LoadPrefs();
+
+    // Пересобрать список элементов текущей папки (поиск, сортировка, сведения
+    // о файлах) и привести выделение к тому, что видно. Зовётся из Draw;
+    // открыт ради самопроверки — порядок и выделение проверяются без кадра.
+    void RefreshItems(EditorHost& host);
+    // Порядок элементов НА ЭКРАНЕ (папки, потом файлы; с поиском и сортировкой).
+    const std::vector<std::filesystem::path>& VisibleOrder() const { return m_visibleOrder; }
+    void SetSearch(const std::string& text);
+    // Что удалит Delete: выделенное И видимое. Файл, выделенный в другой
+    // папке или скрытый поиском, клавишей не удаляется — человек его не видит.
+    std::vector<std::filesystem::path> DeletableSelection() const;
+
+    // Переименование, удаление и перенос ВМЕСТЕ С ВЫДЕЛЕНИЕМ: модалка, меню и
+    // бросок зовут их, и самопроверка тоже — выделение после операции обязано
+    // указывать на новые пути, а не на пропавшие.
+    bool ApplyRename(EditorHost& host, const std::filesystem::path& from, const std::string& newName,
+                     std::string& err);
+    void ApplyDelete(EditorHost& host, const std::vector<std::filesystem::path>& victims);
+    void MoveItems(EditorHost& host, const std::vector<std::string>& sources,
+                   const std::filesystem::path& folder) { MoveGroupIntoFolder(host, sources, folder); }
 
     // Создаёт ассет kind с именем name в папке dir (расширение дописывается).
     // false + err при ошибке. Публично: используется и модалкой, и self-test'ом.
@@ -152,7 +209,9 @@ private:
         uint64_t Id = 0;
         int W = 0, H = 0;   // 0 — пропорции неизвестны, рисуем во всю площадку
     };
-    Cover ThumbnailFor(EditorHost& host, const std::filesystem::path& path, bool isDir);
+    // px — сторона снимка для материала, модели и префаба: крупной карточке
+    // нужен крупный кадр, иначе обложка в ней размыта.
+    Cover ThumbnailFor(EditorHost& host, const std::filesystem::path& path, bool isDir, int px = 96);
     AssetPreview m_preview;
     struct Thumb {
         uint64_t Id = 0;      // 0 — превью не получилось (негативный кэш)
@@ -162,6 +221,7 @@ private:
         // (см. Material::Fingerprint). weak_ptr — обложка не держит материал.
         std::weak_ptr<Material> Mat;
         uint64_t Print = 0;
+        int Px = 96;          // сторона снимка; буфер превью — свой на каждую
     };
     // Ключ — путь к файлу. Штамп времени в значении: правка материала или
     // пересохранение префаба обязаны обновить обложку, иначе в панели остаётся
@@ -186,7 +246,14 @@ private:
     size_t m_convertSrcBytes = 0, m_convertOutBytes = 0;
     uint64_t m_convertTask = 0;
 
-    void DrawBreadcrumb(EditorHost& host);
+    // Шапка: путь, вид и масштаб; поиск, сортировка, импорт, создание.
+    void DrawHeader(EditorHost& host);
+    void DrawBreadcrumb(EditorHost& host, float width);
+    void DrawCreateMenu(EditorHost& host);
+    // Правая область — сетка или таблица по m_view.
+    void DrawGrid(EditorHost& host);
+    void DrawList(EditorHost& host);
+    void DrawListRow(EditorHost& host, size_t index);
     // Дерево папок проекта слева. Сетка отвечает на вопрос «что лежит здесь», а
     // дерево — на вопрос «что вообще есть в проекте»: без него единственным
     // способом узнать состав было ходить по папкам вверх-вниз, каждый раз теряя
@@ -197,7 +264,49 @@ private:
     // значка.
     sage::editor::treelines::Lines m_treeLines;   // связи папок дерева (ui/TreeLines.h)
     void DrawFolderNode(EditorHost& host, const std::filesystem::path& dir, int depth);
-    void DrawTile(EditorHost& host, const std::filesystem::path& path, bool isDir);
+    void DrawTile(EditorHost& host, size_t index);
+
+    // Элемент папки с тем, что о нём нужно обоим видам: сведения о файле
+    // собираются при пересборке списка, а не в каждом кадре каждой строкой.
+    struct Item {
+        std::filesystem::path Path;
+        bool IsDir = false;
+        std::string Name;
+        std::string Kind;        // «Модель», «Текстура» — см. KindLabel
+        uintmax_t Size = 0;
+        long long Stamp = 0;     // время правки (fscache)
+    };
+    std::vector<Item> m_items;
+    // Ключ пересборки: папка, листинг, поиск и сортировка. Плюс раз в секунду —
+    // размер и дата меняются, не трогая состав папки.
+    std::string m_itemsDir, m_itemsFilter;
+    uint64_t m_itemsGen = 0;
+    SortBy m_itemsSort = SortBy::Name;
+    bool m_itemsDesc = false;
+    double m_itemsTime = -1.0;
+
+    // ВСЁ, ЧТО ДЕЛАЮТ С ЭЛЕМЕНТОМ МЫШЬЮ, — одно на оба вида. Зовётся сразу
+    // после элемента (карточки или строки): выбор, двойной щелчок, меню,
+    // перетаскивание, бросок на папку, рамка, подсказка. nameCut — имя на
+    // экране обрезано (подсказка покажет его целиком).
+    void ItemBehavior(EditorHost& host, const Item& item, bool nameCut);
+    void ClickItem(const std::filesystem::path& path);
+    void DrawItemMenu(EditorHost& host, const Item& item);
+
+    // Настройки вида
+    ViewMode m_view = ViewMode::Grid;
+    float m_tileSize = kTileDefault;
+    float m_rowHeight = kRowDefault;
+    SortBy m_sortBy = SortBy::Name;
+    bool m_sortDesc = false;
+    bool m_prefsLoaded = false;
+    bool m_tableSortSync = true;   // таблице сообщить сортировку, выбранную в шапке
+
+    // Синхронизация дерева: папку сменили — дерево раскрывает путь к ней и
+    // прокручивается к строке (один раз, а не держит прокрутку).
+    std::filesystem::path m_lastCwd;
+    bool m_revealCwd = true;
+    std::vector<std::filesystem::path> m_cwdChain;   // канонические предки cwd
     void DrawModals(EditorHost& host);
     // Открыть файл или папку (двойной щелчок, пункт меню «Открыть»).
     void OpenItem(EditorHost& host, const std::filesystem::path& path, bool isDir); // Create/Rename/Delete — в ID-скоупе окна панели
@@ -217,9 +326,9 @@ private:
     FileBrowser m_importBrowser;
 
     char m_search[128] = "";
-    // Ширина дерева. Правится перетаскиванием разделителя и живёт до
-    // перезапуска: у кого-то имена папок длинные, у кого-то экран узкий.
-    float m_treeWidth = 190.0f;
+    // Ширина дерева. Правится перетаскиванием разделителя и запоминается
+    // (EditorPrefs): у кого-то имена папок длинные, у кого-то экран узкий.
+    float m_treeWidth = kTreeDefault;
     std::filesystem::path m_selected;      // первичный выделенный тайл (под инспектор)
     std::vector<std::filesystem::path> m_multi; // весь набор: рамка, Ctrl-клик
     // ЯКОРЬ ДИАПАЗОНА и порядок карточек НА ЭКРАНЕ — для выбора с Shift «от и

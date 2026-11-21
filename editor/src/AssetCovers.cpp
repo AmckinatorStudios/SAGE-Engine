@@ -6,9 +6,11 @@
 
 #include "AssetSlot.h"
 #include "EditorIcons.h"
+#include "FsCache.h"
 #include "SceneCover.h"
 #include "Localization.h"
 #include "Thumbnails.h"
+#include "EditorTheme.h"
 #include "sage/ui/ImageFit.h"
 
 namespace fs = std::filesystem;
@@ -66,9 +68,10 @@ PreviewSource SourceOf(const fs::path& full, bool isDir, bool hasPreview,
         // Снимок сцены лежит РЯДОМ С ПРОЕКТОМ, а не рядом со сценой: без папки
         // проекта его не найти, и тогда честнее показать значок, чем пустоту.
         if (projectDir.empty()) return PreviewSource::Icon;
-        std::error_code ec;
+        // Есть ли снимок — с памятью (FsCache): подсказка спрашивает это в
+        // каждом кадре, пока курсор стоит на сцене.
         const fs::path cover = scenecover::For(projectDir, full);
-        if (cover.empty() || !fs::exists(cover, ec)) return PreviewSource::Icon;
+        if (cover.empty() || sage::editor::fscache::Stamp(cover) == 0) return PreviewSource::Icon;
         return PreviewSource::SceneCover;
     }
     if (!hasPreview) return PreviewSource::Icon;
@@ -80,37 +83,64 @@ PreviewSource SourceOf(const fs::path& full, bool isDir, bool hasPreview,
     return PreviewSource::Icon;
 }
 
+namespace {
+// Строки сведений под превью: тип, размеры картинки, размер файла, дата.
+void DrawFacts(const fs::path& full, bool isDir, uintmax_t bytes, const HoverInfo* info) {
+    std::string line;
+    if (info && !info->Kind.empty()) line = info->Kind;
+    else if (isDir) line = T("Folder");
+    if (!isDir) {
+        const thumbs::Thumb t = thumbs::IsImage(full) ? thumbs::Get(full, thumbs::Size::Tile) : thumbs::Thumb{};
+        char dims[64] = "";
+        if (t.W > 0 && t.H > 0) std::snprintf(dims, sizeof(dims), "%d x %d", t.W, t.H);
+        for (const std::string& part : {std::string(dims), HumanSize(bytes)}) {
+            if (part.empty()) continue;
+            if (!line.empty()) line += "  \xC2\xB7  ";
+            line += part;
+        }
+    }
+    if (!line.empty()) ImGui::TextDisabled("%s", line.c_str());
+    if (info && !info->Modified.empty()) ImGui::TextDisabled(T("Modified: %s"), info->Modified.c_str());
+}
+} // namespace
+
 void DrawHoverPreview(const fs::path& full, bool isDir, const std::string& name, uintmax_t bytes,
-                      AssetPreview* preview, const fs::path& projectDir) {
+                      AssetPreview* preview, const fs::path& projectDir, const HoverInfo* info) {
     const PreviewSource source = SourceOf(full, isDir, preview != nullptr, projectDir);
-    if (!ShowsHoverPreview(source)) return;   // у значков превью нет — и подсказки нет
+    // У значков картинки нет. Без сведений от вызывающего — и подсказки нет
+    // (файловый диалог); со сведениями — КОМПАКТНАЯ подсказка без площадки:
+    // окно размером в три строки не закрывает соседние файлы, а отвечает на
+    // «что это и когда менялось», не открывая файл.
+    if (!ShowsHoverPreview(source)) {
+        if (!info) return;
+        if (!ImGui::BeginTooltip()) return;
+        const char* icon = isDir ? "folder" : assetslot::KindIcon(assetslot::KindOf(full));
+        const float line = ImGui::GetTextLineHeight();
+        ImGui::PushTextWrapPos(ImGui::GetFontSize() * 24.0f);
+        EditorIcons::DrawLabeled(ImGui::GetWindowDrawList(), ImGui::GetCursorScreenPos(), line, icon,
+                                 ImGui::GetColorU32(ImGuiCol_TextDisabled), name.c_str(),
+                                 ImGui::GetColorU32(ImGuiCol_Text));
+        ImGui::Dummy(ImVec2(EditorIcons::LabeledWidth(line, name.c_str()), line));
+        ImGui::PopTextWrapPos();
+        DrawFacts(full, isDir, bytes, info);
+        ImGui::EndTooltip();
+        return;
+    }
     if (!ImGui::BeginTooltip()) return;
 
     const ImGuiViewport* vp = ImGui::GetMainViewport();
-    // ПЛОЩАДКА ПРЕВЬЮ — ПОСТОЯННАЯ И КВАДРАТНАЯ.
-    //
-    // Раньше размер превью задавала САМА картинка: её увеличивали до четырёх
-    // раз и обрезали по потолку. Отсюда две беды разом. Первая: окошко прыгало
-    // размером от файла к файлу — панорама открывалась широкой лентой, иконка
-    // 32x32 крошечным квадратиком, и глазу приходилось заново искать, куда
-    // смотреть, на каждом движении мыши. Вторая: по такому превью нельзя
-    // сравнить два файла — они показаны в разном масштабе.
-    //
-    // Теперь площадка одна на все файлы, а картинка вписывается в неё по своим
-    // пропорциям: положение и размер окна не зависят от того, что внутри.
+    // ПЛОЩАДКА ПРЕВЬЮ — ПОСТОЯННАЯ И КВАДРАТНАЯ: размер окна не зависит от
+    // картинки, и два файла сравниваются в одном масштабе. Картинка вписывается
+    // в площадку по своим пропорциям. Окно подсказки ImGui сам держит в
+    // границах экрана, а площадка не больше доли экрана — у края она не
+    // выталкивает подсказку за него.
     const float side = std::min({320.0f, vp->Size.x * 0.32f, vp->Size.y * 0.42f});
-    const float maxW = side;
 
     const ImVec2 box0 = ImGui::GetCursorScreenPos();
     const ImVec2 box1(box0.x + side, box0.y + side);
     ImDrawList* dl = ImGui::GetWindowDrawList();
-    // Подложка площадки: по ней видно её границы, даже когда картинка ниже и
-    // уже — то есть видно, что поля пустые, а не что превью «съехало».
     dl->AddRectFilled(box0, box1, ImGui::GetColorU32(ImVec4(0.0f, 0.0f, 0.0f, 0.30f)), 6.0f);
 
-    // Что показывать: картинка — сама собой, сцена — своим снимком, модель,
-    // материал и префаб — снятой обложкой. Скрипт, звук, шрифт и папка сюда не
-    // доходят (ShowsHoverPreview): у них нет ничего, кроме значка.
     uint64_t cover = 0;
     int coverW = 0, coverH = 0;
     bool failed = false, loading = false;
@@ -122,25 +152,28 @@ void DrawHoverPreview(const fs::path& full, bool isDir, const std::string& name,
 
     if (!imageFile.empty()) {
         // Крупную обложку просим отдельно, а мелкую показываем, ПОКА крупная
-        // читается: пустота под курсором выглядит как «редактор задумался», а
-        // мелкая — как «сейчас станет резче», и это правда.
+        // читается: пустота под курсором выглядит как «редактор задумался».
         thumbs::Thumb t = thumbs::Get(imageFile, thumbs::Size::Large);
         if (!t.Id) {
             const thumbs::Thumb small = thumbs::Get(imageFile, thumbs::Size::Tile);
             if (small.Id) t = small;
+            failed = t.Failed || small.Failed;
+            if (error.empty()) error = !t.Error.empty() ? t.Error : small.Error;
         }
         cover = t.Id;
         coverW = t.W;
         coverH = t.H;
-        failed = t.Failed;
-        error = t.Error;
         loading = !cover && !failed;
     } else if (source == PreviewSource::Rendered) {
-        // Материал, модель, префаб: их обложку надо СНЯТЬ, и делает это общий
-        // кэш редактора (не больше одной съёмки за кадр, результат помнится).
-        // Кадр съёмки квадратный, поэтому пропорции 1:1.
-        cover = assetslot::Cover(preview, full, 192);
+        // Материал, модель, префаб: обложку СНИМАЕТ общий кэш (не больше одной
+        // съёмки за кадр, результат помнится). Пока снимается — крутилка;
+        // съёмка не удалась — так и сказано, а не пустой значок.
+        bool pending = false;
+        cover = assetslot::Cover(preview, full, 192, &pending);
         coverW = coverH = cover ? 1 : 0;
+        loading = !cover && pending;
+        failed = !cover && !pending;
+        if (failed) error = T("No preview: the file could not be read");
     }
 
     if (cover && coverW > 0 && coverH > 0) {
@@ -158,29 +191,17 @@ void DrawHoverPreview(const fs::path& full, bool isDir, const std::string& name,
                              std::floor(box0.y + (side - glyph) * 0.5f), glyph, icon,
                              glm::vec3(0.62f, 0.66f, 0.74f));
     }
-    // Место под площадку занимаем НЕВИДИМОЙ кнопкой: рисовали мы списком
-    // отрисовки, и без неё ImGui считал бы, что в подсказке ничего нет, —
+    // Место под площадку занимаем: рисовали списком отрисовки, и без этого
     // подпись легла бы поверх картинки.
     ImGui::Dummy(ImVec2(side, side));
-    const bool drew = true;
-    if (failed && !error.empty()) ImGui::TextColored(ImVec4(1.0f, 0.55f, 0.4f, 1.0f), "%s",
-                                                     error.c_str());
+    if (failed && !error.empty())
+        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", error.c_str());
 
-    if (drew) ImGui::Spacing();
-    ImGui::PushTextWrapPos(maxW);
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + side);
     ImGui::TextUnformatted(name.c_str());
     ImGui::PopTextWrapPos();
-
-    if (isDir) {
-        ImGui::TextDisabled("%s", T("Folder"));
-    } else {
-        const thumbs::Thumb t =
-            thumbs::IsImage(full) ? thumbs::Get(full, thumbs::Size::Tile) : thumbs::Thumb{};
-        if (t.W > 0 && t.H > 0)
-            ImGui::TextDisabled(T("%d x %d, %s"), t.W, t.H, HumanSize(bytes).c_str());
-        else
-            ImGui::TextDisabled("%s", HumanSize(bytes).c_str());
-    }
+    DrawFacts(full, isDir, bytes, info);
     ImGui::EndTooltip();
 }
 

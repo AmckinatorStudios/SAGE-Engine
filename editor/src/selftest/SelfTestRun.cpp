@@ -61,6 +61,7 @@ void EditorLayer::RunSelfTest() {
         ok = SelfTestGIBake() && ok;
         ok = SelfTestAiGraph() && ok;
         ok = SelfTestAnimGraph() && ok;
+        ok = SelfTestAssetsBrowser() && ok;
         ok = SelfTestPivot() && ok;
         ok = SelfTestVisualScript() && ok;
         ok = SelfTestShaders() && ok;

@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -24,13 +25,32 @@ namespace sage::editor::fscache {
 // Время правки файла (0 — файла нет). Спрашивает диск не чаще раза в maxAge с.
 long long Stamp(const std::filesystem::path& path, double maxAge = 1.0);
 
+// Время правки и размер одним ответом — для колонок списка ассетов и
+// подсказки под курсором. Отдельно от Stamp ради размера: спрашивать его у
+// диска в каждом кадре значило бы стучаться в файл, пока на него смотрят.
+struct FileInfo {
+    long long Stamp = 0;     // 0 — файла нет
+    uintmax_t Size = 0;      // у папки — 0
+};
+FileInfo Info(const std::filesystem::path& path, double maxAge = 1.0);
+
 struct Listing {
     std::vector<std::filesystem::path> Dirs;
     std::vector<std::filesystem::path> Files;   // без сайдкаров .meta
+    // Номер перечитывания: меняется, когда меняется состав папки. По нему
+    // панель понимает, что пора пересобрать свой порядок карточек, не
+    // сравнивая списки целиком.
+    uint64_t Generation = 0;
 };
-// Содержимое папки, отсортированное по имени. Перечитывается, когда меняется
+// Содержимое папки, отсортированное по имени БЕЗ УЧЁТА РЕГИСТРА (как в
+// проводнике: «b.png» не уезжает за «Z.png»). Перечитывается, когда меняется
 // время правки папки (проверка — не чаще раза в maxAge с).
 const Listing& List(const std::filesystem::path& dir, double maxAge = 0.2);
+
+// Забыть ответы про папку и её содержимое — после СВОЕЙ правки (переименовали,
+// удалили, перенесли). Время правки папки на части файловых систем идёт
+// секундами, и две правки за секунду оставили бы листинг старым.
+void Invalidate(const std::filesystem::path& dir);
 
 // weakly_canonical с памятью: сравнение «та ли это папка» идёт по нему на
 // каждой строке дерева и в каждом кадре.
