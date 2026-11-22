@@ -91,16 +91,12 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     };
     copyMark(KeepOnLoadComponent{});
     CopyIfPresent<FolderComponent>(src, dst);
-    // Тег, звук, твины, наклейка, LOD, пост-обработка, сеть, съёмка в
-    // текстуру. Этого списка здесь не было — и копия (Ctrl+D, префаб,
+    // Тег, наклейка, пост-обработка, сеть, съёмка в текстуру (звук, твины,
+    // LOD, частицы и др. — уже в реестре, BuiltinComponents.cpp). Этого списка здесь не было — и копия (Ctrl+D, префаб,
     // вставка) теряла их молча: сериализатор их писал, а копирование — нет.
     // Сторожит tests/test_scene_lossless.cpp.
     CopyIfPresent<TagComponent>(src, dst);
-    CopyIfPresent<AudioSourceComponent>(src, dst);
-    CopyIfPresent<sage::anim::TweenComponent>(src, dst);
-    CopyIfPresent<PropertyAnimatorComponent>(src, dst);
     CopyIfPresent<DecalComponent>(src, dst);
-    CopyIfPresent<sage::render::LodComponent>(src, dst);
     CopyIfPresent<sage::render::PostProcessComponent>(src, dst);
     CopyIfPresent<sage::ui::InterfaceComponent>(src, dst);
     CopyIfPresent<NetReplicatedComponent>(src, dst);
@@ -117,11 +113,7 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     CopyIfPresent<LightComponent>(src, dst);
     CopyIfPresent<RigidBodyComponent>(src, dst);
     CopyIfPresent<ColliderComponent>(src, dst);
-    CopyIfPresent<JointComponent>(src, dst);
-    CopyIfPresent<ParticleEmitterComponent>(src, dst);
     CopyIfPresent<AnimationComponent>(src, dst);
-    CopyIfPresent<IKComponent>(src, dst);
-    CopyIfPresent<ReflectionProbeComponent>(src, dst);
     // Интерфейс — ПО РЕЕСТРУ ЧАСТЕЙ, а не списком руками.
     //
     // Список здесь был, и он молча устаревал: часть, зарегистрированную игрой
@@ -132,9 +124,6 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     for (const sage::ui::PartType& part : sage::ui::Parts()) {
         if (part.Copy) part.Copy(*src.Registry(), src.Entity(), *dst.Registry(), dst.Entity());
     }
-    CopyIfPresent<GIStaticComponent>(src, dst);
-    CopyIfPresent<CharacterControllerComponent>(src, dst);
-    CopyIfPresent<ShaderParamsComponent>(src, dst);
 
     // Состояние ЭКЗЕМПЛЯРА (дескрипторы физики, голос звука, загруженная
     // модель, «уже запущено») сбрасывает сам компонент — CopyComponent зовёт

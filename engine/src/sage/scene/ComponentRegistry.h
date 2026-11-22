@@ -58,6 +58,11 @@ struct ComponentType {
     std::function<void(const entt::registry&, entt::entity, entt::registry&, entt::entity)> Copy;
     // Ссылки на другие объекты внутри компонента (необязательно).
     std::function<void(entt::registry&, entt::entity, const RefVisit&)> VisitRefs;
+    // Ключ лежит ПРЯМО в объекте (objects[i][Key]), а не в components. Так
+    // записаны встроенные компоненты движка с тех пор, как реестра не было:
+    // перенос их в реестр не имеет права менять файл сцены. Save такого типа
+    // может вернуть null — «писать нечего», ключ не появится.
+    bool TopLevel = false;
 };
 
 // Описание отдаётся shared_ptr'ом на НЕИЗМЕНЯЕМУЮ запись: замена или снятие
@@ -71,8 +76,11 @@ using ComponentTypePtr = std::shared_ptr<const ComponentType>;
 // реестр без взаимоблокировки. Встроенные типы движка регистрируются ровно
 // один раз при первом обращении к реестру, из любого потока.
 //
-// Тот же ключ второй раз — ЗАМЕНА на месте (порядок записи сохраняется): игра
-// вправе переопределить свой тип или встроенный. Неполное описание (нет ключа,
+// Тот же ключ того же уровня (TopLevel) второй раз — ЗАМЕНА на месте (порядок
+// записи сохраняется): игра вправе переопределить свой тип или встроенный.
+// Тип игры в components с ключом встроенного (например, «audio») встроенный
+// не заменяет: это разные записи файла. Find/Unregister по такому ключу
+// находят сначала тип игры. Неполное описание (нет ключа,
 // Has, Save, Load или Remove) отвергается: false и строка в лог.
 //
 // Снятие типа не трогает уже созданные компоненты в сценах: пока тип снят,
@@ -85,6 +93,9 @@ ComponentTypePtr FindComponentType(const std::string& key);
 // Компоненты файла, которых нет в реестре: сохраняются как есть.
 struct UnknownComponents {
     nlohmann::json Data = nlohmann::json::object();   // ключ -> JSON
+    // Непрочитанные компоненты верхнего уровня (TopLevel): пишутся обратно
+    // туда же, в объект, а не в components.
+    nlohmann::json TopLevel = nlohmann::json::object();
 };
 
 // Все ссылки сущности: публичные переменные, связи сигналов, компоненты
@@ -145,6 +156,32 @@ ComponentType MakeComponentType(std::string key, SaveFn save, LoadFn load) {
         T value{};
         load(j, value);
         r.emplace_or_replace<T>(e, std::move(value));
+    };
+    t.Remove = [](entt::registry& r, entt::entity e) { r.remove<T>(e); };
+    t.Copy = [](const entt::registry& s, entt::entity se, entt::registry& d, entt::entity de) {
+        CopyComponent<T>(s, se, d, de);
+    };
+    return t;
+}
+
+// Встроенный компонент с ключом верхнего уровня (TopLevel). save(json& object,
+// const T&) пишет свой ключ в объект, parse(const json&) -> T читает его —
+// так устроены функции сериализатора сцены (scene_serial::SaveX/ParseX), и
+// они переходят в реестр как есть.
+template <typename T, typename SaveFn, typename ParseFn>
+ComponentType MakeTopLevelComponentType(std::string key, SaveFn save, ParseFn parse) {
+    ComponentType t;
+    t.Key = std::move(key);
+    t.TopLevel = true;
+    t.Has = [](const entt::registry& r, entt::entity e) { return r.all_of<T>(e); };
+    t.Save = [save, k = t.Key](const entt::registry& r, entt::entity e) {
+        nlohmann::json object = nlohmann::json::object();
+        save(object, r.get<T>(e));
+        auto it = object.find(k);
+        return it == object.end() ? nlohmann::json() : *it;
+    };
+    t.Load = [parse](entt::registry& r, entt::entity e, const nlohmann::json& j) {
+        r.emplace_or_replace<T>(e, parse(j));
     };
     t.Remove = [](entt::registry& r, entt::entity e) { r.remove<T>(e); };
     t.Copy = [](const entt::registry& s, entt::entity se, entt::registry& d, entt::entity de) {

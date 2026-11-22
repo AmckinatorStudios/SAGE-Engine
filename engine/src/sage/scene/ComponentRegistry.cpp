@@ -8,6 +8,7 @@
 #include "sage/core/Log.h"
 #include "sage/render/ObjectEffects.h"
 #include "sage/scene/AiAgentComponent.h"
+#include "sage/scene/BuiltinComponents.h"
 #include "sage/scene/VisualScriptComponent.h"
 #include "sage/scene/Signals.h"
 #include "sage/vars/Refs.h"
@@ -55,6 +56,7 @@ void EnsureBuiltins() {
         RegisterSceneLayerComponent();
         RegisterVisualScriptComponent();
         sage::render::RegisterObjectEffectsComponent();
+        RegisterBuiltinSceneComponents();
     });
 }
 
@@ -105,7 +107,11 @@ bool RegisterComponent(ComponentType type) {
     std::lock_guard<std::mutex> lock(r.Lock);
     auto next = std::make_shared<TypeList>(*r.Types);
     auto it = std::find_if(next->begin(), next->end(),
-                           [&](const ComponentTypePtr& t) { return t->Key == entry->Key; });
+                           [&](const ComponentTypePtr& t) {
+                               // Встроенный «audio» в объекте и «audio» игры в components —
+                               // разные записи файла; одна не заменяет другую.
+                               return t->Key == entry->Key && t->TopLevel == entry->TopLevel;
+                           });
     if (it != next->end()) *it = std::move(entry);
     else next->push_back(std::move(entry));
     r.Types = std::move(next);
@@ -117,7 +123,11 @@ bool UnregisterComponent(const std::string& key) {
     Registry& r = Reg();
     std::lock_guard<std::mutex> lock(r.Lock);
     auto next = std::make_shared<TypeList>(*r.Types);
-    auto it = std::find_if(next->begin(), next->end(), [&](const ComponentTypePtr& t) { return t->Key == key; });
+    // Сначала тип игры (components), потом встроенный верхнего уровня.
+    auto it = std::find_if(next->begin(), next->end(),
+                           [&](const ComponentTypePtr& t) { return t->Key == key && !t->TopLevel; });
+    if (it == next->end())
+        it = std::find_if(next->begin(), next->end(), [&](const ComponentTypePtr& t) { return t->Key == key; });
     if (it == next->end()) return false;
     next->erase(it);
     r.Types = std::move(next);
@@ -128,9 +138,13 @@ std::vector<ComponentTypePtr> ComponentTypes() { return *Types(); }
 
 ComponentTypePtr FindComponentType(const std::string& key) {
     const Snapshot all = Types();
-    for (const ComponentTypePtr& t : *all)
-        if (t->Key == key) return t;
-    return nullptr;
+    ComponentTypePtr top;
+    for (const ComponentTypePtr& t : *all) {
+        if (t->Key != key) continue;
+        if (!t->TopLevel) return t;   // тип игры (components) — первым, как в Unregister
+        if (!top) top = t;
+    }
+    return top;
 }
 
 void VisitEntityRefs(entt::registry& reg, entt::entity e, const RefVisit& visit) {
@@ -150,56 +164,71 @@ void SaveRegisteredComponents(const entt::registry& reg, entt::entity e, nlohman
     nlohmann::json comps = nlohmann::json::object();
     // Сначала неизвестные — чтобы зарегистрированный тип с тем же ключом
     // (код игры вернулся) записал своё, свежее.
-    if (const UnknownComponents* u = reg.try_get<UnknownComponents>(e))
+    if (const UnknownComponents* u = reg.try_get<UnknownComponents>(e)) {
         for (auto it = u->Data.begin(); it != u->Data.end(); ++it) comps[it.key()] = it.value();
+        for (auto it = u->TopLevel.begin(); it != u->TopLevel.end(); ++it) object[it.key()] = it.value();
+    }
     const Snapshot all = Types();
     for (const ComponentTypePtr& tp : *all) {
         const ComponentType& t = *tp;
         if (!CallUser(t, "Has", [&] { return t.Has(reg, e); })) continue;
         // Ошибка НЕ глотается: сцена без компонента, записанная поверх
         // прежнего файла, стёрла бы его данные. Сохранение целиком отменяется.
-        comps[t.Key] = CallUser(t, "сохранение", [&] { return t.Save(reg, e); });
+        nlohmann::json data = CallUser(t, "сохранение", [&] { return t.Save(reg, e); });
+        if (!t.TopLevel) comps[t.Key] = std::move(data);
+        else if (!data.is_null()) object[t.Key] = std::move(data);
     }
     if (!comps.empty()) object["components"] = std::move(comps);
 }
 
+namespace {
+
+// Прочитать один компонент. Не прочитался — компонент снимаем (недочитанный
+// хуже отсутствующего: игра работала бы с мусором), JSON храним как есть в
+// unknown: следующее сохранение не имеет права стереть то, что этот код не понял.
+void LoadOne(const ComponentType& t, entt::registry& reg, entt::entity e, const std::string& key,
+             const nlohmann::json& data, nlohmann::json& unknown) {
+    bool had = false;
+    try {
+        had = CallUser(t, "Has", [&] { return t.Has(reg, e); });
+        CallUser(t, "загрузка", [&] { t.Load(reg, e, data); });
+    } catch (const std::exception& ex) {
+        if (!had) RemovePartial(t, reg, e);
+        LOG_ERROR("Scene") << ex.what() << " — сохранён как есть";
+        unknown[key] = data;
+    }
+}
+
+} // namespace
+
 void LoadRegisteredComponents(entt::registry& reg, entt::entity e, const nlohmann::json& object) {
+    const Snapshot all = Types();
+    nlohmann::json unknown = nlohmann::json::object();
+    nlohmann::json unknownTop = nlohmann::json::object();
+    // Верхний уровень: ключ ищется в самом объекте; нет ключа — нет компонента.
+    for (const ComponentTypePtr& tp : *all) {
+        if (!tp->TopLevel) continue;
+        auto f = object.find(tp->Key);
+        if (f != object.end()) LoadOne(*tp, reg, e, tp->Key, *f, unknownTop);
+    }
     auto it = object.find("components");
-    if (it == object.end()) return;
-    if (!it->is_object()) {
+    if (it != object.end() && !it->is_object()) {
         // Не объект — ключей компонентов в нём нет, читать нечего; причина — в лог.
         LOG_ERROR("Scene") << "поле components объекта — не объект, пропущено";
-        return;
-    }
-    nlohmann::json unknown = nlohmann::json::object();
-    const Snapshot all = Types();
-    for (auto c = it->begin(); c != it->end(); ++c) {
-        ComponentTypePtr tp;
-        for (const ComponentTypePtr& t : *all)
-            if (t->Key == c.key()) {
-                tp = t;
-                break;
-            }
-        if (!tp) {
-            unknown[c.key()] = c.value();
-            continue;
-        }
-        const ComponentType& t = *tp;
-        bool had = false;
-        try {
-            had = CallUser(t, "Has", [&] { return t.Has(reg, e); });
-            CallUser(t, "загрузка", [&] { t.Load(reg, e, c.value()); });
-        } catch (const std::exception& ex) {
-            // Не прочитался — компонент снимаем (недочитанный хуже
-            // отсутствующего: игра работала бы с мусором), JSON храним как
-            // есть: следующее сохранение не имеет права стереть то, что этот
-            // код не понял.
-            if (!had) RemovePartial(t, reg, e);
-            LOG_ERROR("Scene") << ex.what() << " — сохранён как есть";
-            unknown[c.key()] = c.value();
+    } else if (it != object.end()) {
+        for (auto c = it->begin(); c != it->end(); ++c) {
+            ComponentTypePtr tp;
+            for (const ComponentTypePtr& t : *all)
+                if (!t->TopLevel && t->Key == c.key()) {
+                    tp = t;
+                    break;
+                }
+            if (!tp) unknown[c.key()] = c.value();
+            else LoadOne(*tp, reg, e, c.key(), c.value(), unknown);
         }
     }
-    if (!unknown.empty()) reg.emplace_or_replace<UnknownComponents>(e, UnknownComponents{std::move(unknown)});
+    if (!unknown.empty() || !unknownTop.empty())
+        reg.emplace_or_replace<UnknownComponents>(e, UnknownComponents{std::move(unknown), std::move(unknownTop)});
 }
 
 void CopyRegisteredComponents(const entt::registry& src, entt::entity se, entt::registry& dst, entt::entity de) {

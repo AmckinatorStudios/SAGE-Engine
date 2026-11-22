@@ -214,7 +214,6 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
             j["decal"]["angleLimit"] = dc->AngleLimitDeg;
             j["decal"]["offset"] = dc->Offset;
         }
-        if (const GIStaticComponent* gs = reg.try_get<GIStaticComponent>(e)) SaveGIStatic(j, *gs);
         if (reg.all_of<NetReplicatedComponent>(e)) j["netReplicated"] = true;
         if (const CameraComponent* cam = reg.try_get<CameraComponent>(e)) SaveCamera(j, *cam);
         if (const LightComponent* light = reg.try_get<LightComponent>(e)) SaveLight(j, *light);
@@ -223,23 +222,7 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
             SavePostProcess(j, *pc);
         if (const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(e)) SaveRigidBody(j, *rb);
         if (const ColliderComponent* col = reg.try_get<ColliderComponent>(e)) SaveCollider(j, *col);
-        if (const JointComponent* jc = reg.try_get<JointComponent>(e)) SaveJoint(j, *jc);
         if (const AnimationComponent* am = reg.try_get<AnimationComponent>(e)) SaveAnimation(j, *am);
-        if (const PropertyAnimatorComponent* pa = reg.try_get<PropertyAnimatorComponent>(e))
-            SavePropertyAnimator(j, *pa);
-        if (const sage::anim::TweenComponent* tw = reg.try_get<sage::anim::TweenComponent>(e))
-            SaveTweens(j, *tw);
-        if (const IKComponent* ik = reg.try_get<IKComponent>(e)) SaveIK(j, *ik);
-        if (const ReflectionProbeComponent* rp = reg.try_get<ReflectionProbeComponent>(e))
-            SaveReflectionProbe(j, *rp);
-        if (const CharacterControllerComponent* cc = reg.try_get<CharacterControllerComponent>(e))
-            SaveCharacter(j, *cc);
-        if (const sage::render::LodComponent* lod = reg.try_get<sage::render::LodComponent>(e))
-            SaveLod(j, *lod);
-        if (const ShaderParamsComponent* sp = reg.try_get<ShaderParamsComponent>(e))
-            SaveShaderParams(j, *sp);
-        if (const ParticleEmitterComponent* pe = reg.try_get<ParticleEmitterComponent>(e)) SaveParticles(j, *pe);
-        if (const AudioSourceComponent* au = reg.try_get<AudioSourceComponent>(e)) SaveAudio(j, *au);
         if (const VarsComponent* vc = reg.try_get<VarsComponent>(e))
             if (!vc->Values.Empty()) j["vars"] = VarsToJson(vc->Values);
         if (const sage::signals::SignalLinksComponent* sl =
@@ -383,8 +366,6 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             }
         }
 
-        if (j.contains("giStatic"))
-            obj.Registry()->emplace<GIStaticComponent>(obj.Entity(), ParseGIStatic(j["giStatic"]));
         if (j.value("netReplicated", false))
             obj.Registry()->emplace<NetReplicatedComponent>(obj.Entity());
         if (j.contains("camera"))
@@ -404,32 +385,8 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             obj.Registry()->emplace<RigidBodyComponent>(obj.Entity(), ParseRigidBody(j["rigidBody"]));
         if (j.contains("collider"))
             obj.Registry()->emplace<ColliderComponent>(obj.Entity(), ParseCollider(j["collider"]));
-        if (j.contains("joint"))
-            obj.Registry()->emplace<JointComponent>(obj.Entity(), ParseJoint(j["joint"]));
         if (j.contains("animation"))
             obj.Registry()->emplace<AnimationComponent>(obj.Entity(), ParseAnimation(j["animation"]));
-        if (j.contains("propertyAnimator"))
-            obj.Registry()->emplace<PropertyAnimatorComponent>(
-                obj.Entity(), ParsePropertyAnimator(j["propertyAnimator"]));
-        if (j.contains("tweens"))
-            obj.Registry()->emplace<sage::anim::TweenComponent>(obj.Entity(), ParseTweens(j["tweens"]));
-        if (j.contains("ik"))
-            obj.Registry()->emplace<IKComponent>(obj.Entity(), ParseIK(j["ik"]));
-        if (j.contains("character"))
-            obj.Registry()->emplace<CharacterControllerComponent>(obj.Entity(),
-                                                                  ParseCharacter(j["character"]));
-        if (j.contains("reflectionProbe"))
-            obj.Registry()->emplace<ReflectionProbeComponent>(
-                obj.Entity(), ParseReflectionProbe(j["reflectionProbe"]));
-        if (j.contains("lod"))
-            obj.Registry()->emplace<sage::render::LodComponent>(obj.Entity(), ParseLod(j["lod"]));
-        if (j.contains("shaderParams"))
-            obj.Registry()->emplace<ShaderParamsComponent>(obj.Entity(),
-                                                           ParseShaderParams(j["shaderParams"]));
-        if (j.contains("particles"))
-            obj.Registry()->emplace<ParticleEmitterComponent>(obj.Entity(), ParseParticles(j["particles"]));
-        if (j.contains("audio"))
-            obj.Registry()->emplace<AudioSourceComponent>(obj.Entity(), ParseAudio(j["audio"]));
         if (j.contains("vars")) {
             VarsComponent vc;
             VarsFromJson(j["vars"], vc.Values);

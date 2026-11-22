@@ -215,6 +215,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/scene/CharacterFit.cpp
     src/sage/scene/Prefab.cpp
     src/sage/scene/SceneFlow.cpp
+    src/sage/scene/BuiltinComponents.cpp
     src/sage/scene/ComponentRegistry.cpp
     src/sage/scene/SceneSerializer.cpp
     src/sage/scene/SceneSerializer_Components.cpp
