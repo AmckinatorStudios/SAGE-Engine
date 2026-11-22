@@ -287,6 +287,21 @@ void RegisterComponents(Backend& backend) {
         Need<CameraComponent>(r.Obj, "SetPrimary").Primary = on;
     };
     cam["transform"] = sol::property([](CameraRef& r) { return TransformRef(r.Obj); });
+    // Те же настройки свойствами (стандарт SAGE): camera.fov = 60.
+    cam["fov"] = sol::property([](CameraRef& r) { return Need<CameraComponent>(r.Obj, "fov").Fov; },
+                               [](CameraRef& r, float v) { Need<CameraComponent>(r.Obj, "fov").Fov = v; });
+    cam["near_clip"] = sol::property([](CameraRef& r) { return Need<CameraComponent>(r.Obj, "near_clip").NearClip; },
+                                     [](CameraRef& r, float v) { Need<CameraComponent>(r.Obj, "near_clip").NearClip = v; });
+    cam["far_clip"] = sol::property([](CameraRef& r) { return Need<CameraComponent>(r.Obj, "far_clip").FarClip; },
+                                    [](CameraRef& r, float v) { Need<CameraComponent>(r.Obj, "far_clip").FarClip = v; });
+    cam["primary"] = sol::property([](CameraRef& r) { return Need<CameraComponent>(r.Obj, "primary").Primary; },
+                                   [](CameraRef& r, bool v) { Need<CameraComponent>(r.Obj, "primary").Primary = v; });
+
+    // Методы по snake_case-именам и через точку: `character.is_grounded()`.
+    InstallBoundIndex(ch, "SageCharacterController");
+    InstallBoundIndex(an, "SageAnimation");
+    InstallBoundIndex(au, "SageAudioSource");
+    InstallBoundIndex(cam, "SageCamera");
 }
 
 // Имя компонента → прокси. ОДИН список на весь бэкенд: и GetComponent, и

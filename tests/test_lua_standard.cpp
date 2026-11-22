@@ -615,3 +615,78 @@ function OnOldEvent(data) viahook = data end
     CHECK_NEAR((*o.Registry()).get<Transform>(o.Entity()).Position.z, 6.0f, 1e-4f);
     CHECK_TRUE(w.errors.empty());
 }
+
+// Методы прокси через точку: твин, камера, преобразование.
+TEST(LuaStandard_dot_calls_on_proxies) {
+    World w;
+    GameObject o = w.Spawn("Cam", "proxies", R"(
+function start()
+    local cam = object.add_component("camera", {fov = 70})
+    fov_before = cam.fov
+    cam.fov = 55
+    fov_after = object.get_component("camera").fov
+    object.transform.look_at(vector3.new(0, 0, -10))
+    local t = tween.to(object, "scale", 2.0, 0.5)
+    t.ping_pong()
+    chained = tostring(t.is_playing()) == "true"
+    t.cancel()
+    local old = object:has_component("camera")   -- двоеточие по-прежнему работает
+    colon_ok = old
+    local right = object.transform.right()
+    right_x = right.x
+end
+)");
+    w.Start();
+    for (const auto& e : w.errors) std::printf("       %s\n", e.Format().c_str());
+    CHECK_TRUE(w.errors.empty());
+    CHECK_NEAR(w.Global<float>(o, "fov_before"), 70.0f, 1e-4f);
+    CHECK_NEAR(w.Global<float>(o, "fov_after"), 55.0f, 1e-4f);
+    CHECK_TRUE(w.Global<bool>(o, "chained"));
+    CHECK_TRUE(w.Global<bool>(o, "colon_ok"));
+    CHECK_NEAR(w.Global<float>(o, "right_x"), 1.0f, 1e-3f);
+}
+
+// Каждое имя из docs/scripting.md («Стандарт SAGE Lua») существует.
+TEST(LuaStandard_documented_names_exist) {
+    World w;
+    GameObject o = w.Spawn("P", "docnames", R"(
+function start()
+    local names = {
+        "scene.find", "scene.find_all", "scene.create", "scene.instantiate", "scene.load",
+        "events.create", "events.trigger", "events.connect", "events.connect_once", "events.disconnect",
+        "input.is_action_down", "input.was_pressed", "input.was_released", "input.get_vector",
+        "input.get_axis", "input.is_key_down", "input.is_key_pressed", "input.is_mouse_down",
+        "input.mouse_position", "input.mouse_delta", "input.bind_action",
+        "time.delta", "time.fixed_delta", "time.total", "time.set_scale",
+        "debug.log", "debug.warn", "debug.error", "debug.draw_line", "debug.draw_sphere",
+        "audio.play", "audio.play_at", "physics.raycast", "physics.overlap_sphere",
+        "ui.get", "ui.find", "vector3.new", "vector3.zero", "vector3.one", "vector3.up", "vector3.forward",
+        "vector3.distance", "vector3.dot", "vector3.cross", "vector3.lerp",
+        "tween.to", "tween.from", "tween.sequence", "tween.play", "tween.cancel", "tween.pause",
+        "tween.resume", "tween.is_playing",
+    }
+    missing = ""
+    for _, path in ipairs(names) do
+        local value = _G
+        for part in path:gmatch("[^.]+") do
+            if type(value) ~= "table" then value = nil break end
+            value = value[part]
+        end
+        if value == nil then missing = missing .. path .. " " end
+    end
+    local o = object
+    for _, m in ipairs({"destroy", "get_component", "has_component", "add_component", "remove_component", "call"}) do
+        if o[m] == nil then missing = missing .. "object." .. m .. " " end
+    end
+    for _, m in ipairs({"forward", "right", "up", "look_at", "translate", "rotate"}) do
+        if o.transform[m] == nil then missing = missing .. "transform." .. m .. " " end
+    end
+end
+)");
+    w.Start();
+    for (const auto& e : w.errors) std::printf("       %s\n", e.Format().c_str());
+    CHECK_TRUE(w.errors.empty());
+    const std::string missing = w.Global<std::string>(o, "missing");
+    if (!missing.empty()) std::printf("       нет имён: %s\n", missing.c_str());
+    CHECK_EQ(missing, std::string(""));
+}

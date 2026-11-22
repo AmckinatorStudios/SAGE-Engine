@@ -108,28 +108,28 @@ struct ConnectionRef {
 // `object.destroy()` без `self`: метод, найденный у прокси, отдаётся
 // привязанным к нему замыканием. Двоеточие (`object:destroy()`) продолжает
 // работать — прежние скрипты на нём написаны: первый аргумент, который и есть
-// этот же объект, молча отбрасывается. Чужой объект первым аргументом
-// (`child.set_parent(other)`) остаётся аргументом.
-bool SameObject(const GameObject& a, const GameObject& b);
-
+// этот же объект (тот же userdata), молча отбрасывается. Чужой объект первым
+// аргументом (`child.set_parent(other)`) остаётся аргументом.
 // Имя компонента из скрипта -> имя, по которому его знает бэкенд: "rigid_body"
 // и "RigidBody" — один компонент (стандарт — snake_case, прежнее — PascalCase).
 std::string CanonicalComponent(const std::string& name);
 
-// Тот же ли это владелец: для прокси объекта — тот же объект, для соединения —
-// тот же номер.
-template <class R>
-bool SameRef(const R& a, const R& b) { return SameObject(a.Obj, b.Obj); }
-inline bool SameRef(const ConnectionRef& a, const ConnectionRef& b) { return a.Id == b.Id; }
-
-template <class R>
-sol::object BindMethod(sol::state_view lua, const sol::object& fn, const R& owner) {
+// Метод, привязанный к своему объекту. `owner` — сам объект Lua (а не копия
+// прокси): у прокси бывает своё состояние (твин помнит, где кончился прошлый
+// шаг), и метод обязан менять именно его.
+inline sol::object BindMethod(sol::state_view lua, const sol::object& fn, const sol::object& owner) {
     if (fn.get_type() != sol::type::function) return fn;
     sol::protected_function f = fn.as<sol::protected_function>();
-    return sol::make_object(lua, [f, owner](sol::variadic_args va) -> sol::variadic_results {
-        std::vector<sol::object> args;
+    return sol::make_object(lua, [f, owner](sol::this_state ts, sol::variadic_args va) -> sol::variadic_results {
+        lua_State* L = ts;
         size_t from = 0;
-        if (va.size() > 0 && va[0].is<R>() && SameRef(va[0].as<R&>(), owner)) from = 1;
+        if (va.size() > 0) {
+            owner.push(L);
+            lua_pushvalue(L, va[0].stack_index());
+            if (lua_rawequal(L, -1, -2)) from = 1;
+            lua_pop(L, 2);
+        }
+        std::vector<sol::object> args;
         for (size_t i = from; i < va.size(); ++i) args.push_back(sol::object(va[i]));
         sol::protected_function_result r = f(owner, sol::as_args(args));
         if (!r.valid()) {
@@ -140,6 +140,17 @@ sol::object BindMethod(sol::state_view lua, const sol::object& fn, const R& owne
         for (int i = 0; i < r.return_count(); ++i) out.push_back(sol::object(r[i]));
         return out;
     });
+}
+
+// Прежние методы PascalCase прокси находит сам sol2, а недостающее
+// snake_case-имя (`character.is_grounded()`) — этот запасной index: ищет
+// прежнее имя в классе и отдаёт метод привязанным.
+template <class T>
+void InstallBoundIndex(sol::usertype<T>& type, const char* className) {
+    type[sol::meta_function::index] = [className](sol::object self, sol::stack_object key) -> sol::object {
+        sol::state_view lua(key.lua_state());
+        return BindMethod(lua, SnakeMethod(lua, className, key), self);
+    };
 }
 
 class Backend : public LanguageBackend {

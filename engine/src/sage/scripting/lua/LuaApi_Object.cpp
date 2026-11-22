@@ -78,10 +78,6 @@ auto Axis(int i) {
 
 } // namespace
 
-bool SameObject(const GameObject& a, const GameObject& b) {
-    return a.Registry() == b.Registry() && a.Entity() == b.Entity();
-}
-
 std::string CanonicalComponent(const std::string& name) {
     // PascalCase (прежнее) остаётся как есть; snake_case — в PascalCase.
     std::string out = name;
@@ -236,10 +232,7 @@ void RegisterObject(Backend& backend) {
     // translate, look_at, forward… — нынешние имена тех же методов.
     // Метод отдаётся привязанным к transform: `transform.forward()` (стандарт)
     // и `transform:forward()` (прежнее) — одно и то же.
-    tr[sol::meta_function::index] = [](TransformRef& r, sol::stack_object key) {
-        sol::state_view lua(key.lua_state());
-        return BindMethod(lua, SnakeMethod(lua, "SageTransform", key), r);
-    };
+    InstallBoundIndex(tr, "SageTransform");
     tr["WorldPosition"] = [self](TransformRef& r) {
         Alive(r.Obj, "WorldPosition");
         Scene* scene = self->ScenePtr();

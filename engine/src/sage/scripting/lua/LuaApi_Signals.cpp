@@ -275,7 +275,8 @@ void RegisterObjectSignals(Backend& backend, sol::usertype<ObjectRef>& ot) {
     // Затем — нынешние имена методов (`obj:get_component`, `obj:call`) и
     // компонент по имени типа (`obj.Audio`): одно правило для self и для
     // любого найденного объекта.
-    ot[sol::meta_function::index] = [signalOf, self](ObjectRef& r, sol::stack_object key) -> sol::object {
+    ot[sol::meta_function::index] = [signalOf, self](sol::object selfObject, sol::stack_object key) -> sol::object {
+        ObjectRef& r = selfObject.as<ObjectRef&>();
         if (!key.is<std::string>()) return sol::lua_nil;
         sol::state_view lua(key.lua_state());
         // Методы отдаются привязанными к объекту (стандарт SAGE:
@@ -288,11 +289,11 @@ void RegisterObjectSignals(Backend& backend, sol::usertype<ObjectRef>& ot) {
             sol::object sageMethods = lua["__SageObjectMethods"];
             if (sageMethods.get_type() == sol::type::table) {
                 sol::object m = sageMethods.as<sol::table>().raw_get<sol::object>(key);
-                if (m.get_type() == sol::type::function) return BindMethod(lua, m, r);
+                if (m.get_type() == sol::type::function) return BindMethod(lua, m, selfObject);
             }
         }
         sol::object method = SnakeMethod(lua, "SageObject", key);
-        if (method.valid() && method.get_type() != sol::type::lua_nil) return BindMethod(lua, method, r);
+        if (method.valid() && method.get_type() != sol::type::lua_nil) return BindMethod(lua, method, selfObject);
         if (!r.Obj.Valid()) return sol::lua_nil;
         const std::string name = key.as<std::string>();
         if (sage::signals::IsDeclared(*r.Obj.Registry(), r.Obj.Entity(), name))
@@ -424,10 +425,10 @@ void RegisterSignals(Backend& backend) {
         Scene* scene = self->ScenePtr();
         return scene && scene->Events.Disconnect(c.Id);
     };
-    ct[sol::meta_function::index] = [disconnectConnection](ConnectionRef& c, sol::stack_object key) -> sol::object {
+    ct[sol::meta_function::index] = [disconnectConnection](sol::object self, sol::stack_object key) -> sol::object {
         sol::state_view lua(key.lua_state());
         if (key.is<std::string>() && key.as<std::string>() == "disconnect")
-            return BindMethod(lua, sol::make_object(lua, disconnectConnection), c);
+            return BindMethod(lua, sol::make_object(lua, disconnectConnection), self);
         return sol::lua_nil;
     };
     ct["connected"] = sol::readonly_property([self](const ConnectionRef& c) {

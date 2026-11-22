@@ -313,10 +313,12 @@ box
 camera
 clamp
 collectgarbage
+color
 core
 coroutine
 cylinder
 dofile
+ease
 error
 events
 fbm
@@ -356,6 +358,7 @@ physics
 ping_pong
 plugins
 print
+quaternion
 random
 rawequal
 rawget
@@ -737,6 +740,8 @@ tween
 type
 ui
 value_noise
+vector2
+vector3
 visual
 volumetric
 wait

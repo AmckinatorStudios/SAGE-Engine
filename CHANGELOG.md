@@ -12,6 +12,49 @@
 
 ## 0.5.0 → 1.0 (в работе)
 
+### 2026-11-22 (Стандарт Lua API: object, events.*, аннотации `---@`)
+
+#### Добавлено
+- Lua: `object` — текущий объект скрипта (вместо `self`); методы через точку
+  (`object.destroy()`, `object.transform.forward()`, `tween.ping_pong()`);
+  двоеточие работает как раньше.
+- Lua: функции жизненного цикла в snake_case — `start`, `update(delta)`,
+  `fixed_update`, `late_update`, `on_enable`, `on_disable`, `on_destroy`.
+- Lua: события одним набором слов — `events.create`, `events.trigger`,
+  `events.connect`, `events.connect_once`, `events.disconnect` (для событий
+  объекта, встроенных событий компонентов и глобальных событий сцены, та же шина
+  сцены). Обработчик получает `event` с `name`, `sender`, `data`;
+  `events.disconnect` снимает подключение по самому обработчику.
+  `events.create` и `events.trigger` Inspector находит по тексту до запуска игры.
+- Lua: публичные переменные аннотациями над обычной переменной — `---@export`,
+  `---@export_range`, `---@export_enum`, `---@export_color`, `---@export_object`,
+  `---@export_resource`, `---@tooltip`, `---@header`, `---@group` /
+  `---@end_group` (группы вкладываются). Разбор по тексту, ошибки — в консоль и
+  «Проблемы» с файлом и строкой; «Проверить скрипты» проверяет и их.
+- Inspector: переменные скрипта идут в порядке объявления, с заголовками и
+  вложенными сворачиваемыми группами; список для строк (`export_enum`) и слот
+  ресурса нужного вида (`export_resource`).
+- Lua: строчные разделы `input`, `scene`, `time`, `debug`, `physics`, `audio`,
+  `tween`, `ui`, `vector3`, `vector2`, `quaternion`, `color`, `ease`;
+  `input.was_pressed`, `input.was_released`, `input.get_vector`.
+- Lua: компоненты по snake_case-именам (`get_component("rigid_body")`) с полями
+  `body.mass`, `body.linear_damping` (RigidBody, Collider, Light, Mesh, Joint,
+  ParticleEmitter, Decal); `camera.fov`, `camera.near_clip`, `camera.far_clip`,
+  `camera.primary`; настройки `add_component` — snake_case.
+- Документация («Стандарт SAGE Lua», «Совместимость») и учебные скрипты
+  переписаны под новый стандарт.
+
+#### Изменено
+- Учебные скрипты `examples/*.lua` и `spin.lua` в новом стиле; у `Door.lua`
+  функция `Open` теперь `open`.
+- В файле, где есть `---@export…` или функции `start`/`update`, полем
+  Inspector становится только помеченная `---@export*` переменная. Прежние
+  файлы без них работают как раньше (поля — все литералы).
+- `debug` в скриптах — раздел движка (`debug.log`); стандартной библиотеки
+  `debug` Lua там по-прежнему нет.
+- Старые варианты (`self`, `:`, `Start/Update`, `On<Событие>`, `Events.on/emit`,
+  `field.*`, `Player.public`, скрипты-таблицы) работают без изменений.
+
 ### 2026-11-22 (События: define_event и компактный Events)
 
 #### Добавлено

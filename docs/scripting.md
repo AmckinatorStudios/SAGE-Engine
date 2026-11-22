@@ -2,39 +2,46 @@
 
 Lua-API, публичные переменные, события, ход игры, управление.
 
+## Стандарт SAGE Lua
+
+Один способ записи на всё API. Это обычный Lua: ни препроцессора, ни своего
+языка — только единые имена и вызовы.
+
+| Правило | Пример |
+|---|---|
+| Текущий объект — `object`, без `self` | `object.name`, `object.transform.position` |
+| Всё через точку, двоеточие не нужно | `object.destroy()`, `object.transform.forward()` |
+| Функции, свойства, компоненты, события — `snake_case` | `get_component("rigid_body")`, `is_action_down("move")` |
+| Разделы — строчными | `input`, `scene`, `events`, `time`, `debug`, `physics`, `audio`, `tween`, `ui`, `vector3` |
+| Необязательное — в конце, настройки — одной таблицей | `scene.instantiate(prefab, position)` |
+| Название функции говорит, что она делает | `events.connect`, `events.trigger`, `input.was_pressed` |
+
 ## Первый скрипт: просто набор функций
 
-Главный вид скрипта в SAGE — обычный файл с функциями. Ни классов, ни
-регистрации, ни `return`:
+Файл с функциями. Ни классов, ни регистрации, ни `return`:
 
 ```lua
-speed = 5.0          -- поле инспектора: float
-jump_force = 8.0
+---@export_range 0 20
+move_speed = 5.0
 
-function Start()
-    Debug.log("Player started")
+function start()
+    debug.log("Started")
 end
 
-function Update(dt)
-    local direction = Vector3.zero()
-    if Input.is_key_down("W") then direction.z = direction.z + 1 end
-    if Input.is_key_down("S") then direction.z = direction.z - 1 end
-
-    self.transform.position = self.transform.position + direction * speed * dt
-
-    if Input.is_key_pressed("Space") then Debug.log("Jump") end
-end
-
-function OnCollisionEnter(other)
-    Debug.log("Hit " .. other.name)
+function update(delta)
+    if input.is_action_down("Move") then
+        object.transform.position =
+            object.transform.position +
+            object.transform.forward() * move_speed * delta
+    end
 end
 ```
 
 Файл ставится на объект компонентом **Script** в инспекторе (или кодом:
-`obj:add_component("Script", {path = "assets/scripts/Door.lua"})`). Учебные
+`object.add_component("script", {path = "assets/scripts/Door.lua"})`). Учебные
 скрипты — `editor/assets/scripts/examples/` (в проекте —
 `assets/scripts/examples/`): `Player.lua`, `RotatingCube.lua`, `Door.lua`,
-`Trigger.lua`, `Events.lua`, по одной возможности API в каждом.
+`Trigger.lua`, `Events.lua`, `Pulse.lua`, по одной возможности API в каждом.
 
 **Кто что делает.** C++ даёт возможности движка (объекты, transform, ввод,
 физика, звук, события) и сам зовёт функции скрипта. Что объект ЗНАЧИТ —
@@ -42,107 +49,318 @@ end
 
 ### Функции, которые движок зовёт сам
 
-| функция | когда |
+| Функция | Когда |
 |---|---|
-| `Start()` | один раз, когда объект ожил — после того, как подключены ВСЕ скрипты сцены |
-| `Update(dt)` | каждый кадр, `dt` — секунд с прошлого |
-| `FixedUpdate(dt)` | постоянным шагом (физика) |
-| `LateUpdate(dt)` | после всех `Update` кадра |
-| `Destroy()` | перед удалением объекта или скрипта (`OnDestroy` — то же) |
-| `OnCollisionEnter(other)` / `OnCollisionExit(other)` | удар / конец касания |
-| `OnTriggerEnter(other)` / `OnTriggerExit(other)` | вход / выход из зоны-сенсора |
-| `OnKeyDown(key)` / `OnKeyUp(key)` | клавиша нажата / отпущена в этом кадре |
-| `On<Событие>(data)` | кто-то сделал `Events.emit("<событие>", data)` |
+| `start()` | один раз, когда объект ожил — после того, как подключены ВСЕ скрипты сцены |
+| `update(delta)` | каждый кадр, `delta` — секунд с прошлого |
+| `fixed_update(delta)` | постоянным шагом (физика) |
+| `late_update(delta)` | после всех `update` кадра |
+| `on_enable()` / `on_disable()` | объект включили / выключили |
+| `on_destroy()` | перед удалением объекта или скрипта |
 
 Нет функции — нет вызова и нет ошибки. Каждая функция получает только своё:
-`Update(dt)`, а не `(self, dt)`.
+`update(delta)`, а не `(self, delta)`. Столкновения, зоны, кнопки и прочее
+приходят **событиями** (см. «События»), а не отдельными функциями.
 
-**Start — после подключения всех.** При запуске сцены движок сначала
+**`start` — после подключения всех.** При запуске сцены движок сначала
 подключает скрипты всех объектов (в порядке объектов сцены), и только потом
-зовёт `Start` каждого. Раньше `Start` звался сразу при подключении, а сцена
-подключалась в порядке хранилища — задом наперёд, и `Start`, обратившийся к
-соседу (`Scene.find("Player"):call(...)`), не находил у него скрипта. Объект,
-созданный посреди игры, получает `Start` сразу.
+зовёт `start` каждого. Скрипт, обратившийся в `start` к соседу
+(`scene.find("Player").call("open")`), находит у него скрипт. Объект,
+созданный посреди игры, получает `start` сразу.
 
-### Свой объект: `self`
+### Текущий объект: `object`
 
-`self` — объект, на котором стоит скрипт, виден во всём файле, даже на верхнем
-уровне:
+`object` — объект, на котором стоит скрипт; виден во всём файле, даже на
+верхнем уровне и в каждой функции жизненного цикла:
 
 ```lua
-self.name                        -- имя объекта
-self.transform.position          -- Vector3, rotation (градусы), scale
-self.game_object                 -- сам объект (то, что отдаёт Scene.find)
-self:get_component("Audio")      -- компонент по имени, nil — нет такого
-self.Audio                       -- то же короче: имя типа с большой буквы
-self:add_component("RigidBody", {type = "dynamic"})
-self:destroy()
+object.name                        -- имя объекта
+object.active                      -- включён ли (можно присваивать)
+object.transform.position          -- vector3; rotation (градусы), scale
+object.get_component("audio")      -- компонент по имени, nil — нет такого
+object.has_component("camera")
+object.add_component("rigid_body", {type = "dynamic"})
+object.remove_component("camera")
+object.destroy()
 ```
 
 **`transform.position.z = 5` пишет в объект.** Вектор из `transform` —
 окно в объект: запись одной оси меняет только эту ось объекта. При этом он
-остаётся обычным `Vector3` — его принимает любая функция и с ним работает
-арифметика (`TransformVector` — наследник `glm::vec3` в sol2). Результат
-арифметики — обычный вектор, ни к чему не привязанный; своя копия —
-`p:copy()`.
+остаётся обычным вектором — его принимает любая функция и с ним работает
+арифметика. Результат арифметики — обычный вектор, ни к чему не привязанный;
+своя копия — `p.copy()`.
 
-### Публичные переменные: присваивание наверху файла
+### Сцена и объекты
 
 ```lua
-speed = 5.0                         -- float (есть точка)
-count = 10                          -- integer
-enabled = true                      -- bool
-target_name = "Player"              -- string
-offset = Vector3.new(0, 1, 0)       -- Vector3
-health = field.number(100, 0, 200)  -- с границами для ползунка
-target = field.entity()             -- ссылка на объект сцены
+local player = scene.find("Player")             -- nil, если нет
+local enemies = scene.find_all("Enemy")         -- по имени или метке
+local box = scene.create("Box")
+
+player.transform.position = vector3.new(0, 2, 0)
+player.active = false
+player.destroy()
 ```
 
-Каждое присваивание ЛИТЕРАЛА на верхнем уровне файла (не `local`, не внутри
-функции) — поле секции Script в инспекторе, тип — по значению. Не поля:
-`local x`, `_timer = 0` (подчёркивание — служебное), `sum = a + b`
-(выражение — показать нечем). Разбор — текстом, а не запуском файла:
-инспектор показывает поля, пока игра не запущена, и чужой файл ради этого не
-выполняется. Значение из инспектора ложится ПОВЕРХ присваивания в файле ещё
-до `Start`.
+### Компоненты
+
+```lua
+local body = object.get_component("rigid_body")
+if body then
+    body.mass = 2.0
+    body.linear_damping = 0.4
+end
+
+object.has_component("camera")
+object.add_component("camera", {fov = 70, primary = true})
+object.remove_component("camera")
+```
+
+Имя компонента и его поля — `snake_case`: `rigid_body`, `collider`,
+`character_controller`, `light`, `camera`, `audio`, `animation`, `mesh`.
+Настройки `add_component` тоже `snake_case` (`linear_damping`,
+`freeze_rotation`). Компонент — безопасная ссылка: он держит объект, а не
+указатель, поэтому остаётся рабочим, когда к объектам сцены добавляют
+компоненты, а у удалённого — понятная ошибка.
+
+### Публичные переменные: аннотации `---@`
+
+Обычная переменная Lua + короткий комментарий-аннотация над ней. Файл при этом
+остаётся обычным Lua (аннотация — комментарий), а редактор читает их **по
+тексту, не запуская скрипт**: инспектор показывает переменные до запуска игры.
+
+```lua
+---@header "Player Settings"
+
+---@group "Movement"
+---@export_range 0 20
+---@tooltip "Movement speed of the player"
+move_speed = 5.0
+
+---@export_range 0 30
+jump_force = 8.0
+---@end_group
+
+---@group "Combat"
+---@export_range 0 200
+health = 100
+
+---@export
+can_attack = true
+---@end_group
+
+---@export_enum "Idle" "Walk" "Run"
+animation_state = "Idle"
+
+---@export_color
+player_color = color(1, 1, 1)
+
+---@export_object
+target = nil
+
+---@export_resource "Animation"
+animator = nil
+```
+
+| Аннотация | Что делает |
+|---|---|
+| `---@export` | переменная видна в Inspector; тип — по значению (число с точкой → float, без точки → integer, `true`/`false`, строка, `vector3.new(…)`, `color(…)`) |
+| `---@export_range 0 20` | число со слайдером и границами |
+| `---@export_enum "A" "B"` | строка из списка — выпадающий список |
+| `---@export_color` | цвет (палитра) |
+| `---@export_object` | ссылка на объект сцены; в скрипт приходит объектом, `nil` — не выбран. Необязательно имя компонента: `---@export_object "camera"` — слот примет только объект с ним, а скрипт получит сам компонент |
+| `---@export_resource "Animation"` | ссылка на файл проекта указанного вида (`Model`, `Material`, `Texture`, `Script`, `Shader`, `Prefab`, `Scene`, `Audio`, `Animation`, `Font`, …); в скрипт приходит путём |
+| `---@tooltip "Текст"` | подсказка при наведении |
+| `---@header "Название"` | заголовок над переменными ниже |
+| `---@group "Название"` … `---@end_group` | сворачиваемая группа; группы вкладываются |
+
+Правила:
+
+- **Без `---@export*` переменная в Inspector не появляется** (`timer = 0`,
+  `local x` — служебные).
+- Аннотации переменной — строки комментариев **прямо над ней**: между ними и
+  `имя = значение` нет пустой строки и кода. Одной переменной можно дать
+  несколько аннотаций (`export_range` + `tooltip`). Аннотация, оторванная от
+  переменной, — ошибка, а не молчаливая привязка к соседней.
+- `header`, `group`, `end_group` ни к чему не привязаны: действуют на все
+  переменные ниже, до следующей аннотации того же рода.
+- Переменная — присваивание на верхнем уровне файла (не `local`, не внутри
+  функции); у `export*` кроме `export_object` / `export_resource` значение —
+  литерал.
+- Значение из Inspector ложится ПОВЕРХ присваивания в файле до `start`.
+- Ошибки (неизвестная `---@export_…`, один аргумент у `export_range`, значение
+  не из списка `export_enum`, лишняя или оторванная аннотация, незакрытая
+  группа) показываются в консоли и во вкладке «Проблемы» с файлом и строкой;
+  «Проверить скрипты» (Play) проверяет и их.
+- Файл, где есть аннотации или функции в `snake_case` (`start`, `update`),
+  — «стандартный»: в Inspector идёт только помеченное `---@export*`. Файл без
+  них — прежний вид, его поля описаны в «Совместимости».
 
 ### События
 
+Один набор слов на события объектов, встроенные события компонентов и
+глобальные события сцены:
+
+| Функция | Что делает |
+|---|---|
+| `events.create(object, "player_died")` | создаёт и объявляет своё событие объекта |
+| `events.trigger(object, "player_died", data)` | вызывает событие |
+| `events.connect(object, "player_died", handler)` | подключает обработчик (их может быть несколько) |
+| `events.connect_once(object, "player_died", handler)` | обработчик сработает только один раз |
+| `events.disconnect(object, "player_died", handler)` | отключает обработчик |
+
 ```lua
-Events.emit("door_open", data)            -- послать
-Events.on("door_open", function(event, data) … end)   -- подписаться
-function OnDoorOpen(data) … end           -- или просто объявить функцию
+-- создать: объявляет событие; редактор находит его по тексту и показывает
+-- в Inspector (Events) до запуска игры
+events.create(object, "player_died")
+
+-- вызвать
+function die()
+    events.trigger(object, "player_died", {
+        reason = "fall",
+        position = object.transform.position,
+    })
+end
+
+-- подключить
+local player = scene.find("Player")
+
+local function on_player_died(event)
+    debug.log(event.sender.name)     -- кто вызвал
+    debug.log(event.data.reason)     -- что передали
+    debug.log(event.name)            -- "player_died"
+end
+events.connect(player, "player_died", on_player_died)
+
+-- один раз
+events.connect_once(player, "player_died", function(event)
+    debug.log("Player died")
+end)
+
+-- отключить: тем же обработчиком
+events.disconnect(player, "player_died", on_player_died)
 ```
 
-`Events.emit("door_open")` зовёт `OnDoorOpen(data)` у всех простых скриптов —
-то же правило, что у `OnCollisionEnter`: функция с именем события и есть
-обработчик. Имя: `On` + слова события с большой буквы (`door_open`,
-`door-open`, `doorOpen` → `OnDoorOpen`). Подписка `Events.on` нужна, когда
-обработчик — не функция файла (замыкание, временная реакция).
+- Обработчик получает один объект `event`: `name`, `sender` (объект, который
+  вызвал событие), `data` (то, что передали). Таблица из `trigger` доходит как
+  есть.
+- Подключений к одному событию — сколько угодно; упавший обработчик не
+  отменяет остальных. `events.connect` возвращает соединение; его тоже можно
+  отключить: `connection.disconnect()` или `events.disconnect(connection)`.
+  `events.disconnect(object, "имя")` без обработчика снимает все подключения
+  этого скрипта к событию.
+- Подписки скрипта принадлежат его объекту: объект уничтожен — обработчики
+  замолкают и снимаются.
+- **Глобальные события** сцены — те же функции, но без объекта:
+  `events.trigger("level_loaded", "forest")`,
+  `events.connect("level_loaded", handler)`. `events.create` для глобального
+  события не нужен.
+- **Встроенные события** подключаются так же — у объекта они есть, только если
+  их объявляет его компонент:
 
-Функцию другого скрипта зовут напрямую: `Scene.find("Door"):call("Open")`,
-`player:call("TakeDamage", 10)` — возвращает то, что вернула функция.
+  | Компонент | События (`data`) |
+  |---|---|
+  | Interactable (кнопка) | `clicked`, `pressed`, `released`, `hovered`, `unhovered` |
+  | Range (ползунок, галка) / Dropdown | `value_changed` (значение) |
+  | TextInput | `text_changed` (текст), `submitted` |
+  | RigidBody / Collider / CharacterController | `collision`, `collision_ended`, `trigger_entered`, `trigger_exited` (другой объект) |
+
+  ```lua
+  events.connect(scene.find("Play"), "clicked", function(event) start_game() end)
+  events.connect(object, "trigger_entered", function(event)
+      debug.log(event.data.name .. " вошёл в зону")
+  end)
+  ```
+- Inspector показывает события объекта (встроенные — по компонентам и их
+  настройкам, свои — из `events.create`) и их связи; в связи выбираются объект
+  и метод его скрипта. Это та же система, что Lua, и Script Graph: связь
+  становится обычным подключением шины сцены. AI Graph — отдельная система.
+
+### Ввод
+
+Основной способ — именованные действия из InputMap (их настраивают в панели
+«Управление» или объявляют в коде `input.bind_action("Jump", "SPACE")`):
+
+```lua
+input.is_action_down("Move")        -- удерживается
+input.was_pressed("Jump")           -- нажато в этом кадре
+input.was_released("Jump")          -- отпущено в этом кадре
+
+local movement = input.get_vector("Move")   -- vector2: x вправо, y вперёд
+local turn = input.get_axis("Turn")         -- число −1…1
+```
+
+Клавиатура и мышь напрямую — для прототипа и отладки: `input.is_key_down("W")`,
+`input.is_key_pressed("Space")`, `input.is_mouse_down("left")`,
+`input.mouse_position()`, `input.mouse_delta()`. Игра, которую можно
+переназначить, спрашивает действие, а не клавишу.
 
 ### API: разделы
 
-| раздел | примеры |
+| Раздел | Примеры |
 |---|---|
-| `Input` | `is_key_down("W")`, `is_key_pressed("Space")`, `is_key_released("E")`, `is_mouse_down("left")`, `mouse_position()`, `mouse_delta()`, `is_action_down("Jump")` |
-| `Scene` | `find("Player")`, `find_all("Enemy")` (по имени или метке), `create("Box")`, `instantiate(prefab, pos)`, `load("level2")` |
-| `Events` | `emit`, `on`, `once`, `off`, `count` |
-| `Time` | `delta()`, `fixed_delta()`, `total()`, `set_scale(0.5)` |
-| `Debug` | `log`, `warn`, `error`, `draw_line`, `draw_sphere` |
-| `Audio` | `play("explosion")`, `play_at(clip, pos)` |
-| `Physics` | `raycast(origin, dir, dist)`, `overlap_sphere(center, r)` |
-| `Vector3` | `new(x, y, z)`, `zero()`, `one()`, `up()`, `forward()`, `distance`, `dot`, `cross`, `lerp`; у вектора `length()`, `normalized()`, `copy()` |
-| `Tween` | `to(obj, "position", v, 1.0, Ease.Out)`, `from`, `sequence`, `play(obj, "Name")`, `cancel`, `pause`, `resume`, `is_playing` — см. [твины](animation.md#твины-быстрое-изменение-свойства-без-клипа) |
+| `scene` | `find("Player")`, `find_all("Enemy")`, `create("Box")`, `instantiate(prefab, position)`, `load("level2")` |
+| `events` | `create`, `trigger`, `connect`, `connect_once`, `disconnect` |
+| `input` | `is_action_down`, `was_pressed`, `was_released`, `get_vector`, `get_axis`, `is_key_down`, `mouse_delta` |
+| `time` | `delta()`, `fixed_delta()`, `total()`, `set_scale(0.5)` |
+| `debug` | `log`, `warn`, `error`, `draw_line`, `draw_sphere` |
+| `audio` | `play("explosion")`, `play_at(clip, position)` |
+| `physics` | `raycast(origin, direction, distance)`, `overlap_sphere(center, radius)` |
+| `ui` | `get("PlayButton")` (нет элемента — ошибка), `find("PlayButton")` (`nil`); у элемента `text`, `visible`, `enabled`, `value`, `show()`, `hide()`; события — `clicked`, `value_changed`… |
+| `vector3` | `new(x, y, z)`, `zero()`, `one()`, `up()`, `forward()`, `distance(a, b)`, `dot`, `cross`, `lerp`; у вектора `length()`, `normalized()`, `copy()` |
+| `color` | `color(r, g, b, a)` |
+| `tween` | `to(object, "position", value, 1.0, Ease.OutCubic)`, `from`, `sequence`, `play`, `cancel`, `pause`, `resume`, `is_playing`; у твина `ping_pong()`, `wait(s)`, `then_to(...)`, `on_complete(fn)` — см. [твины](animation.md#твины-быстрое-изменение-свойства-без-клипа) |
 
-**Одно правило имён.** У каждой функции раздела есть имя через подчёркивание:
-`Input.IsKeyDown` — это `Input.is_key_down`, `obj:GetComponent` —
-`obj:get_component`. Список не пишется руками: он выводится из имён при
-регистрации раздела, и новая функция сразу доступна обоими написаниями.
-`Vector3.zero()` — функция, возвращающая НОВЫЙ вектор: общий «ноль»,
-поправленный одним скриптом на месте, стал бы (0, 0, 1) у всех.
+Остальные разделы (`animation`, `character`, процедурная генерация, `tasks`,
+`profile`…) подчиняются тому же правилу: точка, `snake_case`, настройки одной
+таблицей — см. ниже по документу.
+
+**Одно правило имён.** У каждой функции есть имя через подчёркивание, и оно —
+основное. Прежние написания (`Input.IsKeyDown`, `obj:GetComponent`) остаются
+как совместимость и в новых скриптах не нужны. Список не пишется руками: он
+выводится из имён при регистрации раздела, и новая функция сразу доступна
+обоими написаниями. `vector3.zero()` — функция, возвращающая НОВЫЙ вектор:
+общий «ноль», поправленный одним скриптом на месте, стал бы (0, 0, 1) у всех.
+
+### Полный пример
+
+```lua
+---@header "Door"
+---@export_range 0 10
+---@tooltip "На сколько поднимается дверь"
+open_height = 3.0
+
+---@export_range 0 10
+open_speed = 2.0
+
+is_open = false
+local closed_y = 0
+
+events.create(object, "opened")
+
+function start()
+    closed_y = object.transform.position.y
+end
+
+function open()
+    if is_open then return end
+    is_open = true
+    events.trigger(object, "opened", {door = object.name})
+end
+
+-- Зона-триггер или любой другой скрипт просят открыть: events.trigger("door_open")
+events.connect("door_open", function(event) open() end)
+
+function update(delta)
+    local target = is_open and closed_y + open_height or closed_y
+    local y = object.transform.position.y
+    object.transform.position.y = y + math.max(-open_speed * delta,
+                                               math.min(open_speed * delta, target - y))
+end
+```
+
+Функцию другого скрипта зовут напрямую: `scene.find("Door").call("open")`,
+`player.call("take_damage", 10)` — возвращает то, что вернула функция.
 
 ### Ошибки
 
@@ -184,20 +402,30 @@ local v = perlin(1).x          -- ошибка: у number нет членов
 Сохранённый `.lua` перечитывается во время Play (см. ниже); значения из
 инспектора при этом сохраняются. Для автодополнения проект содержит
 `.sage/api/sage.lua` (описание API в аннотациях LuaLS) и `.luarc.json`,
-указывающий на него: `self.transform.` в VS Code / любом редакторе с Lua
+указывающий на него: `object.transform.` в VS Code / любом редакторе с Lua
 Language Server показывает `position`, `rotation`, `scale` и методы.
 
-### Прежние виды скрипта
+### Совместимость: прежний синтаксис
 
-Работают как раньше и определяются по тексту:
+Прежние скрипты работают без правок; новый API — рекомендуемый стандарт, а
+старое — legacy и в новых примерах не используется. Массового автоматического
+преобразования нет.
 
-- **скрипт-таблица** (`local Player = {} … return Player`, методы
-  `Player:Update(dt)`, поля в `Player.public`) — ниже, «Скрипт объекта»;
-- **старые глобальные функции** (`OnStart(entity)`, `OnUpdate(entity, dt)` —
-  первым аргументом сущность) — «Скриптинг (Lua)».
+| Было | Остаётся |
+|---|---|
+| `self`, `self.gameObject`, `self:destroy()` | работает рядом с `object` |
+| вызовы через двоеточие (`obj:get_component("x")`) | работают: объект, которого передают первым, отбрасывается |
+| `Start()`, `Update(dt)`, `OnDestroy()` | работают; если в файле есть и `Start`, и `start`, главнее `Start` |
+| `OnCollisionEnter(other)`, `OnTriggerEnter`, `OnKeyDown(key)`, `On<Событие>(data)` | работают |
+| `Input.IsKeyDown`, `Scene.Find`, `Debug.log`, `Events.on/emit/off/once` | работают те же функции: PascalCase и прежние имена |
+| `obj:on / obj:emit / obj:once / obj:off / obj:define_event`, `obj.clicked:connect(fn)` | работают; `define_event` по-прежнему находит редактор |
+| `field.number(100, 0, 200)`, `field.vector3()`, `X.public = {…}` | работают; поля описываются как раньше |
+| глобальные переменные-литералы в файле без аннотаций | остаются полями Inspector (в файле с аннотациями или функциями `snake_case` полем становится только `---@export`) |
+| `GetComponent("RigidBody")`, поля `rb.Mass` | работают рядом с `get_component("rigid_body")` и `body.mass` |
+| скрипты-таблицы (`return Player`, `Player:Update(dt)`) | см. «Скрипт объекта»; старые глобальные функции `OnStart(entity)` — «Скриптинг (Lua)» |
 
 Файл без `return`, где нет `OnStart/OnUpdate` и первого параметра `entity`, —
-простой.
+простой (то, что описано выше).
 
 ### Проверка
 
@@ -236,6 +464,7 @@ Language Server показывает `position`, `rotation`, `scale` и мето
 
 ## Содержание
 
+- [Стандарт SAGE Lua](#стандарт-sage-lua)
 - [Первый скрипт: просто набор функций](#первый-скрипт-просто-набор-функций)
 - [Правка на ходу: скрипт перечитывается без перезапуска](#правка-на-ходу-скрипт-перечитывается-без-перезапуска)
 - [Архитектура: язык — сменная деталь, а не часть ядра](#архитектура-язык--сменная-деталь-а-не-часть-ядра)
@@ -923,11 +1152,14 @@ SAGE Object (свойства / методы / сигналы)
 
 Свой компонент объявляет свои одной строкой — `sage::signals::Declare("Door",
 has, {{"opened", ...}})`, движок не правится. Своё событие (`player_died`)
-объявлять не нужно: `obj:emit("player_died")` работает с любым именем.
-Чтобы событие появилось в Inspector (Events) до запуска игры, объявите его в
-скрипте: `self:define_event("Died")` — редактор находит вызов по тексту.
+объявлять не нужно: `events.trigger(object, "player_died")` работает с любым
+именем. Чтобы событие появилось в Inspector (Events) до запуска игры, объявите
+его в скрипте: `events.create(object, "player_died")` — редактор находит вызов
+по тексту (прежнее `self:define_event("Died")` находится так же).
 
-**Lua** (`engine/src/sage/scripting/lua/LuaApi_Signals.cpp`):
+**Lua** (`engine/src/sage/scripting/lua/LuaApi_Signals.cpp`). Стандарт записи —
+`events.create / trigger / connect / connect_once / disconnect` (см. выше,
+«События»); ниже прежние формы — они работают и ведут в ту же шину:
 
 ```lua
 local Menu = {}

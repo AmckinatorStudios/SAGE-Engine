@@ -1,11 +1,15 @@
--- Пример скрипта для Play-режима редактора: плавное вращение сущности.
--- Назначь его сущности в Inspector (секция Script), нажми Play — куб
+-- Пример скрипта для Play-режима редактора: плавное вращение объекта.
+-- Назначь его объекту в Inspector (секция Script), нажми Play — куб
 -- закрутится; Stop вернёт сцену в исходное состояние.
 
-function OnStart(entity)
-    log("spin.lua attached to: " .. entity.Name)
+---@export_range 0 360
+---@tooltip "Градусов в секунду"
+speed = 90.0
+
+function start()
+    debug.log("spin.lua attached to: " .. object.name)
 end
 
-function OnUpdate(entity, dt)
-    entity.Transform.Rotation.y = entity.Transform.Rotation.y + dt * 90.0
+function update(delta)
+    object.transform.rotation.y = object.transform.rotation.y + delta * speed
 end

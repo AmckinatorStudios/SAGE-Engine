@@ -1,5 +1,5 @@
--- Простой вид скрипта (функции Start/Update/On…, self, глобальные поля) —
--- на учебных скриптах из assets/scripts/examples, поставленных на объекты в
+-- Простой вид скрипта в стандарте SAGE (start/update, object, events.*,
+-- аннотации ---@export) — на учебных скриптах из assets/scripts/examples, поставленных на объекты в
 -- настоящем Play.
 local S = {}
 local DIR = "assets/scripts/examples/"
@@ -44,14 +44,14 @@ end
 function S:test_door_opens_on_event_and_moves_up()
     local door, script = spawn("LT_Door", "Door.lua", Vector3.new(300, 0, 10))
     Test.eq(script.is_open, false)
-    Events.emit("door_open")                  -- OnDoorOpen зовётся сам
-    Test.eq(script.is_open, true, "OnDoorOpen не позвалась")
+    Events.emit("door_open")                  -- Door.lua подключён: events.connect("door_open", …)
+    Test.eq(script.is_open, true, "обработчик door_open не позвался")
     Test.waitUntil(function() return door.transform.position.y > 2.9 end, 4, "дверь не поднялась")
 end
 
 function S:test_door_open_can_be_called_from_another_script()
     local door, script = spawn("LT_Door", "Door.lua", Vector3.new(300, 0, 15))
-    Scene.find("LT_Door"):call("Open")
+    Scene.find("LT_Door"):call("open")
     Test.eq(script.is_open, true)
 end
 
@@ -61,8 +61,8 @@ function S:test_key_E_opens_the_door_through_events_script()
     Test.key("E")
     Test.frames(2)
     Test.key("E", false)
-    Test.eq(door.is_open, true, "OnKeyDown → Events.emit → OnDoorOpen не дошло")
-    Test.eq(events.opened_doors, 1, "Events.on не услышал door_opened")
+    Test.eq(door.is_open, true, "клавиша E → events.trigger → door_open не дошло")
+    Test.eq(events.opened_doors, 1, "events.connect не услышал door_opened")
 end
 
 function S:test_trigger_zone_opens_the_door()
@@ -80,7 +80,7 @@ function S:test_trigger_zone_opens_the_door()
     ball.transform.position = Vector3.new(320, 7, 0)
     ball:AddComponent("RigidBody", {type = "dynamic"})
     ball:AddComponent("Collider", {shape = "sphere", radius = 0.3})
-    Test.waitUntil(function() return trigger.entered_count > 0 end, 5, "OnTriggerEnter не позвался")
+    Test.waitUntil(function() return trigger.entered_count > 0 end, 5, "событие trigger_entered не пришло")
     Test.eq(door.is_open, true, "событие триггера не открыло дверь")
 end
 
