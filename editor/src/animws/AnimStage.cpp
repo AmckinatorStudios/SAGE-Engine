@@ -16,6 +16,7 @@
 #include "sage/anim/AnimationComponents.h"
 #include "sage/anim/AnimationSystem.h"
 #include "sage/render/Material.h"
+#include "sage/render/Mesh.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/render/SkinnedModel.h"
 #include "sage/render/Texture.h"
@@ -88,6 +89,11 @@ void AnimStage::Rebuild(EditorHost& host) {
     m_bone = -1;
     m_entity = entt::null;
     m_targetMesh.clear();
+    m_floorAligned = false;
+    m_floorLift = 0.0f;
+    m_alignModel = nullptr;
+    m_alignRetries = 0;
+    m_followValid = false;
     m_clipDirty = !m_clipPath.empty();
     m_graphDirty = m_graph != nullptr;
     EnsureFloor();
@@ -116,6 +122,7 @@ void AnimStage::Rebuild(EditorHost& host) {
         am->PoseOverrides.clear();
     }
     sage::anim::UpdateAnimators(*m_scene, 0.0f);
+    AlignToFloor();
     FrameTarget();
 }
 
@@ -266,6 +273,19 @@ void AnimStage::Tick(EditorHost& host, float dt) {
     ApplySource(dt);
     sage::anim::UpdateAnimators(*m_scene, dt);
     AnimationComponent* am = StageAnim();
+    // Другая модель в той же копии или правка настроек импорта (.sageimport
+    // перезагрузила модель): посадка и кадр считаются заново. Пока границ не
+    // было (модель не успела подгрузиться) — несколько повторов, потом молча
+    // остаёмся как есть: цикл на каждый кадр для цели без геометрии не нужен.
+    if (am && StageRoot().Valid()) {
+        const void* model = am->Model.get();
+        const bool changed = model != m_alignModel || (model && am->Model->ImportTransform() != m_alignImport);
+        if (changed || (!m_floorAligned && m_alignRetries < 120)) {
+            ++m_alignRetries;
+            AlignToFloor();
+            if (m_floorAligned) FrameTarget();
+        }
+    }
     if (!am || !am->Model) return;
     if (m_source == Source::Clip && (m_externalTime || !m_playing)) {
         // Время ведёт таймлайн (бегунок) или стоим: поза — ровно в этот момент.
@@ -273,6 +293,7 @@ void AnimStage::Tick(EditorHost& host, float dt) {
     } else if (m_source == Source::Clip) {
         m_time = am->Anim.Time();
     }
+    UpdateFollow(dt);
 }
 
 int AnimStage::RootSkeletalEntity() const { return m_animId; }
@@ -354,6 +375,12 @@ bool AnimStage::HasPoseEdits() const {
 
 // --- Камера -------------------------------------------------------------------
 
+// Направление от фокуса к глазу — единичный вектор.
+static glm::vec3 EyeDir(float yawDeg, float pitchDeg) {
+    const float yaw = glm::radians(yawDeg), pitch = glm::radians(pitchDeg);
+    return glm::vec3(std::cos(pitch) * std::sin(yaw), std::sin(pitch), std::cos(pitch) * std::cos(yaw));
+}
+
 void AnimStage::Orbit(float dYaw, float dPitch) {
     m_yaw += dYaw;
     m_pitch = std::clamp(m_pitch + dPitch, -89.0f, 89.0f);
@@ -371,25 +398,162 @@ void AnimStage::Zoom(float wheel) {
     m_distance = std::clamp(m_distance * (wheel > 0 ? 0.88f : 1.14f), 0.2f, 200.0f);
 }
 
+// Осмотр на месте: глаз не двигается, фокус переезжает на то же расстояние
+// вперёд по новому взгляду. Так камера остаётся орбитальной (колесо, средняя
+// кнопка, Frame работают как раньше), а ПКМ даёт свободный взгляд.
+void AnimStage::Look(float dx, float dy) {
+    const glm::vec3 eye = Eye();
+    m_yaw -= dx * 0.15f;
+    m_pitch = std::clamp(m_pitch + dy * 0.15f, -89.0f, 89.0f);
+    m_focus = eye - m_distance * EyeDir(m_yaw, m_pitch);
+}
+
+void AnimStage::Fly(float forward, float right, float up, float dt, bool fast) {
+    const glm::vec3 fwd = -EyeDir(m_yaw, m_pitch);
+    const glm::vec3 side = glm::normalize(glm::cross(fwd, glm::vec3(0.0f, 1.0f, 0.0f)));
+    // Скорость — от размера модели: персонаж и спичечный коробок обходятся за
+    // одно и то же время.
+    const float speed = std::max(1.0f, m_radius * 1.5f) * (fast ? 3.0f : 1.0f) * dt;
+    m_focus += (fwd * forward + side * right + glm::vec3(0.0f, 1.0f, 0.0f) * up) * speed;
+}
+
 void AnimStage::ResetCamera() {
     m_yaw = 30.0f;
     m_pitch = 15.0f;
     FrameTarget();
 }
 
-// Кадрирование цели: по костям (скелет) или по объектам копии.
-void AnimStage::FrameTarget() {
-    glm::vec3 lo(1e9f), hi(-1e9f);
+// Центр костей — точка слежения. Центр, а не корневая кость: у многих
+// скелетов над корнем стоит неподвижный «Armature», и следить за ним значило
+// бы не следить вовсе.
+glm::vec3 AnimStage::TrackedPoint() {
+    if (const sage::anim::Skeleton* sk = Skeleton(); sk && sk->Count() > 0) {
+        glm::vec3 sum(0.0f);
+        for (int i = 0; i < sk->Count(); ++i) sum += glm::vec3(BoneWorld(i)[3]);
+        return sum / (float)sk->Count();
+    }
+    GameObject root = StageRoot();
+    return root.Valid() ? glm::vec3(m_scene->WorldMatrix(root.Entity())[3]) : glm::vec3(0.0f);
+}
+
+// Follow: фокус получает ТО ЖЕ смещение, что точка слежения. Угол и
+// расстояние не трогаются — камера едет, а не переоценивает кадр. Во время
+// проигрывания смещение сглажено (шаг бега не качает кадр); при перемотке
+// и на стыке цикла — сразу: сглаживание прокатило бы камеру через всю сцену.
+void AnimStage::UpdateFollow(float dt) {
+    if (!m_follow) return;
+    const glm::vec3 cur = TrackedPoint();
+    if (!m_followValid) {
+        m_followPoint = cur;
+        m_followValid = true;
+        return;
+    }
+    const glm::vec3 d = cur - m_followPoint;
+    const bool snap = !m_playing || glm::length(d) > std::max(1.0f, m_radius) * 1.5f;
+    const float a = snap ? 1.0f : 1.0f - std::exp(-std::max(0.0f, dt) * 10.0f);
+    m_focus += d * a;
+    m_followPoint += d * a;
+}
+
+static glm::vec3 AabbCorner(const glm::vec3& lo, const glm::vec3& hi, int i) {
+    return glm::vec3((i & 1) ? hi.x : lo.x, (i & 2) ? hi.y : lo.y, (i & 4) ? hi.z : lo.z);
+}
+
+// Границы ОТОБРАЖАЕМОЙ геометрии копии в мире: скелетная модель — габарит всех
+// её подмешей в позе привязки (не положения костей: кость не граница меша)
+// через те же матрицы, что при рисовании, «сущность * ImportTransform»;
+// обычные меши потомков — габарит меша через мировую матрицу.
+bool AnimStage::GeometryBounds(glm::vec3& lo, glm::vec3& hi, bool robust) {
+    lo = glm::vec3(1e30f);
+    hi = glm::vec3(-1e30f);
     bool any = false;
-    auto grow = [&](const glm::vec3& p) {
-        lo = glm::min(lo, p);
-        hi = glm::max(hi, p);
+    GameObject root = StageRoot();
+    if (!root.Valid()) return false;
+    auto addBox = [&](const glm::mat4& m, const glm::vec3& a, const glm::vec3& b) {
+        for (int i = 0; i < 8; ++i) {
+            const glm::vec3 p = glm::vec3(m * glm::vec4(AabbCorner(a, b, i), 1.0f));
+            lo = glm::min(lo, p);
+            hi = glm::max(hi, p);
+        }
         any = true;
     };
-    if (AnimationComponent* am = StageAnim()) {
-        for (size_t i = 0; i < am->Anim.GlobalMatrices().size(); ++i) grow(glm::vec3(BoneWorld((int)i)[3]));
+    std::vector<entt::entity> all;
+    Walk(*m_scene, root.Entity(), all);
+    for (entt::entity e : all) {
+        const glm::mat4 world = m_scene->WorldMatrix(e);
+        const AnimationComponent* am = m_scene->Registry().try_get<AnimationComponent>(e);
+        if (am && am->Model) {
+            glm::vec3 a, b;
+            if (robust ? am->Model->RobustBindBounds(a, b) : am->Model->BindBounds(a, b))
+                addBox(world * am->Model->ImportTransform(), a, b);
+            continue;
+        }
+        const auto* mr = m_scene->Registry().try_get<MeshRendererComponent>(e);
+        if (mr && mr->MeshPtr && mr->MeshPtr->BoundsRadius() > 0.0f)
+            addBox(world, mr->MeshPtr->BoundsMin(), mr->MeshPtr->BoundsMax());
     }
-    if (!any) {
+    return any;
+}
+
+// Посадка копии на пол — по границам геометрии, один раз (см. AnimStage.h).
+// Только скелетная цель: у объекта без скелета положение корня — то, что
+// анимирует клип свойств, и сдвиг его бы перебил.
+void AnimStage::AlignToFloor() {
+    m_floorAligned = false;
+    m_floorLift = 0.0f;
+    GameObject root = StageRoot();
+    AnimationComponent* am = StageAnim();
+    m_alignModel = am ? am->Model.get() : nullptr;
+    if (am && am->Model) m_alignImport = am->Model->ImportTransform();
+    if (!root.Valid() || !am || !am->Model) return;
+    root.GetTransform().Position = glm::vec3(0.0f);
+    glm::vec3 lo, hi;
+    if (!GeometryBounds(lo, hi, false) || !std::isfinite(lo.y)) return;
+    m_floorLift = -lo.y;
+    root.GetTransform().Position.y = m_floorLift;
+    m_floorAligned = true;
+    m_alignTracked = TrackedPoint();
+}
+
+// Кадрирование: по настоящей геометрии (без аномальных частей), запасной
+// вариант — кости без дальних выбросов, затем объекты копии.
+void AnimStage::FrameTarget() {
+    glm::vec3 lo(1e9f), hi(-1e9f);
+    bool any = GeometryBounds(lo, hi, true);
+    if (any) {
+        // Модель в движении — рамка едет вместе с ней: границы посчитаны по
+        // позе привязки, а точка слежения уже в текущей позе.
+        if (m_floorAligned && StageAnim()) {
+            const glm::vec3 shift = TrackedPoint() - m_alignTracked;
+            lo += shift;
+            hi += shift;
+        }
+    } else if (const sage::anim::Skeleton* sk = Skeleton(); sk && sk->Count() > 0) {
+        // Кости: центр по медиане, границы — без костей дальше удвоенного
+        // 90-го перцентиля расстояния от центра (одна кость на краю света
+        // не должна отодвигать камеру).
+        std::vector<glm::vec3> pts((size_t)sk->Count());
+        for (int i = 0; i < sk->Count(); ++i) pts[(size_t)i] = glm::vec3(BoneWorld(i)[3]);
+        std::vector<float> xs, ys, zs;
+        for (const glm::vec3& p : pts) { xs.push_back(p.x); ys.push_back(p.y); zs.push_back(p.z); }
+        auto median = [](std::vector<float>& v) {
+            std::nth_element(v.begin(), v.begin() + v.size() / 2, v.end());
+            return v[v.size() / 2];
+        };
+        const glm::vec3 mid(median(xs), median(ys), median(zs));
+        std::vector<float> dist;
+        for (const glm::vec3& p : pts) dist.push_back(glm::length(p - mid));
+        std::vector<float> sorted = dist;
+        std::sort(sorted.begin(), sorted.end());
+        const float limit = std::max(0.05f, sorted[(size_t)((sorted.size() - 1) * 0.9f)] * 2.0f);
+        for (size_t i = 0; i < pts.size(); ++i) {
+            if (dist[i] > limit) continue;
+            lo = glm::min(lo, pts[i]);
+            hi = glm::max(hi, pts[i]);
+            any = true;
+        }
+    }
+    if (!any && StageRoot().Valid()) {
         std::vector<entt::entity> all;
         Walk(*m_scene, StageRoot().Entity(), all);
         // Объект — точкой и размером: у одного куба «габарит» из одних
@@ -399,8 +563,9 @@ void AnimStage::FrameTarget() {
             const glm::vec3 c(w[3]);
             const float r = 0.5f * std::max({glm::length(glm::vec3(w[0])), glm::length(glm::vec3(w[1])),
                                              glm::length(glm::vec3(w[2]))});
-            grow(c - glm::vec3(r));
-            grow(c + glm::vec3(r));
+            lo = glm::min(lo, c - glm::vec3(r));
+            hi = glm::max(hi, c + glm::vec3(r));
+            any = true;
         }
     }
     if (!any) {
@@ -408,9 +573,14 @@ void AnimStage::FrameTarget() {
         m_radius = 1.0f;
     } else {
         m_focus = (lo + hi) * 0.5f;
-        m_radius = std::max(0.5f, glm::length(hi - lo) * 0.5f);
+        m_radius = std::max(0.25f, glm::length(hi - lo) * 0.5f);
     }
-    m_distance = m_radius * 3.2f;
+    // Расстояние — чтобы шар вокруг модели вписался в МЕНЬШИЙ из углов обзора
+    // (по высоте и по ширине кадра); запас 5 %.
+    const float halfV = glm::radians(20.0f);
+    const float halfH = std::atan(std::tan(halfV) * std::max(0.1f, m_aspect));
+    m_distance = std::clamp(m_radius / std::sin(std::min(halfV, halfH)) * 1.05f, 0.2f, 200.0f);
+    m_followValid = false;   // слежение начинается с этого кадра
 }
 
 glm::vec3 AnimStage::Eye() const {
@@ -428,6 +598,7 @@ glm::mat4 AnimStage::Proj(float aspect) const {
 
 uint64_t AnimStage::Render(int width, int height) {
     EnsureFloor();
+    m_aspect = (float)width / (float)std::max(1, height);
     // Светло-серый фон: тёмная модель на нём читается силуэтом, светлая —
     // тенью пола и светом студии.
     return m_preview.RenderSceneView(*m_scene, width, height, View(), Proj((float)width / (float)height), Eye(),

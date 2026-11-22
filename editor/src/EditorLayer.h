@@ -524,6 +524,7 @@ private:
     bool SelfTestVisualScript();     // Visual Scripting: свой редактор, узлы, компонент в Play
     bool SelfTestAiGraph();          // SAGE AI Graph: библиотека, редактор графов, компонент AI в Play
     bool SelfTestAnimGraph();        // SAGE Animation Graph: ассет, окно, компонент, сохранение сцены
+    void AnimWorkspaceChecks(GameObject hero, const std::function<void(const std::string&)>& fail);
     bool SelfTestAnimWorkspace();    // пространство Animation: копия цели, ключ кости, граф, слои, уровень не тронут
     bool SelfTestAssetsBrowser();    // панель Assets: порядок, поиск, выделение, операции, настройки вида
     bool SelfTestPivot();            // опора Transform: положения, отмена, гизмо, иерархия, сцена

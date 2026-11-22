@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 4398.
+// Язык: Русский. Строк: 4405.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1746,6 +1746,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сложить повороты"},
     {"Comment",
      "Комментарий"},
+    {"Common prefix",
+     "Общий префикс"},
     {"Company",
      "Издатель"},
     {"Compare Parameter",
@@ -3035,9 +3037,11 @@ constexpr TranslationPair kRussianStrings[] = {
     {"Folders",
      "Папки"},
     {"Follow",
-     "Следовать"},
+     "Следить"},
     {"Follow Target",
      "Следовать за целью"},
+    {"Follow Target: the camera follows the model while it plays",
+     "Следить за целью: камера едет за моделью при проигрывании"},
     {"Follow new messages",
      "Прокручивать к новым"},
     {"Follows the parent size instead of a fixed one",
@@ -3086,6 +3090,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Фрагментный"},
     {"Frame Cap (0=off)",
      "Предел кадров (0 — без предела)"},
+    {"Frame Target (F)",
+     "Кадрировать цель (F)"},
     {"Frame playback",
      "Смена кадров"},
     {"Frame rate",
@@ -3094,8 +3100,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Частота кадров в фоне"},
     {"Frame rate limit",
      "Ограничение частоты кадров"},
-    {"Frame the model (F)",
-     "Кадрировать модель (F)"},
     {"Frame the selection",
      "Показать выделенное"},
     {"Frame the selection (F)",
@@ -4572,6 +4576,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Клипа пока нет: создайте его на шкале анимации"},
     {"No clip — nothing is playing",
      "Клипа нет — играть нечего"},
+    {"No clips match",
+     "Нет подходящих клипов"},
     {"No code editors found on this machine",
      "На этой машине редакторов кода не найдено"},
     {"No colour",
@@ -6480,6 +6486,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Поиск действий..."},
     {"Search again",
      "Найти заново"},
+    {"Search clips...",
+     "Поиск клипов..."},
     {"Search commands...",
      "Поиск команд..."},
     {"Search elements...",
@@ -6548,6 +6556,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Выберите элементы, чтобы выровнять их"},
     {"Select keys to edit their interpolation, time and value",
      "Выделите ключи, чтобы править интерполяцию, время и значение"},
+    {"Select only (Q): the gizmo is hidden, bones are still picked",
+     "Только выбор (Q): гизмо скрыто, кости выбираются"},
     {"Select the linked object",
      "Выбрать объект по ссылке"},
     {"Selected",
@@ -6714,6 +6724,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Статистика производительности"},
     {"Show Selection Information",
      "Выделение"},
+    {"Show Skeleton: lines and points of all bones",
+     "Показать скелет: линии и точки всех костей"},
     {"Show View Information",
      "Вид"},
     {"Show all",
@@ -6808,6 +6820,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Скелетная анимация: клип или граф играет на скелете модели Mesh"},
     {"Skeletal model",
      "Модель со скелетом"},
+    {"Skeleton",
+     "Скелет"},
     {"Skeleton comes from the Mesh model",
      "Скелет берётся из модели в Mesh"},
     {"Skeleton of animated models",

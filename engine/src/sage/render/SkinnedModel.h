@@ -143,6 +143,13 @@ struct SkinnedMaterial {
 
 struct SkinnedSubMesh {
     std::shared_ptr<SkinnedMesh> Mesh;
+    // Габарит вершин подмеша в позе привязки (до ImportTransform). Считается
+    // при сборке из тех же вершин, что уходят на видеокарту: после загрузки
+    // CPU-копии вершин у модели нет.
+    glm::vec3 BoundsLo{0.0f};
+    glm::vec3 BoundsHi{0.0f};
+    size_t BoundsVertices = 0;   // 0 — у подмеша нет вершин, габарита нет
+    void SetBounds(const std::vector<SkinnedVertex>& vertices);
     SkinnedMaterial Material;
     MorphData Morphs;        // пусто, если у примитива нет морф-целей
 };
@@ -239,6 +246,17 @@ public:
 
     // Подмеши с материалами из файла (только чтение: проверки и инструменты).
     const std::vector<SkinnedSubMesh>& SubMeshes() const { return m_subMeshes; }
+
+    // Габарит ВСЕЙ отображаемой геометрии (все подмеши, в том числе жёсткие
+    // детали на костях) в позе привязки, до ImportTransform. Поза привязки —
+    // та, что рисуется с единичной палитрой: палитра Root*глобальная*InverseBind
+    // в ней тоже единица, поэтому её габарит не зависит от клипа. false —
+    // вершин нет, и границ нет (подставлять нечего).
+    bool BindBounds(glm::vec3& lo, glm::vec3& hi) const;
+    // То же БЕЗ аномальных частей (служебный меш в сотнях единиц): для
+    // кадрирования, не для посадки на пол — пол обязан касаться самой нижней
+    // точки.
+    bool RobustBindBounds(glm::vec3& lo, glm::vec3& hi) const;
 
 private:
     // Сборка модели из уже разобранных данных (ModelData). Частный член, а не

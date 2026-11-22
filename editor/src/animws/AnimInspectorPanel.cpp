@@ -8,6 +8,7 @@
 
 #include "imgui.h"
 
+#include "AnimClipNames.h"
 #include "AnimStage.h"
 #include "../AssetSlot.h"
 #include "../EditorHost.h"
@@ -18,6 +19,7 @@
 #include "../InspectorFields.h"
 #include "../Localization.h"
 #include "../Project.h"
+#include "../ui/UI.h"
 #include "sage/anim/AnimationComponents.h"
 #include "sage/anim/ClipFile.h"
 #include "sage/assets/AssetDatabase.h"
@@ -153,24 +155,56 @@ void AnimInspectorPanel::DrawSource(EditorHost& host, AnimStage& stage) {
 
     // Клипы модели — по именам; есть вынутый файл — открывается в таймлайне
     // (правится как свой после «Сделать свой»), нет — только просмотр.
+    // Имена в списке — отображаемые (короче и различимы, см. AnimClipNames.h);
+    // настоящее имя — в подсказке, номера и ссылки клипов не меняются.
     ImGui::TextDisabled("%s", T("Clips"));
     const auto& clips = view->Model->Clips();
+    std::vector<std::string> fullNames;
+    fullNames.reserve(clips.size());
+    for (const auto& c : clips) fullNames.push_back(c.Name);
+    std::string prefix;
+    const std::vector<std::string> shown = animnames::DisplayNames(fullNames, &prefix);
+    if (clips.size() > 6)
+        Sage::UI::SearchField("anim_clip_filter", m_clipFilter, sizeof(m_clipFilter), T("Search clips..."), -1.0f);
+    if (!prefix.empty()) ImGui::TextDisabled("%s: %s", T("Common prefix"), prefix.c_str());
+    // Высота списка ограничена: сотня клипов не должна занимать весь Inspector.
+    const float rowH = ImGui::GetTextLineHeightWithSpacing();
+    const int rows = std::clamp((int)clips.size(), 1, 8);
+    ImGui::BeginChild("##anim_clip_list", ImVec2(0.0f, rowH * (float)rows + 8.0f), true);
+    int listed = 0;
     for (int i = 0; i < (int)clips.size(); ++i) {
+        if (m_clipFilter[0]) {
+            // Поиск — по отображаемому и по настоящему имени, без учёта регистра.
+            auto lower = [](std::string s) { for (char& ch : s) ch = (char)std::tolower((unsigned char)ch); return s; };
+            const std::string needle = lower(m_clipFilter);
+            if (lower(shown[(size_t)i]).find(needle) == std::string::npos &&
+                lower(fullNames[(size_t)i]).find(needle) == std::string::npos)
+                continue;
+        }
+        ++listed;
         const std::string file = ModelClipFile(host, view->ResolvedFrom, clips[(size_t)i].Name);
         const bool current = file.empty() ? (stage.ModelClip() == i && stage.ClipPath().empty())
                                           : sage::AssetDatabase::Instance().LocatePath(stage.ClipPath()) ==
                                                 sage::AssetDatabase::Instance().LocatePath(file);
-        std::string label = clips[(size_t)i].Name + "##mclip" + std::to_string(i);
+        const std::string label = shown[(size_t)i] + "##mclip" + std::to_string(i);
         if (ImGui::Selectable(label.c_str(), current)) {
             stage.SetMode(AnimStage::Source::Clip);
             stage.ClearPose();
             if (!file.empty()) host.OpenAnimationClip(file);
             else stage.ShowModelClip(i);
         }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", file.empty() ? T("Clip inside the model (not extracted to a file): view only")
-                                                 : file.c_str());
+        if (current && m_scrollToCurrent) ImGui::SetScrollHereY(0.5f);
+        if (ImGui::IsItemHovered()) {
+            ImGui::BeginTooltip();
+            ImGui::TextUnformatted(fullNames[(size_t)i].c_str());
+            ImGui::TextDisabled("%s", file.empty() ? T("Clip inside the model (not extracted to a file): view only")
+                                                   : file.c_str());
+            ImGui::EndTooltip();
+        }
     }
+    if (listed == 0) ImGui::TextDisabled("%s", T("No clips match"));
+    ImGui::EndChild();
+    m_scrollToCurrent = false;
     // Свои клипы (.sageanim) — слотом: брошенный файл открывается в таймлайне.
     const assetslot::Result r = assetslot::Draw(host, "anim_clip_open", assetslot::Kind::Animation, stage.ClipPath(),
                                                 nullptr, T("Drop a .sageanim to view or edit it"));

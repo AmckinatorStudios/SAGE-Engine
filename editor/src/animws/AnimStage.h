@@ -115,13 +115,42 @@ public:
     float ParamValue(const std::string& name) const;
     void SetParamValue(const std::string& name, float v) { m_params[name] = v; }
 
+    // --- Пол -----------------------------------------------------------------
+    // Копия скелетной цели ставится на пол САМА: нижняя точка настоящей геометрии
+    // (все подмеши в позе привязки, с ImportTransform и узлами копии) совмещается
+    // с плоскостью Y = 0. Смещение считается ОДИН раз — при сборке копии и при
+    // смене модели или её настроек импорта — и дальше не пересчитывается по
+    // анимированной позе: иначе прыжок клипа возвращался бы на пол каждый кадр.
+    // false — достоверных границ нет (у цели нет вершин): смещения нет, копия
+    // осталась в начале координат, и выдавать это за посадку нельзя.
+    bool FloorAligned() const { return m_floorAligned; }
+    float FloorLift() const { return m_floorLift; }
+    // Габарит геометрии копии в МИРЕ (robust — без аномальных частей, для
+    // кадрирования). false — геометрии нет.
+    bool GeometryBounds(glm::vec3& lo, glm::vec3& hi, bool robust);
+    // Точка, за которой едет камера в режиме Follow: центр костей в ТЕКУЩЕЙ
+    // позе (у цели без скелета — начало копии).
+    glm::vec3 TrackedPoint();
+
     // --- Кадр ----------------------------------------------------------------
-    // Камера: орбита вокруг фокуса.
+    // Камера: орбита вокруг фокуса, осмотр на месте и полёт.
     void Orbit(float dYaw, float dPitch);
     void Pan(float dx, float dy);
     void Zoom(float wheel);
+    // Осмотр на месте (ПКМ): глаз стоит, поворачивается взгляд. Пиксели мыши.
+    void Look(float dx, float dy);
+    // Полёт (ПКМ + WASDQE): оси -1..1 по взгляду, вбок и вверх по миру; fast —
+    // Shift. Глаз и фокус едут вместе, расстояние до фокуса не меняется.
+    void Fly(float forward, float right, float up, float dt, bool fast);
     void ResetCamera();
     void FrameTarget();
+    // Follow Target: фокус едет за моделью, пока она играет; угол и расстояние
+    // остаются пользовательскими. Состояние предпросмотра, в сцену не пишется.
+    bool Follow() const { return m_follow; }
+    void SetFollow(bool on) { m_follow = on; m_followValid = false; }
+    glm::vec3 Focus() const { return m_focus; }
+    float Distance() const { return m_distance; }
+    float Radius() const { return m_radius; }   // размер кадрированной модели
     glm::mat4 View() const;
     glm::mat4 Proj(float aspect) const;
     glm::vec3 Eye() const;
@@ -133,6 +162,8 @@ private:
     void ApplySource(float dt);
     void EnsureFloor();
     int RootSkeletalEntity() const;
+    void AlignToFloor();
+    void UpdateFollow(float dt);
 
     std::unique_ptr<Scene> m_scene = std::make_unique<Scene>("animation-stage");
     AssetPreview m_preview;
@@ -167,7 +198,21 @@ private:
     bool m_graphDirty = false;
     std::unordered_map<std::string, float> m_params;
 
+    // Посадка на пол: смещение копии и то, от чего оно посчитано. Модель и
+    // матрица импорта — чтобы заметить смену модели или настроек, не сравнивая
+    // файлы; ReTries — модель могла ещё не подгрузиться (границ нет пока).
+    bool m_floorAligned = false;
+    float m_floorLift = 0.0f;
+    const void* m_alignModel = nullptr;
+    glm::mat4 m_alignImport{1.0f};
+    int m_alignRetries = 0;
+    glm::vec3 m_alignTracked{0.0f};   // TrackedPoint в момент расчёта границ
+
     glm::vec3 m_focus{0.0f, 1.0f, 0.0f};
     float m_yaw = 30.0f, m_pitch = 15.0f, m_distance = 4.0f;
     float m_radius = 1.0f;
+    float m_aspect = 1.6f;            // последний показанный кадр — для кадрирования
+    bool m_follow = false;
+    bool m_followValid = false;
+    glm::vec3 m_followPoint{0.0f};    // сглаженная точка, за которой едет фокус
 };
