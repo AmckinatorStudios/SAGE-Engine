@@ -15,7 +15,6 @@
 #include "CanvasToolbarRules.h"
 #include "InterfaceWidgets.h"
 #include "../Localization.h"
-#include "../PanelWindows.h"
 #include "../Project.h"
 #include "../UIElementProperties.h"
 #include "../UILayoutOps.h"
@@ -474,8 +473,7 @@ void InterfaceViewportPanel::Draw(EditorHost& host, bool& open) {
         --m_focusFrames;
     }
     ImGui::SetNextWindowSize(ImVec2(960.0f, 640.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(EditorIcons::WindowTitle("layout", T("Canvas"), "InterfaceViewport").c_str(), &open,
-                      panelwindows::WindowFlags("InterfaceViewport"))) {
+    if (!ImGui::Begin(EditorIcons::WindowTitle("layout", T("Canvas"), "InterfaceViewport").c_str(), &open)) {
         ImGui::End();
         return;
     }

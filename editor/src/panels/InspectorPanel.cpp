@@ -1,5 +1,4 @@
 #include <cstdarg>
-#include "../PanelWindows.h"
 #include "InspectorControls.h"
 #include "InspectorPanel.h"
 #include "../EditorTheme.h"
@@ -149,8 +148,7 @@ void InspectorPanel::Draw(EditorHost& host, bool* open, const std::string& windo
         }
     }
 
-    ImGui::Begin(EditorIcons::WindowTitle("inspector", T("Inspector"), windowId.c_str()).c_str(), open,
-                 panelwindows::WindowFlags(windowId.c_str()));
+    ImGui::Begin(EditorIcons::WindowTitle("inspector", T("Inspector"), windowId.c_str()).c_str(), open);
     // Инструмент пространства (узел графа анимации) занимает инспектор своим
     // выделенным элементом; выбор объекта возвращает обычные свойства.
     if (host.DrawToolInspector()) {

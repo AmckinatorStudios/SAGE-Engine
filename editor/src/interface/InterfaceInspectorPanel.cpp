@@ -14,7 +14,6 @@
 #include "../InspectorControls.h"
 #include "InterfaceWidgets.h"
 #include "../Localization.h"
-#include "../PanelWindows.h"
 #include "../Project.h"
 #include "../UIElementProperties.h"
 #include "../UILayoutOps.h"
@@ -142,8 +141,7 @@ void InterfaceInspectorPanel::Draw(EditorHost& host, bool& open) {
     }
 
     ImGui::SetNextWindowSize(ImVec2(380.0f, 720.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(EditorIcons::WindowTitle("inspector", T("Element"), "InterfaceInspector").c_str(), &open,
-                      panelwindows::WindowFlags("InterfaceInspector"))) {
+    if (!ImGui::Begin(EditorIcons::WindowTitle("inspector", T("Element"), "InterfaceInspector").c_str(), &open)) {
         ImGui::End();
         return;
     }

@@ -1,4 +1,3 @@
-#include "../PanelWindows.h"
 #include "GamePanel.h"
 
 #include <algorithm>
@@ -40,7 +39,7 @@ void GamePanel::Draw(EditorHost& host, bool* open) {
     }
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin(EditorIcons::WindowTitle("game", T("Game"), "Game").c_str(), open, panelwindows::WindowFlags("Game"));
+    ImGui::Begin(EditorIcons::WindowTitle("game", T("Game"), "Game").c_str(), open);
 
     // Фокус запоминаем для ввода Play-режима (см. GamePanel::Focused).
     // RootAndChildWindows — чтобы клик по изображению внутри панели считался

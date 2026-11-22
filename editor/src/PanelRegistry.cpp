@@ -156,7 +156,7 @@ void PanelRegistry::DrawPanels(EditorHost& host, EditorWorkspace workspace) {
         const std::string id = WindowId(e.Spec, workspace);
         // Копия функции: Unregister из самого Draw уничтожил бы её посреди вызова.
         const auto draw = e.Spec.Draw;
-        const bool wrap = e.Spec.WrapWindow && *open;
+        const bool wrap = e.Spec.Detachable && *open;
         if (wrap) panelwindows::Before(id.c_str());
         // Пределы размера — перед Begin панели: докинг читает их у окна (см.
         // DockNodeCalcLimit в imgui.cpp). Не доставшиеся окну (Draw ничего не
@@ -166,8 +166,12 @@ void PanelRegistry::DrawPanels(EditorHost& host, EditorWorkspace workspace) {
             ImGui::SetNextWindowSizeConstraints(ImVec2(lim.Min[0], lim.Min[1]), ImVec2(lim.Max[0], lim.Max[1]));
         }
         draw(host, open, id);
-        if (*open) ImGui::GetCurrentContext()->NextWindowData.HasFlags &= ~ImGuiNextWindowDataFlags_HasSizeConstraint;
-        if (wrap) panelwindows::After(id.c_str());
+        // Не доставшееся окну (Draw ничего не открыл) снимаем и тут: класс окна и док
+        // «вернуть в редактор» достались бы чужому Begin следующей панели.
+        if (*open)
+            ImGui::GetCurrentContext()->NextWindowData.HasFlags &=
+                ~(ImGuiNextWindowDataFlags_HasSizeConstraint | ImGuiNextWindowDataFlags_HasWindowClass |
+                  ImGuiNextWindowDataFlags_HasDock);
     }
 }
 
@@ -185,33 +189,19 @@ void PanelRegistry::DrawMenuSection(PanelSection section) {
     }
 }
 
-void PanelRegistry::DrawDetachMenu(EditorWorkspace workspace) {
-    // По разделам, как в самом меню Window: два десятка окон одним столбцом
-    // читаются только целиком.
-    static const PanelSection kOrder[] = {PanelSection::Scene, PanelSection::Interface, PanelSection::Animation,
-                                          PanelSection::Shared, PanelSection::Tools, PanelSection::Plugins};
-    static const char* const kTitles[] = {"Scene", "Interface", "Animation", "Shared", "Tools", "Plugins"};
-    bool first = true;
-    for (int k = 0; k < 6; ++k) {
-        bool header = false;
-        for (const PanelSpec* s : All()) {
-            if (!s->Detachable || !s->InMenu || s->Section != kOrder[k]) continue;
-            if (!header) {
-                Sage::UI::MenuSection(T(kTitles[k]), first);
-                header = true;
-                first = false;
-            }
-            // Имя окна — ТЕКУЩЕГО пространства: у общих панелей их два, и
-            // галочка обязана относиться к тому окну, которое человек видит.
-            const std::string id = WindowId(*s, workspace);
-            const bool detached = panelwindows::Detached(id.c_str());
-            if (EditorIcons::MenuItemSelected("window", T(s->Title.c_str()), detached)) {
-                panelwindows::SetDetached(id.c_str(), !detached);
-                // Вытащенная закрытая панель обязана появиться — иначе галочка
-                // ничего не меняет на экране.
-                if (!detached) *FindEntry(s->Id)->Flag() = true;
-            }
-        }
+bool PanelRegistry::AnyFloating(EditorWorkspace workspace) const {
+    for (const auto& e : m_entries) {
+        if (!e->Spec.Detachable || !InSpace(e->Spec, workspace) || !*e->Flag()) continue;
+        if (panelwindows::IsFloating(WindowId(e->Spec, workspace).c_str())) return true;
+    }
+    return false;
+}
+
+void PanelRegistry::ReturnFloating(EditorWorkspace workspace) {
+    for (const auto& e : m_entries) {
+        if (!e->Spec.Detachable || !InSpace(e->Spec, workspace) || !*e->Flag()) continue;
+        const std::string id = WindowId(e->Spec, workspace);
+        if (panelwindows::IsFloating(id.c_str())) panelwindows::RequestReturn(id.c_str());
     }
 }
 

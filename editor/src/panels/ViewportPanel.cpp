@@ -1,6 +1,5 @@
 #include "sage/scene/ScaleLock.h"
 #include "../DragSet.h"
-#include "../PanelWindows.h"
 #include "ViewportPanel.h"
 #include "ModelImportDialog.h"
 
@@ -162,8 +161,7 @@ void ViewportPanel::Draw(EditorHost& host, bool* open, const std::string& window
     }
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::Begin(EditorIcons::WindowTitle("world", T("Viewport"), windowId.c_str()).c_str(), open,
-                 panelwindows::WindowFlags(windowId.c_str()));
+    ImGui::Begin(EditorIcons::WindowTitle("world", T("Viewport"), windowId.c_str()).c_str(), open);
 
     // Мышь НА ВИДЖЕТЕ инструментов? Ректом прошлого кадра — сам виджет
     // рисуется в конце, поверх видов, а знать об этом надо здесь: клик по его

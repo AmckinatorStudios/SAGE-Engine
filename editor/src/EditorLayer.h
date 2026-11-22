@@ -535,6 +535,9 @@ private:
     void CheckMultiWindowFrame();
     // Общие панели переживают переход между пространствами (см. .cpp).
     void CheckWorkspaceDockFrame();
+    // Один круг «вытащить вкладку — окно системы — вернуть в док» для панели id
+    // текущего пространства (шаги живут в m_rt*). 0 — идёт, 1 — готово, -1 — сбой.
+    int DetachRoundTrip(const char* id, std::string& why);
     // Разрешение предпросмотра правит кадр, а не проект (см. .cpp).
     void CheckPreviewResolutionFrame();
     // Инспектор каждого типа интерфейса и окно девятины (в том числе узкое)
@@ -578,6 +581,11 @@ private:
     // окно обездвиживает редактор целиком (см. EditorLayer.cpp).
     void CloseGhostPopups();
     bool m_multiWindowChecked = false; // проверка одноразовая: кадров много
+    int m_multiWindowStep = 0;         // шаг проверки отдельных окон
+    int m_multiWindowWait = 0;
+    int m_rtPhase = 0;                 // фаза DetachRoundTrip
+    int m_rtWait = 0;
+    unsigned int m_rtOrigDock = 0;     // узел дока, откуда панель вытащили
     bool m_workspaceDockChecked = false;
     int m_wsDockStep = 0;              // шаг проверки общих панелей
     int m_wsDockWait = 0;              // кадры на устаканивание раскладки
@@ -791,14 +799,13 @@ private:
     bool m_rebuildAllDocks = false;   // Window > Reset Layout: все три пространства
 
     // Пользовательский макет: ini ImGui ЦЕЛИКОМ (в нём доки всех трёх
-    // пространств, размеры, вкладки, позиции окон) плюс видимость панелей и
-    // «отдельные окна» — то, чего в ini нет. Отдельная от ini последней сессии
+    // пространств, размеры, вкладки, позиции окон) (и позиции отдельных
+    // окон системы) плюс видимость панелей — то, чего в ini нет. Отдельная от ini последней сессии
     // (sage_editor_imgui.ini) копия: автосохранение сессии работает как прежде.
     struct SavedLayout {
         std::string Name;
         std::string Ini;
         std::map<std::string, bool> Visible;
-        std::map<std::string, bool> Detached;
     };
     std::vector<SavedLayout> m_layouts;
     std::string m_activeLayout;       // имя выбранного макета; пусто — стандартный

@@ -14,7 +14,6 @@
 #include "../HotkeyScope.h"
 #include "InterfaceWidgets.h"
 #include "../Localization.h"
-#include "../PanelWindows.h"
 #include "../FsCache.h"
 #include "../Project.h"
 #include "../ui/UI.h"
@@ -143,8 +142,7 @@ void InterfaceHierarchyPanel::Draw(EditorHost& host, bool& open) {
         --m_focusFrames;
     }
     ImGui::SetNextWindowSize(ImVec2(320.0f, 620.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(EditorIcons::WindowTitle("list", T("Elements"), "InterfaceHierarchy").c_str(), &open,
-                      panelwindows::WindowFlags("InterfaceHierarchy"))) {
+    if (!ImGui::Begin(EditorIcons::WindowTitle("list", T("Elements"), "InterfaceHierarchy").c_str(), &open)) {
         ImGui::End();
         return;
     }

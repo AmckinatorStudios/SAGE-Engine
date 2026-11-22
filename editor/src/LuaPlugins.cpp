@@ -560,10 +560,8 @@ void RegisterPanels(EditorHost& host, Entry& e) {
         s.Icon = "gear";
         s.Section = sage::editor::PanelSection::Plugins;
         s.Visible = &e.Panels[i].Open;
-        // Окно плагин открывает сам, со своим «###»: обёртка своего окна
-        // системы и меню «Отдельным окном» ему не нужны.
-        s.WrapWindow = false;
-        s.Detachable = false;
+        // Окно плагин открывает сам, со своим «###»: класс окна реестра (Detachable)
+        // ему не ставится. Вытащить его мышью можно, как любое окно ImGui.
         // Зовётся и у закрытого: закрытие из меню «Окно» надо запомнить.
         s.DrawWhenHidden = true;
         Entry* ep = &e;

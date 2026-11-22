@@ -3,7 +3,6 @@
 #include "../CreateAssetDialog.h"
 #include "../DragSet.h"
 #include "../PanelWindowId.h"
-#include "../PanelWindows.h"
 #include "AssetsPanel.h"
 #include "../ui/TreeLines.h"
 #include "FsCache.h"
@@ -343,8 +342,7 @@ void AssetsPanel::Draw(EditorHost& host, bool* open, const std::string& windowId
         ImGui::SetNextWindowFocus();
         --m_focusFrames;
     }
-    ImGui::Begin(sage::editor::panelid::Title("folder-full", T("Assets"), windowId).c_str(), open,
-                     panelwindows::WindowFlags("Assets"));
+    ImGui::Begin(sage::editor::panelid::Title("folder-full", T("Assets"), windowId).c_str(), open);
 
     DrawHeader(host);
 

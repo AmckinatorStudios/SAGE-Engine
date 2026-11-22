@@ -1,4 +1,3 @@
-#include "../PanelWindows.h"
 #include "panels/ProfilerPanel.h"
 
 #include <algorithm>
@@ -67,8 +66,7 @@ void ProfilerPanel::Draw(bool* open) {
     }
     if (!wantEnabled) return;
 
-    if (!ImGui::Begin(EditorIcons::WindowTitle("chart", T("Profiler"), "Profiler").c_str(), open,
-                      panelwindows::WindowFlags("Profiler"))) {
+    if (!ImGui::Begin(EditorIcons::WindowTitle("chart", T("Profiler"), "Profiler").c_str(), open)) {
         ImGui::End();
         return;
     }

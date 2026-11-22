@@ -500,85 +500,39 @@ bool EditorLayer::SelfTestToolsAssetsAndPanels() {
 
     // --- Панель ОТДЕЛЬНЫМ ОКНОМ СИСТЕМЫ (multi-window) ---------------------
     //
-    // Проверяется не «панель можно вытащить мышью» — это ImGui умел и раньше, —
-    // а ровно то, чего не было и из-за чего вытащенная панель не становилась
-    // окном (см. PanelWindows.h):
-    //
-    //   1) ФЛАГ ВЬЮПОРТА. Пока окну не поставлен ImGuiViewportFlags_NoAutoMerge,
-    //      ImGui СЛИВАЕТ его с главным, стоит на главное наехать: для системы
-    //      такого окна нет — ни отдельной кнопки на панели задач, ни переноса
-    //      на второй монитор. Проверяется прямо: после Before у следующего окна
-    //      обязан стоять этот флаг — и обязан НЕ стоять у панели, живущей в
-    //      доке, иначе в отдельное окно уедут все подряд.
-    //   2) ПАМЯТЬ МЕЖДУ ЗАПУСКАМИ: состояние живёт в настройках редактора, иначе
-    //      расстановку окон пришлось бы собирать заново каждый запуск.
-    //   3) ПУТЬ НАЗАД: «собрать все окна в главное» возвращает ВСЕ, включая
-    //      уехавшее на монитор, которого больше нет, — его иначе не достать.
-    //
-    // ОТСТЫКОВАННЫХ ПО УМОЛЧАНИЮ ПАНЕЛЕЙ БОЛЬШЕ НЕТ, и проверка это учитывает:
-    // раньше редактор интерфейса открывался своим окном, потому что во вкладке
-    // центрального дока его холсту оставалась треть экрана. Теперь вёрстка —
-    // отдельное рабочее пространство со своими панелями, и выталкивать её
-    // наружу незачем. Значит проверять надо ВОЗМОЖНОСТЬ, а не умолчание:
-    // панель отстыковывается здесь же, явно.
+    // Состояния «окно отдельное» больше нет (см. PanelWindows.h): вытащенное окно
+    // — это вьюпорт ImGui, и помнит его ini. Здесь проверяется то, что можно
+    // проверить без кадра: любая панель, объявившая Detachable, получает класс
+    // окна с NoAutoMerge (без него окно сливается с главным, стоит на него
+    // наехать), а у панелей без этого флага класс не ставится. Само вытаскивание
+    // и возврат — живым кадром (CheckMultiWindowFrame, CheckWorkspaceDockFrame).
     if (ok) {
-        namespace prefs = sage::editor::prefs;
-        // Настройки общие с живым редактором, поэтому состояние возвращается
-        // как было: прогон не имеет права переставить человеку окна.
-        const bool hadInspector = panelwindows::Detached("InterfaceInspector");
-        const bool hadViewport = panelwindows::Detached("Viewport");
-
-        panelwindows::ResetToDefaults();
-        if (panelwindows::Detached("InterfaceInspector") || panelwindows::Detached("Viewport")) {
-            LOG_ERROR("Editor") << "SELFTEST: по умолчанию панели живут в доке (свойства "
-                                << panelwindows::Detached("InterfaceInspector") << ", вьюпорт "
-                                << panelwindows::Detached("Viewport") << ")";
+        ImGuiContext* ctx = ImGui::GetCurrentContext();
+        auto classHasNoAutoMerge = [&]() {
+            const bool v = (ctx->NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasWindowClass) != 0 &&
+                           (ctx->NextWindowData.WindowClass.ViewportFlagsOverrideSet &
+                            ImGuiViewportFlags_NoAutoMerge) != 0;
+            // Заготовку следующего окна за собой убираем: иначе первый же
+            // настоящий Begin в кадре получил бы чужой класс.
+            ctx->NextWindowData.ClearFlags();
+            return v;
+        };
+        panelwindows::Before("Viewport");
+        if (!classHasNoAutoMerge()) {
+            LOG_ERROR("Editor") << "SELFTEST: Before не поставил NoAutoMerge — вытащенное окно слипнется с главным";
             ok = false;
         }
-        // Флаг вьюпорта — то самое, без чего окно слипается с главным.
-        if (ok) {
-            ImGuiContext* ctx = ImGui::GetCurrentContext();
-            panelwindows::SetDetached("InterfaceInspector", true);
-            panelwindows::Before("InterfaceInspector");
-            const bool detachedHasFlag =
-                (ctx->NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasWindowClass) != 0 &&
-                (ctx->NextWindowData.WindowClass.ViewportFlagsOverrideSet &
-                 ImGuiViewportFlags_NoAutoMerge) != 0;
-            ctx->NextWindowData.ClearFlags();
-            panelwindows::Before("Viewport");
-            const bool dockedHasFlag =
-                (ctx->NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasWindowClass) != 0 &&
-                (ctx->NextWindowData.WindowClass.ViewportFlagsOverrideSet &
-                 ImGuiViewportFlags_NoAutoMerge) != 0;
-            // Заготовку следующего окна за собой убираем: иначе первый же
-            // настоящий Begin в кадре получил бы чужой класс и чужой док.
-            ctx->NextWindowData.ClearFlags();
-            if (!detachedHasFlag || dockedHasFlag) {
-                LOG_ERROR("Editor") << "SELFTEST: NoAutoMerge выставлен неверно (отдельное окно "
-                                    << detachedHasFlag << ", панель в доке " << dockedHasFlag << ")";
+        // Реестр и окна не расходятся: у каждой Detachable-панели есть окно
+        // ImGui с её WindowId, а инструменты со своим Begin/End в этот режим не
+        // заявлены (иначе класс окна достался бы чужому Begin).
+        for (const sage::editor::PanelSpec* spec : m_panelRegistry.All()) {
+            if (!spec->Detachable) continue;
+            if (!spec->Draw || !spec->InMenu || spec->Section == sage::editor::PanelSection::Plugins) {
+                LOG_ERROR("Editor") << "SELFTEST: панель " << spec->Id
+                                    << " заявлена Detachable, но не рисуется реестром как обычное окно";
                 ok = false;
             }
         }
-
-        // Память между запусками и путь назад.
-        if (ok) {
-            panelwindows::SetDetached("Hierarchy", true);
-            const bool saved = prefs::GetBool("window.detached.Hierarchy", false);
-            panelwindows::AttachAll();
-            const bool allBack = !panelwindows::Detached("Hierarchy") &&
-                                 !panelwindows::Detached("InterfaceInspector");
-            const bool cleared = !prefs::GetBool("window.detached.Hierarchy", true);
-            if (!saved || !allBack || !cleared) {
-                LOG_ERROR("Editor") << "SELFTEST: состояние отдельных окон не сохраняется "
-                                    << "(записалось " << saved << ", собрались " << allBack
-                                    << ", стёрлось " << cleared << ")";
-                ok = false;
-            }
-        }
-
-        panelwindows::SetDetached("Hierarchy", false);
-        panelwindows::SetDetached("InterfaceInspector", hadInspector);
-        panelwindows::SetDetached("Viewport", hadViewport);
     }
 
     // --- Настройки редактора переживают запись и чтение ---------------------

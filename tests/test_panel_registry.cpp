@@ -149,3 +149,10 @@ TEST(PanelRegistry_visibility_snapshot_roundtrip) {
     CHECK_TRUE(reg.IsVisible("A"));
     CHECK_FALSE(reg.IsVisible("B"));
 }
+
+// Панель не попадает в систему отдельных окон по умолчанию: её Draw мог открыть
+// окно иначе (инструмент со своим Begin/End, окно плагина).
+TEST(PanelRegistry_detachable_is_opt_in) {
+    pe::PanelSpec s;
+    CHECK(!s.Detachable);
+}

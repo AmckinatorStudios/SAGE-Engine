@@ -1,5 +1,4 @@
 #include "../PanelWindowId.h"
-#include "../PanelWindows.h"
 #include "ConsolePanel.h"
 #include "../InspectorControls.h"
 
@@ -132,8 +131,7 @@ void ConsolePanel::Draw(bool* open, const std::string& windowId, EditorHost* hos
         ImGui::SetNextWindowFocus();
         --m_focusFrames;
     }
-    ImGui::Begin(sage::editor::panelid::Title("console", T("Console"), windowId).c_str(), open,
-                 panelwindows::WindowFlags("Console"));
+    ImGui::Begin(sage::editor::panelid::Title("console", T("Console"), windowId).c_str(), open);
     if (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows)) MarkSeen();
 
     // ДВЕ ВКЛАДКИ: журнал — «что происходило», проблемы — «что сломано и как

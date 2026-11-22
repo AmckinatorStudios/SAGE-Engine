@@ -16,7 +16,6 @@
 #include "../Localization.h"
 #include "../ObjectSlot.h"
 #include "../PanelWindowId.h"
-#include "../PanelWindows.h"
 #include "../ui/ColorPicker.h"
 #include "../ui/UI.h"
 #include "sage/anim/AnimProperty.h"
@@ -223,8 +222,7 @@ void TweenPanel::Draw(EditorHost& host, bool* open, const std::string& windowId)
         --m_focusFrames;
     }
     ImGui::SetNextWindowSize(ImVec2(960.0f, 340.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(sage::editor::panelid::Title("clock", T("Tween"), windowId).c_str(), open,
-                      panelwindows::WindowFlags("Tween"))) {
+    if (!ImGui::Begin(sage::editor::panelid::Title("clock", T("Tween"), windowId).c_str(), open)) {
         ImGui::End();
         return;
     }

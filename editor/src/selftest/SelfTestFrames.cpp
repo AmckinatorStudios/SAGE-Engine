@@ -4,83 +4,126 @@
 // ---------------------------------------------------------------------------
 // МНОГООКОННОСТЬ В ЖИВОМ КАДРЕ (SAGE_EDITOR_SELFTEST=1).
 //
-// Состояние и флаг вьюпорта проверяет RunSelfTest, но кадра там нет, а окно
-// системы заводит ПЛАТФОРМА: ImGui решает завести панели свой вьюпорт, бэкенд
-// создаёт под него окно GLFW, и только тогда окно существует. Ломается этот
-// последний шаг молча — галочка стоит, состояние верное, а окна на экране нет;
-// увидеть такое можно было только запустив редактор глазами.
+// Окно системы заводит ПЛАТФОРМА: ImGui решает завести панели свой вьюпорт,
+// бэкенд создаёт под него окно GLFW, и только тогда окно существует. Ломается
+// этот последний шаг молча, поэтому проверяется конец пути.
 //
-// Поэтому проверяется ровно конец пути: у редактора интерфейса СВОЙ вьюпорт со
-// СВОИМ окном платформы, а панель, оставшаяся в доке, живёт во вьюпорте
-// главного окна — иначе «отдельное окно» означало бы, что в него уехали все.
+// 1) Профайлер не в раскладке: открытый, он плавает ПОВЕРХ главного окна — и
+//    обязан стать своим окном системы, а не прямоугольником внутри редактора
+//    (NoAutoMerge). Заголовок у него рисует ImGui (за него окно и возвращают).
+// 2) «Вернуть все окна в редактор» заводит его в док главного окна.
+// 3) Панель из раскладки (Console) проходит круг «вытащить — окно системы —
+//    вернуть» и встаёт на своё место (см. DetachRoundTrip).
 // ---------------------------------------------------------------------------
+int EditorLayer::DetachRoundTrip(const char* id, std::string& why) {
+    ImGuiContext* ctx = ImGui::GetCurrentContext();
+    const ImGuiID mainId = ImGui::GetMainViewport()->ID;
+    ImGuiWindow* w = ImGui::FindWindowByID(ImHashStr(id));
+    if (m_rtWait > 0) { --m_rtWait; return 0; }
+    switch (m_rtPhase) {
+        case 0:
+            if (!w || !w->WasActive || w->DockId == 0) { why = std::string(id) + " не в доке до проверки"; return -1; }
+            m_rtOrigDock = w->DockId;
+            // То же действие, что делает перетаскивание вкладки из узла.
+            ImGui::DockContextQueueUndockWindow(ctx, w);
+            m_rtPhase = 1;
+            m_rtWait = 6;   // окно платформы появляется не в том же кадре
+            return 0;
+        case 1: {
+            if (!w || w->Viewport == nullptr || w->Viewport->ID == mainId || w->DockId != 0) {
+                why = std::string(id) + ": вытащенная панель не стала окном системы"; return -1;
+            }
+            if (w->Viewport->PlatformHandle == nullptr) { why = std::string(id) + ": у вьюпорта нет окна платформы"; return -1; }
+            if ((w->Viewport->Flags & ImGuiViewportFlags_NoDecoration) == 0 || (w->Flags & ImGuiWindowFlags_NoTitleBar)) {
+                why = std::string(id) + ": у отдельного окна нет заголовка ImGui, за который его возвращают"; return -1;
+            }
+            if (!m_panelRegistry.AnyFloating(m_workspace)) { why = "реестр не видит отдельного окна"; return -1; }
+            m_panelRegistry.ReturnFloating(m_workspace);
+            m_rtPhase = 2;
+            m_rtWait = 6;
+            return 0;
+        }
+        case 2:
+            if (!w || w->Viewport == nullptr || w->Viewport->ID != mainId || w->DockId == 0) {
+                why = std::string(id) + ": окно не вернулось в док главного окна"; return -1;
+            }
+            // Остальным панелям возврат ничего не сделал.
+            if (m_panelRegistry.AnyFloating(m_workspace)) { why = "после возврата осталось отдельное окно"; return -1; }
+            // Назад — ровно в тот узел, откуда вытащили: проверки дальше (и
+            // щелчки по координатам) рассчитаны на привычную раскладку.
+            ImGui::DockBuilderDockWindow(id, m_rtOrigDock);
+            m_rtPhase = 3;
+            m_rtWait = 3;
+            return 0;
+        default:
+            if (!w || w->DockId != m_rtOrigDock) { why = std::string(id) + ": не встала на прежнее место"; return -1; }
+            m_rtPhase = 0;
+            m_rtWait = 0;
+            return 1;
+    }
+}
+
 void EditorLayer::CheckMultiWindowFrame() {
     if (m_multiWindowChecked) return;
     if (!std::getenv("SAGE_EDITOR_SELFTEST")) return;
-    // Не в первых кадрах: окно платформы появляется не в том же кадре, в
-    // котором ImGui решил завести вьюпорт.
-    // Панель отстыковывается САМОЙ проверкой, а не берётся отстыкованной по
-    // умолчанию. Умолчаний, где панель живёт своим окном, больше нет (вёрстка
-    // стала пространством внутри главного окна), а проверять надо ВОЗМОЖНОСТЬ:
-    // именно она ломается молча — галочка стоит, состояние верное, а окна на
-    // экране нет.
+    // Не в первых кадрах: раскладка и окна платформы устаканиваются.
     if (m_frameCounter < 3) return;
-    if (m_frameCounter < 10) {
-        // ПРОФИЛИРОВЩИК, а не панель раскладки. Он закрыт по умолчанию и ни в
-        // одном доке не лежит, поэтому его отстыковка ничего не двигает. Панель
-        // из раскладки на её месте оставляла бы дыру в доке, соседи
-        // растягивались бы на освободившееся место, и следующая проверка —
-        // щелчок по вьюпорту — целилась бы в координаты, которые за это время
-        // переехали.
-        m_panels[EditorPanel::Profiler] = true;
-        panelwindows::SetDetached("Profiler", true);
-        return;   // окно платформы появляется не в том же кадре
-    }
-    m_multiWindowChecked = true;
+    if (m_multiWindowWait > 0) { --m_multiWindowWait; return; }
 
     const ImGuiID mainId = ImGui::GetMainViewport()->ID;
-    const ImGuiWindow* ui = ImGui::FindWindowByName("Profiler");
-    const ImGuiWindow* docked = ImGui::FindWindowByName("Hierarchy");
-
-    if (ui == nullptr || ui->Viewport == nullptr) {
-        LOG_ERROR("Editor") << "MULTIWINDOW: FAIL — окна панели нет в кадре";
-        return;
+    auto fail = [this](const std::string& why) {
+        LOG_ERROR("Editor") << "MULTIWINDOW: FAIL — " << why;
+        m_panels[EditorPanel::Profiler] = false;
+        m_multiWindowChecked = true;
+    };
+    switch (m_multiWindowStep) {
+        case 0:
+            m_panels[EditorPanel::Profiler] = true;
+            m_multiWindowStep = 1;
+            m_multiWindowWait = 7;
+            return;
+        case 1: {
+            const ImGuiWindow* ui = ImGui::FindWindowByName("Profiler");
+            const ImGuiWindow* docked = ImGui::FindWindowByName("Hierarchy");
+            if (ui == nullptr || ui->Viewport == nullptr) return fail("окна панели нет в кадре");
+            if (ui->Viewport->ID == mainId)
+                return fail("плавающая панель слилась с главным окном (нет NoAutoMerge)");
+            if (ui->Viewport->PlatformHandle == nullptr) return fail("у отдельного окна нет окна платформы");
+            if ((ui->Viewport->Flags & ImGuiViewportFlags_NoDecoration) == 0 || (ui->Flags & ImGuiWindowFlags_NoTitleBar))
+                return fail("заголовок отдельного окна рисует не ImGui: за него не вернуть перетаскиванием");
+            if (docked && docked->Viewport && docked->Viewport->ID != mainId)
+                return fail("панель дока уехала из главного окна вслед за плавающей");
+            // Пока окно живо — ввод и захват в нём.
+            CheckDetachedWindowInput(ui->Viewport->PlatformHandle);
+            m_panelRegistry.ReturnFloating(m_workspace);
+            m_multiWindowStep = 2;
+            m_multiWindowWait = 7;
+            return;
+        }
+        case 2: {
+            const ImGuiWindow* ui = ImGui::FindWindowByName("Profiler");
+            if (ui == nullptr || ui->Viewport == nullptr || ui->Viewport->ID != mainId || ui->DockId == 0)
+                return fail("«Вернуть все окна» не завело панель в док главного окна");
+            // Убираем за собой: закрыть и вернуть вьюпорт вперёд — иначе
+            // вкладка профайлера осталась бы выбранной в центре.
+            m_panels[EditorPanel::Profiler] = false;
+            if (ImGuiWindow* vp = ImGui::FindWindowByName("Viewport")) ImGui::FocusWindow(vp);
+            m_multiWindowStep = 3;
+            m_multiWindowWait = 3;
+            return;
+        }
+        default: {
+            std::string why;
+            const int r = DetachRoundTrip("Console", why);
+            if (r == 0) return;
+            if (r < 0) return fail(why);
+            m_multiWindowChecked = true;
+            LOG_INFO("Editor") << "MULTIWINDOW: OK — вытащенная панель живёт своим окном системы "
+                               << "(заголовок ImGui, без слияния с главным), возвращается "
+                               << "перетаскиванием и «Вернуть все окна»; панели дока не затронуты";
+            return;
+        }
     }
-    const bool own = ui->Viewport->ID != mainId;
-    const bool real = ui->Viewport->PlatformHandle != nullptr;
-    // РАМКА СИСТЕМЫ — часть требования, а не украшение: без неё у окна нет
-    // кнопок «свернуть» и «развернуть», оно не разворачивается двойным щелчком
-    // по заголовку и не прилипает к краю экрана. То есть выглядит как окно и
-    // стоит отдельно, а ведёт себя не как окно.
-    const bool decorated = (ui->Viewport->Flags & ImGuiViewportFlags_NoDecoration) == 0;
-    // И заголовок у него ОДИН: свой ImGui в таком окне гасится, иначе их два
-    // подряд (см. panelwindows::WindowFlags).
-    const bool singleTitle = (ui->Flags & ImGuiWindowFlags_NoTitleBar) != 0;
-    const bool dockedStayed = docked == nullptr || docked->Viewport == nullptr ||
-                              docked->Viewport->ID == mainId;
-    // ПУТЬ НАЗАД ВИДЕН В САМОМ ОКНЕ. Заголовок такой панели рисует система, а
-    // свой ImGui погашен: хватать нечего, и ImGui про перетаскивание за
-    // системный заголовок не знает — док-узлы не подсвечиваются. Пока кнопки
-    // не было, вернуть панель можно было только галочкой в меню, о которой
-    // надо знать, — человек видел окно, которое не возвращается.
-    const ImGuiWindow* back = ImGui::FindWindowByName("##redock_Profiler");
-    const bool wayBack = back != nullptr && back->WasActive && back->Viewport != nullptr &&
-                         back->Viewport->ID == ui->Viewport->ID;
-    // Пока окно панели живо — ввод и захват в нём (см. CheckDetachedWindowInput).
-    if (real) CheckDetachedWindowInput(ui->Viewport->PlatformHandle);
-    // Убираем за собой: панель закрывается и возвращается в док, чтобы на
-    // экране после проверки не осталось плавающего окна поверх вьюпорта.
-    panelwindows::SetDetached("Profiler", false);
-    m_panels[EditorPanel::Profiler] = false;
-    if (own && real && decorated && singleTitle && dockedStayed && wayBack) {
-        LOG_INFO("Editor") << "MULTIWINDOW: OK — панель живёт своим окном системы "
-                           << "(рамка системы, один заголовок, есть кнопка возврата)";
-        return;
-    }
-    LOG_ERROR("Editor") << "MULTIWINDOW: FAIL — свой вьюпорт " << own << ", окно платформы "
-                        << real << ", рамка системы " << decorated << ", один заголовок "
-                        << singleTitle << ", панель дока осталась в главном " << dockedStayed
-                        << ", кнопка возврата " << wayBack;
 }
 
 
@@ -135,10 +178,19 @@ void EditorLayer::CheckWorkspaceDockFrame() {
                 done(false, "раскладка вёрстки забрала окно ассетов у сцены");
                 return;
             }
+            // Вытащить панель из дока вёрстки и вернуть (общая система окон).
+            m_wsDockStep = 10;
+            return;
+        case 10: {
+            std::string why;
+            const int r = DetachRoundTrip("ConsoleUI", why);
+            if (r == 0) return;
+            if (r < 0) { done(false, why.c_str()); return; }
             SetWorkspace(EditorWorkspace::Scene);
             m_wsDockStep = 2;
             m_wsDockWait = 8;
             return;
+        }
         case 2: {
             const unsigned int back = dockOf("Assets");
             if (back == 0) {
@@ -165,6 +217,14 @@ void EditorLayer::CheckWorkspaceDockFrame() {
             for (const char* id : {"AnimViewport", "AnimHierarchy", "AnimInspector"})
                 if (dockOf(id) == 0 || dockOf(id) == bottom) { done(false, (std::string(id) + " не на своём месте в анимации").c_str()); return; }
             if (dockOf("Assets") != m_wsDockHome) { done(false, "раскладка анимации забрала окно ассетов у сцены"); return; }
+            m_wsDockStep = 11;
+            return;
+        }
+        case 11: {
+            std::string why;
+            const int r = DetachRoundTrip("ConsoleAnim", why);
+            if (r == 0) return;
+            if (r < 0) { done(false, why.c_str()); return; }
             SetWorkspace(EditorWorkspace::Scene);
             m_wsDockStep = 4;
             m_wsDockWait = 8;
