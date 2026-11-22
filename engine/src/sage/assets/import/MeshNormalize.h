@@ -5,8 +5,7 @@
 
 #include <glm/glm.hpp>
 
-#include "sage/render/Mesh.h"
-#include "sage/render/MeshData.h"
+#include "sage/assets/MeshData.h"
 
 // ---------------------------------------------------------------------------
 // НОРМАЛИЗАЦИЯ ГЕОМЕТРИИ — ОДНА НА ВСЕ ФОРМАТЫ.
@@ -78,28 +77,28 @@ void BuildTangents(std::size_t vertexCount, const std::vector<unsigned int>& ind
 
 // Есть ли у меша осмысленные нормали. Нулевая нормаль — это не «нормаль вниз»,
 // а «её нет»: формат её не дал, и освещать по ней нельзя.
-bool HasNormals(const sage::render::MeshData& mesh);
+bool HasNormals(const MeshData& mesh);
 
 // Нормали по треугольникам, усреднённые по вершине (площадь треугольника —
 // вес). Зовётся, только когда своих нормалей нет: считать поверх авторских
 // значило бы стереть заданное вручную сглаживание.
-void GenerateNormals(sage::render::MeshData& mesh);
+void GenerateNormals(MeshData& mesh);
 
 // Есть ли касательные (не «поле по умолчанию», а настоящие).
-bool HasTangents(const sage::render::MeshData& mesh);
+bool HasTangents(const MeshData& mesh);
 
 // Касательные по развёртке. Требует нормалей и развёртки; без развёртки не
 // делает ничего — придумывать её нельзя.
-void GenerateTangents(sage::render::MeshData& mesh);
+void GenerateTangents(MeshData& mesh);
 
 // Разворачивает обход треугольников. Нужно при ЗЕРКАЛЬНОМ трансформе
 // (определитель < 0): отражение меняет направление обхода, и меш, оставленный
 // как есть, оказывается вывернутым наизнанку — грани отбрасываются отсечением
 // задних, и половина модели исчезает.
-void FlipWinding(sage::render::MeshData& mesh);
+void FlipWinding(MeshData& mesh);
 
 // Достраивает то, чего не дал формат: нормали, касательные. Одна точка на все
 // импортёры — её зовёт реестр (ImporterRegistry::Import) после любого из них.
-void NormalizeImportedMesh(sage::render::MeshData& mesh);
+void NormalizeImportedMesh(MeshData& mesh);
 
 } // namespace sage::assets

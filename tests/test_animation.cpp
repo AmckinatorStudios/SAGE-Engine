@@ -1202,3 +1202,62 @@ TEST(Animator_joint_offset_adds_to_rest_pose) {
     CHECK_NEAR(p1.x, -1.0f, 1e-4);   // (0.5, 1, 0) повёрнуто на 90° вокруг Z
     CHECK_NEAR(p1.y, 0.5f, 1e-4);
 }
+
+// Скелет и клипы приходят из импорта данными слоя ресурсов
+// (sage/assets/SkeletonData.h) и становятся типами анимации только здесь. Ни
+// одно поле не должно потеряться по дороге: иерархия, поза покоя, bind-матрицы,
+// корень над скелетом, вид интерполяции и касательные кубических ключей.
+TEST(skeleton_and_clips_from_import_data_keep_every_field) {
+    sage::assets::SkeletonData sd;
+    sd.Root = glm::translate(glm::mat4(1.0f), glm::vec3(0, 2, 0));
+    sd.Joints.resize(2);
+    sd.Joints[0].Name = "root";
+    sd.Joints[1].Name = "arm";
+    sd.Joints[1].Parent = 0;
+    sd.Joints[1].Translation = glm::vec3(1, 0, 0);
+    sd.Joints[1].Rotation = glm::angleAxis(glm::radians(30.0f), glm::vec3(0, 0, 1));
+    sd.Joints[1].Scale = glm::vec3(2.0f);
+    sd.Joints[1].InverseBind = glm::translate(glm::mat4(1.0f), glm::vec3(-1, 0, 0));
+    const glm::mat4 local = sd.Joints[1].LocalMatrix();
+
+    sage::assets::ClipData cd;
+    cd.Name = "Wave";
+    cd.Duration = 1.0f;
+    sage::assets::ChannelData ch;
+    ch.Joint = 1;
+    ch.Target = sage::assets::AnimPath::Translation;
+    ch.Interp = sage::assets::AnimInterp::CubicSpline;
+    ch.Times = {0.0f, 1.0f};
+    ch.Values = {glm::vec4(0.0f), glm::vec4(2, 0, 0, 0)};
+    ch.InTangents = {glm::vec4(0.0f), glm::vec4(0.0f)};
+    ch.OutTangents = {glm::vec4(0.0f), glm::vec4(0.0f)};
+    cd.Channels.push_back(ch);
+
+    const Skeleton sk = SkeletonFromData(std::move(sd));
+    CHECK_EQ(sk.Count(), 2);
+    CHECK_EQ(sk.Joints[1].Name, std::string("arm"));
+    CHECK_EQ(sk.Joints[1].Parent, 0);
+    CHECK_NEAR(sk.Root[3][1], 2.0f, 1e-6f);
+    CHECK_NEAR(sk.Joints[1].InverseBind[3][0], -1.0f, 1e-6f);
+    for (int c = 0; c < 4; ++c)
+        for (int r = 0; r < 4; ++r) CHECK_NEAR(sk.Joints[1].LocalMatrix()[c][r], local[c][r], 1e-6f);
+
+    std::vector<sage::assets::ClipData> clipsData;
+    clipsData.push_back(std::move(cd));
+    const std::vector<AnimationClip> clips = ClipsFromData(std::move(clipsData));
+    CHECK_EQ((int)clips.size(), 1);
+    if (clips.empty() || clips[0].Channels.empty()) { CHECK_TRUE(false); return; }
+    const AnimChannel& out = clips[0].Channels[0];
+    CHECK_EQ(clips[0].Name, std::string("Wave"));
+    CHECK_NEAR(clips[0].Duration, 1.0f, 1e-6f);
+    CHECK_EQ(out.Joint, 1);
+    CHECK_TRUE(out.Target == AnimPath::Translation);
+    CHECK_TRUE(out.Interp == AnimInterp::CubicSpline);
+    CHECK_EQ((int)out.InTangents.size(), 2);
+    CHECK_EQ((int)out.OutTangents.size(), 2);
+    // Нулевые касательные — плавный старт и стоп: середина ровно посередине.
+    glm::vec3 v(0.0f);
+    glm::quat q(1, 0, 0, 0);
+    out.Sample(0.5f, v, q);
+    CHECK_NEAR(v.x, 1.0f, 1e-4f);
+}

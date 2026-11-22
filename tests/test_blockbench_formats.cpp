@@ -81,7 +81,7 @@ TEST(blockbench_skinned_glb_keeps_each_root_offset) {
     // Три скина с тремя корнями: пояс и две ноги. Поза привязки по скелету
     // обязана поставить ноги по сторонам, а не в одну точку под поясом.
     sage::render::ModelData data = sage::render::ParseSkinnedModelFile(Fixture("model.glb"));
-    const sage::anim::Skeleton& sk = data.Skeleton;
+    const auto& sk = data.Skeleton;
     std::vector<glm::mat4> palette((size_t)sk.Count(), glm::mat4(1.0f));
     for (int i = 0; i < sk.Count(); ++i) {
         glm::mat4 g = sk.Joints[(size_t)i].LocalMatrix();

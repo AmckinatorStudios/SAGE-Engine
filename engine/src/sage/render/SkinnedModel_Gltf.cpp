@@ -311,13 +311,13 @@ ModelData ParseGltfSkinned(const std::string& path) {
     };
 
     // Скелет: TRS из узлов + родитель из иерархии узлов.
-    Skeleton& sk = data.Skeleton;
+    sage::assets::SkeletonData& sk = data.Skeleton;
     sk.Joints.resize(jointCount);
     const tinygltf::Node kEmptyNode;
     for (int i = 0; i < jointCount; ++i) {
         const int ni = jointNode(i);
         const tinygltf::Node& n = ni >= 0 ? g.nodes[(size_t)ni] : kEmptyNode;
-        Joint& j = sk.Joints[i];
+        sage::assets::JointData& j = sk.Joints[i];
         j.Name = n.name;
         j.InverseBind = invBind[i];
         if (n.matrix.size() == 16) {
@@ -703,7 +703,7 @@ ModelData ParseGltfSkinned(const std::string& path) {
 
     // Анимации: каждый channel -> наш AnimChannel (только кости скина).
     for (const auto& anim : g.animations) {
-        AnimationClip clip;
+        sage::assets::ClipData clip;
         clip.Name = anim.name.empty() ? ("clip" + std::to_string(data.Clips.size())) : anim.name;
         for (const auto& ch : anim.channels) {
             auto jIt = nodeToJoint.find(ch.target_node);
@@ -712,7 +712,7 @@ ModelData ParseGltfSkinned(const std::string& path) {
             // файл, а не повод читать чужую память.
             if (ch.sampler < 0 || ch.sampler >= (int)anim.samplers.size()) continue;
             const tinygltf::AnimationSampler& samp = anim.samplers[(size_t)ch.sampler];
-            AnimChannel out;
+            sage::assets::ChannelData out;
             out.Joint = jIt->second;
             if (ch.target_path == "translation") out.Target = AnimPath::Translation;
             else if (ch.target_path == "rotation") out.Target = AnimPath::Rotation;

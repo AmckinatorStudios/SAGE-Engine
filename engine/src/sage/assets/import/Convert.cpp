@@ -98,8 +98,8 @@ ConvertResult ConvertModelToNative(const std::string& sourcePath, const std::str
     if (!ImporterRegistry::Instance().Import(sourcePath, scene, r.Error)) return r;
     r.Warnings = scene.Warnings;
 
-    sage::render::MeshData mesh =
-        opts.FlattenToSingleMesh ? scene.Flatten() : (scene.Nodes.empty() ? sage::render::MeshData{}
+    MeshData mesh =
+        opts.FlattenToSingleMesh ? scene.Flatten() : (scene.Nodes.empty() ? MeshData{}
                                                                           : scene.Nodes[0].Mesh);
     if (mesh.Empty()) {
         r.Error = "после импорта не осталось геометрии";

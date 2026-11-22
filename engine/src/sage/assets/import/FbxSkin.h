@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 
-namespace sage::render { struct ModelData; }
+namespace sage::assets { struct SkinnedModelData; }
 
 // ---------------------------------------------------------------------------
 // СКЕЛЕТНАЯ МОДЕЛЬ ИЗ FBX: скин, кости и клипы анимации.
@@ -26,6 +26,6 @@ namespace sage::assets {
 // Разбирает .fbx в скелетную модель. false — файла нет, он не разобрался или в
 // нём НЕТ скина (err объясняет, что именно); модель без скина — не ошибка
 // формата, а обычная статическая модель, и грузить её надо другим путём.
-bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std::string& err);
+bool ImportFbxSkinned(const std::string& path, SkinnedModelData& out, std::string& err);
 
 } // namespace sage::assets

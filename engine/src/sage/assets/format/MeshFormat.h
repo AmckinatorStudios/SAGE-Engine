@@ -2,7 +2,7 @@
 #include <string>
 
 #include "sage/assets/format/Blob.h"
-#include "sage/render/MeshData.h"
+#include "sage/assets/MeshData.h"
 
 // ---------------------------------------------------------------------------
 // .sagemesh — свой формат геометрии.
@@ -64,15 +64,15 @@ struct MeshStats {
 
 // Упаковать геометрию в контейнер. stats — необязательная сводка (для отчёта
 // в редакторе и для тестов: без неё «стало меньше» проверить нечем).
-Blob PackMesh(const sage::render::MeshData& mesh, const MeshWriteOptions& opts = {},
+Blob PackMesh(const MeshData& mesh, const MeshWriteOptions& opts = {},
               MeshStats* stats = nullptr);
 
 // Обратно. false + err, если это не меш, версия схемы новее или куски не сходятся.
-bool UnpackMesh(const Blob& blob, sage::render::MeshData& out, std::string& err);
+bool UnpackMesh(const Blob& blob, MeshData& out, std::string& err);
 
 // Файл целиком.
-bool WriteMeshFile(const std::string& path, const sage::render::MeshData& mesh,
+bool WriteMeshFile(const std::string& path, const MeshData& mesh,
                    const MeshWriteOptions& opts, std::string& err, MeshStats* stats = nullptr);
-bool ReadMeshFile(const std::string& path, sage::render::MeshData& out, std::string& err);
+bool ReadMeshFile(const std::string& path, MeshData& out, std::string& err);
 
 } // namespace sage::assets

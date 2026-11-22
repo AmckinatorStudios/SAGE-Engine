@@ -783,8 +783,10 @@ std::unique_ptr<SkinnedModel> SkinnedModel::CreateDemoTentacle(int segments) {
 // float-текстуры. Отсюда и только отсюда трогается GPU.
 std::unique_ptr<SkinnedModel> SkinnedModel::BuildFromData(ModelData& data) {
     auto model = std::unique_ptr<SkinnedModel>(new SkinnedModel());
-    model->m_skeleton = std::move(data.Skeleton);
-    model->m_clips = std::move(data.Clips);
+    // Скелет и клипы в данных — представление импорта; своими их делает
+    // анимация (anim::SkeletonFromData), рендер только передаёт.
+    model->m_skeleton = sage::anim::SkeletonFromData(std::move(data.Skeleton));
+    model->m_clips = sage::anim::ClipsFromData(std::move(data.Clips));
     model->m_morphNames = std::move(data.MorphNames);
     model->m_morphDefaults = std::move(data.MorphDefaults);
 

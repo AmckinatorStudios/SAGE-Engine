@@ -8,6 +8,7 @@
 
 #include "sage/assets/format/TextureFormat.h"
 #include "sage/assets/import/Convert.h"
+#include "sage/render/MeshData.h"
 #include <filesystem>
 #include <system_error>
 #include <stb_image_write.h>

@@ -57,8 +57,8 @@ using fbx::Text;
 
 // Углы одного материала -> MeshData. Разбор треугольников — общий
 // (fbx::BuildCorners), здесь углы лишь раскладываются по вершинам и индексам.
-sage::render::MeshData BuildMesh(const std::vector<fbx::MeshCorner>& corners, int material) {
-    sage::render::MeshData mesh;
+MeshData BuildMesh(const std::vector<fbx::MeshCorner>& corners, int material) {
+    MeshData mesh;
     for (const fbx::MeshCorner& c : corners) {
         if (c.Material != material) continue;
         Vertex v;

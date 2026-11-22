@@ -292,8 +292,13 @@ TEST(Fbx_with_skin_loads_bones_weights_and_clips) {
     // второй кости на 90° вокруг Z) и смотрим палитру: первая кость обязана
     // остаться на месте, вторая — повернуться. Без матриц привязки и каналов
     // эта проверка не проходит ни при каких обстоятельствах.
+    // Данные разбора -> типы анимации (как при сборке SkinnedModel); копии —
+    // data ещё проверяется ниже.
+    const sage::anim::Skeleton skeleton = sage::anim::SkeletonFromData(sage::assets::SkeletonData(data.Skeleton));
+    const std::vector<sage::anim::AnimationClip> clips =
+        sage::anim::ClipsFromData(std::vector<sage::assets::ClipData>(data.Clips));
     sage::anim::Animator animator;
-    animator.SetRig(&data.Skeleton, &data.Clips);
+    animator.SetRig(&skeleton, &clips);
     animator.Play(0, false);
     animator.Update(1.0f);
     const std::vector<glm::mat4>& palette = animator.BoneMatrices();
@@ -328,8 +333,13 @@ TEST(Fbx_bind_relative_cluster_transform_keeps_the_rest_pose_in_place) {
     if (!ok || data.Skeleton.Count() != 2 || data.SubMeshes.empty()) return;
 
     // Поза покоя: палитра не двигает ни одной вершины.
+    // Данные разбора -> типы анимации (как при сборке SkinnedModel); копии —
+    // data ещё проверяется ниже.
+    const sage::anim::Skeleton skeleton = sage::anim::SkeletonFromData(sage::assets::SkeletonData(data.Skeleton));
+    const std::vector<sage::anim::AnimationClip> clips =
+        sage::anim::ClipsFromData(std::vector<sage::assets::ClipData>(data.Clips));
     sage::anim::Animator animator;
-    animator.SetRig(&data.Skeleton, &data.Clips);
+    animator.SetRig(&skeleton, &clips);
     animator.Update(0.0f);
     const std::vector<glm::mat4>& palette = animator.BoneMatrices();
     float worst = 0.0f;

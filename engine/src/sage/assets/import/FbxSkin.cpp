@@ -24,7 +24,7 @@
 
 #include "sage/assets/import/FbxTree.h"
 #include "sage/core/Log.h"
-#include "sage/render/ModelData.h"
+#include "sage/assets/SkinnedModelData.h"
 
 namespace fs = std::filesystem;
 
@@ -188,7 +188,7 @@ struct AnimatedNode {
 
 } // namespace
 
-bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std::string& err) {
+bool ImportFbxSkinned(const std::string& path, SkinnedModelData& out, std::string& err) {
     Node root;
     if (!fbx::ReadTree(path, root, err)) return false;
     const fbx::Units units = fbx::ReadUnits(root);
@@ -306,9 +306,9 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
         err = "в скине FBX не нашлось костей";
         return false;
     }
-    if ((int)bones.size() > sage::anim::kMaxBones) {
+    if ((int)bones.size() > kMaxSkinJoints) {
         LOG_WARN("Anim") << "FBX: костей " << bones.size() << ", в палитру влезает "
-                         << sage::anim::kMaxBones << " — лишние не анимируются";
+                         << kMaxSkinJoints << " — лишние не анимируются";
     }
 
     // Локальный трансформ кости — из свойств узла (с пред- и постповоротом), а
@@ -319,7 +319,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
     out.Skeleton.Joints.resize(bones.size());
     for (size_t i = 0; i < bones.size(); ++i) {
         const Node& node = *byUid[bones[i]];
-        sage::anim::Joint& joint = out.Skeleton.Joints[i];
+        JointData& joint = out.Skeleton.Joints[i];
         joint.Name = ObjectName(node);
         const int64_t parent = parentOfKind(bones[i], "Model");
         joint.Parent = (parent != 0 && jointOf.count(parent)) ? jointOf[parent] : -1;
@@ -367,7 +367,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
         int w = 0, h = 0, comp = 0;
         unsigned char* pixels = sage::assets::vfs::LoadImage(sage::PathToUtf8(file), &w, &h, &comp, 4);
         if (!pixels) { imageSlots[name] = -1; return -1; }
-        sage::render::ModelImage image;
+        ModelImage image;
         image.Width = w;
         image.Height = h;
         image.Pixels.assign(pixels, pixels + (size_t)w * h * 4);
@@ -392,10 +392,10 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
         if (textureFile.count(texture)) materialSlots[link.Parent][link.Property] = texture;
     }
 
-    std::unordered_map<int64_t, sage::render::ModelSubMeshMaterial> materialOf;
+    std::unordered_map<int64_t, ModelSubMeshMaterial> materialOf;
     for (const Node& n : objects->Children) {
         if (n.Name != "Material" || n.Props.empty()) continue;
-        sage::render::ModelSubMeshMaterial m;
+        ModelSubMeshMaterial m;
         m.Name = ObjectName(n);
         m.Tint = Property70Vec(&n, "DiffuseColor", glm::vec3(1.0f));
         m.Emissive = Property70Vec(&n, "EmissiveColor", glm::vec3(0.0f)) *
@@ -442,7 +442,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
     // Материалы геометрии — через её Model, В ПОРЯДКЕ СВЯЗЕЙ: номер материала
     // грани (MeshCorner::Material) — это номер именно в этом списке.
     auto materialsOfGeometry = [&](int64_t geometry) {
-        std::vector<sage::render::ModelSubMeshMaterial> list;
+        std::vector<ModelSubMeshMaterial> list;
         const int64_t model = parentOfKind(geometry, "Model");
         if (model == 0) return list;
         for (int64_t child : fbx::ChildrenInOrder(root, model)) {
@@ -456,13 +456,13 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
     // одном меше красилось корой целиком.
     auto emitByMaterial = [&](const std::vector<fbx::MeshCorner>& corners, int64_t geometry,
                               const auto& makeVertex) {
-        const std::vector<sage::render::ModelSubMeshMaterial> mats = materialsOfGeometry(geometry);
+        const std::vector<ModelSubMeshMaterial> mats = materialsOfGeometry(geometry);
         std::vector<int> used;
         for (const fbx::MeshCorner& c : corners)
             if (std::find(used.begin(), used.end(), c.Material) == used.end()) used.push_back(c.Material);
         int emitted = 0;
         for (int material : used) {
-            sage::render::ModelSubMeshData sub;
+            ModelSubMeshData sub;
             for (const fbx::MeshCorner& corner : corners) {
                 if (corner.Material != material) continue;
                 sub.Indices.push_back((unsigned int)sub.Vertices.size());
@@ -555,7 +555,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
         }
 
         submeshes += emitByMaterial(corners, Uid(n), [&](const fbx::MeshCorner& corner) {
-            sage::render::SkinnedVertex v;
+            SkinnedVertex v;
             v.Position = corner.Position;
             v.Normal = corner.Normal;
             v.TexCoords = SkinUV(corner.TexCoords);
@@ -635,7 +635,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
         // Кость за палитрой шейдера (uBones[kMaxBones]) — это чтение чужой
         // памяти на видеокарте. Деталь лучше оставить на месте, чем отправить
         // в палитру наугад.
-        if (rigidJoint >= sage::anim::kMaxBones) rigidJoint = -1;
+        if (rigidJoint >= kMaxSkinJoints) rigidJoint = -1;
 
         const std::vector<fbx::MeshCorner> corners =
             fbx::BuildCorners(n, units, nodeWorld, warnings);
@@ -648,7 +648,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
         const glm::mat3 toBoneNrm = glm::mat3(glm::transpose(glm::inverse(toBone)));
 
         rigidParts += emitByMaterial(corners, Uid(n), [&](const fbx::MeshCorner& corner) {
-            sage::render::SkinnedVertex v;
+            SkinnedVertex v;
             v.Position = glm::vec3(toBone * glm::vec4(corner.Position, 1.0f));
             v.Normal = glm::normalize(toBoneNrm * corner.Normal);
             v.TexCoords = SkinUV(corner.TexCoords);
@@ -736,7 +736,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
 
     for (const auto& [layerUid, nodes] : layers) {
         if (nodes.empty()) continue;
-        sage::anim::AnimationClip clip;
+        ClipData clip;
         // Слой принадлежит стеку: Layer --OO--> Stack.
         if (const int64_t stack = parentOfKind(layerUid, "AnimationStack"); stack != 0) {
             auto name = stackNames.find(stack);
@@ -772,11 +772,11 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
                         times.end());
             if (times.empty()) continue;
 
-            sage::anim::AnimChannel chT, chR, chS;
+            ChannelData chT, chR, chS;
             chT.Joint = chR.Joint = chS.Joint = jointIt->second;
-            chT.Target = sage::anim::AnimPath::Translation;
-            chR.Target = sage::anim::AnimPath::Rotation;
-            chS.Target = sage::anim::AnimPath::Scale;
+            chT.Target = AnimPath::Translation;
+            chR.Target = AnimPath::Rotation;
+            chS.Target = AnimPath::Scale;
 
             for (double t : times) {
                 NodeTransform frame = rest;
@@ -807,7 +807,7 @@ bool ImportFbxSkinned(const std::string& path, sage::render::ModelData& out, std
     // Клипы по именам: порядок обхода слоёв зависит от хеш-таблицы, а человек
     // ждёт в списке один и тот же порядок от запуска к запуску.
     std::sort(out.Clips.begin(), out.Clips.end(),
-              [](const sage::anim::AnimationClip& a, const sage::anim::AnimationClip& b) {
+              [](const ClipData& a, const ClipData& b) {
                   return a.Name < b.Name;
               });
 

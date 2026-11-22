@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-#include "sage/anim/Skeleton.h"
+#include "sage/assets/SkeletonData.h"
 
 namespace sage::assets {
 
@@ -11,7 +11,7 @@ bool ResolveInfluences(std::vector<SkinInfluence>& influences, int jointCount,
     // Палитра шейдера короче скелета у моделей с сотнями костей — номер за её
     // пределами читает чужую память уже на видеокарте, где не будет ни
     // исключения, ни лога, а будет чёрный экран или вылет драйвера.
-    const int limit = std::min(jointCount, sage::anim::kMaxBones);
+    const int limit = std::min(jointCount, kMaxSkinJoints);
 
     influences.erase(std::remove_if(influences.begin(), influences.end(),
                                     [&](const SkinInfluence& i) {
