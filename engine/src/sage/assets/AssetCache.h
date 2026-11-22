@@ -1,7 +1,7 @@
 #pragma once
 #include <string>
 
-#include "sage/render/ModelData.h"
+#include "sage/assets/SkinnedModelData.h"
 
 // ---------------------------------------------------------------------------
 // Кэш разобранных ресурсов — «запечённый» бинарный формат рядом с исходником.
@@ -46,11 +46,11 @@ std::string CachePathFor(const std::string& sourcePath);
 
 // Читает кэш, если он есть и соответствует исходнику. false — кэша нет, он
 // устарел или повреждён; это НЕ ошибка, вызывающий разбирает исходник.
-bool ReadModelCache(const std::string& sourcePath, sage::render::ModelData& out);
+bool ReadModelCache(const std::string& sourcePath, SkinnedModelData& out);
 
 // Пишет кэш. false — не удалось (нет прав, нет места); тоже не ошибка,
 // программа продолжает работать, просто медленнее.
-bool WriteModelCache(const std::string& sourcePath, const sage::render::ModelData& data);
+bool WriteModelCache(const std::string& sourcePath, const SkinnedModelData& data);
 
 // Статистика за время работы — для строки состояния и проверок.
 struct Stats {

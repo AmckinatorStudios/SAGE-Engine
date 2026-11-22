@@ -10,7 +10,6 @@
 
 #include "sage/assets/format/MeshFormat.h"
 #include "sage/core/Log.h"
-#include "sage/render/ModelLoader.h"
 
 namespace sage::assets {
 
@@ -37,7 +36,7 @@ size_t ImportedScene::TotalTriangles() const {
     return n;
 }
 
-sage::render::MeshData ImportedScene::FlattenGroup(int group) const {
+MeshData ImportedScene::FlattenGroup(int group) const {
     // Подмножество узлов этой группы, с мировой матрицей группы, вынесенной за
     // скобки: Flatten сам разложит их по материалам, развернёт обход у
     // зеркальных и пересчитает нормали — второй копии этих правил не нужно.
@@ -60,8 +59,8 @@ glm::mat4 ImportedScene::GroupLocal(int group) const {
     return glm::inverse(Groups[(size_t)g.Parent].World) * g.World;
 }
 
-sage::render::MeshData ImportedScene::Flatten() const {
-    sage::render::MeshData out;
+MeshData ImportedScene::Flatten() const {
+    MeshData out;
 
     // Порядок групп — по ПЕРВОМУ появлению материала, а не по его номеру:
     // порядок частей в файле — это порядок, в котором их видит человек в
@@ -73,7 +72,7 @@ sage::render::MeshData ImportedScene::Flatten() const {
     }
 
     for (int material : order) {
-        sage::render::Submesh sub;
+        Submesh sub;
         sub.Material = material;
         sub.FirstIndex = (unsigned int)out.Indices.size();
 
@@ -221,55 +220,6 @@ std::vector<std::string> ImporterRegistry::Extensions() const {
 }
 
 // --- Встроенные ---------------------------------------------------------------
-
-bool ImportObj(const std::string& path, ImportedScene& out, std::string& err) {
-    try {
-        // Геометрию .obj читает ModelLoader — он же применяет .sageimport. Она
-        // приходит УЖЕ с разметкой по материалам (LoadObjData группирует грани
-        // по material_id), поэтому здесь остаётся разложить её обратно по узлам:
-        // по узлу на материал, чтобы Flatten() собрал ту же разметку, что и у
-        // остальных форматов.
-        std::vector<std::string> objects;
-        sage::render::MeshData data = ModelLoader::LoadObjData(path, &out.Materials, &objects);
-        if (data.Empty()) {
-            err = "в файле нет геометрии: " + path;
-            return false;
-        }
-
-        const std::string stem = std::filesystem::path(path).stem().string();
-        // Объекты файла — узлы дерева (плоского: у .obj нет родителей, и
-        // вершины уже в общих координатах — мировая матрица узла единичная).
-        std::unordered_map<std::string, int> groupOf;
-        const std::vector<sage::render::Submesh> subs = data.SubmeshesOrWhole();
-        for (size_t si = 0; si < subs.size(); ++si) {
-            const sage::render::Submesh& sub = subs[si];
-            const std::string object = si < objects.size() ? objects[si] : std::string();
-            ImportedNode node;
-            node.Name = !object.empty() ? object : (sub.Name.empty() ? stem : sub.Name);
-            node.MaterialIndex = sub.Material;
-            if (!object.empty()) {
-                auto [it, fresh] = groupOf.emplace(object, (int)out.Groups.size());
-                if (fresh) out.Groups.push_back(ImportedGroup{object, -1, glm::mat4(1.0f)});
-                node.Group = it->second;
-            }
-            // Вершины части — только те, на которые она ссылается: узел обязан
-            // быть самодостаточным, иначе «узел» здесь означал бы не объект, а
-            // окно в чужой буфер.
-            std::unordered_map<unsigned int, unsigned int> remap;
-            for (unsigned int k = 0; k < sub.IndexCount; ++k) {
-                const unsigned int src = data.Indices[sub.FirstIndex + k];
-                auto [it, inserted] = remap.emplace(src, (unsigned int)node.Mesh.Vertices.size());
-                if (inserted) node.Mesh.Vertices.push_back(data.Vertices[src]);
-                node.Mesh.Indices.push_back(it->second);
-            }
-            out.Nodes.push_back(std::move(node));
-        }
-        return true;
-    } catch (const std::exception& e) {
-        err = e.what();
-        return false;
-    }
-}
 
 bool ImportSageMesh(const std::string& path, ImportedScene& out, std::string& err) {
     // Свой формат тоже проходит через реестр: он такой же вход, как остальные, и

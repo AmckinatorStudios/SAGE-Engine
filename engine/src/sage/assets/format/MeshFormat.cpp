@@ -91,7 +91,7 @@ struct Quantizer {
 
 } // namespace
 
-Blob PackMesh(const sage::render::MeshData& mesh, const MeshWriteOptions& opts, MeshStats* stats) {
+Blob PackMesh(const MeshData& mesh, const MeshWriteOptions& opts, MeshStats* stats) {
     Blob blob(kAssetTypeMesh, kMeshSchemaVersion);
 
     const size_t vcount = mesh.Vertices.size();
@@ -247,7 +247,7 @@ Blob PackMesh(const sage::render::MeshData& mesh, const MeshWriteOptions& opts, 
     return blob;
 }
 
-bool UnpackMesh(const Blob& blob, sage::render::MeshData& out, std::string& err) {
+bool UnpackMesh(const Blob& blob, MeshData& out, std::string& err) {
     if (blob.AssetType() != kAssetTypeMesh) {
         err = "это не меш (тип " + FourCCToString(blob.AssetType()) + ")";
         return false;
@@ -378,13 +378,13 @@ bool UnpackMesh(const Blob& blob, sage::render::MeshData& out, std::string& err)
     return true;
 }
 
-bool WriteMeshFile(const std::string& path, const sage::render::MeshData& mesh,
+bool WriteMeshFile(const std::string& path, const MeshData& mesh,
                    const MeshWriteOptions& opts, std::string& err, MeshStats* stats) {
     const Blob blob = PackMesh(mesh, opts, stats);
     return blob.Write(path, err);
 }
 
-bool ReadMeshFile(const std::string& path, sage::render::MeshData& out, std::string& err) {
+bool ReadMeshFile(const std::string& path, MeshData& out, std::string& err) {
     Blob blob;
     if (!Blob::Read(path, blob, err)) return false;
     return UnpackMesh(blob, out, err);

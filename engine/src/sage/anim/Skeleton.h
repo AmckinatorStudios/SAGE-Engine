@@ -5,6 +5,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "sage/assets/SkeletonData.h"
+
 // ---------------------------------------------------------------------------
 // Скелет и анимационные клипы — данные скелетной анимации, независимые от GPU
 // и графического API (как sage/physics независим от бэкенда физики). Загружаются
@@ -19,7 +21,7 @@ namespace sage::anim {
 // vec4, весь лимит вершинной стадии NVIDIA, и программа не линковалась (C6020).
 // Персонажи с 150-200 костями (лицо, пальцы) в 128 не помещались, и вершины на
 // «лишних» костях теряли влияние.
-constexpr int kMaxBones = 256;
+constexpr int kMaxBones = sage::assets::kMaxSkinJoints;
 
 // Кость (сустав) скелета. Локальный дефолт хранится как TRS, чтобы каналы
 // анимации могли независимо переопределять перенос/поворот/масштаб, а поворот
@@ -58,7 +60,7 @@ struct Skeleton {
 };
 
 // Что анимирует канал у одной кости.
-enum class AnimPath { Translation, Rotation, Scale };
+using AnimPath = sage::assets::AnimPath;
 // Как интерполировать между ключами.
 //
 // КУБИЧЕСКАЯ — ОТДЕЛЬНЫМ ВИДОМ, а не «как линейная». Формат её даёт (glTF
@@ -68,7 +70,8 @@ enum class AnimPath { Translation, Rotation, Scale };
 // сэмплера — тройка «касательная на входе, значение, касательная на выходе»,
 // и разбор брал первую из трёх. То есть поза бралась из касательной — числа,
 // которое к позе отношения не имеет. Снаружи это и есть «анимация дёргается».
-enum class AnimInterp { Linear, Step, CubicSpline };
+// Перечисления — общие с данными импорта (sage/assets/SkeletonData.h).
+using AnimInterp = sage::assets::AnimInterp;
 
 // Один канал: последовательность ключей (время → значение) для одного свойства
 // одной кости. Для Translation/Scale значимы xyz Values; для Rotation — кватернион
@@ -115,6 +118,13 @@ struct AnimationClip {
     float Duration = 0.0f;
     std::vector<AnimChannel> Channels;
 };
+
+// Скелет и клипы из данных импорта (sage/assets/SkeletonData.h). Импорт и кэш
+// моделей готовят только данные; во что они превращаются здесь — решает
+// анимация. Rvalue: массивы ключей переезжают, а не копируются.
+Skeleton SkeletonFromData(sage::assets::SkeletonData&& data);
+AnimationClip ClipFromData(sage::assets::ClipData&& data);
+std::vector<AnimationClip> ClipsFromData(std::vector<sage::assets::ClipData>&& data);
 
 // Ручная поза поверх позы покоя (SetJointRotation / SetJointOffset скриптов).
 // И поворот, и сдвиг ДОБАВЛЯЮТСЯ к тому, как кость стоит в файле: «отклонить

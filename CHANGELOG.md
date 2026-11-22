@@ -12,6 +12,24 @@
 
 ## 0.5.0 → 1.0 (в работе)
 
+### 2026-11-22 (Слои: ресурсы не зависят от рендера и анимации)
+
+#### Изменено
+- `assets` больше не включает `render` и `anim`; база
+  `scripts/layer_baseline.json` пуста. CPU-данные импорта переехали в слой
+  ресурсов: `sage/assets/MeshData.h` (`Vertex`, `Submesh`, `MeshData`),
+  `SkinnedModelData.h` (вершина скина, материалы, картинки модели),
+  `SkeletonData.h` (кости, каналы, клипы). `render::MeshData`, `ModelData`,
+  `SkinnedVertex` и глобальный `Vertex` остались псевдонимами — код,
+  `.sagemesh` и кэш моделей не меняются.
+- `ModelData::Skeleton` и `Clips` — теперь данные импорта
+  (`assets::SkeletonData`, `ClipData`); в `anim::Skeleton`/`AnimationClip` их
+  переводят `anim::SkeletonFromData`, `ClipFromData`, `ClipsFromData`
+  (`SkinnedModel` делает это при сборке).
+- Настройки `.sageimport` и разбор OBJ — в `sage/assets/import/ImportSettings.h`
+  и `ObjImporter.cpp` (взаимная зависимость импортёра и `ModelLoader` снята);
+  `ModelLoader::ImportSettings`, `LoadObjData` и прочие — прежние имена.
+
 ### 2026-11-22 (Очистка репозитория: без игр, примеров и шаблонов)
 
 #### Изменено

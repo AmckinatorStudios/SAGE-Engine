@@ -4,9 +4,6 @@
 
 namespace sage::assets {
 
-using sage::render::MeshData;
-// Vertex живёт в ГЛОБАЛЬНОМ пространстве имён (см. render/Mesh.h).
-
 bool HasNormals(const MeshData& mesh) {
     for (const Vertex& v : mesh.Vertices)
         if (glm::dot(v.Normal, v.Normal) > 1e-8f) return true;

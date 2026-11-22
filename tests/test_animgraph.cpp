@@ -377,10 +377,12 @@ TEST(AnimGraph_real_skinned_model) {
         CHECK_TRUE(false);
         return;
     }
-    const Skeleton& sk = data.Skeleton;
+    // Данные разбора -> типы анимации: так их собирает и SkinnedModel.
+    const Skeleton sk = SkeletonFromData(std::move(data.Skeleton));
+    const std::vector<AnimationClip> clips = ClipsFromData(std::move(data.Clips));
     CHECK_TRUE(sk.Joints.size() >= 2);
-    CHECK_TRUE(data.Clips.size() >= 2);
-    if (sk.Joints.size() < 2 || data.Clips.size() < 2) return;
+    CHECK_TRUE(clips.size() >= 2);
+    if (sk.Joints.size() < 2 || clips.size() < 2) return;
 
     auto diskLoader = [&models](const std::string& path, ClipAsset& out, std::string& err) {
         try {
@@ -407,15 +409,15 @@ TEST(AnimGraph_real_skinned_model) {
     const auto graph = std::make_shared<const AnimGraph>(g);
 
     AnimGraphInstance inst;
-    inst.Bind(graph, &sk, &data.Clips, diskLoader);
+    inst.Bind(graph, &sk, &clips, diskLoader);
     CHECK_TRUE(inst.Problems().empty());
     CHECK_EQ(inst.MissingBones(), 0);
-    const float t = std::min(data.Clips[0].Duration, data.Clips[1].Duration) * 0.37f;
+    const float t = std::min(clips[0].Duration, clips[1].Duration) * 0.37f;
     inst.Update(t);
     // Вес 0 и 1 — ровно позы клипов, сэмплированные напрямую из модели.
     LocalPose p0, p1;
-    SampleClipPose(sk, &data.Clips[0], t, p0);
-    SampleClipPose(sk, &data.Clips[1], t, p1);
+    SampleClipPose(sk, &clips[0], t, p0);
+    SampleClipPose(sk, &clips[1], t, p1);
     float maxDiff0 = 0.0f, maxDiff1 = 0.0f, clipsDiffer = 0.0f;
     for (int i = 0; i < p0.Size(); ++i) {
         maxDiff0 = std::max(maxDiff0, glm::length(inst.Pose().T[i] - p0.T[i]) +
@@ -445,9 +447,9 @@ TEST(AnimGraph_real_skinned_model) {
     // Клип модели по имени — тот же результат, что и вынутый файл.
     AnimGraph byName = g;
     byName.Find(c0)->ClipPath.clear();
-    byName.Find(c0)->ClipName = data.Clips[0].Name;
+    byName.Find(c0)->ClipName = clips[0].Name;
     AnimGraphInstance named;
-    named.Bind(std::make_shared<const AnimGraph>(byName), &sk, &data.Clips, diskLoader);
+    named.Bind(std::make_shared<const AnimGraph>(byName), &sk, &clips, diskLoader);
     CHECK_TRUE(named.Problems().empty());
     named.Update(t);
     float maxNamed = 0.0f;

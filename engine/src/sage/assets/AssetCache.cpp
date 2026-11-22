@@ -189,7 +189,7 @@ std::string CachePathFor(const std::string& sourcePath) {
     return (fs::path(Get().Directory) / (key.stem().string() + "_" + suffix + ".sagemc")).string();
 }
 
-bool ReadModelCache(const std::string& sourcePath, sage::render::ModelData& out) {
+bool ReadModelCache(const std::string& sourcePath, SkinnedModelData& out) {
     if (!Get().Enabled) return false;
 
     Fingerprint source;
@@ -302,7 +302,7 @@ bool ReadModelCache(const std::string& sourcePath, sage::render::ModelData& out)
 
     if (!r.Ok) {
         LOG_WARN("Assets") << "Кэш повреждён, читаю исходник: " << path;
-        out = sage::render::ModelData{};
+        out = SkinnedModelData{};
         return false;
     }
 
@@ -311,7 +311,7 @@ bool ReadModelCache(const std::string& sourcePath, sage::render::ModelData& out)
     return true;
 }
 
-bool WriteModelCache(const std::string& sourcePath, const sage::render::ModelData& data) {
+bool WriteModelCache(const std::string& sourcePath, const SkinnedModelData& data) {
     if (!Get().Enabled) return false;
 
     Fingerprint source;

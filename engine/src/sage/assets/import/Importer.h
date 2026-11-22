@@ -5,7 +5,7 @@
 
 #include <glm/glm.hpp>
 
-#include "sage/render/MeshData.h"
+#include "sage/assets/MeshData.h"
 
 // ---------------------------------------------------------------------------
 // Импорт из ЧУЖИХ форматов — открытый реестр, а не список в switch.
@@ -81,7 +81,7 @@ struct ImportedGroup {
 // Один объект сцены: геометрия + куда её поставить.
 struct ImportedNode {
     std::string Name;
-    sage::render::MeshData Mesh;
+    MeshData Mesh;
     glm::mat4 Transform{1.0f};
     int MaterialIndex = -1;      // в ImportedScene::Materials; -1 — нет
     int Group = -1;              // узел дерева, которому принадлежит геометрия; -1 — корень
@@ -104,18 +104,18 @@ struct ImportedScene {
     // (MeshRendererComponent). Трансформы узлов при этом ЗАПЕКАЮТСЯ в вершины.
     //
     // Границы по материалам при этом НЕ теряются: узлы группируются по своему
-    // MaterialIndex, и каждая группа становится подмешем (sage::render::Submesh)
+    // MaterialIndex, и каждая группа становится подмешем (Submesh)
     // с тем же индексом материала. Именно это и делает многоматериальную модель
     // рисуемой: один Mesh на сущность, но по подмешу на материал.
     //
     // Группировка, а не «узел = подмеш», намеренно: в .glb сорок примитивов на
     // четырнадцать материалов — обычное дело, и сорок вызовов отрисовки вместо
     // четырнадцати были бы платой ни за что.
-    sage::render::MeshData Flatten() const;
+    MeshData Flatten() const;
     // Геометрия ОДНОГО узла дерева в его собственных координатах (мировая
     // матрица узла снята): ровно то, что рисует объект этого узла в иерархии.
     // Подмеши и материалы — как у Flatten.
-    sage::render::MeshData FlattenGroup(int group) const;
+    MeshData FlattenGroup(int group) const;
     // Мировая матрица узла -> локальная относительно родителя.
     glm::mat4 GroupLocal(int group) const;
 };
@@ -169,6 +169,15 @@ void RegisterBuiltinImporters(ImporterRegistry& registry);
 
 // Реализации отдельных форматов (регистрируются функцией выше).
 bool ImportObj(const std::string& path, ImportedScene& out, std::string& err);
+// Геометрия .obj одним мешем с разметкой по материалам, с применёнными
+// настройками .sageimport (ObjImporter.cpp). Бросает std::runtime_error.
+// materialsOut — материалы .mtl В ПОРЯДКЕ ФАЙЛА: MeshData::Submeshes[i].Material
+// — индекс именно в нём. objectOfSubmesh — разложить грани ещё и по ОБЪЕКТАМ
+// файла («o Голова»): подмеш на пару «объект, материал», имя объекта — в этот
+// список (по подмешу); нужно дереву модели (ImportedScene::Groups).
+MeshData LoadObjData(const std::string& path,
+                     std::vector<ImportedMaterial>* materialsOut = nullptr,
+                     std::vector<std::string>* objectOfSubmesh = nullptr);
 bool ImportGltf(const std::string& path, ImportedScene& out, std::string& err);
 bool ImportBlockbench(const std::string& path, ImportedScene& out, std::string& err);
 bool ImportBlend(const std::string& path, ImportedScene& out, std::string& err);

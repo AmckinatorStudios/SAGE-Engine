@@ -6,11 +6,49 @@
 
 namespace sage::anim {
 
-glm::mat4 Joint::LocalMatrix() const {
-    glm::mat4 t = glm::translate(glm::mat4(1.0f), Translation);
-    glm::mat4 r = glm::mat4_cast(Rotation);
-    glm::mat4 s = glm::scale(glm::mat4(1.0f), Scale);
-    return t * r * s;
+glm::mat4 Joint::LocalMatrix() const { return sage::assets::TrsMatrix(Translation, Rotation, Scale); }
+
+Skeleton SkeletonFromData(sage::assets::SkeletonData&& data) {
+    Skeleton sk;
+    sk.Root = data.Root;
+    sk.Joints.reserve(data.Joints.size());
+    for (sage::assets::JointData& j : data.Joints) {
+        Joint out;
+        out.Name = std::move(j.Name);
+        out.Parent = j.Parent;
+        out.Translation = j.Translation;
+        out.Rotation = j.Rotation;
+        out.Scale = j.Scale;
+        out.InverseBind = j.InverseBind;
+        sk.Joints.push_back(std::move(out));
+    }
+    return sk;
+}
+
+AnimationClip ClipFromData(sage::assets::ClipData&& data) {
+    AnimationClip clip;
+    clip.Name = std::move(data.Name);
+    clip.Duration = data.Duration;
+    clip.Channels.reserve(data.Channels.size());
+    for (sage::assets::ChannelData& c : data.Channels) {
+        AnimChannel ch;
+        ch.Joint = c.Joint;
+        ch.Target = c.Target;
+        ch.Interp = c.Interp;
+        ch.Times = std::move(c.Times);
+        ch.Values = std::move(c.Values);
+        ch.InTangents = std::move(c.InTangents);
+        ch.OutTangents = std::move(c.OutTangents);
+        clip.Channels.push_back(std::move(ch));
+    }
+    return clip;
+}
+
+std::vector<AnimationClip> ClipsFromData(std::vector<sage::assets::ClipData>&& data) {
+    std::vector<AnimationClip> out;
+    out.reserve(data.size());
+    for (sage::assets::ClipData& c : data) out.push_back(ClipFromData(std::move(c)));
+    return out;
 }
 
 void AnimChannel::Sample(float t, glm::vec3& outVec3, glm::quat& outQuat) const {

@@ -128,6 +128,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/assets/format/MeshFormat.cpp
     src/sage/assets/format/TextureFormat.cpp
     src/sage/assets/import/Importer.cpp
+    src/sage/assets/import/ImportSettings.cpp
+    src/sage/assets/import/ObjImporter.cpp
     src/sage/assets/import/MeshNormalize.cpp
     src/sage/assets/import/PolygonTriangulate.cpp
     src/sage/assets/import/ObjMtl.cpp

@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "sage/assets/MeshData.h"
 #include "sage/render/Mesh.h"
 #include "sage/render/PrimitiveParams.h"
 
@@ -16,29 +17,10 @@
 // ---------------------------------------------------------------------------
 namespace sage::render {
 
-// Submesh (разметка геометрии по материалам) объявлен в Mesh.h — там же, где
-// Vertex: его держит и CPU-представление, и GPU-меш, а Mesh.h включается
-// раньше.
-
-struct MeshData {
-    std::vector<Vertex> Vertices;
-    std::vector<unsigned int> Indices;
-    // Разметка по материалам. ПУСТО — законное состояние: вся геометрия
-    // считается одним подмешем. Так процедурные примитивы и старые форматы
-    // ничего про подмеши не знают и знать не обязаны.
-    std::vector<Submesh> Submeshes;
-
-    bool Empty() const { return Vertices.empty() || Indices.empty(); }
-
-    // Разметка, годная для отрисовки: если её нет — один подмеш на всё.
-    // Единственное место, где записано это правило: разложить его по
-    // потребителям значило бы получить столько трактовок пустого списка,
-    // сколько потребителей.
-    std::vector<Submesh> SubmeshesOrWhole() const {
-        if (!Submeshes.empty()) return Submeshes;
-        return {Submesh{{}, 0u, (unsigned int)Indices.size(), -1}};
-    }
-};
+// MeshData и Submesh — данные ресурсов (sage/assets/MeshData.h): их выдаёт
+// импорт и читает .sagemesh. Здесь — псевдоним прежнего имени и генераторы
+// примитивов рендера.
+using MeshData = sage::assets::MeshData;
 
 // Процедурные примитивы движка. Параметры по умолчанию — геометрия, которой
 // примитив был всегда (ResourceManager::GetPrimitive без настроек).

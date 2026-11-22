@@ -8,6 +8,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "sage/assets/import/Importer.h"
+#include "sage/render/MeshData.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -591,7 +592,7 @@ TEST(gltf_cubic_animation_reads_values_not_tangents) {
 
     CHECK_EQ((int)data.Clips.size(), 1);
     if (data.Clips.empty()) return;
-    const sage::anim::AnimationClip& clip = data.Clips[0];
+    const sage::anim::AnimationClip clip = sage::anim::ClipFromData(sage::assets::ClipData(data.Clips[0]));
     CHECK_EQ(clip.Name, std::string("Turn"));
     CHECK_NEAR(clip.Duration, 1.0f, 1e-4f);
     CHECK_EQ((int)clip.Channels.size(), 1);

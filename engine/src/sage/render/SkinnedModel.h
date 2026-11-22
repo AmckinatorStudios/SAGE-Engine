@@ -6,6 +6,8 @@
 #include <glm/glm.hpp>
 
 #include "sage/anim/Skeleton.h"
+#include "sage/assets/SkinnedModelData.h"
+#include "sage/render/ModelData.h"
 #include "sage/render/ShadowMap.h"
 #include "sage/render/Reflection.h"
 #include "sage/render/Texture.h"
@@ -43,24 +45,9 @@ namespace sage::gi { struct GIState; }
 // ---------------------------------------------------------------------------
 namespace sage::render {
 
-// Вершина скина: геометрия + до 4 влияющих костей (индексы) и их веса.
-//
-// ПОЛЕЙ СТОЛЬКО ЖЕ, СКОЛЬКО У СТАТИЧЕСКОЙ ВЕРШИНЫ, плюс кости. Так и должно
-// быть: скин отличается от обычного меша ровно тем, КАК получается позиция и
-// нормаль, а не тем, что он умеет меньше. Пока здесь не было касательной и
-// второй развёртки, у скина не могло быть ни карты нормалей, ни лайтмапы — не
-// потому, что так решили, а потому, что данные до шейдера не доезжали.
-struct SkinnedVertex {
-    glm::vec3 Position{0.0f};
-    glm::vec3 Normal{0.0f, 1.0f, 0.0f};
-    glm::vec2 TexCoords{0.0f};
-    glm::vec4 Joints{0.0f};  // индексы костей (как float — читаются в шейдере через int())
-    glm::vec4 Weights{0.0f}; // веса (нормируются при загрузке; сумма ~1)
-    // Касательная для карты нормалей: xyz — направление вдоль U, w — знак
-    // бинормали (±1). Считается при разборе, если её нет в файле.
-    glm::vec4 Tangent{1.0f, 0.0f, 0.0f, 1.0f};
-    glm::vec2 TexCoords2{0.0f}; // вторая развёртка (лайтмапа/AO), 0 — её нет
-};
+// Вершина скина — данные ресурсов (sage/assets/SkinnedModelData.h): её готовит
+// разбор модели, SkinnedMesh заливает её на видеокарту как есть.
+using SkinnedVertex = sage::assets::SkinnedVertex;
 
 class SkinnedMesh {
 public:
@@ -268,7 +255,7 @@ private:
     // Сборка модели из уже разобранных данных (ModelData). Частный член, а не
     // свободная функция: только отсюда заполняются приватные поля, и открывать
     // их наружу ради одной функции незачем.
-    static std::unique_ptr<SkinnedModel> BuildFromData(struct ModelData& data);
+    static std::unique_ptr<SkinnedModel> BuildFromData(ModelData& data);
 
     std::vector<SkinnedSubMesh> m_subMeshes;
     sage::anim::Skeleton m_skeleton;
