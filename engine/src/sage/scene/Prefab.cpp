@@ -204,6 +204,9 @@ GameObject CopySubtreeCollecting(Scene& src, entt::entity srcRoot, Scene& dst,
                                  std::vector<entt::entity>& made) {
     GameObject s(&src.Registry(), srcRoot);
     GameObject d = dst.CreateObject(s.Name());
+    // В список созданных — СРАЗУ, до копирования компонентов: если копия
+    // упадёт на этом объекте, откат обязан убрать и его.
+    made.push_back(d.Entity());
     CopyAllComponents(s, d);
     if (dstParent != entt::null) dst.SetParent(d.Entity(), dstParent);
     // Место среди братьев едет с копией: дети заготовки встают в том порядке,
@@ -212,7 +215,6 @@ GameObject CopySubtreeCollecting(Scene& src, entt::entity srcRoot, Scene& dst,
     dst.Registry().get_or_emplace<HierarchyComponent>(d.Entity()).Order = src.SiblingOrder(srcRoot);
     if (const IdComponent* srcId = src.Registry().try_get<IdComponent>(srcRoot))
         idMap[srcId->Id] = d.Id();
-    made.push_back(d.Entity());
     if (const HierarchyComponent* h = src.Registry().try_get<HierarchyComponent>(srcRoot)) {
         // В порядке списка: Children у копии собирается в той же
         // последовательности, в какой его обходят системы.
@@ -224,6 +226,18 @@ GameObject CopySubtreeCollecting(Scene& src, entt::entity srcRoot, Scene& dst,
                 CopySubtreeCollecting(src, k, dst, d.Entity(), idMap, made);
     }
     return d;
+}
+
+// ОТКАТ: копия поддерева — одна операция. Упала на середине (компонент игры
+// бросил в Copy/VisitRefs) — всё созданное уничтожается, и сцена остаётся
+// такой, какой была до вызова, а не с половиной поддерева без части
+// компонентов и с недописанными ссылками.
+void RollBack(Scene& scene, const std::vector<entt::entity>& made) {
+    // С конца: дети раньше родителей, каждый отвязывается от ещё живого родителя.
+    for (auto it = made.rbegin(); it != made.rend(); ++it) {
+        if (!scene.Registry().valid(*it)) continue;
+        if (const IdComponent* id = scene.Registry().try_get<IdComponent>(*it)) scene.RemoveObject(id->Id);
+    }
 }
 
 } // namespace
@@ -253,9 +267,15 @@ void RemapEntityRefs(Scene& scene, const std::vector<entt::entity>& entities,
 GameObject CopySubtree(Scene& src, entt::entity srcRoot, Scene& dst, entt::entity dstParent) {
     std::unordered_map<int, int> idMap;
     std::vector<entt::entity> made;
-    GameObject d = CopySubtreeCollecting(src, srcRoot, dst, dstParent, idMap, made);
-    RemapEntityRefs(dst, made, idMap);
-    return d;
+    try {
+        GameObject d = CopySubtreeCollecting(src, srcRoot, dst, dstParent, idMap, made);
+        RemapEntityRefs(dst, made, idMap);
+        return d;
+    } catch (...) {
+        // Строгая гарантия: сцена как до вызова, причина — у вызывающего.
+        RollBack(dst, made);
+        throw;
+    }
 }
 
 bool SavePrefab(Scene& scene, entt::entity root, const std::string& path, std::string& err) {
@@ -266,7 +286,14 @@ bool SavePrefab(Scene& scene, entt::entity root, const std::string& path, std::s
     Scene temp("Prefab");
     std::unordered_map<int, int> idMap;
     std::vector<entt::entity> made;
-    CopySubtreeCollecting(scene, root, temp, entt::null, idMap, made);
+    // Временная сцена: откатывать в ней нечего, но сбой копии — это отказ
+    // сохранения с причиной, а не файл заготовки без части компонентов.
+    try {
+        CopySubtreeCollecting(scene, root, temp, entt::null, idMap, made);
+    } catch (const std::exception& e) {
+        err = e.what();
+        return false;
+    }
 
     // ССЫЛКИ НАРУЖУ ЗАГОТОВКИ ОБРЫВАЮТСЯ, И ЭТО НЕ ПОТЕРЯ ДАННЫХ.
     //
@@ -284,22 +311,21 @@ bool SavePrefab(Scene& scene, entt::entity root, const std::string& path, std::s
     // номером объекта ВНУТРИ неё — тогда проверка «а есть ли такой?» ответит
     // «есть», и ссылка на игрока молча превратится в ссылку на дверную ручку.
     int dropped = 0;
-    for (entt::entity e : made) {
-        if (!temp.Registry().valid(e)) continue;
-        sage::scene::VisitEntityRefs(temp.Registry(), e, [&](sage::vars::EntityRef& ref) {
-            if (!ref.Valid()) return;
-            if (idMap.count(ref.Id) != 0) return;   // внутрь заготовки — оставляем
-            ref.Id = 0;
-            ++dropped;
-        });
-    }
-    RemapEntityRefs(temp, made, idMap);
-    if (dropped > 0) {
-        LOG_WARN("Prefab") << "В заготовке " << path << " оборвано ссылок наружу: " << dropped
-                           << " — префаб ставят в любую сцену, и объекта из исходной там нет";
-    }
-
     try {
+        for (entt::entity e : made) {
+            if (!temp.Registry().valid(e)) continue;
+            sage::scene::VisitEntityRefs(temp.Registry(), e, [&](sage::vars::EntityRef& ref) {
+                if (!ref.Valid()) return;
+                if (idMap.count(ref.Id) != 0) return;   // внутрь заготовки — оставляем
+                ref.Id = 0;
+                ++dropped;
+            });
+        }
+        RemapEntityRefs(temp, made, idMap);
+        if (dropped > 0) {
+            LOG_WARN("Prefab") << "В заготовке " << path << " оборвано ссылок наружу: " << dropped
+                               << " — префаб ставят в любую сцену, и объекта из исходной там нет";
+        }
         SceneSerializer::Save(temp, path);
     } catch (const std::exception& e) {
         err = e.what();
@@ -321,21 +347,30 @@ int InstantiatePrefab(Scene& scene, const std::string& path) {
     std::unordered_map<int, int> idMap;
     std::vector<entt::entity> made;
     int firstRootId = -1;
-    for (entt::entity r : RootsOf(*prefab)) {
-        GameObject copy = CopySubtreeCollecting(*prefab, r, scene, entt::null, idMap, made);
-        if (firstRootId == -1) firstRootId = copy.Id();
+    try {
+        for (entt::entity r : RootsOf(*prefab)) {
+            GameObject copy = CopySubtreeCollecting(*prefab, r, scene, entt::null, idMap, made);
+            if (firstRootId == -1) firstRootId = copy.Id();
+        }
+        // Ссылка, которой в карте нет, в ЗАГОТОВКЕ означать может только одно —
+        // что файл сделан до того, как обрыв внешних ссылок появился при
+        // сохранении. Оставить её нельзя: номер из чужой сцены попадёт в
+        // посторонний объект этой, и «работающая» связь будет дёргать не то.
+        for (entt::entity e : made) {
+            if (!scene.Registry().valid(e)) continue;
+            sage::scene::VisitEntityRefs(scene.Registry(), e, [&](sage::vars::EntityRef& ref) {
+                if (ref.Valid() && idMap.count(ref.Id) == 0) ref.Id = 0;
+            });
+        }
+        RemapEntityRefs(scene, made, idMap);
+    } catch (const std::exception& e) {
+        // Префаб ставится целиком или никак: половина заготовки в сцене (без
+        // части компонентов, со ссылками на оригинал) хуже отказа. Контракт
+        // функции — -1 при неудаче, как у ненайденного файла.
+        RollBack(scene, made);
+        LOG_ERROR("Prefab") << "Префаб не поставлен (" << path << "): " << e.what() << " — изменения откатаны";
+        return -1;
     }
-    // Ссылка, которой в карте нет, в ЗАГОТОВКЕ означать может только одно —
-    // что файл сделан до того, как обрыв внешних ссылок появился при
-    // сохранении. Оставить её нельзя: номер из чужой сцены попадёт в
-    // посторонний объект этой, и «работающая» связь будет дёргать не то.
-    for (entt::entity e : made) {
-        if (!scene.Registry().valid(e)) continue;
-        sage::scene::VisitEntityRefs(scene.Registry(), e, [&](sage::vars::EntityRef& ref) {
-            if (ref.Valid() && idMap.count(ref.Id) == 0) ref.Id = 0;
-        });
-    }
-    RemapEntityRefs(scene, made, idMap);
     return firstRootId;
 }
 

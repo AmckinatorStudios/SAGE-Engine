@@ -2,6 +2,8 @@
 #include "sage/scene/SceneLayer.h"
 
 #include <algorithm>
+#include <mutex>
+#include <stdexcept>
 
 #include "sage/core/Log.h"
 #include "sage/render/ObjectEffects.h"
@@ -13,55 +15,121 @@
 namespace sage::scene {
 
 namespace {
-void EnsureBuiltins();
 
-std::vector<ComponentType>& Types() {
-    static std::vector<ComponentType> t;
-    EnsureBuiltins();
-    return t;
+using TypeList = std::vector<ComponentTypePtr>;
+using Snapshot = std::shared_ptr<const TypeList>;
+
+// Список хранится неизменяемым снимком: запись подменяет снимок целиком под
+// блокировкой, чтение берёт под ней копию shared_ptr (одна атомарная операция)
+// и дальше обходит список без блокировки. Так пользовательские функции
+// компонентов не зовутся под mutex'ом, а замена/снятие типа во время чужого
+// обхода не инвалидирует ни список, ни описание.
+struct Registry {
+    std::mutex Lock;
+    Snapshot Types = std::make_shared<const TypeList>();
+};
+
+Registry& Reg() {
+    static Registry r;
+    return r;
 }
+
+// Поток, который сейчас регистрирует встроенные: их Register* снова зовут
+// RegisterComponent, и повторный вход в call_once был бы взаимоблокировкой.
+thread_local bool t_registeringBuiltins = false;
 
 // Встроенные компоненты, описанные реестром, — при первом обращении к нему:
 // статический инициализатор в другом файле статической библиотеки
 // компоновщик вправе выбросить, и компонент молча перестал бы писаться.
+// Прежний `static bool done` не был потокобезопасным: два потока могли
+// зарегистрировать встроенные дважды или прочитать реестр без них.
 void EnsureBuiltins() {
-    static bool done = false;
-    if (done) return;
-    done = true;
-    RegisterAiAgentComponent();
-    RegisterSceneLayerComponent();
-    RegisterVisualScriptComponent();
-    sage::render::RegisterObjectEffectsComponent();
+    if (t_registeringBuiltins) return;
+    static std::once_flag once;
+    std::call_once(once, [] {
+        t_registeringBuiltins = true;
+        struct Reset {
+            ~Reset() { t_registeringBuiltins = false; }
+        } reset;
+        RegisterAiAgentComponent();
+        RegisterSceneLayerComponent();
+        RegisterVisualScriptComponent();
+        sage::render::RegisterObjectEffectsComponent();
+    });
 }
+
+Snapshot Types() {
+    EnsureBuiltins();
+    Registry& r = Reg();
+    std::lock_guard<std::mutex> lock(r.Lock);
+    return r.Types;
+}
+
+// Пользовательская функция компонента: любое исключение (и не std тоже)
+// превращается в runtime_error с ключом компонента — вызывающий решает, что
+// делать, а текст говорит, какой компонент и на каком шаге.
+template <typename Fn>
+auto CallUser(const ComponentType& t, const char* step, Fn&& fn) -> decltype(fn()) {
+    try {
+        return fn();
+    } catch (const std::exception& ex) {
+        throw std::runtime_error("компонент «" + t.Key + "»: " + step + ": " + ex.what());
+    } catch (...) {
+        throw std::runtime_error("компонент «" + t.Key + "»: " + step + ": неизвестное исключение");
+    }
+}
+
+// Снять недоделанный компонент. Сбой самого снятия — тоже ошибка: её нельзя
+// проглотить, но и прятать за ней исходную причину нельзя — пишем в лог.
+void RemovePartial(const ComponentType& t, entt::registry& reg, entt::entity e) {
+    try {
+        if (t.Has(reg, e)) t.Remove(reg, e);
+    } catch (const std::exception& ex) {
+        LOG_ERROR("Scene") << "компонент «" << t.Key << "»: не снялся после сбоя: " << ex.what();
+    } catch (...) {
+        LOG_ERROR("Scene") << "компонент «" << t.Key << "»: не снялся после сбоя (неизвестное исключение)";
+    }
+}
+
 } // namespace
 
-void RegisterComponent(ComponentType type) {
-    if (type.Key.empty() || !type.Has || !type.Save || !type.Load) {
+bool RegisterComponent(ComponentType type) {
+    if (type.Key.empty() || !type.Has || !type.Save || !type.Load || !type.Remove) {
         LOG_ERROR("Scene") << "RegisterComponent: у типа «" << type.Key
-                           << "» нет ключа или функций Has/Save/Load — не зарегистрирован";
-        return;
+                           << "» нет ключа или функций Has/Save/Load/Remove — не зарегистрирован";
+        return false;
     }
-    // Ключи «components» и встроенные поля объекта — не трогаем: пересечься
-    // с ними значит перезаписать чужие данные в файле.
-    std::vector<ComponentType>& all = Types();
-    auto it = std::find_if(all.begin(), all.end(), [&](const ComponentType& t) { return t.Key == type.Key; });
-    if (it != all.end()) *it = std::move(type);
-    else all.push_back(std::move(type));
-}
-
-bool UnregisterComponent(const std::string& key) {
-    std::vector<ComponentType>& all = Types();
-    auto it = std::find_if(all.begin(), all.end(), [&](const ComponentType& t) { return t.Key == key; });
-    if (it == all.end()) return false;
-    all.erase(it);
+    EnsureBuiltins();
+    auto entry = std::make_shared<const ComponentType>(std::move(type));
+    Registry& r = Reg();
+    std::lock_guard<std::mutex> lock(r.Lock);
+    auto next = std::make_shared<TypeList>(*r.Types);
+    auto it = std::find_if(next->begin(), next->end(),
+                           [&](const ComponentTypePtr& t) { return t->Key == entry->Key; });
+    if (it != next->end()) *it = std::move(entry);
+    else next->push_back(std::move(entry));
+    r.Types = std::move(next);
     return true;
 }
 
-const std::vector<ComponentType>& ComponentTypes() { return Types(); }
+bool UnregisterComponent(const std::string& key) {
+    EnsureBuiltins();
+    Registry& r = Reg();
+    std::lock_guard<std::mutex> lock(r.Lock);
+    auto next = std::make_shared<TypeList>(*r.Types);
+    auto it = std::find_if(next->begin(), next->end(), [&](const ComponentTypePtr& t) { return t->Key == key; });
+    if (it == next->end()) return false;
+    next->erase(it);
+    r.Types = std::move(next);
+    return true;
+}
 
-const ComponentType* FindComponentType(const std::string& key) {
-    for (const ComponentType& t : Types())
-        if (t.Key == key) return &t;
+std::vector<ComponentTypePtr> ComponentTypes() { return *Types(); }
+
+ComponentTypePtr FindComponentType(const std::string& key) {
+    const Snapshot all = Types();
+    for (const ComponentTypePtr& t : *all)
+        if (t->Key == key) return t;
     return nullptr;
 }
 
@@ -73,8 +141,9 @@ void VisitEntityRefs(entt::registry& reg, entt::entity e, const RefVisit& visit)
     // а не дверь оригинала.
     if (sage::signals::SignalLinksComponent* sl = reg.try_get<sage::signals::SignalLinksComponent>(e))
         for (sage::signals::Link& link : sl->Links) visit(link.Target);
-    for (const ComponentType& t : Types())
-        if (t.VisitRefs && t.Has(reg, e)) t.VisitRefs(reg, e, visit);
+    const Snapshot all = Types();
+    for (const ComponentTypePtr& t : *all)
+        if (t->VisitRefs && t->Has(reg, e)) t->VisitRefs(reg, e, visit);
 }
 
 void SaveRegisteredComponents(const entt::registry& reg, entt::entity e, nlohmann::json& object) {
@@ -83,34 +152,50 @@ void SaveRegisteredComponents(const entt::registry& reg, entt::entity e, nlohman
     // (код игры вернулся) записал своё, свежее.
     if (const UnknownComponents* u = reg.try_get<UnknownComponents>(e))
         for (auto it = u->Data.begin(); it != u->Data.end(); ++it) comps[it.key()] = it.value();
-    for (const ComponentType& t : Types()) {
-        if (!t.Has(reg, e)) continue;
-        try {
-            comps[t.Key] = t.Save(reg, e);
-        } catch (const std::exception& ex) {
-            LOG_ERROR("Scene") << "компонент «" << t.Key << "» не сохранился: " << ex.what();
-        }
+    const Snapshot all = Types();
+    for (const ComponentTypePtr& tp : *all) {
+        const ComponentType& t = *tp;
+        if (!CallUser(t, "Has", [&] { return t.Has(reg, e); })) continue;
+        // Ошибка НЕ глотается: сцена без компонента, записанная поверх
+        // прежнего файла, стёрла бы его данные. Сохранение целиком отменяется.
+        comps[t.Key] = CallUser(t, "сохранение", [&] { return t.Save(reg, e); });
     }
     if (!comps.empty()) object["components"] = std::move(comps);
 }
 
 void LoadRegisteredComponents(entt::registry& reg, entt::entity e, const nlohmann::json& object) {
     auto it = object.find("components");
-    if (it == object.end() || !it->is_object()) return;
+    if (it == object.end()) return;
+    if (!it->is_object()) {
+        // Не объект — ключей компонентов в нём нет, читать нечего; причина — в лог.
+        LOG_ERROR("Scene") << "поле components объекта — не объект, пропущено";
+        return;
+    }
     nlohmann::json unknown = nlohmann::json::object();
+    const Snapshot all = Types();
     for (auto c = it->begin(); c != it->end(); ++c) {
-        const ComponentType* t = FindComponentType(c.key());
-        if (!t) {
+        ComponentTypePtr tp;
+        for (const ComponentTypePtr& t : *all)
+            if (t->Key == c.key()) {
+                tp = t;
+                break;
+            }
+        if (!tp) {
             unknown[c.key()] = c.value();
             continue;
         }
+        const ComponentType& t = *tp;
+        bool had = false;
         try {
-            t->Load(reg, e, c.value());
+            had = CallUser(t, "Has", [&] { return t.Has(reg, e); });
+            CallUser(t, "загрузка", [&] { t.Load(reg, e, c.value()); });
         } catch (const std::exception& ex) {
-            // Не прочитался — сохраняем как есть: следующее сохранение не
-            // имеет права стереть то, что этот код не понял.
-            LOG_ERROR("Scene") << "компонент «" << c.key() << "» не прочитался: " << ex.what()
-                               << " — сохранён как есть";
+            // Не прочитался — компонент снимаем (недочитанный хуже
+            // отсутствующего: игра работала бы с мусором), JSON храним как
+            // есть: следующее сохранение не имеет права стереть то, что этот
+            // код не понял.
+            if (!had) RemovePartial(t, reg, e);
+            LOG_ERROR("Scene") << ex.what() << " — сохранён как есть";
             unknown[c.key()] = c.value();
         }
     }
@@ -119,13 +204,23 @@ void LoadRegisteredComponents(entt::registry& reg, entt::entity e, const nlohman
 
 void CopyRegisteredComponents(const entt::registry& src, entt::entity se, entt::registry& dst, entt::entity de) {
     if (const UnknownComponents* u = src.try_get<UnknownComponents>(se)) dst.emplace_or_replace<UnknownComponents>(de, *u);
-    for (const ComponentType& t : Types()) {
-        if (!t.Has(src, se)) continue;
-        if (t.Copy) {
-            t.Copy(src, se, dst, de);
-        } else {
-            // Без своей копии — через файл: медленнее, но ничего не теряется.
-            t.Load(dst, de, t.Save(src, se));
+    const Snapshot all = Types();
+    for (const ComponentTypePtr& tp : *all) {
+        const ComponentType& t = *tp;
+        if (!CallUser(t, "Has", [&] { return t.Has(src, se); })) continue;
+        try {
+            if (t.Copy) {
+                CallUser(t, "копирование", [&] { t.Copy(src, se, dst, de); });
+            } else {
+                // Без своей копии — через файл: медленнее, но ничего не теряется.
+                nlohmann::json j = CallUser(t, "сохранение", [&] { return t.Save(src, se); });
+                CallUser(t, "загрузка", [&] { t.Load(dst, de, j); });
+            }
+        } catch (...) {
+            // Недокопированный компонент не оставляем; остальное откатывает
+            // вызывающий. Ошибка уходит наверх — это не пустой перехват.
+            RemovePartial(t, dst, de);
+            throw;
         }
     }
 }

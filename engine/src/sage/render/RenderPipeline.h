@@ -1,6 +1,7 @@
 #pragma once
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -85,16 +86,23 @@ struct PipelineInfo {
     std::function<std::unique_ptr<RenderPipeline>()> Create;
 };
 
+// Реестр потокобезопасен. Наружу записи отдаются КОПИЯМИ: указатель на
+// элемент внутреннего вектора терял бы силу при следующей регистрации (вектор
+// растёт) или замене (запись перезаписывается) — в том числе из другого потока.
+// Фабрика Create вызывается ВНЕ блокировки: пользовательский код может сам
+// обращаться к реестру, и под mutex'ом это была бы взаимоблокировка.
 class RenderPipelineRegistry {
 public:
-    // Повторная регистрация того же Id ЗАМЕНЯЕТ запись — так игра подменяет
-    // встроенный рендерер своим под тем же именем.
-    static void Register(PipelineInfo info);
-    static const PipelineInfo* Find(const std::string& id);
+    // Повторная регистрация того же Id ЗАМЕНЯЕТ запись (порядок в All() не
+    // меняется) — так игра подменяет встроенный рендерер своим под тем же
+    // именем. Запись без Id или без фабрики отвергается: false и строка в лог.
+    static bool Register(PipelineInfo info);
+    static std::optional<PipelineInfo> Find(const std::string& id);
     static std::vector<PipelineInfo> All();
     static std::unique_ptr<RenderPipeline> Create(const std::string& id);
-    // Регистрирует встроенные ("sage.pbr"). Идемпотентна; зовётся сама при
-    // первом обращении к реестру.
+    // Встроенные ("sage.pbr") регистрируются ровно один раз при первом
+    // обращении к реестру и не затирают уже сделанную игрой подмену.
+    // Явный вызов оставлен для совместимости; он идемпотентен.
     static void RegisterBuiltins();
 };
 

@@ -4,9 +4,12 @@
 // устройство кадра проверяется здесь, картинка — в tests/render/Checks_Pipeline.
 #include "TestFramework.h"
 
+#include <atomic>
 #include <map>
+#include <optional>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "rhi/null/NullDevice.h"
@@ -211,7 +214,7 @@ TEST(shader_log_parses_vendor_formats) {
 }
 
 TEST(pipeline_registry_lists_builtin_pbr_and_accepts_replacement) {
-    CHECK_TRUE(RenderPipelineRegistry::Find(StandardPipeline::kId) != nullptr);
+    CHECK_TRUE(RenderPipelineRegistry::Find(StandardPipeline::kId).has_value());
     struct Mine : RenderPipeline {
         std::string Id() const override { return "test.mine"; }
         void Build(RenderGraph& g, const RenderView&) override {
@@ -221,8 +224,12 @@ TEST(pipeline_registry_lists_builtin_pbr_and_accepts_replacement) {
             g.AddPass(std::move(p));
         }
     };
-    RenderPipelineRegistry::Register({"test.mine", "Мой", "", [] { return std::make_unique<Mine>(); }});
-    RenderPipelineRegistry::Register({"test.mine", "Мой 2", "", [] { return std::make_unique<Mine>(); }});
+    CHECK_TRUE(RenderPipelineRegistry::Register({"test.mine", "Мой", "", [] { return std::make_unique<Mine>(); }}));
+    // Копия, полученная ДО замены, остаётся целой: Find больше не отдаёт
+    // указатель внутрь вектора, который замена перезаписывает.
+    const std::optional<PipelineInfo> before = RenderPipelineRegistry::Find("test.mine");
+    CHECK_TRUE(RenderPipelineRegistry::Register({"test.mine", "Мой 2", "", [] { return std::make_unique<Mine>(); }}));
+    CHECK_TRUE(before && before->Label == "Мой");
     int count = 0;
     for (const PipelineInfo& i : RenderPipelineRegistry::All())
         if (i.Id == "test.mine") ++count;
@@ -278,4 +285,43 @@ TEST(shader_material_needs_program_and_null_buffer_round_trips) {
     float out[4] = {};
     CHECK_TRUE(buf->Read(out, sizeof(out)));
     CHECK_TRUE(out[3] == 4.0f);
+}
+
+TEST(pipeline_registry_rejects_invalid_and_survives_concurrent_use) {
+    // Без Id или без фабрики — отказ, реестр не меняется.
+    const size_t n = RenderPipelineRegistry::All().size();
+    CHECK_FALSE(RenderPipelineRegistry::Register({"", "x", "", [] { return std::unique_ptr<RenderPipeline>(); }}));
+    CHECK_FALSE(RenderPipelineRegistry::Register({"test.nofactory", "x", "", nullptr}));
+    CHECK_EQ(RenderPipelineRegistry::All().size(), n);
+    CHECK_FALSE(RenderPipelineRegistry::Find("test.nofactory").has_value());
+
+    // Фабрика вызывается вне блокировки: она может сама читать реестр.
+    CHECK_TRUE(RenderPipelineRegistry::Register({"test.reentrant", "", "", [] {
+        (void)RenderPipelineRegistry::Find(StandardPipeline::kId);
+        return std::unique_ptr<RenderPipeline>();
+    }}));
+    CHECK_TRUE(RenderPipelineRegistry::Create("test.reentrant") == nullptr); // не зависла
+
+    // Регистрации и чтения из нескольких потоков: встроенный PBR виден всегда,
+    // описания приходят целыми (под ThreadSanitizer — без гонок).
+    std::atomic<bool> bad{false};
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 4; ++t) {
+        threads.emplace_back([t, &bad] {
+            for (int i = 0; i < 200; ++i) {
+                const std::string id = "test.mt." + std::to_string(t) + "." + std::to_string(i % 7);
+                RenderPipelineRegistry::Register({id, id, "", [] { return std::unique_ptr<RenderPipeline>(); }});
+                const auto pbr = RenderPipelineRegistry::Find(StandardPipeline::kId);
+                const auto mine = RenderPipelineRegistry::Find(id);
+                if (!pbr || pbr->Label != "SAGE PBR" || !mine || mine->Label != id) bad = true;
+                (void)RenderPipelineRegistry::All();
+            }
+        });
+    }
+    for (std::thread& th : threads) th.join();
+    CHECK_FALSE(bad.load());
+    int pbrCount = 0;
+    for (const PipelineInfo& i : RenderPipelineRegistry::All())
+        if (i.Id == StandardPipeline::kId) ++pbrCount;
+    CHECK_EQ(pbrCount, 1);
 }

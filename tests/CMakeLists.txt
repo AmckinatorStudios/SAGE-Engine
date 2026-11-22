@@ -71,6 +71,7 @@ add_executable(sage_tests
     test_panel_registry.cpp
     test_scene_flow.cpp
     test_component_registry.cpp
+    test_engine_lifetime.cpp
     test_format_version.cpp
     test_jobsystem.cpp
     test_net.cpp

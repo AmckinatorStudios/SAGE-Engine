@@ -483,20 +483,83 @@ void TestGameLayer::AttachSceneScripts(const std::string& sceneName) {
     m_sceneScripts[sceneName] = std::move(engine);
 }
 
-// Боевая проверка сериализации: движковая часть сцены переживает запись в
-// .sage и чтение обратно (кастомные компоненты сознательно не сериализуются —
-// известное ограничение, см. GameComponents.h).
+// Боевая проверка сериализации: обе комнаты переживают запись в .sage и
+// чтение обратно ЦЕЛИКОМ — число объектов, и у каждого объекта с компонентом
+// игры тот же компонент с теми же значениями полей (компоненты описаны в
+// реестре движка, см. GameComponents.cpp). Каждый из пяти типов обязан
+// встретиться хотя бы раз — иначе проверка ничего не проверила бы.
+namespace {
+
+bool SameVec(const glm::vec3& a, const glm::vec3& b) { return a == b; }
+
+// Сравнивает компонент T у всех объектов src с объектом того же номера в dst.
+// Возвращает число проверенных; при расхождении пишет причину в why.
+template <typename T, typename Eq>
+int CompareComponent(Scene& src, Scene& dst, const char* name, Eq eq, std::string& why) {
+    int checked = 0;
+    for (entt::entity e : src.Registry().view<T>()) {
+        const int id = src.Registry().get<IdComponent>(e).Id;
+        GameObject other = dst.Get(id);
+        if (!other.Valid() || !dst.Registry().all_of<T>(other.Entity())) {
+            if (why.empty()) why = std::string(name) + " потерян у объекта #" + std::to_string(id);
+            continue;
+        }
+        if (!eq(src.Registry(), e, dst.Registry(), other.Entity()) && why.empty())
+            why = std::string(name) + ": поля объекта #" + std::to_string(id) + " не совпали";
+        ++checked;
+    }
+    return checked;
+}
+
+} // namespace
+
 void TestGameLayer::VerifySerializationRoundTrip() {
-    Scene* room1 = m_scenes.Get("room1");
     try {
-        std::string json = SceneSerializer::SaveToString(*room1);
-        std::unique_ptr<Scene> restored = SceneSerializer::LoadFromString(json);
-        if (restored->Count() == room1->Count() && restored->Name() == room1->Name()) {
-            LOG_INFO("TestGame") << "TESTGAME: serialization round-trip PASS ("
-                                 << restored->Count() << " entities)";
+        std::string why;
+        int health = 0, pickup = 0, patrol = 0, collider = 0, portal = 0, entities = 0;
+        for (const char* room : {"room1", "room2"}) {
+            Scene* src = m_scenes.Get(room);
+            if (!src) continue;
+            std::unique_ptr<Scene> restored = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(*src));
+            if (restored->Count() != src->Count() || restored->Name() != src->Name()) {
+                if (why.empty())
+                    why = std::string(room) + ": объектов " + std::to_string(src->Count()) + " -> " +
+                          std::to_string(restored->Count());
+            }
+            entities += (int)restored->Count();
+            Scene& dst = *restored;
+            health += CompareComponent<HealthComponent>(*src, dst, "Health",
+                [](auto& ra, entt::entity a, auto& rb, entt::entity b) {
+                    const auto &x = ra.template get<HealthComponent>(a), &y = rb.template get<HealthComponent>(b);
+                    return x.Current == y.Current && x.Max == y.Max;
+                }, why);
+            pickup += CompareComponent<PickupComponent>(*src, dst, "Pickup",
+                [](auto& ra, entt::entity a, auto& rb, entt::entity b) {
+                    const auto &x = ra.template get<PickupComponent>(a), &y = rb.template get<PickupComponent>(b);
+                    return x.Score == y.Score && x.Radius == y.Radius;
+                }, why);
+            patrol += CompareComponent<PatrolComponent>(*src, dst, "Patrol",
+                [](auto& ra, entt::entity a, auto& rb, entt::entity b) {
+                    const auto &x = ra.template get<PatrolComponent>(a), &y = rb.template get<PatrolComponent>(b);
+                    return SameVec(x.PointA, y.PointA) && SameVec(x.PointB, y.PointB) && x.Speed == y.Speed &&
+                           x.Damage == y.Damage && x.TowardB == y.TowardB;
+                }, why);
+            collider += CompareComponent<StaticColliderComponent>(*src, dst, "StaticCollider",
+                [](auto&, entt::entity, auto&, entt::entity) { return true; }, why);
+            portal += CompareComponent<PortalComponent>(*src, dst, "Portal",
+                [](auto& ra, entt::entity a, auto& rb, entt::entity b) {
+                    const auto &x = ra.template get<PortalComponent>(a), &y = rb.template get<PortalComponent>(b);
+                    return x.TargetScene == y.TargetScene && SameVec(x.SpawnPos, y.SpawnPos) && x.Radius == y.Radius;
+                }, why);
+        }
+        if (why.empty() && (health == 0 || pickup == 0 || patrol == 0 || collider == 0 || portal == 0))
+            why = "не все пять компонентов игры встретились в комнатах";
+        if (why.empty()) {
+            LOG_INFO("TestGame") << "TESTGAME: serialization round-trip PASS (" << entities << " entities; health "
+                                 << health << ", pickup " << pickup << ", patrol " << patrol << ", collider "
+                                 << collider << ", portal " << portal << ")";
         } else {
-            LOG_ERROR("TestGame") << "TESTGAME: serialization round-trip FAIL (saved "
-                                  << room1->Count() << ", loaded " << restored->Count() << ")";
+            LOG_ERROR("TestGame") << "TESTGAME: serialization round-trip FAIL: " << why;
         }
     } catch (const std::exception& ex) {
         LOG_ERROR("TestGame") << "TESTGAME: serialization round-trip FAIL: " << ex.what();
@@ -550,6 +613,9 @@ void TestGameLayer::OnAttach() {
     // Движок держит у себя только нейтральный набор (см. sage/ui/UIIcons.h);
     // доска, бочка, парус и остальной инвентарь принадлежат игре.
     RegisterGameIcons();
+    // Компоненты игры — в реестр движка ДО создания комнат и первой
+    // сериализации: иначе сохранение их не пишет, а загрузка не узнаёт.
+    RegisterGameComponents();
 
     // --- env-хуки (паттерн движка) ---
     if (const std::string p = sage::EnvString("SAGE_SCREENSHOT_PATH"); !p.empty())

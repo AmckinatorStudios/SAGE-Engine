@@ -1150,3 +1150,77 @@ TEST(Material_render_fields_are_grouped_by_purpose) {
     for (const char* key : {"cull", "depthBias", "planarReflectivity", "translucency", "unlit"})
         CHECK_EQ(groupOf(key), (int)G::Render);
 }
+
+// --- Атомарное сохранение сцены ---------------------------------------------
+
+#include "sage/core/AtomicFile.h"
+#include "sage/core/Paths.h"
+#include "sage/scene/ComponentRegistry.h"
+
+namespace {
+std::string ReadAll(const fs::path& p) {
+    std::ifstream f(p, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
+}
+// Временных файлов рядом с целью после записи остаться не должно.
+int TempLeftovers(const fs::path& target) {
+    int n = 0;
+    const std::string prefix = target.filename().string() + ".tmp";
+    for (const auto& entry : fs::directory_iterator(target.parent_path()))
+        if (entry.path().filename().string().rfind(prefix, 0) == 0) ++n;
+    return n;
+}
+struct Boom { int Unused = 0; };   // не пустой: у пустых типов entt нет get<T>()
+} // namespace
+
+// Ошибка сборки JSON (компонент игры бросил в Save) — исключение, а прежний
+// файл сцены нетронут. Раньше файл обнулялся ДО сборки JSON, и вместо сцены
+// оставался пустой файл.
+TEST(Scene_save_failure_keeps_previous_file_intact) {
+    const fs::path dir = fs::temp_directory_path() / "sage_test_atomic_scene";
+    fs::create_directories(dir);
+    const std::string path = (dir / "level.sage").string();
+    Scene good("Good");
+    good.CreateObject("Keep");
+    SceneSerializer::Save(good, path);
+    const std::string before = ReadAll(path);
+    CHECK_TRUE(before.find("Keep") != std::string::npos);
+
+    sage::scene::RegisterComponent(sage::scene::MakeComponentType<Boom>(
+        "test_boom", [](const Boom&) -> nlohmann::json { throw std::runtime_error("сбой сохранения"); },
+        [](const nlohmann::json&, Boom&) {}));
+    Scene bad("Bad");
+    GameObject o = bad.CreateObject("Broken");
+    bad.Registry().emplace<Boom>(o.Entity());
+    bool threw = false;
+    try {
+        SceneSerializer::Save(bad, path);
+    } catch (const std::exception& e) {
+        threw = std::string(e.what()).find("test_boom") != std::string::npos;
+    }
+    CHECK_TRUE(threw);
+    CHECK_TRUE(ReadAll(path) == before);
+    CHECK_EQ(TempLeftovers(path), 0);
+    sage::scene::UnregisterComponent("test_boom");
+    fs::remove_all(dir);
+}
+
+// Подмена существующего файла, кириллический путь, без хвостов .tmp; отказ
+// записи (папки нет) — false с причиной, без создания чего-либо.
+TEST(AtomicFile_replaces_existing_file_and_cleans_temp) {
+    const fs::path dir = sage::PathFromUtf8((fs::temp_directory_path() / "sage_test_атомарно").u8string());
+    fs::create_directories(dir);
+    const std::string utf8 = (dir / "сцена.json").u8string();
+    std::string err;
+    CHECK_TRUE(sage::WriteFileAtomic(utf8, "первый", err));
+    CHECK_TRUE(sage::WriteFileAtomic(utf8, "второй", err));
+    CHECK_TRUE(ReadAll(sage::PathFromUtf8(utf8)) == "второй");
+    CHECK_EQ(TempLeftovers(sage::PathFromUtf8(utf8)), 0);
+
+    const std::string missing = (dir / "нет_папки" / "x.json").u8string();
+    CHECK_FALSE(sage::WriteFileAtomic(missing, "x", err));
+    CHECK_FALSE(err.empty());
+    CHECK_FALSE(fs::exists(sage::PathFromUtf8(missing)));
+    CHECK_TRUE(ReadAll(sage::PathFromUtf8(utf8)) == "второй");
+    fs::remove_all(dir);
+}

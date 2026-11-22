@@ -36,14 +36,26 @@ void EngineContext::ReleaseGpuResources() {
 }
 
 EngineContext::~EngineContext() {
-    ReleaseGpuResources();
-    // Воркеры останавливаются до сноса подсистем: их задачи могут держать
-    // ссылки на кэш ресурсов.
-    if (m_jobs) m_jobs->Shutdown();
+    // На время сноса текущим делается ЭТОТ контекст: подсистемы, которые при
+    // разрушении спрашивают EngineContext::Current() (кэш ресурсов, воркеры),
+    // должны попасть в себя, а не в соседний контекст. Чужой текущий
+    // возвращается на место в конце; свой — обнуляется.
+    EngineContext* const previous = SetCurrent(this);
 
-    // Явный обратный порядок. Полагаться на порядок полей можно, но тогда
-    // перестановка двух строк в заголовке меняет порядок разрушения молча —
-    // ровно тот класс поломок, ради которого этот класс и появился.
+    // 1. Воркеры — ПЕРВЫМИ: их задачи держат ссылки на кэш ресурсов и прочие
+    //    подсистемы, и чистить кэш под работающей задачей нельзя. Выключаем
+    //    пул, чтобы ParallelFor из чьего-нибудь деструктора не поднял его
+    //    заново ленивой инициализацией.
+    if (m_jobs) {
+        m_jobs->Shutdown();
+        m_jobs->SetEnabled(false);
+    }
+    // 2. GPU-объекты (идемпотентно: Application обычно уже освободил их).
+    ReleaseGpuResources();
+
+    // 3. Явный обратный порядок. Полагаться на порядок полей можно, но тогда
+    //    перестановка двух строк в заголовке меняет порядок разрушения молча —
+    //    ровно тот класс поломок, ради которого этот класс и появился.
     m_importers.reset();
     m_renderTextures.reset();
     m_postEffects.reset();
@@ -51,8 +63,9 @@ EngineContext::~EngineContext() {
     m_jobs.reset();
     m_assets.reset();
     m_resources.reset();
+    m_device = nullptr;
 
-    if (s_current == this) s_current = nullptr;
+    s_current = (previous == this) ? nullptr : previous;
 }
 
 EngineContext& EngineContext::Current() {
