@@ -132,7 +132,7 @@ void EditorLayer::ApplyStartupHooks() {
             "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TWEEN",
             "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
             "SAGE_EDITOR_SHOW_CONSOLE",  "SAGE_EDITOR_SHOW_PROBLEMS",
-            "SAGE_EDITOR_SHOW_PLUGINS",   "SAGE_EDITOR_SHADER_DEMO",  "SAGE_EDITOR_LIGHT_COOKIE", "SAGE_EDITOR_PRIMITIVES",
+            "SAGE_EDITOR_SHOW_PLUGINS",   "SAGE_EDITOR_SHOW_ENVIRONMENT", "SAGE_EDITOR_SHADER_DEMO",  "SAGE_EDITOR_LIGHT_COOKIE", "SAGE_EDITOR_PRIMITIVES",
             "SAGE_EDITOR_OPEN_ANIMGRAPH", "SAGE_EDITOR_SHOW_ASSETS", "SAGE_EDITOR_ANIM_WORKSPACE",
         };
         for (const char* name : kHeadless) {
@@ -192,6 +192,9 @@ void EditorLayer::ApplyStartupHooks() {
             m_settingsPanel.ForceSize((float)w, (float)h);
     }
     if (std::getenv("SAGE_EDITOR_SHOW_PROFILER")) { m_headlessProject = true; m_panels[EditorPanel::Profiler] = true; }
+    // Окно Environment открыто и впереди — для снимка его вида (панель стоит
+    // вкладкой, и без этого на кадре её не видно).
+    if (std::getenv("SAGE_EDITOR_SHOW_ENVIRONMENT")) m_panels[EditorPanel::Environment] = true;
     // Консоль впереди вкладки Assets — для скриншот-проверки её панели.
     if (std::getenv("SAGE_EDITOR_SHOW_CONSOLE")) m_console.RequestFocus();
     if (std::getenv("SAGE_EDITOR_SHOW_PROBLEMS")) m_console.ShowProblems();

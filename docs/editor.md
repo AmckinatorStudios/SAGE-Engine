@@ -911,22 +911,36 @@ Disabled) — `EditorTheme::ControlFill/SegmentFill/ControlBorder/IconTint`;
 ### Окно Environment: показывается только нужное
 
 Окно рисуется по **схеме окружения** (`engine/src/sage/scene/EnvironmentSchema.h`),
-а не списком полей с `if` на каждое. Четыре системы, у каждой — включатель,
-выбор типа и группы свойств ЭТОГО типа:
+а не списком полей с `if` на каждое. Пять разделов в порядке показа, у каждого —
+включатель, выбор типа и группы свойств ЭТОГО типа; все строки — контролы
+Editor UI Kit (`ictl::`), группы — `ictl::SubSection` (у групп с включателем в
+заголовке справа «On/Off»):
 
 ```
 Sky                    Enabled, Type
-    Procedural         Colors · Sun · Moon · Stars · Atmosphere / Horizon · Clouds
+    Procedural         Colors · Sun · Moon · Stars · Horizon · Clouds (группы свёрнуты)
     One colour         Color
     One image          Texture, Layout, Rotation, Exposure
     Six separate files Face map · Faces (6), Rotation, Exposure
     (Cubemap folder)   прежний тип: в списке нет; Folder, «Convert to six files»
-Day / Night Cycle      Enabled → Time, Speed, Day length, Runs in play · Sun path
-Environment Lighting   Source → From the sky: Intensity (+ вычисленные цвета)
-                                 Custom values: Sky, Ground, Intensity · Shadows
-Fog                    Enabled, Type → Linear: Color, Start, End
-                                       Exponential height: Color, Density, … · Sun glow
+Atmosphere (туман)     Fog, Type → Linear: Color, Start Distance, End Distance
+                                   Exponential height: Color, Start Distance, Density,
+                                   Height Falloff, Base Height, Max Opacity · Sun Glow
+Day / Night            Day / Night Cycle → Time of Day, Time Speed, Day Length,
+                                   Run in Play · Sun Path (advanced)
+Ambient Light          Source → From Sky: Intensity (+ вычисленные цвета)
+                                Custom: Sky Color, Ground Color, Intensity
+Scene Shadow Settings  Shadow Distance Override, Sun Angular Size (свёрнут)
+Baked Lighting         GIBakeSection
 ```
+
+Границы уровней — в подсказках: включатели «Sky» и «Atmosphere» настраивают
+сцену, а «Skybox»/«Fog» в Game Settings только включают их показ в Game View и
+собранной игре; «Shadow Distance Override» — переопределение сцены (0 — глобальная
+дальность из Game Settings, `EngineConfig::ShadowDistance`). «Night palette»
+(перекраска неба по высоте солнца) и цикл «Day / Night» (двигает солнце) —
+разные параметры.
+
 
 - Выключенная система (небо, цикл, туман) — одна строка «Enabled», больше ничего.
 - Группы с включателем (Sun, Moon, Clouds) — галка в заголовке; выключена —

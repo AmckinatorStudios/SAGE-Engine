@@ -357,3 +357,27 @@ TEST(Environment_cubemap_folder_converts_to_six_files) {
     CHECK_TRUE(sky.HasFaces());
     fs::remove_all(root, ec);
 }
+
+// ПОРЯДОК И ГРАНИЦЫ РАЗДЕЛОВ: небо → атмосфера → время суток → окружающий свет →
+// тени сцены. Тени сцены — самостоятельный раздел, а не группа внутри света, и
+// в нём только то, что есть в LightingEnvironment::Shadows: дистанция и угол
+// солнца (разрешение и каскады — глобальные, в Game Settings).
+TEST(Environment_sections_order_and_scene_shadows_are_separate) {
+    const std::vector<env::System>& all = env::Systems();
+    CHECK_EQ((int)all.size(), 5);
+    if (all.size() != 5) return;
+    CHECK_TRUE(all[0].Id == "sky" && all[1].Id == "fog" && all[2].Id == "cycle" && all[3].Id == "ambient" &&
+               all[4].Id == "shadows");
+    CHECK_TRUE(all[3].Common.empty());   // тени больше не прячутся в «Ambient»
+    CHECK_FALSE(all[4].Open);            // раздел теней свёрнут при первом открытии
+    int props = 0;
+    for (const env::Variant& v : all[4].Variants)
+        for (const env::Group& g : v.Groups) props += (int)g.Props.size();
+    CHECK_EQ(props, 2);
+    const env::Prop* d = env::FindProp("shadows.distance");
+    CHECK_TRUE(d != nullptr && d->Label == "Shadow Distance Override");
+    CHECK_TRUE(d != nullptr && d->Hint.find("Game Settings") != std::string::npos);
+    LightingEnvironment e;
+    CHECK_TRUE(Active("shadows.distance", e));
+    CHECK_TRUE(Active("shadows.sunAngle", e));
+}

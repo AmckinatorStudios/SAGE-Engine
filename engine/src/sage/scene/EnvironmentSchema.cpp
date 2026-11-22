@@ -98,6 +98,8 @@ System MakeSky() {
     s.Label = "Sky";
     s.Icon = "sun";
     s.Hint = "What is drawn behind the scene and lights it from above";
+    s.EnabledLabel = "Sky";
+    s.EnabledHint = "Sky and background of THIS scene. Game Settings → Sky only switches its display in Game View and in the built game";
     s.Enabled = FIELD(Skybox.Enabled);
     s.GetType = [](const Env& e) { return (int)e.Skybox.Kind; };
     s.SetType = [](Env& e, int v) { e.Skybox.Kind = (Src)v; };
@@ -115,8 +117,9 @@ System MakeSky() {
               P(PropKind::Color, "sky.zenith", "Zenith", FIELD(Skybox.TopColor)),
               P(PropKind::Color, "sky.horizon", "Horizon", FIELD(Skybox.HorizonColor)),
               P(PropKind::Bool, "sky.dayNight", "Night palette", FIELD(Skybox.DayNight),
-                "Sky colours and the scene's light follow the sun's height:\n"
-                "below the horizon it gets dark and the moon takes over."),
+                "Sky colours and the scene's light follow the sun's height: below the\n"
+                "horizon it gets dark and the moon takes over. This is NOT the time-of-day\n"
+                "cycle: the cycle moves the sun, the palette only recolours the sky."),
               P(PropKind::Color, "sky.nightZenith", "Zenith (night)", FIELD(Skybox.NightTopColor), {},
                 WHEN(e.Skybox.DayNight)),
               P(PropKind::Color, "sky.nightHorizon", "Horizon (night)",
@@ -137,7 +140,7 @@ System MakeSky() {
                    {"Smooth", "Nearest pixel"},
                    "How the sun and moon pictures are filtered: nearest pixel keeps them crisp."),
           },
-          true, FIELD(Skybox.Celestials), "Discs of the sun and moon and the stars"),
+          false, FIELD(Skybox.Celestials), "Discs of the sun and moon and the stars"),
         G("moon", "Moon",
           {
               P(PropKind::Color, "sky.moon.color", "Disc colour", FIELD(Skybox.MoonColor), {},
@@ -166,7 +169,7 @@ System MakeSky() {
               Float("sky.stars.size", "Size", FIELD(Skybox.StarSize), 0.1f, 10.0f, 0.02f, "%.2f"),
           },
           false, {}, {}, WHEN(e.Skybox.Celestials)),
-        G("atmosphere", "Atmosphere / Horizon",
+        G("horizon", "Horizon",
           {
               Float("sky.gradient", "Gradient curve", FIELD(Skybox.GradientExponent), 0.05f, 8.0f, 0.01f,
                     "%.2f",
@@ -198,8 +201,9 @@ System MakeSky() {
               Slider("sky.clouds.opacity", "Opacity", FIELD(Skybox.CloudOpacity), 0.0f, 1.0f, "%.2f"),
               Float("sky.clouds.wind", "Wind", FIELD(Skybox.CloudWind), -100.0f, 100.0f, 0.05f,
                     "%.2f m/s"),
-              Float("sky.clouds.fade", "Fade distance", FIELD(Skybox.CloudFade), 10.0f, 50000.0f, 5.0f,
-                    "%.0f m"),
+              Float("sky.clouds.fade", "Cloud fade distance", FIELD(Skybox.CloudFade), 10.0f, 50000.0f, 5.0f,
+                    "%.0f m",
+                    "Distance at which clouds melt into the horizon. Not related to fog or shadow distance"),
           },
           false, FIELD(Skybox.Clouds), "A cloud layer at a height above the camera"),
     };
@@ -292,26 +296,28 @@ System MakeSky() {
 System MakeCycle() {
     System s;
     s.Id = "cycle";
-    s.Label = "Day / Night Cycle";
+    s.Label = "Day / Night";
     s.Icon = "clock";
-    s.Hint = "Time of day moves the sun; in the game time runs by itself. Works with any sky";
+    s.Hint = "Time of day turns the sun object; in the game time runs by itself. Works with any sky.\nThe sky's \"Night palette\" is separate: it only recolours the sky by the sun's height";
     s.Enabled = FIELD(Cycle.Enabled);
+    s.EnabledLabel = "Day / Night Cycle";
+    s.EnabledHint = "Turns on the time-of-day cycle: Time of Day moves the sun object";
     Variant v;
     v.Key = "cycle";
     v.Groups = {
         G("time", "",
           {
-              Slider("cycle.time", "Time", FIELD(Cycle.Time), 0.0f, 24.0f, "%.2f h",
+              Slider("cycle.time", "Time of Day", FIELD(Cycle.Time), 0.0f, 24.0f, "%.2f h",
                      "6 — sunrise, 12 — noon, 18 — sunset, 0 — midnight"),
-              Float("cycle.speed", "Speed", FIELD(Cycle.Speed), -100.0f, 100.0f, 0.05f, "x%.2f",
+              Float("cycle.speed", "Time Speed", FIELD(Cycle.Speed), -100.0f, 100.0f, 0.05f, "x%.2f",
                     "1 — normal; 0 — time stands still; below 0 — backwards"),
-              Float("cycle.dayLength", "Day length", FIELD(Cycle.DayLengthMinutes), 0.1f, 1440.0f, 0.1f,
+              Float("cycle.dayLength", "Day Length", FIELD(Cycle.DayLengthMinutes), 0.1f, 1440.0f, 0.1f,
                     "%.1f min", "Real minutes in one game day at speed 1"),
-              P(PropKind::Bool, "cycle.runInPlay", "Runs in play", FIELD(Cycle.RunInPlay),
+              P(PropKind::Bool, "cycle.runInPlay", "Run in Play", FIELD(Cycle.RunInPlay),
                 "Off — the sun stays at the set time; scripts can still move it"),
               Custom("cycle.sunlink"),
           }),
-        G("path", "Sun path",
+        G("path", "Sun Path (advanced)",
           {
               Float("cycle.azimuth", "Sunrise direction", FIELD(Cycle.SunAzimuth), -360.0f, 360.0f, 0.5f,
                     "%.0f°", "Where the sun rises: 0 — +Z, 90 — +X"),
@@ -327,7 +333,7 @@ System MakeCycle() {
 System MakeAmbient() {
     System s;
     s.Id = "ambient";
-    s.Label = "Environment Lighting";
+    s.Label = "Ambient Light";
     s.Icon = "light";
     s.Hint = "Soft light from all around: from the sky or your own colours";
     s.TypeLabel = "Source";
@@ -336,7 +342,7 @@ System MakeAmbient() {
     Variant sky;
     sky.Value = (int)Env::AmbientSource::FromSky;
     sky.Key = "sky";
-    sky.Label = "From the sky";
+    sky.Label = "From Sky";
     sky.Hint = "Colours are taken from the sky and darken with it";
     sky.Groups = {G("main", "",
                     {Float("ambient.intensity", "Intensity", FIELD(AmbientStrength), 0.0f, 2.0f, 0.01f, "%.2f"),
@@ -344,30 +350,47 @@ System MakeAmbient() {
     Variant custom;
     custom.Value = (int)Env::AmbientSource::Custom;
     custom.Key = "custom";
-    custom.Label = "Custom values";
+    custom.Label = "Custom";
     custom.Hint = "Exactly the colours below, whatever the sky";
     custom.Groups = {G("main", "",
-                       {P(PropKind::Color, "ambient.sky", "Sky", FIELD(SkyColor), "Tints upward faces"),
-                        P(PropKind::Color, "ambient.ground", "Ground", FIELD(GroundColor),
+                       {P(PropKind::Color, "ambient.sky", "Sky Color", FIELD(SkyColor), "Tints upward faces"),
+                        P(PropKind::Color, "ambient.ground", "Ground Color", FIELD(GroundColor),
                           "Tints downward faces"),
                         Float("ambient.intensity.custom", "Intensity", FIELD(AmbientStrength), 0.0f, 2.0f,
                               0.01f, "%.2f")})};
     s.Variants = {sky, custom};
-    s.Common = {G("shadows", "Shadows",
-                  {Float("shadows.distance", "Shadow distance", FIELD(Shadows.Distance), 0.0f, 2000.0f, 0.5f,
-                         "%.0f m", "How far from the camera shadows reach. 0 — from Game Settings"),
-                   Float("shadows.sunAngle", "Sun size", FIELD(Shadows.SunAngle), 0.0f, 5.0f, 0.05f,
-                         "%.2f°", "Angular size of the sun: sharp shadow at the base, softer farther away. 0 — hard shadows")},
-                  false)};
+    return s;
+}
+
+System MakeShadows() {
+    System s;
+    s.Id = "shadows";
+    s.Label = "Scene Shadow Settings";
+    s.Icon = "cube";
+    s.Hint = "Overrides for THIS scene. Shadow quality, resolution and cascades stay in Game Settings";
+    s.Open = false;
+    Variant v;
+    v.Key = "shadows";
+    v.Groups = {G("main", "",
+                  {Float("shadows.distance", "Shadow Distance Override", FIELD(Shadows.Distance), 0.0f, 2000.0f,
+                         0.5f, "%.0f m",
+                         "How far from the camera this scene's shadows reach, in metres.\n"
+                         "0 — use the global shadow distance from Game Settings"),
+                   Float("shadows.sunAngle", "Sun Angular Size", FIELD(Shadows.SunAngle), 0.0f, 5.0f, 0.05f,
+                         "%.2f°",
+                         "Angular size of the sun: sharp shadow at the base, softer farther away.\n0 — hard shadows")})};
+    s.Variants = {v};
     return s;
 }
 
 System MakeFog() {
     System s;
     s.Id = "fog";
-    s.Label = "Fog";
+    s.Label = "Atmosphere";
     s.Icon = "cone";
-    s.Hint = "Air of the scene: linear distance fog or exponential height fog";
+    s.Hint = "Fog of the scene: linear distance fog or exponential height fog";
+    s.EnabledHint = "Fog of THIS scene. Game Settings → Fog only switches its display in Game View and in the built game";
+    s.EnabledLabel = "Fog";
     s.Enabled = FIELD(Fog.Enabled);
     s.GetType = [](const Env& e) { return (int)e.Fog.Kind; };
     s.SetType = [](Env& e, int v) { e.Fog.Kind = (FogSettings::Mode)v; };
@@ -378,8 +401,10 @@ System MakeFog() {
     lin.Hint = "From Start to End objects fade into the fog colour";
     lin.Groups = {G("main", "",
                     {P(PropKind::Color, "fog.color", "Color", FIELD(Fog.Color)),
-                     Float("fog.start", "Start", FIELD(Fog.Start), 0.0f, 500.0f, 0.2f, "%.1f m"),
-                     Float("fog.end", "End", FIELD(Fog.End), 0.0f, 1000.0f, 0.2f, "%.1f m")})};
+                     Float("fog.start", "Start Distance", FIELD(Fog.Start), 0.0f, 500.0f, 0.2f, "%.1f m",
+                           "Distance from the camera where fog begins, in metres"),
+                     Float("fog.end", "End Distance", FIELD(Fog.End), 0.0f, 1000.0f, 0.2f, "%.1f m",
+                         "Distance from the camera where objects are fully fogged, in metres")})};
     Variant height;
     height.Value = (int)FogSettings::Mode::ExponentialHeight;
     height.Key = "height";
@@ -389,11 +414,13 @@ System MakeFog() {
         G("main", "",
           {P(PropKind::Color, "fog.color.height", "Color", FIELD(Fog.Color)),
            Float("fog.density", "Density", FIELD(Fog.Density), 0.0f, 1.0f, 0.001f, "%.4f"),
-           Float("fog.falloff", "Height falloff", FIELD(Fog.HeightFalloff), 0.0f, 5.0f, 0.005f, "%.3f"),
-           Float("fog.baseHeight", "Base height", FIELD(Fog.BaseHeight), -1000.0f, 1000.0f, 0.1f, "%.1f m"),
-           Float("fog.startDistance", "Start distance", FIELD(Fog.Start), 0.0f, 1000.0f, 0.2f, "%.1f m"),
-           Slider("fog.maxOpacity", "Max opacity", FIELD(Fog.MaxOpacity), 0.0f, 1.0f, "%.2f")}),
-        G("glow", "Sun glow",
+           Float("fog.falloff", "Height Falloff", FIELD(Fog.HeightFalloff), 0.0f, 5.0f, 0.005f, "%.3f"),
+           Float("fog.baseHeight", "Base Height", FIELD(Fog.BaseHeight), -1000.0f, 1000.0f, 0.1f, "%.1f m",
+                 "World height (Y) where the fog is densest, in metres"),
+           Float("fog.startDistance", "Start Distance", FIELD(Fog.Start), 0.0f, 1000.0f, 0.2f, "%.1f m",
+                 "Distance from the camera where fog begins, in metres"),
+           Slider("fog.maxOpacity", "Max Opacity", FIELD(Fog.MaxOpacity), 0.0f, 1.0f, "%.2f")}),
+        G("glow", "Sun Glow",
           {Float("fog.sunGlow", "Strength", FIELD(Fog.SunScatter), 0.0f, 4.0f, 0.01f, "%.2f"),
            Float("fog.sunGlowSize", "Tightness", FIELD(Fog.SunExponent), 1.0f, 64.0f, 0.1f, "%.1f",
                  "Larger — a narrower glow around the sun")},
@@ -418,7 +445,7 @@ bool GroupActive(const Group& g, const Env& env) {
 } // namespace
 
 const std::vector<System>& Systems() {
-    static const std::vector<System> systems = {MakeSky(), MakeCycle(), MakeAmbient(), MakeFog()};
+    static const std::vector<System> systems = {MakeSky(), MakeFog(), MakeCycle(), MakeAmbient(), MakeShadows()};
     return systems;
 }
 
