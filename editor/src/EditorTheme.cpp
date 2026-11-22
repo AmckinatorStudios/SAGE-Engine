@@ -79,42 +79,45 @@ Theme ModernDark() {
     t.Name = "SAGE Dark";
     t.Dark = true;
     ImVec4* c = t.Colors;
-    // Слои — лесенкой, шаг примерно в 4 % яркости: меньше не видно, больше
-    // рябит. Оттенок чуть холодный (синева в тенях), чтобы жёлтый акцент рядом
-    // читался тёплым, а не грязным.
-    c[(int)Role::Bg] = Hex("#0E1013");
-    c[(int)Role::Surface] = Hex("#15181D");
-    c[(int)Role::SurfaceAlt] = Hex("#1B1F26");
-    c[(int)Role::Elevated] = Hex("#232830");
-    // Поле — на полступени светлее панели: при #1E2229 на #15181D пустой
-    // флажок и поле без текста почти сливались с фоном.
-    c[(int)Role::Input] = Hex("#22272F");
-    c[(int)Role::Overlay] = Hex("#191D23FA");
+    // Слои — лесенкой графита, шаг примерно в 4 % яркости: меньше не видно,
+    // больше рябит. Оттенок нейтрально-тёплый, без синевы: холодные тени
+    // спорили с жёлтым акцентом и красили весь интерфейс в «сталь».
+    c[(int)Role::Bg] = Hex("#0B0B0A");
+    c[(int)Role::Surface] = Hex("#121211");
+    c[(int)Role::SurfaceAlt] = Hex("#1B1A18");
+    c[(int)Role::Elevated] = Hex("#242321");
+    // Поле — светлее панели и отделено рамкой Line: пустое поле и флажок не
+    // должны сливаться с фоном.
+    c[(int)Role::Input] = Hex("#1E1D1A");
+    c[(int)Role::Overlay] = Hex("#151513F7");
 
-    c[(int)Role::Line] = Hex("#272C35");
-    c[(int)Role::LineStrong] = Hex("#3A414D");
+    c[(int)Role::Line] = Hex("#35332E");
+    c[(int)Role::LineStrong] = Hex("#504B42");
 
-    c[(int)Role::Text] = Hex("#E8EAEE");
-    c[(int)Role::TextDim] = Hex("#9BA3B0");
-    c[(int)Role::TextFaint] = Hex("#646C7A");
+    c[(int)Role::Text] = Hex("#F2EFE8");
+    c[(int)Role::TextDim] = Hex("#B9B4A9");
+    c[(int)Role::TextFaint] = Hex("#837D72");
     // Текст ПОВЕРХ жёлтого — тёмный, а не белый: белое на жёлтом не читается
     // (контраст около 1.7:1 при требуемых 4.5).
-    c[(int)Role::TextOnAccent] = Hex("#15181D");
+    c[(int)Role::TextOnAccent] = Hex("#17140D");
 
     // SAGE Yellow. Тёплый янтарь, а не лимон: лимонный на тёмном светится и
     // утомляет, а на светлой теме исчезает.
     c[(int)Role::Accent] = Hex("#F0B429");
-    c[(int)Role::AccentHover] = Hex("#FFC93C");
-    c[(int)Role::AccentActive] = Hex("#D69A18");
-    c[(int)Role::AccentMuted] = Hex("#F0B42933");   // подложка выделения
+    c[(int)Role::AccentHover] = Hex("#FFC64D");
+    c[(int)Role::AccentActive] = Hex("#CC941E");
+    c[(int)Role::AccentMuted] = Hex("#F0B4292E");   // подложка выделения
 
-    c[(int)Role::Hover] = Hex("#FFFFFF0F");         // наведение — светлее фона
-    c[(int)Role::Selection] = Hex("#F0B4292E");
+    c[(int)Role::Hover] = Hex("#FFFFFF0D");         // наведение — светлее фона
+    c[(int)Role::Selection] = Hex("#F0B4292A");
 
-    c[(int)Role::Ok] = Hex("#4ADE80");
-    c[(int)Role::Warn] = Hex("#FBBF24");
-    c[(int)Role::Danger] = Hex("#F0616B");
-    c[(int)Role::Info] = Hex("#60A5FA");
+    c[(int)Role::Ok] = Hex("#64A17A");
+    c[(int)Role::Warn] = Hex("#D6A144");
+    c[(int)Role::Danger] = Hex("#CF6A63");
+    c[(int)Role::Info] = Hex("#C3A66B");
+    // Поля и кнопки отделяются от фона тонкой рамкой: при графитовой палитре
+    // одной разницы заливок мало, чтобы пустое поле читалось как поле.
+    t.Metric.BorderFrame = 1.0f;
     return t;
 }
 
@@ -123,6 +126,7 @@ Theme ModernDark() {
 // темнее, а слои — наоборот, ближе друг к другу.
 Theme ModernLight() {
     Theme t = ModernDark();
+    t.Metric.BorderFrame = 0.0f;   // светлая остаётся как была: рамки полей — только у тёмных
     t.Id = "modern-light";
     t.Name = "SAGE Light";
     t.Dark = false;
@@ -475,7 +479,7 @@ Kit ScaledKit(float k, float radiusFrame, float separatorSize, float fontSize) {
     for (float* f : {&kit.LabelMin, &kit.LabelMax, &kit.LabelGap, &kit.TagGap, &kit.PairGap, &kit.AxisGap, &kit.Indent,
                      &kit.GroupGap, &kit.SectionGap, &kit.FieldMin, &kit.SegmentMin, &kit.NumberMin, &kit.NumberMax,
                      &kit.SeparatorInset, &kit.TagPad, &kit.TagInset, &kit.HeaderExtra,
-                     &kit.HeaderPadX, &kit.ButtonPadX, &kit.ButtonPadXCompact})
+                     &kit.HeaderPadX, &kit.ButtonPadX, &kit.ButtonPadXCompact, &kit.IconGap})
         *f = std::floor(*f * k);
     kit.Rounding = radiusFrame;
     kit.SeparatorThickness = std::max(1.0f, std::floor(separatorSize * k));
@@ -503,7 +507,11 @@ ImU32 SegmentFill(State s) {
 }
 
 ImU32 ControlBorder(State s) {
-    return (s == State::Focused || s == State::Active) ? Color32(Role::Accent) : 0;
+    if (s == State::Focused || s == State::Active) return Color32(Role::Accent);
+    // Рамка покоя — только в темах, где поля вообще с рамкой (тот же признак,
+    // что у нативных полей ImGui: иначе kit и ImGui-контролы выглядят по-разному).
+    if (Current().Metric.BorderFrame <= 0.0f) return 0;
+    return Color32(s == State::Hover ? Role::LineStrong : Role::Line);
 }
 
 ImVec4 IconTint(State s) {

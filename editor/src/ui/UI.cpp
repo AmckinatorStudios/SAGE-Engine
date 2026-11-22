@@ -90,10 +90,12 @@ bool Button(const char* label, ButtonStyle style, const ImVec2& size) {
     ImGui::PushStyleColor(ImGuiCol_Border, p.Border ? C(Role::Line) : ImVec4(0, 0, 0, 0));
     ImGui::PushStyleVar(ImGuiStyleVar_FrameBorderSize, p.Border ? ui.BorderWidth : 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
-                        ImVec2(ui.PaddingControl * 1.5f, ui.PaddingControlY));
-    // Высота у всех кнопок одна — иначе ряд кнопок «пляшет» по вертикали.
+                        ImVec2(EditorTheme::KitMetrics().ButtonPadX, ui.PaddingControlY));
+    // Высота — ровно высота поля ImGui (как у EditorIcons::Button и ButtonGroup),
+    // а не отдельный токен: при масштабе округления двух чисел расходились, и
+    // соседние кнопки отличались на точку.
     ImVec2 sz = size;
-    if (sz.y == 0.0f) sz.y = ui.ControlHeight;
+    if (sz.y == 0.0f) sz.y = ImGui::GetFrameHeight();
     const bool pressed = ImGui::Button(label, sz);
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor(5);
