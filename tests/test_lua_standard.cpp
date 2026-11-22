@@ -19,6 +19,7 @@
 #include "sage/scene/ScriptComponent.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/scripting/ScriptFields.h"
+#include "sage/scripting/lua/LuaInternal.h"
 #include "sage/scripting/ScriptingSystem.h"
 #include "sage/scripting/lua/LuaBackend.h"
 
@@ -255,4 +256,215 @@ end
     CHECK_TRUE(w.Global<bool>(o, "destroyed"));
     CHECK_TRUE(w.Global<bool>(o, "input_ok"));
     CHECK_TRUE(w.Global<bool>(o, "ok_time"));
+}
+
+// --- Аннотации Inspector -----------------------------------------------------
+
+namespace {
+const sage::vars::Var* Find(const sage::vars::Table& t, const char* n) { return t.Find(n); }
+}
+
+// Каждая аннотация из задания, разбор текстом — без запуска файла.
+TEST(LuaStandard_annotations_every_kind) {
+    std::vector<sage::scripting::FieldDiagnostic> problems;
+    const sage::vars::Table t = sage::scripting::lua::ParsePublicFields(R"(
+---@header "Player Settings"
+
+---@group "Movement"
+
+---@export_range 0 20
+---@tooltip "Movement speed of the player"
+move_speed = 5.0
+
+---@export
+can_jump = true
+
+---@end_group
+
+---@group "Combat"
+---@export_range 0 200
+health = 100
+---@export
+player_name = "Player"
+---@end_group
+
+---@export_enum "Idle" "Walk" "Run"
+animation_state = "Idle"
+
+---@export_color
+player_color = color(1, 0.5, 0)
+
+---@export_object
+target = nil
+
+---@export_resource "Animation"
+animator = nil
+
+not_exported = 3
+local hidden = 1
+function update(delta) end
+)", &problems);
+    for (const auto& p : problems) std::printf("       %d: %s\n", p.Line, p.Message.c_str());
+    CHECK_TRUE(problems.empty());
+    CHECK_EQ(t.Size(), (size_t)8);
+    CHECK_TRUE(Find(t, "not_exported") == nullptr);
+    CHECK_TRUE(Find(t, "hidden") == nullptr);
+    const auto* speed = Find(t, "move_speed");
+    CHECK_TRUE(speed != nullptr);
+    if (speed) {
+        CHECK_EQ((int)speed->Data.Type(), (int)Kind::Float);
+        CHECK_NEAR(speed->Max, 20.0f, 1e-6f);
+        CHECK_EQ(speed->Tooltip, std::string("Movement speed of the player"));
+        CHECK_EQ(speed->Group, std::string("Movement"));
+        CHECK_EQ(speed->Header, std::string("Player Settings"));
+    }
+    const auto* health = Find(t, "health");
+    if (health) {
+        CHECK_EQ((int)health->Data.Type(), (int)Kind::Int);   // тип — по значению
+        CHECK_NEAR(health->Max, 200.0f, 1e-6f);
+        CHECK_EQ(health->Group, std::string("Combat"));
+    }
+    if (const auto* v = Find(t, "can_jump")) CHECK_EQ((int)v->Data.Type(), (int)Kind::Bool);
+    if (const auto* v = Find(t, "player_name")) CHECK_EQ(v->Group, std::string("Combat"));
+    const auto* state = Find(t, "animation_state");
+    if (state) {
+        CHECK_EQ(state->Options.size(), (size_t)3);
+        CHECK_EQ(state->Group, std::string(""));            // группа закрыта
+        CHECK_EQ(state->Header, std::string("Player Settings"));
+    }
+    if (const auto* v = Find(t, "player_color")) {
+        CHECK_EQ((int)v->Data.Type(), (int)Kind::Color);
+        CHECK_NEAR(v->Data.AsVec4().y, 0.5f, 1e-6f);
+    }
+    if (const auto* v = Find(t, "target")) CHECK_EQ((int)v->Data.Type(), (int)Kind::Entity);
+    if (const auto* v = Find(t, "animator")) {
+        CHECK_EQ((int)v->Data.Type(), (int)Kind::Asset);
+        CHECK_EQ(v->Hint, std::string("Animation"));
+    }
+}
+
+// Ошибки: переменная и аннотация связаны только прямо; мусор — понятное
+// сообщение со строкой; вложенные группы — путь через «/».
+TEST(LuaStandard_annotations_errors_and_binding) {
+    std::vector<sage::scripting::FieldDiagnostic> problems;
+    const sage::vars::Table t = sage::scripting::lua::ParsePublicFields(R"(
+---@export_range 0 20
+
+orphan_by_blank_line = 1
+
+---@export_range 5 1
+bad_range = 3
+
+---@export_enum "A" "B"
+not_a_string = 1
+
+---@export_colour
+typo_name = 1
+
+---@export
+from_nil = nil
+
+---@export
+sum = 1 + 2
+
+---@export_resource
+no_kind = nil
+
+---@export
+---@export_range 0 1
+two_exports = 0.5
+
+---@group "Outer"
+---@group "Inner"
+---@export
+nested = 1
+---@end_group
+---@end_group
+---@end_group
+
+---@export
+ok_one = 1
+
+---@tooltip "alone"
+just_tooltip = 2
+
+local function helper() end
+---@export
+local local_var = 5
+)", &problems);
+    auto has = [&](const char* needle) {
+        for (const auto& p : problems)
+            if (p.Message.find(needle) != std::string::npos) return true;
+        return false;
+    };
+    for (const auto& p : problems) std::printf("       %d: %s\n", p.Line, p.Message.c_str());
+    CHECK_TRUE(has("не связана с переменной"));          // пустая строка оборвала связь
+    CHECK_TRUE(has("минимум должен быть меньше"));
+    CHECK_TRUE(has("значение должно быть строкой"));
+    CHECK_TRUE(has("неизвестная аннотация @export_colour"));
+    CHECK_TRUE(has("тип не определить по nil"));
+    CHECK_TRUE(has("значение должно быть литералом"));
+    CHECK_TRUE(has("нужен вид ресурса"));
+    CHECK_TRUE(has("уже есть @export"));
+    CHECK_TRUE(has("@end_group без открытой"));
+    CHECK_TRUE(has("@tooltip без @export"));
+    CHECK_TRUE(Find(t, "orphan_by_blank_line") == nullptr);
+    CHECK_TRUE(Find(t, "just_tooltip") == nullptr);
+    CHECK_TRUE(Find(t, "ok_one") != nullptr);
+    if (const auto* v = Find(t, "nested")) CHECK_EQ(v->Group, std::string("Outer/Inner"));
+    else CHECK_TRUE(false);
+    if (const auto* v = Find(t, "ok_one")) CHECK_EQ(v->Group, std::string(""));
+}
+
+// Файл без аннотаций и без snake_case-функций — прежний вид: поля — все литералы.
+TEST(LuaStandard_legacy_globals_still_fields) {
+    const sage::vars::Table t = sage::scripting::ParseFields("legacy.lua", R"(
+speed = 5.0
+health = field.number(100, 0, 200)
+function Update(dt) end
+)");
+    CHECK_TRUE(Find(t, "speed") != nullptr);
+    CHECK_TRUE(Find(t, "health") != nullptr);
+    // А новый вид без @export полей не даёт.
+    const sage::vars::Table n = sage::scripting::ParseFields("new.lua", R"(
+speed = 5.0
+function update(delta) end
+)");
+    CHECK_EQ(n.Size(), (size_t)0);
+}
+
+// Поля работают и в игре: значение из Inspector ложится поверх присваивания,
+// ссылка на объект приходит объектом, цвет — цветом.
+TEST(LuaStandard_annotated_fields_reach_script) {
+    World w;
+    sage::vars::Table fields;
+    {
+        sage::vars::Var v;
+        v.Name = "move_speed";
+        v.Data = sage::vars::Value(9.0f);
+        fields.Put(v);
+    }
+    GameObject o = w.Spawn("P", "annot", R"(
+---@export_range 0 20
+move_speed = 5.0
+---@export_color
+tint = color(1, 0, 0)
+---@export_enum "Idle" "Walk"
+state = "Idle"
+---@export_object
+target = nil
+function start()
+    speed_seen = move_speed
+    tint_ok = tint ~= nil
+    state_seen = state
+    target_missing = target == nil
+end
+)", fields);
+    w.Start();
+    for (const auto& e : w.errors) std::printf("       %s\n", e.Format().c_str());
+    CHECK_TRUE(w.errors.empty());
+    CHECK_NEAR(w.Global<float>(o, "speed_seen"), 9.0f, 1e-5f);
+    CHECK_TRUE(w.Global<bool>(o, "tint_ok"));
+    CHECK_EQ(w.Global<std::string>(o, "state_seen"), std::string("Idle"));
+    CHECK_TRUE(w.Global<bool>(o, "target_missing"));
 }

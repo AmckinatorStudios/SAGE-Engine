@@ -10,6 +10,7 @@
 
 #include "sage/scene/Scene.h"
 #include "sage/scripting/LuaHandlerStore.h"
+#include "sage/scripting/ScriptFields.h"
 #include "sage/scripting/LanguageBackend.h"
 #include "sage/scripting/lua/LuaBackend.h"
 
@@ -454,7 +455,26 @@ sol::object StandardComponentOf(Backend& backend, GameObject object, const std::
 bool StandardHasComponent(const GameObject& object, const std::string& canonical);
 
 // Публичные поля скрипта: разбор `X.public = { ... }` ТЕКСТОМ (см. LuaFields.cpp).
-sage::vars::Table ParsePublicFields(const std::string& source);
+// diagnostics — ошибки аннотаций `---@export…` (необязательно).
+sage::vars::Table ParsePublicFields(const std::string& source,
+                                    std::vector<sage::scripting::FieldDiagnostic>* diagnostics = nullptr);
+
+// Присваивание верхнего уровня простого скрипта: `имя = значение`.
+struct TopLevelAssign {
+    std::string Name;
+    int Line = 0;          // 1-based
+    bool Literal = false;  // значение — литерал, Var.Data заполнен
+    bool IsNil = false;
+    sage::vars::Var Var;
+};
+// Стандартный вид скрипта: в файле есть аннотации `---@export…` или функции
+// жизненного цикла в snake_case (start, update…). Тогда в Inspector идёт только
+// то, что помечено `---@export*`; прежний вид показывает все литералы.
+bool IsStandardStyleSource(const std::string& source);
+// Применить аннотации к присваиваниям верхнего уровня (LuaAnnotations.cpp):
+// заполняет out полями с описанием, ошибки — в diagnostics.
+void ApplyAnnotations(const std::string& source, const std::vector<TopLevelAssign>& assigns,
+                      sage::vars::Table& out, std::vector<sage::scripting::FieldDiagnostic>* diagnostics);
 
 // Общие мелочи для файлов API.
 Scene* SceneOrThrow(Backend& backend, const char* who);

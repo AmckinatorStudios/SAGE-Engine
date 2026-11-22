@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "sage/scripting/LanguageBackend.h"
+#include "sage/scripting/ScriptFields.h"
 #include "sage/scripting/ScriptLint.h"
 #include "sage/vars/Table.h"
 
@@ -54,6 +55,8 @@ struct Language {
     // Пусто — у языка нет такого инструмента, и это не ошибка.
     std::function<sage::vars::Table(const std::string& path, const std::string& source)> Fields;
     std::function<std::vector<std::string>(const std::string& path, const std::string& source)> Methods;
+    // Ошибки объявления полей (аннотации и т.п.) — по тексту, как и Fields.
+    std::function<std::vector<FieldDiagnostic>(const std::string& path, const std::string& source)> FieldProblems;
     std::function<ScriptLintResult(const std::string& path, const std::string& source)> Check;
 
     std::string Origin = "engine";        // "engine", "project", "plugin:<имя>"

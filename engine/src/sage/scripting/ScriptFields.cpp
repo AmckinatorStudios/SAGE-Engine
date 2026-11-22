@@ -4,6 +4,11 @@
 #include <cstring>
 #include <cctype>
 
+#include <functional>
+#include <mutex>
+#include <unordered_map>
+
+#include "sage/core/Problems.h"
 #include "sage/scripting/Languages.h"
 
 namespace sage::scripting {
@@ -14,6 +19,43 @@ sage::vars::Table ParseFields(const std::string& path, const std::string& source
     Language lang;
     if (!LanguageForPath(path, lang) || !lang.Fields) return {};
     return lang.Fields(path, source);
+}
+
+std::vector<FieldDiagnostic> ParseFieldProblems(const std::string& path, const std::string& source) {
+    Language lang;
+    if (!LanguageForPath(path, lang) || !lang.FieldProblems) return {};
+    return lang.FieldProblems(path, source);
+}
+
+void ReportFieldProblems(const std::string& path, const std::string& source) {
+    // Хеш текста на файл: тот же текст — те же находки, повторять их каждый
+    // кадр показа инспектора значило бы забить консоль.
+    static std::mutex mutex;
+    static std::unordered_map<std::string, size_t> seen;
+    const size_t hash = std::hash<std::string>()(source);
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        auto it = seen.find(path);
+        if (it != seen.end() && it->second == hash) return;
+        seen[path] = hash;
+    }
+    sage::Problems::Resolve(path, "script.annotation");
+    for (const FieldDiagnostic& d : ParseFieldProblems(path, source)) {
+        sage::Problem p;
+        p.Level = d.Error ? sage::Severity::Error : sage::Severity::Warning;
+        p.Category = "Script";
+        p.Code = "script.annotation";
+        // Сообщение — в заголовке: в консоль идёт именно он, и «файл:строка:
+        // что не так» читается без открытия вкладки проблем.
+        p.Title = d.Message;
+        p.Detail = "Аннотации `---@` над переменной скрипта задают её вид в Inspector (docs/scripting.md).";
+        p.File = path;
+        p.Resource = path;
+        p.Line = d.Line;
+        p.Excerpt = sage::Problems::Excerpt(source, d.Line);
+        p.Technical = path + ":" + std::to_string(d.Line) + ": " + d.Message;
+        sage::Problems::Report(std::move(p));
+    }
 }
 
 namespace {

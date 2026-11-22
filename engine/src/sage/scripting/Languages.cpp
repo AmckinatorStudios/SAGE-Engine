@@ -73,6 +73,11 @@ void EnsureBuiltins() {
         luaLang.CreateBackend = [](const LanguageHost& host) { return MakeLuaBackend({host.Engine}); };
         luaLang.Fields = [](const std::string&, const std::string& src) { return lua::ParsePublicFields(src); };
         luaLang.Methods = [](const std::string&, const std::string& src) { return ParseLuaMethods(src); };
+        luaLang.FieldProblems = [](const std::string&, const std::string& src) {
+            std::vector<FieldDiagnostic> found;
+            lua::ParsePublicFields(src, &found);
+            return found;
+        };
         luaLang.Check = [](const std::string& path, const std::string& src) { return LintScriptSource(path, src); };
 
         // SAGE Lua — компилятор в Lua: исполняет Lua-бэкенд, поля и методы —
