@@ -673,6 +673,7 @@ std::unique_ptr<SkinnedModel> SkinnedModel::CreateDemoTentacle(int segments) {
 
     SkinnedSubMesh sub;
     sub.Mesh = std::make_shared<SkinnedMesh>(verts, idx);
+    sub.SetBounds(verts);
     // Демо-щупальцу — обычный материал: свой цвет и матовая поверхность.
     sub.Material.Tint = {0.35f, 0.75f, 0.55f};
     sub.Material.Roughness = 0.6f;
@@ -822,6 +823,7 @@ std::unique_ptr<SkinnedModel> SkinnedModel::BuildFromData(ModelData& data) {
     for (ModelSubMeshData& src : data.SubMeshes) {
         SkinnedSubMesh sub;
         sub.Mesh = std::make_shared<SkinnedMesh>(src.Vertices, src.Indices);
+        sub.SetBounds(src.Vertices);
 
         // Материал переносится ЦЕЛИКОМ, карта за картой. Пока сюда доезжала
         // одна текстура из шести, у скина не могло быть ни рельефа, ни
