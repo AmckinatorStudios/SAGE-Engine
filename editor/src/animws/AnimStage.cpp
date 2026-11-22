@@ -232,6 +232,11 @@ void AnimStage::ApplySource(float dt) {
     am->Speed = m_speed;
     am->BlendTime = 0.0f;   // смена клипа в предпросмотре — сразу, без перехода
     const bool own = m_source == Source::Graph && m_graph;
+    // Источник КОПИИ — по режиму предпросмотра, а не объекта уровня: открыть
+    // граф для правки не значит переключить объект на граф, и наоборот. Пути
+    // не стираются: копия — одноразовая, а настоящий компонент здесь не трогается.
+    am->GraphInMemory = own;
+    am->Source = own ? AnimationComponent::SourceKind::Graph : AnimationComponent::SourceKind::Clip;
     if (own) {
         // Граф — из памяти: правка видна до сохранения. Путь и ревизия
         // выставлены так, чтобы система не перечитала его из файла.
@@ -245,7 +250,6 @@ void AnimStage::ApplySource(float dt) {
         // Параметры — значения ПРЕДПРОСМОТРА: в объект уровня они не идут.
         for (const AnimGraphParam& p : m_graph->Params) am->Params.Floats[p.Name] = ParamValue(p.Name);
     } else {
-        am->GraphPath.clear();
         am->GraphResolvedFrom.clear();
         am->GraphAsset = nullptr;
     }
@@ -256,6 +260,7 @@ void AnimStage::ApplySource(float dt) {
             am->OwnClips.push_back(Bind(m_clip, sk, &am->MissingBones));
             am->ClipPath = m_clipPath;
             am->ClipResolvedFrom = m_clipPath;   // из памяти, не из файла
+            am->ClipSuspended = false;           // и не «вернулись из графа»: файл не перечитывать
             am->Anim.SetRig(&sk, &am->OwnClips);
             am->Anim.Play(0, m_loop);
         } else {

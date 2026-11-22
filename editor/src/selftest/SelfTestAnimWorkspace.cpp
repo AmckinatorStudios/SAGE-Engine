@@ -341,6 +341,19 @@ bool EditorLayer::SelfTestAnimWorkspace() {
     real.ClipPath = clips.Refs.front();
     m_scene->Registry().emplace<AnimationComponent>(hero.Entity(), real);
     sage::anim::UpdateAnimators(*m_scene, 0.0f);
+    // Выбран Graph, а графа нет: клип НЕ подставляется (стоим, причина названа);
+    // вернули Clip — клип снова играет. Пути при этом не тронуты.
+    {
+        auto& am = m_scene->Registry().get<AnimationComponent>(hero.Entity());
+        am.Source = AnimationComponent::SourceKind::Graph;
+        sage::anim::UpdateAnimators(*m_scene, 0.016f);
+        if (am.Anim.Playing()) fail("Graph без графа: клип играет вместо графа (скрытый fallback)");
+        if (am.GraphProblem.empty()) fail("Graph без графа: причина не названа");
+        am.Source = AnimationComponent::SourceKind::Clip;
+        sage::anim::UpdateAnimators(*m_scene, 0.016f);
+        if (!am.Anim.Playing()) fail("возврат к Clip не возобновил клип");
+        if (am.ClipPath != clips.Refs.front()) fail("переключение источника тронуло ClipPath");
+    }
 
     SetWorkspace(EditorWorkspace::Animation);
     m_animStage.SetTarget(*this, hero.Id());
@@ -510,10 +523,12 @@ bool EditorLayer::SelfTestAnimWorkspace() {
         SetWorkspace(EditorWorkspace::Scene);
         auto& heroAm = m_scene->Registry().get<AnimationComponent>(hero.Entity());
         heroAm.GraphPath = "unused.sageanimgraph";
+        heroAm.Source = AnimationComponent::SourceKind::Graph;
         if (!CreateAnimationClip(hero.Id(), true)) fail("Create Clip скелетного клипа не сработал");
         createdSkeletal = sage::AssetDatabase::Instance().LocatePath(heroAm.ClipPath);
         if (heroAm.ClipPath.empty() || heroAm.ClipPath == clips.Refs.front()) fail("скелетный клип не назначен");
-        if (!heroAm.GraphPath.empty()) fail("новый клип не снял граф: источники позы должны исключать друг друга");
+        if (heroAm.GraphPath != "unused.sageanimgraph") fail("новый клип стёр путь графа");
+        if (heroAm.Source != AnimationComponent::SourceKind::Clip) fail("новый клип не выбран источником");
         try {
             if (!sage::anim::LoadClip(createdSkeletal).Editable) fail("созданный скелетный клип не editable");
         } catch (const std::exception& e) {

@@ -189,21 +189,12 @@ public:
     // Клип и граф живут в пространстве анимации: открытие ведёт туда. Из
     // вёрстки — нет: там клипом анимируют элементы интерфейса, и уход унёс
     // бы документ вёрстки из-под клипа.
-    void OpenAnimationClip(const std::string& clipPath) override {
-        if (m_workspace != EditorWorkspace::Interface) SetWorkspace(EditorWorkspace::Animation);
-        m_panels[EditorPanel::Animation] = true;
-        m_animation.RequestFocus();
-        m_animation.OpenClip(*this, clipPath);
-    }
+    void OpenAnimationClip(const std::string& clipPath) override;
     void OpenAiGraph(const std::string& graphPath) override {
         m_panelRegistry.SetVisible("AiGraph", true);
         m_aiGraph.Open(*this, graphPath);
     }
-    void OpenAnimGraph(const std::string& graphPath) override {
-        SetWorkspace(EditorWorkspace::Animation);
-        m_panelRegistry.SetVisible("AnimGraph", true);
-        m_animGraph.Open(*this, graphPath);
-    }
+    void OpenAnimGraph(const std::string& graphPath) override;
     bool DrawToolInspector() override {
         return m_workspace == EditorWorkspace::Animation && m_animGraph.DrawInspector(*this);
     }
@@ -712,6 +703,21 @@ private:
     int IdleFrameCap() const override;
     void AskUnsaved(std::function<void()> action);
     void DrawUnsavedPrompt();
+    // ОТКРЫТИЕ ДОКУМЕНТА В ПРОСТРАНСТВЕ ANIMATION — одна защита для всех
+    // входов (Inspector, Assets, окно графа, диалоги): если открытый клип или
+    // граф имеет несохранённые правки и открывается ДРУГОЙ файл, спрашиваем
+    // Save / Discard / Cancel. Открытие того же файла не спрашивает ничего.
+    // proceed выполняется только после ответа «Save» (и успешной записи) или
+    // «Discard».
+    void GuardAnimDocument(const std::string& targetFile, std::function<void()> proceed);
+    void DrawAnimOpenPrompt();
+    enum class AnimOpenAnswer { Save, Discard, Cancel };
+    // Ответ на диалог выше — тем же путём, что и кнопки (и самопроверка).
+    void AnswerAnimOpenPrompt(AnimOpenAnswer answer);
+    void OpenAnimClipNow(const std::string& clipPath);
+    void OpenAnimGraphNow(const std::string& graphPath);
+    bool m_animOpenPrompt = false;
+    std::function<void()> m_animOpenProceed;
 
     // Достаёт материал из файла модели и назначает его меш-рендеру (см. .cpp).
     // Сообщает человеку, чем кончился импорт материалов модели (строка

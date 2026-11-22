@@ -72,6 +72,17 @@ public:
     // владельца клип не правится» проверяется снаружи — внутри панели его
     // видно только глазами на линейке.
     bool HasClipOpen() const { return m_hasClip; }
+    // Документ для общей защиты от потери правок (EditorLayer::GuardAnimDocument).
+    bool Dirty() const { return m_hasClip && m_dirty; }
+    const std::string& DocumentPath() const { return m_path; }
+    // Отбросить правки: клип заново из файла; безымянный (ещё не записанный) — закрыть.
+    void DiscardChanges(EditorHost& host) {
+        if (!m_hasClip) return;
+        if (m_path.empty()) { m_hasClip = false; m_dirty = false; m_clip = anim::PropertyClip{}; return; }
+        const std::string keep = m_path;
+        OpenClip(host, keep);
+        m_dirty = false;
+    }
     entt::entity ClipOwner(EditorHost& host) { return Owner(host).Entity(); }
 
     // Открыть клип по пути. Понимает оба расширения: свой .sageclip и вынутый

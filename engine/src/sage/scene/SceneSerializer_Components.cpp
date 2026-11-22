@@ -471,6 +471,9 @@ void SaveAnimation(json& j, const AnimationComponent& am) {
     oj["clipPath"] = am.ClipPath;
     // Граф анимации — тоже путь: граф один на всех, кто его играет.
     if (!am.GraphPath.empty()) oj["graphPath"] = am.GraphPath;
+    // Какой из двух путей играет — свойство компонента; оба пути пишутся
+    // независимо, неактивный не теряется.
+    oj["source"] = am.Source == AnimationComponent::SourceKind::Graph ? "graph" : "clip";
     oj["clip"] = am.Clip;
     oj["speed"] = am.Speed;
     oj["loop"] = am.Loop;
@@ -496,6 +499,13 @@ AnimationComponent ParseAnimation(const json& aj) {
     AnimationComponent am;
     am.ClipPath = aj.value("clipPath", std::string());
     am.GraphPath = aj.value("graphPath", std::string());
+    // Сцены до поля «source»: играл граф, если он назначен, иначе клип.
+    if (aj.contains("source") && aj["source"].is_string())
+        am.Source = aj["source"].get<std::string>() == "graph" ? AnimationComponent::SourceKind::Graph
+                                                                 : AnimationComponent::SourceKind::Clip;
+    else
+        am.Source = am.GraphPath.empty() ? AnimationComponent::SourceKind::Clip
+                                         : AnimationComponent::SourceKind::Graph;
     am.Clip = aj.value("clip", 0);
     am.Speed = aj.value("speed", 1.0f);
     am.Loop = aj.value("loop", true);

@@ -250,7 +250,7 @@ void AnimInspectorPanel::DrawGraph(EditorHost& host, AnimStage& stage) {
         return;
     }
     const assetslot::Result r = assetslot::Draw(host, "anim_graph", assetslot::Kind::AnimGraph, real->GraphPath,
-                                                nullptr, T("No graph: the object plays its clip"));
+                                                nullptr, T("No graph assigned to the object"));
     if (r.Changed) {
         host.PushUndoSnapshot();
         real->GraphPath = r.Path;
@@ -265,11 +265,10 @@ void AnimInspectorPanel::DrawGraph(EditorHost& host, AnimStage& stage) {
             ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Danger), "%s", e.what());
         }
     }
-    if (ictl::Button("wire", T("Open Graph Editor"), nullptr)) {
-        if (!real->GraphPath.empty()) host.OpenAnimGraph(real->GraphPath);
-        else host.OpenAnimGraph(std::string());
-        stage.SetMode(AnimStage::Source::Graph);
-    }
+    // Открыть можно только назначенный граф (настоящий файл), и открытие идёт
+    // общим путём — с целью предпросмотра и защитой несохранённого документа.
+    if (!real->GraphPath.empty() && ictl::Button("wire", T("Open Graph Editor"), nullptr))
+        host.EditAnimation(stage.TargetId(), real->GraphPath);
     // ПАРАМЕТРЫ ГРАФА — значения ПРЕДПРОСМОТРА: двигаешь — поза меняется сразу,
     // а объект уровня их не получает (в игре их пишут скрипты: SetFloat).
     if (const sage::anim::AnimGraph* g = stage.Graph()) {

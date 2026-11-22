@@ -84,7 +84,12 @@ public:
 
     // --- Источник ------------------------------------------------------------
     Source Mode() const { return m_source; }
-    void SetMode(Source s) { m_source = s; }
+    void SetMode(Source s) {
+        // Из графа назад к клипу: клип показан из памяти (правки таймлайна), а
+        // не перечитан из файла — привязать его к копии заново.
+        if (s == Source::Clip && m_source != Source::Clip) m_clipDirty = true;
+        m_source = s;
+    }
     // Клип, который показывает копия: путь (.sageanim) и данные (могут быть
     // правленными в памяти, ещё не сохранёнными). Пусто — клип объекта.
     void ShowClip(const std::string& path, const sage::anim::ClipAsset& clip, uint64_t revision);

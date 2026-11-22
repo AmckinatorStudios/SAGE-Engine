@@ -30,6 +30,8 @@ public:
     // Открыть файл графа (путь на диске).
     void Open(EditorHost& host, const std::string& path);
     bool Save(EditorHost& host);
+    // Добавить узел (меню холста; в самопроверке — правка документа без мыши).
+    void AddNodeAt(EditorHost& host, sage::anim::AnimNodeKind kind, const glm::vec2& at);
     // Свойства выбранного узла — в Inspector. false — узел не выбран (или
     // после него выбрали объект): инспектор рисует объект.
     bool DrawInspector(EditorHost& host);
@@ -38,6 +40,12 @@ public:
     void ReleasePreview(EditorHost& host);
 
     bool HasGraph() const { return m_hasGraph; }
+    // Несохранённые правки открытого документа (общая защита от потери при
+    // открытии другого — EditorLayer::GuardAnimDocument).
+    bool Dirty() const { return m_hasGraph && m_dirty; }
+    // Отбросить правки: документ заново из файла. Рабочая копия всегда привязана
+    // к файлу, поэтому безымянной не бывает.
+    void DiscardChanges(EditorHost& host);
     const sage::anim::AnimGraph& Graph() const { return m_graph; }
     const std::string& Path() const { return m_path; }
     // Окно открыто с графом — граф предпросмотра ведёт оно.
@@ -79,7 +87,6 @@ private:
     ImVec2 OutputPinPos(const sage::anim::AnimGraphNode& n) const;
     std::string NodeTitle(const sage::anim::AnimGraphNode& n) const;
     std::string NodeDetail(const sage::anim::AnimGraphNode& n) const;
-    void AddNodeAt(EditorHost& host, sage::anim::AnimNodeKind kind, const glm::vec2& at);
     void DeleteSelected();
     void FrameAll();
 

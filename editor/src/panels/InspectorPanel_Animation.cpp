@@ -100,11 +100,13 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                                    T("This model has no skeleton — nothing to animate"));
             }
 
-            // ИСТОЧНИК ПОЗЫ — КЛИП ИЛИ ГРАФ, и выбран всегда один. Раньше оба
-            // слота висели рядом, и, назначив оба, человек не знал, какой
-            // играет (играл граф). Переключение снимает другой источник —
-            // одним шагом отмены.
-            const bool graphMode = !am->GraphPath.empty() || m_animUseGraph[obj.Id()];
+            // ИСТОЧНИК ПОЗЫ — КЛИП ИЛИ ГРАФ: свойство самого компонента
+            // (am->Source), оно сохраняется со сценой. Оба пути живут рядом и
+            // друг друга не стирают: переключение меняет только то, какой
+            // ресурс играет. Что открыто в пространстве Animation — третья,
+            // независимая вещь: кнопка «Open in Animation Workspace» открывает
+            // ресурс выбранного режима и источник не трогает.
+            const bool graphMode = am->Source == AnimationComponent::SourceKind::Graph;
             ictl::GroupItem modes[2];
             modes[0].Text = T("Clip");
             modes[0].Tooltip = T("One clip plays on the skeleton");
@@ -113,29 +115,32 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
             modes[1].Tooltip = T("An animation graph blends several clips by its parameters");
             modes[1].Active = graphMode;
             if (const int hit = ictl::ButtonGroup("##anim_source", modes, 2, ictl::ButtonLook::Standard); hit >= 0) {
-                if (hit == 0 && graphMode) {
-                    if (!am->GraphPath.empty()) host.PushUndoSnapshot();
-                    am->GraphPath.clear();
-                    m_animUseGraph[obj.Id()] = false;
-                } else if (hit == 1 && !graphMode) {
-                    if (!am->ClipPath.empty()) host.PushUndoSnapshot();
-                    am->ClipPath.clear();
-                    m_animUseGraph[obj.Id()] = true;
+                const AnimationComponent::SourceKind want =
+                    hit == 0 ? AnimationComponent::SourceKind::Clip : AnimationComponent::SourceKind::Graph;
+                if (want != am->Source) {
+                    host.PushUndoSnapshot();
+                    am->Source = want;
                 }
             }
 
             const int objId = obj.Id();
+            const auto openButton = [&host, objId](const std::string& path) {
+                if (path.empty()) return;
+                if (ictl::Button("open", T("Open in Animation Workspace")))
+                    host.EditAnimation(objId, path);
+            };
             if (graphMode) {
+                // Без Edit: правка — текстовая кнопка под слотом. «+» — стандартное
+                // окно «Создать», созданный граф только назначается (OpenAfter
+                // выключен): создать и открыть — два разных действия.
                 assetslot::Actions graphActions;
                 graphActions.SuggestedName = obj.Name() + "Graph";
-                graphActions.Edit = [&host, objId, am] { host.EditAnimation(objId, am->GraphPath); };
                 const assetslot::Result graphSlot =
                     assetslot::Draw(host, "animgraph", assetslot::Kind::AnimGraph, am->GraphPath, &m_preview,
                                     T("No graph: create one or drop a .sageanimgraph"), &graphActions);
                 if (graphSlot.Changed) {
                     host.PushUndoSnapshot();
                     am->GraphPath = graphSlot.Path;
-                    if (!graphSlot.Path.empty()) am->ClipPath.clear();
                 }
                 if (graphSlot.BrowseRequested) {
                     FileBrowser::Config c;
@@ -147,23 +152,21 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                     m_browseTarget = &am->GraphPath;
                     m_browseIsShader = m_browseIsMesh = m_browseIsMaterial = false;
                 }
-                if (!am->GraphPath.empty()) {
-                    if (EditorIcons::Button("wire", T("Edit Graph"), T("Opens the graph in the Animation workspace")))
-                        host.EditAnimation(objId, am->GraphPath);
-                    if (am->Model && !am->Graph.Graph())
-                        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s",
-                                           T("The graph could not be read (see the console)"));
-                    for (const std::string& problem : am->Graph.Problems())
-                        ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", problem.c_str());
-                } else {
+                openButton(am->GraphPath);
+                if (am->GraphPath.empty()) {
                     ImGui::TextDisabled("%s", T("Create a graph with + in the slot, or drop one from Assets."));
                 }
+                // Выбран граф, а играть нечему — говорим почему, а не молча
+                // стоим (и клип вместо графа тоже не подставляем).
+                if (!am->GraphProblem.empty() && am->Model)
+                    ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", am->GraphProblem.c_str());
+                for (const std::string& problem : am->Graph.Problems())
+                    ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Warn), "%s", problem.c_str());
             } else {
                 // КЛИП ФАЙЛОМ; пусто — клип из самой модели по номеру (сцены до
                 // появления файлов клипов, модели с невынутыми клипами).
                 assetslot::Actions clipActions;
                 clipActions.Create = [&host, objId] { host.CreateAnimationClip(objId, true); };
-                clipActions.Edit = [&host, objId, am] { host.EditAnimation(objId, am->ClipPath); };
                 const assetslot::Result clipSlot =
                     assetslot::Draw(host, "animclip", assetslot::Kind::Animation, am->ClipPath, &m_preview,
                                     T("Playing a clip from the model itself"), &clipActions);
@@ -186,12 +189,8 @@ void InspectorPanel::DrawAnimationSections(EditorHost& host, GameObject obj, ent
                                        T("%d bones of the clip are missing from this skeleton"),
                                        am->MissingBones);
                 }
-                // Править — назначенный клип; создать — свой клип для этого
-                // скелета, сразу назначенный и открытый.
-                if (!am->ClipPath.empty()) {
-                    if (EditorIcons::Button("anim", T("Edit Clip"), T("Opens the clip in the Animation workspace")))
-                        host.EditAnimation(objId, am->ClipPath);
-                } else {
+                openButton(am->ClipPath);
+                if (am->ClipPath.empty()) {
                     if (EditorIcons::Button("plus", T("Create Clip"),
                                             T("A new editable clip for this skeleton: assigned and opened")))
                         host.CreateAnimationClip(objId, true);
