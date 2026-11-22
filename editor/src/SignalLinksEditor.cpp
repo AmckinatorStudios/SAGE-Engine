@@ -60,7 +60,7 @@ std::string TitleOf(const std::string& signal) {
     return signal;
 }
 
-// События, которые объявляют СКРИПТЫ ЭТОГО объекта (`self:define_event("Died")`).
+// События, которые объявляют СКРИПТЫ ЭТОГО объекта (`events.create(object, "player_died")`).
 // По тексту, до запуска игры; кэш по времени правки файла.
 std::vector<std::string> DefinedEventsOf(EditorHost& host, const entt::registry& reg, entt::entity e) {
     std::vector<std::string> out;
@@ -183,7 +183,7 @@ bool DrawSignalLinks(EditorHost& host, GameObject obj) {
         ImGui::BeginDisabled(avail.empty());
         if (EditorIcons::IconOnlyButton("plus", T("Add a built-in event of this object"))) ImGui::OpenPopup("add_event");
         ImGui::EndDisabled();
-        if (ImGui::BeginPopup("add_event")) {
+        if (Sage::UI::MenuScope addEventMenu; ImGui::BeginPopup("add_event")) {
             for (const sage::signals::SignalInfo& s : avail) {
                 if (ImGui::MenuItem(TitleOf(s.Name).c_str())) {
                     host.PushUndoSnapshot();

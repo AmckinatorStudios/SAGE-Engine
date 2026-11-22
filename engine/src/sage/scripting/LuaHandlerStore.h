@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include <sol/sol.hpp>
 
@@ -45,6 +46,12 @@ public:
     int Connect(sage::events::Bus& bus, int object, const std::string& name,
                 sol::protected_function fn, bool once, int owner);
 
+    // Номера соединений ЭТОГО хранилища, чья функция — именно `fn` (та же
+    // функция Lua, а не такая же по тексту) и которые подписаны на сигнал
+    // object/name. Нужны `events.disconnect(объект, "имя", обработчик)`: снять
+    // подписку по самому обработчику, не храня номер соединения.
+    std::vector<int> Find(int object, const std::string& name, const sol::object& fn) const;
+
     int Group() const { return m_group; }
     size_t Size() const;
     // Все ли хранимые функции держатся за ГЛАВНЫЙ поток Lua (а не за поток
@@ -65,6 +72,8 @@ private:
         int Connection = 0;
         const sage::events::Bus* Bus = nullptr;   // шина соединения (их может быть две)
         int Owner = 0;
+        int Object = 0;       // на чей сигнал подписано (0 — глобальное событие)
+        std::string Name;
     };
     struct Shared {
         Invoke Call;

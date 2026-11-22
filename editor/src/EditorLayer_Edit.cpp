@@ -135,6 +135,9 @@ void EditorLayer::MergeScriptVars(GameObject object) {
         // этом не стираются, а гаснут (Var::Declared) — и вернутся, если
         // переменную объявят снова.
         const sage::vars::Table declaration = sage::scripting::ParseFields(entry.Path, source);
+        // Ошибки аннотаций (`---@export_range` с одним числом и т.п.) — в
+        // консоль и «Проблемы»: один раз на изменённый текст, а не каждый кадр.
+        sage::scripting::ReportFieldProblems(entry.Path, source);
 
         // Значения ЭТОГО объекта живут в самом компоненте скрипта: они объявлены
         // скриптом и принадлежат паре «объект + скрипт». Слияние сохраняет уже

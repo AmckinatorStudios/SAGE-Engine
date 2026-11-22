@@ -164,7 +164,19 @@ void RegisterTweens(Backend& backend) {
     lua["Ease"] = tw::MakeEaseTable(lua);
 
     // --- Твин в руках скрипта: цепочка и управление ------------------------------
-    sol::usertype<TweenRef> rt = lua.new_usertype<TweenRef>("SageTween", sol::no_constructor);
+    // Методы твина лежат в таблице, а не в самом типе: тип отдаёт их через
+    // BindMethod, и `tween.ping_pong()` (стандарт SAGE) работает так же, как
+    // `tween:ping_pong()`.
+    sol::usertype<TweenRef> tweenType = lua.new_usertype<TweenRef>("SageTween", sol::no_constructor);
+    sol::table rt = lua.create_table();
+    tweenType[sol::meta_function::index] = [rt](sol::object self, sol::stack_object key) -> sol::object {
+        sol::state_view view(key.lua_state());
+        // Ключ — строкой: стол rt живёт на главном потоке, а скрипт может
+        // идти корутиной (там ключ лежит на чужом стеке).
+        if (!key.is<std::string>()) return sol::lua_nil;
+        const std::string name = key.as<std::string>();
+        return BindMethod(view, rt[name], self);
+    };
     auto clipOf = [self](TweenRef& r, const char* who) -> TweenClip& {
         TweenClip* c = PlayerOf(*self).Clip(r.Id);
         if (!c) throw std::runtime_error(std::string(who) + ": твин уже закончился или снят");
@@ -242,7 +254,7 @@ void RegisterTweens(Backend& backend) {
         const TweenClip* c = PlayerOf(*self).Clip(r.Id);
         return c ? c->Length() : 0.0f;
     };
-    rt[sol::meta_function::to_string] = [](const TweenRef& r) { return "Tween #" + std::to_string(r.Id); };
+    tweenType[sol::meta_function::to_string] = [](const TweenRef& r) { return "Tween #" + std::to_string(r.Id); };
 
     // --- Tween.* -----------------------------------------------------------------
     sol::table t = lua.create_table();

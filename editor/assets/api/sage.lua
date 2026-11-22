@@ -3462,3 +3462,110 @@ function OnUpdate(entity, dt) end
 ---@param name string
 ---@param data any
 function OnMessage(entity, name, data) end
+
+-- --- Стандарт SAGE Lua: object и события -------------------------------------
+-- Рекомендуемый вид скрипта (docs/scripting.md, «Стандарт SAGE Lua»): функции
+-- start/update(delta)/fixed_update/late_update/on_enable/on_disable/on_destroy,
+-- текущий объект — `object`, всё через точку, snake_case.
+
+---@class SageObject
+---@field name string
+---@field active boolean
+---@field transform SageTransform
+---@field parent SageObject?
+---@field children SageObject[]
+local SageObject = {}
+---Уничтожает объект.
+function SageObject.destroy() end
+---Компонент по имени ("rigid_body", "camera", …) или nil.
+---@param name string
+---@return any
+function SageObject.get_component(name) end
+---@param name string
+---@return boolean
+function SageObject.has_component(name) end
+---@param name string
+---@param options? table
+---@return any
+function SageObject.add_component(name, options) end
+---@param name string
+---@return boolean
+function SageObject.remove_component(name) end
+---Позвать функцию скрипта этого объекта.
+---@param method string
+---@param ... any
+---@return any
+function SageObject.call(method, ...) end
+
+---Объект, на котором стоит этот скрипт.
+---@type SageObject
+object = nil
+
+---@class SageTransform
+---@field position vector3
+---@field rotation vector3
+---@field scale vector3
+local SageTransform = {}
+---@return vector3
+function SageTransform.forward() end
+---@return vector3
+function SageTransform.right() end
+---@return vector3
+function SageTransform.up() end
+---@param target vector3
+function SageTransform.look_at(target) end
+
+---@class SageEvent
+---@field name string      Название события.
+---@field sender SageObject Объект, вызвавший событие.
+---@field data any         Переданные данные.
+
+---@class SageConnection
+local SageConnection = {}
+function SageConnection.disconnect() end
+
+---@alias SageEventHandler fun(event: SageEvent)
+
+events = events or {}
+---Создаёт и объявляет своё событие объекта (его видит Inspector до запуска игры).
+---@param target SageObject
+---@param name string
+function events.create(target, name) end
+---Вызывает событие объекта; без объекта первым аргументом — глобальное.
+---@param target SageObject|string
+---@param name string|any
+---@param data? any
+function events.trigger(target, name, data) end
+---Подключает обработчик события (их может быть несколько).
+---@param target SageObject|string
+---@param name string|SageEventHandler
+---@param handler? SageEventHandler
+---@return SageConnection
+function events.connect(target, name, handler) end
+---Подключает обработчик, который сработает только один раз.
+---@param target SageObject|string
+---@param name string|SageEventHandler
+---@param handler? SageEventHandler
+---@return SageConnection
+function events.connect_once(target, name, handler) end
+---Отключает ранее подключённый обработчик.
+---@param target SageObject|string|SageConnection
+---@param name? string
+---@param handler? SageEventHandler
+---@return integer
+function events.disconnect(target, name, handler) end
+
+---Один раз при старте.
+function start() end
+---Каждый кадр.
+---@param delta number
+function update(delta) end
+---Постоянным шагом.
+---@param delta number
+function fixed_update(delta) end
+---После всех update кадра.
+---@param delta number
+function late_update(delta) end
+function on_enable() end
+function on_disable() end
+function on_destroy() end

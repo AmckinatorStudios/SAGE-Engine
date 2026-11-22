@@ -78,6 +78,25 @@ auto Axis(int i) {
 
 } // namespace
 
+std::string CanonicalComponent(const std::string& name) {
+    // PascalCase (прежнее) остаётся как есть; snake_case — в PascalCase.
+    std::string out = name;
+    if (!name.empty() && (std::islower((unsigned char)name[0]))) {
+        out.clear();
+        bool upper = true;
+        for (char c : name) {
+            if (c == '_') { upper = true; continue; }
+            out += upper ? (char)std::toupper((unsigned char)c) : c;
+            upper = false;
+        }
+    }
+    // Имена компонентов, которые бэкенд знает под другим написанием.
+    if (out == "MeshRenderer") return "Mesh";
+    if (out == "AudioSource") return "Audio";
+    if (out == "Animator") return "Animation";
+    return out;
+}
+
 std::string SnakeToPascal(const std::string& name) {
     if (name.empty() || !std::islower((unsigned char)name[0])) return {};
     std::string out;
@@ -160,6 +179,17 @@ void RegisterObject(Backend& backend) {
         [](TransformRef& r) { return Tr(r.Obj, "transform.localScale").Scale; },
         [](TransformRef& r, const glm::vec3& v) { Tr(r.Obj, "transform.localScale").Scale = v; });
 
+    // Те же свойства в стандарте snake_case: transform.local_position.
+    tr["local_position"] = sol::property(
+        [](TransformRef& r) { return Tr(r.Obj, "transform.local_position").Position; },
+        [](TransformRef& r, const glm::vec3& v) { Tr(r.Obj, "transform.local_position").Position = v; });
+    tr["local_rotation"] = sol::property(
+        [](TransformRef& r) { return Tr(r.Obj, "transform.local_rotation").Rotation; },
+        [](TransformRef& r, const glm::vec3& v) { Tr(r.Obj, "transform.local_rotation").Rotation = v; });
+    tr["local_scale"] = sol::property(
+        [](TransformRef& r) { return Tr(r.Obj, "transform.local_scale").Scale; },
+        [](TransformRef& r, const glm::vec3& v) { Tr(r.Obj, "transform.local_scale").Scale = v; });
+
     tr["SetPosition"] = [](TransformRef& r, float x, float y, float z) {
         Tr(r.Obj, "SetPosition").Position = glm::vec3(x, y, z);
     };
@@ -200,9 +230,9 @@ void RegisterObject(Backend& backend) {
         t.Rotation.y = e.y;
     };
     // translate, look_at, forward… — нынешние имена тех же методов.
-    tr[sol::meta_function::index] = [](TransformRef&, sol::stack_object key) {
-        return SnakeMethod(key.lua_state(), "SageTransform", key);
-    };
+    // Метод отдаётся привязанным к transform: `transform.forward()` (стандарт)
+    // и `transform:forward()` (прежнее) — одно и то же.
+    InstallBoundIndex(tr, "SageTransform");
     tr["WorldPosition"] = [self](TransformRef& r) {
         Alive(r.Obj, "WorldPosition");
         Scene* scene = self->ScenePtr();
@@ -288,7 +318,7 @@ void RegisterObject(Backend& backend) {
 
     // Компоненты: универсальный GetComponent и типизированные короткие пути.
     ot["GetComponent"] = [self](ObjectRef& r, const std::string& name) {
-        return self->ComponentOf(r.Obj, name);
+        return self->ComponentOf(r.Obj, CanonicalComponent(name));
     };
     ot["GetCharacterController"] = [self](ObjectRef& r) {
         return self->ComponentOf(r.Obj, "CharacterController");
@@ -306,9 +336,31 @@ void RegisterObject(Backend& backend) {
     //     crate:AddComponent("RigidBody", {type = "dynamic", mass = 2})
     //     crate:AddComponent("Collider",  {shape = "box", size = Vector3(1, 1, 1)})
     //     zone:AddComponent("RigidBody",  {type = "static", sensor = true})
-    ot["AddComponent"] = [self](ObjectRef& r, const std::string& name, sol::optional<sol::table> opts)
+    ot["AddComponent"] = [self](ObjectRef& r, const std::string& rawName, sol::optional<sol::table> opts)
         -> sol::object {
         Alive(r.Obj, "AddComponent");
+        const std::string name = CanonicalComponent(rawName);
+        // Настройки в стандарте snake_case (linear_damping, freeze_rotation):
+        // под прежние camelCase-ключи ниже они копируются, а не переименовываются —
+        // таблица принадлежит вызывающему.
+        if (opts) {
+            std::vector<std::pair<std::string, sol::object>> extra;
+            for (const auto& kv : *opts) {
+                if (kv.first.get_type() != sol::type::string) continue;
+                const std::string key = kv.first.as<std::string>();
+                if (key.find('_') == std::string::npos) continue;
+                std::string camel;
+                bool up = false;
+                for (char c : key) {
+                    if (c == '_') { up = true; continue; }
+                    camel += up ? (char)std::toupper((unsigned char)c) : c;
+                    up = false;
+                }
+                extra.emplace_back(camel, kv.second);
+            }
+            for (auto& [k, v] : extra)
+                if (!(*opts)[k].valid()) (*opts)[k] = v;
+        }
         entt::registry& reg = *r.Obj.Registry();
         const entt::entity e = r.Obj.Entity();
         auto str = [&](const char* key, const std::string& def) {
@@ -339,7 +391,7 @@ void RegisterObject(Backend& backend) {
                 if (opts->get_or("freezeRotation", false)) rb.Locks |= sage::physics::kLockRotAll;
                 rb.Locks = (uint8_t)(opts->get_or("locks", (int)rb.Locks) & 0x3F);
             }
-            return sol::make_object(self->Lua(), true);
+            return self->ComponentOf(r.Obj, "RigidBody");
         }
         if (name == "Collider") {
             ColliderComponent& c = reg.get_or_emplace<ColliderComponent>(e);
@@ -357,7 +409,7 @@ void RegisterObject(Backend& backend) {
                 c.Radius = opts->get_or("radius", c.Radius);
                 c.HalfHeight = opts->get_or("halfHeight", c.HalfHeight);
             }
-            return sol::make_object(self->Lua(), true);
+            return self->ComponentOf(r.Obj, "Collider");
         }
         if (name == "CharacterController") {
             // Новый — сразу по мешу объекта (sage/scene/CharacterFit.h): иначе
@@ -423,7 +475,7 @@ void RegisterObject(Backend& backend) {
                 sol::object c = (*opts)["color"];
                 if (c.is<glm::vec3>()) l.Color = c.as<glm::vec3>();
             }
-            return sol::make_object(self->Lua(), true);
+            return self->ComponentOf(r.Obj, "Light");
         }
         if (name == "Camera") {
             CameraComponent& c = reg.get_or_emplace<CameraComponent>(e);
@@ -439,7 +491,7 @@ void RegisterObject(Backend& backend) {
                 sol::object c = (*opts)["color"];
                 if (c.is<glm::vec3>()) m.Color = c.as<glm::vec3>();
             }
-            return sol::make_object(self->Lua(), true);
+            return self->ComponentOf(r.Obj, "Mesh");
         }
         throw std::runtime_error("AddComponent: компонент '" + name +
                                  "' из скрипта не добавляется (есть RigidBody, Collider, CharacterController, "
@@ -474,8 +526,9 @@ void RegisterObject(Backend& backend) {
             throw std::runtime_error("set: значение для '" + name + "' — число, Vector3 или Color");
         sage::anim::WriteProperty(*p, *r.Obj.Registry(), r.Obj.Entity(), v);
     };
-    ot["HasComponent"] = [](ObjectRef& r, const std::string& name) {
+    ot["HasComponent"] = [](ObjectRef& r, const std::string& rawName) {
         Alive(r.Obj, "HasComponent");
+        const std::string name = CanonicalComponent(rawName);
         entt::registry& reg = *r.Obj.Registry();
         const entt::entity e = r.Obj.Entity();
         if (name == "RigidBody" || name == "Body") return reg.all_of<RigidBodyComponent>(e);
@@ -485,10 +538,14 @@ void RegisterObject(Backend& backend) {
         if (name == "Light") return reg.all_of<LightComponent>(e);
         if (name == "Camera") return reg.all_of<CameraComponent>(e);
         if (name == "Mesh") return reg.all_of<MeshRendererComponent>(e);
-        return false;
+        if (name == "Transform") return reg.all_of<Transform>(e);
+        if (name == "Animation") return reg.all_of<AnimationComponent>(e);
+        if (name == "Audio") return reg.all_of<AudioSourceComponent>(e);
+        return StandardHasComponent(r.Obj, name);
     };
-    ot["RemoveComponent"] = [](ObjectRef& r, const std::string& name) {
+    ot["RemoveComponent"] = [](ObjectRef& r, const std::string& rawName) {
         Alive(r.Obj, "RemoveComponent");
+        const std::string name = CanonicalComponent(rawName);
         entt::registry& reg = *r.Obj.Registry();
         const entt::entity e = r.Obj.Entity();
         if (name == "RigidBody" || name == "Body") return reg.remove<RigidBodyComponent>(e) > 0;
@@ -503,8 +560,9 @@ void RegisterObject(Backend& backend) {
     // Нужен персонажу от первого лица: камера, висящая на самом теле, наклоняла
     // бы вместе со взглядом всё тело, — её переносят на дочерний «взгляд».
     // Камера едет вместе со своей пост-обработкой: та принадлежит именно ей.
-    ot["MoveComponent"] = [](ObjectRef& r, const std::string& name, ObjectRef& to) {
+    ot["MoveComponent"] = [](ObjectRef& r, const std::string& rawName, ObjectRef& to) {
         Alive(r.Obj, "MoveComponent");
+        const std::string name = CanonicalComponent(rawName);
         Alive(to.Obj, "MoveComponent");
         entt::registry& reg = *r.Obj.Registry();
         const entt::entity from = r.Obj.Entity();

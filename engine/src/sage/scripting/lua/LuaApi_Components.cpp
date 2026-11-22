@@ -287,14 +287,31 @@ void RegisterComponents(Backend& backend) {
         Need<CameraComponent>(r.Obj, "SetPrimary").Primary = on;
     };
     cam["transform"] = sol::property([](CameraRef& r) { return TransformRef(r.Obj); });
+    // Те же настройки свойствами (стандарт SAGE): camera.fov = 60.
+    cam["fov"] = sol::property([](CameraRef& r) { return Need<CameraComponent>(r.Obj, "fov").Fov; },
+                               [](CameraRef& r, float v) { Need<CameraComponent>(r.Obj, "fov").Fov = v; });
+    cam["near_clip"] = sol::property([](CameraRef& r) { return Need<CameraComponent>(r.Obj, "near_clip").NearClip; },
+                                     [](CameraRef& r, float v) { Need<CameraComponent>(r.Obj, "near_clip").NearClip = v; });
+    cam["far_clip"] = sol::property([](CameraRef& r) { return Need<CameraComponent>(r.Obj, "far_clip").FarClip; },
+                                    [](CameraRef& r, float v) { Need<CameraComponent>(r.Obj, "far_clip").FarClip = v; });
+    cam["primary"] = sol::property([](CameraRef& r) { return Need<CameraComponent>(r.Obj, "primary").Primary; },
+                                   [](CameraRef& r, bool v) { Need<CameraComponent>(r.Obj, "primary").Primary = v; });
+
+    // Методы по snake_case-именам и через точку: `character.is_grounded()`.
+    InstallBoundIndex(ch, "SageCharacterController");
+    InstallBoundIndex(an, "SageAnimation");
+    InstallBoundIndex(au, "SageAudioSource");
+    InstallBoundIndex(cam, "SageCamera");
 }
 
 // Имя компонента → прокси. ОДИН список на весь бэкенд: и GetComponent, и
 // публичное поле field.component("...") ходят сюда, поэтому «Animation» значит
 // одно и то же в обоих местах — и остаётся значить после добавления нового
 // компонента.
-sol::object Backend::ComponentOf(GameObject object, const std::string& component) {
+sol::object Backend::ComponentOf(GameObject object, const std::string& rawComponent) {
     if (!object.Valid()) return sol::lua_nil;
+    // "rigid_body" и "RigidBody" — один компонент.
+    const std::string component = CanonicalComponent(rawComponent);
     entt::registry& reg = *object.Registry();
     const entt::entity e = object.Entity();
 
@@ -319,6 +336,11 @@ sol::object Backend::ComponentOf(GameObject object, const std::string& component
                                               : sol::lua_nil;
     }
     if (component == "Script") return ScriptOf(object);
+    // RigidBody, Collider, Light, Mesh…: поля компонента — через безопасный
+    // прокси (LuaApi_Standard.cpp).
+    if (sol::object proxy = StandardComponentOf(*this, object, component); proxy.valid() &&
+                                                                          proxy.get_type() != sol::type::lua_nil)
+        return proxy;
     // Неизвестное имя — не ошибка, а nil: список компонентов растёт, и скрипт,
     // спросивший то, чего в этой сборке нет, должен уметь это проверить.
     return sol::lua_nil;

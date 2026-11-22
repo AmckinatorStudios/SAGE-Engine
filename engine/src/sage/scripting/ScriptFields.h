@@ -19,6 +19,23 @@ namespace sage::scripting {
 
 sage::vars::Table ParseFields(const std::string& path, const std::string& source);
 
+// Найденная при разборе ошибка объявления поля (например, неверная аннотация
+// `---@export_range` в Lua). Строка 1-based; Error=false — предупреждение.
+struct FieldDiagnostic {
+    int Line = 0;
+    bool Error = true;
+    std::string Message;
+};
+
+// Ошибки объявления полей — тем же разбором, без запуска. Пусто, если язык
+// ошибок объявления не знает или их нет.
+std::vector<FieldDiagnostic> ParseFieldProblems(const std::string& path, const std::string& source);
+
+// Разбор ошибок объявления + их показ: в консоль и во вкладку «Проблемы»
+// (Category "Script", Code "script.annotation"). Дёшево зовётся каждый кадр:
+// файл с тем же текстом повторно не сообщается, а исправленный — снимается.
+void ReportFieldProblems(const std::string& path, const std::string& source, bool force = false);
+
 // Методы, которые скрипт объявляет, — для выбора «Target.Method» в связи
 // инспектора. Тоже ТЕКСТОМ: связь настраивают, пока игра не запущена. Хуки
 // жизненного цикла (Start, Update, OnCollisionEnter…) в список не входят —
@@ -33,7 +50,8 @@ std::vector<std::string> ParseMethods(const std::string& path, const std::string
 // SAGE Lua пишут вызов одинаково.
 std::vector<std::string> ParseEmittedSignals(const std::string& source);
 
-// События, которые скрипт ОБЪЯВЛЯЕТ (`self:define_event("Died")`), — по тексту,
+// События, которые скрипт ОБЪЯВЛЯЕТ (`events.create(object, "player_died")`,
+// прежнее `self:define_event("Died")`), — по тексту,
 // как и методы: инспектор показывает их до запуска игры и без вызова emit.
 std::vector<std::string> ParseDefinedEvents(const std::string& source);
 

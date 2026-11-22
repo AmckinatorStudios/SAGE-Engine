@@ -10,6 +10,7 @@
 
 #include "sage/scene/Scene.h"
 #include "sage/scripting/LuaHandlerStore.h"
+#include "sage/scripting/ScriptFields.h"
 #include "sage/scripting/LanguageBackend.h"
 #include "sage/scripting/lua/LuaBackend.h"
 
@@ -101,6 +102,72 @@ struct ConnectionRef {
     int Id = 0;
     std::string Signal;
 };
+
+// --- Стандарт SAGE: методы через точку -----------------------------------------
+//
+// `object.destroy()` без `self`: метод, найденный у прокси, отдаётся
+// привязанным к нему замыканием. Двоеточие (`object:destroy()`) продолжает
+// работать — прежние скрипты на нём написаны: первый аргумент, который и есть
+// этот же объект (тот же userdata), молча отбрасывается. Чужой объект первым
+// аргументом (`child.set_parent(other)`) остаётся аргументом.
+// Имя компонента из скрипта -> имя, по которому его знает бэкенд: "rigid_body"
+// и "RigidBody" — один компонент (стандарт — snake_case, прежнее — PascalCase).
+std::string CanonicalComponent(const std::string& name);
+
+// Метод, привязанный к своему объекту. `owner` — сам объект Lua (а не копия
+// прокси): у прокси бывает своё состояние (твин помнит, где кончился прошлый
+// шаг), и метод обязан менять именно его.
+//
+// Ссылки привязки берутся на ГЛАВНОМ потоке Lua: скрипты и тесты идут корутинами,
+// а ссылка помнит поток, на котором её взяли, и снимает себя через него же —
+// собранная сборщиком корутина портила бы память (см. LuaHandlerStore.cpp).
+inline sol::object OnMainThread(const sol::object& value) {
+    lua_State* L = value.lua_state();
+    lua_State* main = L ? sol::main_thread(L, L) : nullptr;
+    if (!main || main == L) return value;
+    value.push(main);
+    sol::object onMain(main, -1);
+    lua_pop(main, 1);
+    return onMain;
+}
+
+inline sol::object BindMethod(sol::state_view lua, const sol::object& fnArg, const sol::object& ownerArg) {
+    if (fnArg.get_type() != sol::type::function) return fnArg;
+    const sol::object fn = OnMainThread(fnArg);
+    const sol::object owner = OnMainThread(ownerArg);
+    sol::protected_function f = fn.as<sol::protected_function>();
+    return sol::make_object(lua, [f, owner](sol::this_state ts, sol::variadic_args va) -> sol::variadic_results {
+        lua_State* L = ts;
+        size_t from = 0;
+        if (va.size() > 0) {
+            owner.push(L);
+            lua_pushvalue(L, va[0].stack_index());
+            if (lua_rawequal(L, -1, -2)) from = 1;
+            lua_pop(L, 2);
+        }
+        std::vector<sol::object> args;
+        for (size_t i = from; i < va.size(); ++i) args.push_back(sol::object(va[i]));
+        sol::protected_function_result r = f(owner, sol::as_args(args));
+        if (!r.valid()) {
+            sol::error e = r;
+            throw e;
+        }
+        sol::variadic_results out;
+        for (int i = 0; i < r.return_count(); ++i) out.push_back(sol::object(r[i]));
+        return out;
+    });
+}
+
+// Прежние методы PascalCase прокси находит сам sol2, а недостающее
+// snake_case-имя (`character.is_grounded()`) — этот запасной index: ищет
+// прежнее имя в классе и отдаёт метод привязанным.
+template <class T>
+void InstallBoundIndex(sol::usertype<T>& type, const char* className) {
+    type[sol::meta_function::index] = [className](sol::object self, sol::stack_object key) -> sol::object {
+        sol::state_view lua(key.lua_state());
+        return BindMethod(lua, SnakeMethod(lua, className, key), self);
+    };
+}
 
 class Backend : public LanguageBackend {
 public:
@@ -405,9 +472,36 @@ void RegisterTweens(Backend& backend);
 // `field.number(...)` и прочие — они нужны и при ВЫПОЛНЕНИИ файла, а не только
 // при разборе объявления (см. LuaFields.cpp).
 void RegisterFields(Backend& backend);
+// Стандарт SAGE: строчные имена разделов, input.was_pressed, прокси компонентов
+// по snake_case-именам (см. LuaApi_Standard.cpp). Зовётся ПОСЛЕДНИМ, когда все
+// разделы и короткие имена прежнего движка уже есть.
+void InstallStandard(Backend& backend);
+// Прокси компонента из списка стандарта (RigidBody, Collider, Light, Mesh,
+// Joint, ParticleEmitter, Decal) или nil.
+sol::object StandardComponentOf(Backend& backend, GameObject object, const std::string& canonical);
+bool StandardHasComponent(const GameObject& object, const std::string& canonical);
 
 // Публичные поля скрипта: разбор `X.public = { ... }` ТЕКСТОМ (см. LuaFields.cpp).
-sage::vars::Table ParsePublicFields(const std::string& source);
+// diagnostics — ошибки аннотаций `---@export…` (необязательно).
+sage::vars::Table ParsePublicFields(const std::string& source,
+                                    std::vector<sage::scripting::FieldDiagnostic>* diagnostics = nullptr);
+
+// Присваивание верхнего уровня простого скрипта: `имя = значение`.
+struct TopLevelAssign {
+    std::string Name;
+    int Line = 0;          // 1-based
+    bool Literal = false;  // значение — литерал, Var.Data заполнен
+    bool IsNil = false;
+    sage::vars::Var Var;
+};
+// Стандартный вид скрипта: в файле есть аннотации `---@export…` или функции
+// жизненного цикла в snake_case (start, update…). Тогда в Inspector идёт только
+// то, что помечено `---@export*`; прежний вид показывает все литералы.
+bool IsStandardStyleSource(const std::string& source);
+// Применить аннотации к присваиваниям верхнего уровня (LuaAnnotations.cpp):
+// заполняет out полями с описанием, ошибки — в diagnostics.
+void ApplyAnnotations(const std::string& source, const std::vector<TopLevelAssign>& assigns,
+                      sage::vars::Table& out, std::vector<sage::scripting::FieldDiagnostic>* diagnostics);
 
 // Общие мелочи для файлов API.
 Scene* SceneOrThrow(Backend& backend, const char* who);

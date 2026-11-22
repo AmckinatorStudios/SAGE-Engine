@@ -1,20 +1,38 @@
--- События: своя подписка (Events.on), своё событие (Events.emit) и
--- событие клавиши (OnKeyDown) — без регистрации и классов.
+-- События: объявить своё (events.create), вызвать (events.trigger),
+-- подключить (events.connect), подключить на один раз (events.connect_once),
+-- отключить (events.disconnect) — и клавиша «E», просящая открыть дверь.
 
+---@export
 key = "E"
+
 opened_doors = 0
 
-function Start()
-    -- Подписка: функция зовётся при каждом "door_opened".
-    Events.on("door_opened", function(event, door_name)
-        opened_doors = opened_doors + 1
-        Debug.log("Door opened: " .. tostring(door_name))
-    end)
+-- Своё событие этого объекта: оно появится в инспекторе до запуска игры.
+events.create(object, "doors_counted")
+
+local function on_door_opened(event)
+    opened_doors = opened_doors + 1
+    debug.log("Door opened: " .. tostring(event.data))
+    events.trigger(object, "doors_counted", {total = opened_doors})
 end
 
--- Нажатие клавиши приходит само.
-function OnKeyDown(pressed)
-    if pressed == key then
-        Events.emit("door_open")
+function start()
+    -- Обработчик зовётся при каждом "door_opened"…
+    events.connect("door_opened", on_door_opened)
+    -- …а этот — только при первом.
+    events.connect_once("door_opened", function(event)
+        debug.log("First door opened")
+    end)
+    -- Другой скрипт слушает то же событие так: events.connect(object, "doors_counted", fn).
+end
+
+function update(delta)
+    if input.is_key_pressed(key) then
+        events.trigger("door_open")
     end
+end
+
+-- Отключить обработчик можно тем же именем и функцией.
+function on_destroy()
+    events.disconnect("door_opened", on_door_opened)
 end

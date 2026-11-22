@@ -173,35 +173,91 @@ void DrawVarRows(EditorHost& host, std::vector<sage::vars::Var*>& vars, AssetPre
     ImGui::EndTable();
 }
 
+// Путь группы по частям: "Combat/Melee" -> {"Combat", "Melee"}.
+std::vector<std::string> GroupParts(const std::string& path) {
+    std::vector<std::string> out;
+    size_t at = 0;
+    while (at <= path.size() && !path.empty()) {
+        size_t end = path.find('/', at);
+        if (end == std::string::npos) end = path.size();
+        out.push_back(path.substr(at, end - at));
+        at = end + 1;
+    }
+    return out;
+}
+
+std::string JoinParts(const std::vector<std::string>& parts, size_t count) {
+    std::string out;
+    for (size_t i = 0; i < count && i < parts.size(); ++i) out += (i ? "/" : "") + parts[i];
+    return out;
+}
+
+// Раскладка переменных В ПОРЯДКЕ ОБЪЯВЛЕНИЯ: подряд идущие переменные уровня —
+// одной таблицей, группа — сворачиваемой секцией на месте своей первой
+// переменной (вложенная группа — секция внутри секции), заголовок
+// (`---@header`) — подписью, когда он сменился. Всё это только раскладка: имя
+// переменной в коде и её значение от неё не зависят.
+void DrawLayout(EditorHost& host, std::vector<sage::vars::Var*>& vars, size_t depth, const std::string& key,
+                AssetPreview& preview, std::string& lastHeader) {
+    std::vector<sage::vars::Var*> run;
+    auto header = [&](const sage::vars::Var& v) {
+        if (v.Header == lastHeader) return;
+        lastHeader = v.Header;
+        if (!v.Header.empty()) ictl::SeparatorText(v.Header.c_str());
+    };
+    auto flush = [&] {
+        if (run.empty()) return;
+        // Подряд идущие переменные одного заголовка — одна таблица.
+        size_t from = 0;
+        while (from < run.size()) {
+            header(*run[from]);
+            size_t to = from + 1;
+            while (to < run.size() && run[to]->Header == run[from]->Header) ++to;
+            std::vector<sage::vars::Var*> part(run.begin() + (long)from, run.begin() + (long)to);
+            DrawVarRows(host, part, preview);
+            from = to;
+        }
+        run.clear();
+    };
+    std::vector<std::string> seen;
+    for (sage::vars::Var* v : vars) {
+        const std::vector<std::string> parts = GroupParts(v->Group);
+        if (parts.size() <= depth) {
+            run.push_back(v);
+            continue;
+        }
+        const std::string path = JoinParts(parts, depth + 1);
+        if (std::find(seen.begin(), seen.end(), path) != seen.end()) continue;
+        seen.push_back(path);
+        flush();
+        std::vector<sage::vars::Var*> inner;
+        for (sage::vars::Var* w : vars) {
+            const std::vector<std::string> wp = GroupParts(w->Group);
+            if (wp.size() > depth && JoinParts(wp, depth + 1) == path) inner.push_back(w);
+        }
+        if (!inner.empty()) header(*inner.front());
+        ImGui::PushID(path.c_str());
+        if (ictl::SubSection((key + ".group." + path).c_str(), parts[depth].c_str(), true)) {
+            DrawLayout(host, inner, depth + 1, key, preview, lastHeader);
+            ictl::EndSubSection();
+        }
+        ImGui::PopID();
+    }
+    flush();
+}
+
 // ПЕРЕМЕННЫЕ СКРИПТА — своей сворачиваемой секцией «Variables (N)»: длинный
-// список настроек не должен прятать слот файла. Внутри — сначала переменные
-// без группы, затем группы из объявления (`group = "Movement"`) в порядке
-// первого появления; внутри группы — порядок объявления. Группа — только
-// раскладка: имя переменной в коде и её значение от неё не зависят.
+// список настроек не должен прятать слот файла. Внутри — порядок объявления
+// в файле, с группами и заголовками (см. DrawLayout).
 void DrawScriptVariables(EditorHost& host, ScriptEntry& entry, const std::string& key, AssetPreview& preview) {
     std::vector<sage::vars::Var>& all = entry.Fields.All();
     if (all.empty()) return;
     const std::string title = std::string(T("Variables")) + " (" + std::to_string(all.size()) + ")###vars";
     if (!ictl::SubSection(key.c_str(), title.c_str(), true)) return;
-    std::vector<sage::vars::Var*> loose;
-    std::vector<std::string> groups;
-    for (sage::vars::Var& v : all) {
-        if (v.Group.empty()) loose.push_back(&v);
-        else if (std::find(groups.begin(), groups.end(), v.Group) == groups.end()) groups.push_back(v.Group);
-    }
-    DrawVarRows(host, loose, preview);
-    for (size_t g = 0; g < groups.size(); ++g) {
-        std::vector<sage::vars::Var*> part;
-        for (sage::vars::Var& v : all)
-            if (v.Group == groups[g]) part.push_back(&v);
-        ImGui::PushID((int)g);
-        const std::string groupKey = key + ".group." + groups[g];
-        if (ictl::SubSection(groupKey.c_str(), groups[g].c_str(), true)) {
-            DrawVarRows(host, part, preview);
-            ictl::EndSubSection();
-        }
-        ImGui::PopID();
-    }
+    std::vector<sage::vars::Var*> ptrs;
+    for (sage::vars::Var& v : all) ptrs.push_back(&v);
+    std::string lastHeader;
+    DrawLayout(host, ptrs, 0, key, preview, lastHeader);
     ictl::EndSubSection();
 }
 

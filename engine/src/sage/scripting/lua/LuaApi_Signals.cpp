@@ -275,21 +275,25 @@ void RegisterObjectSignals(Backend& backend, sol::usertype<ObjectRef>& ot) {
     // Затем — нынешние имена методов (`obj:get_component`, `obj:call`) и
     // компонент по имени типа (`obj.Audio`): одно правило для self и для
     // любого найденного объекта.
-    ot[sol::meta_function::index] = [signalOf, self](ObjectRef& r, sol::stack_object key) -> sol::object {
+    ot[sol::meta_function::index] = [signalOf, self](sol::object selfObject, sol::stack_object key) -> sol::object {
+        ObjectRef& r = selfObject.as<ObjectRef&>();
         if (!key.is<std::string>()) return sol::lua_nil;
+        sol::state_view lua(key.lua_state());
+        // Методы отдаются привязанными к объекту (стандарт SAGE:
+        // `object.destroy()` без self), а `object:destroy()` работает как
+        // прежде — см. BindMethod.
         // Методы SAGE Lua (entity:addComponent(Movement)) — РАНЬШЕ имён
         // движка: addComponent иначе нашёлся бы как AddComponent и получил бы
         // класс SAGE вместо имени компонента. Строку они передают движку сами.
         {
-            sol::state_view lua(key.lua_state());
             sol::object sageMethods = lua["__SageObjectMethods"];
             if (sageMethods.get_type() == sol::type::table) {
                 sol::object m = sageMethods.as<sol::table>().raw_get<sol::object>(key);
-                if (m.get_type() == sol::type::function) return m;
+                if (m.get_type() == sol::type::function) return BindMethod(lua, m, selfObject);
             }
         }
-        sol::object method = SnakeMethod(key.lua_state(), "SageObject", key);
-        if (method.valid() && method.get_type() != sol::type::lua_nil) return method;
+        sol::object method = SnakeMethod(lua, "SageObject", key);
+        if (method.valid() && method.get_type() != sol::type::lua_nil) return BindMethod(lua, method, selfObject);
         if (!r.Obj.Valid()) return sol::lua_nil;
         const std::string name = key.as<std::string>();
         if (sage::signals::IsDeclared(*r.Obj.Registry(), r.Obj.Entity(), name))
@@ -414,10 +418,18 @@ void RegisterSignals(Backend& backend) {
     // --- Соединение ----------------------------------------------------------
     sol::usertype<ConnectionRef> ct = lua.new_usertype<ConnectionRef>("SageConnection", sol::no_constructor);
     // Повторный disconnect — не ошибка: он возвращает false. Два пути к одному
-    // «отпишись» (по событию и в OnDestroy) — обычное дело.
-    ct["disconnect"] = [self](ConnectionRef& c) {
+    // «отпишись» (по событию и в on_destroy) — обычное дело. Метод отдаётся
+    // через index, привязанным к соединению: `connection.disconnect()` (стандарт)
+    // и `connection:disconnect()` (прежнее) — одно и то же.
+    auto disconnectConnection = [self](ConnectionRef& c) {
         Scene* scene = self->ScenePtr();
         return scene && scene->Events.Disconnect(c.Id);
+    };
+    ct[sol::meta_function::index] = [disconnectConnection](sol::object self, sol::stack_object key) -> sol::object {
+        sol::state_view lua(key.lua_state());
+        if (key.is<std::string>() && key.as<std::string>() == "disconnect")
+            return BindMethod(lua, sol::make_object(lua, disconnectConnection), self);
+        return sol::lua_nil;
     };
     ct["connected"] = sol::readonly_property([self](const ConnectionRef& c) {
         Scene* scene = self->ScenePtr();
@@ -471,6 +483,81 @@ void RegisterSignals(Backend& backend) {
         const size_t b = Skip(va);
         return global(NameArg(Arg(va, b), "Events.signal"));
     });
+    // --- Стандарт SAGE: create / trigger / connect / connect_once / disconnect --
+    //
+    // Один набор имён на события объекта и глобальные: первый аргумент —
+    // объект (его событие) или сразу имя (глобальное событие сцены).
+    //
+    //     events.create(object, "player_died")                  -- объявить
+    //     events.trigger(object, "player_died", {reason = "fall"})  -- вызвать
+    //     events.connect(player, "player_died", handler)        -- подключить
+    //     events.connect_once(player, "player_died", handler)   -- один раз
+    //     events.disconnect(player, "player_died", handler)     -- отключить
+    //
+    // Это тот же механизм шины, что `obj:on / obj:emit` и связи инспектора, —
+    // не второй: старые имена продолжают работать, новые лишь называют
+    // действие словами.
+    struct Target {
+        int Object = sage::events::Bus::kGlobal;
+        std::string ObjectName;
+        std::string Name;
+        size_t Next = 0;   // индекс аргумента после имени события
+    };
+    auto target = [](sol::variadic_args& va, size_t b, const std::string& who) {
+        Target t;
+        sol::object first = Arg(va, b);
+        if (first.is<ObjectRef>()) {
+            const ObjectRef& r = first.as<ObjectRef&>();
+            const GameObject o = AliveObject(r, who);
+            t.Object = o.Id();
+            t.ObjectName = o.Name();
+            t.Name = NameArg(Arg(va, b + 1), who);
+            t.Next = b + 2;
+        } else if (first.is<std::string>()) {
+            t.Name = NameArg(first, who);
+            t.Next = b + 1;
+        } else {
+            throw Fail(who + ": первым аргументом — объект или имя события, получено " + TypeName(first));
+        }
+        return t;
+    };
+    events.set_function("create", [target](sol::variadic_args va) {
+        // Для движка объявление — проверка имени: список событий объекта в
+        // инспекторе берётся из ТЕКСТА скрипта (ParseDefinedEvents), до запуска.
+        target(va, Skip(va), "events.create");
+    });
+    events.set_function("trigger", [self, target](sol::variadic_args va) {
+        const Target t = target(va, Skip(va), "events.trigger");
+        self->EmitLua(t.Object, t.Name, Arg(va, t.Next), "events.trigger('" + t.Name + "')");
+    });
+    auto connectOne = [self, target](sol::variadic_args va, bool once) {
+        const char* who = once ? "events.connect_once" : "events.connect";
+        const Target t = target(va, Skip(va), who);
+        return self->ConnectLua(SignalRef{t.Object, t.Name, t.ObjectName}, Arg(va, t.Next), once,
+                                std::string(who) + "('" + t.Name + "')");
+    };
+    events.set_function("connect", [connectOne](sol::variadic_args va) { return connectOne(va, false); });
+    events.set_function("connect_once", [connectOne](sol::variadic_args va) { return connectOne(va, true); });
+    // Отключить можно по самому обработчику (тем, что подключали), по
+    // соединению, которое вернул connect, или сразу все СВОИ подключения
+    // события (без обработчика). Возвращает, сколько подключений снято.
+    events.set_function("disconnect", [self, target](sol::variadic_args va) -> int {
+        const size_t b = Skip(va);
+        sage::events::Bus& bus = self->BusOrThrow("events.disconnect");
+        sol::object first = Arg(va, b);
+        if (first.is<ConnectionRef>()) return bus.Disconnect(first.as<ConnectionRef&>().Id) ? 1 : 0;
+        const Target t = target(va, b, "events.disconnect");
+        sol::object handler = Arg(va, t.Next);
+        if (handler.is<ConnectionRef>()) return bus.Disconnect(handler.as<ConnectionRef&>().Id) ? 1 : 0;
+        if (handler.get_type() == sol::type::function) {
+            int removed = 0;
+            for (int id : self->Signals().Find(t.Object, t.Name, handler))
+                if (bus.Disconnect(id)) ++removed;
+            return removed;
+        }
+        return bus.DisconnectSignal(t.Object, t.Name, self->Signals().Group());
+    });
+
     // Прежние имена с большой буквы — те же функции: игры, написанные до
     // сигналов (Events.On(...)), продолжают работать без правки.
     events.set_function("On", on);

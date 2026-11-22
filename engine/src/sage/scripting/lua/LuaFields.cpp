@@ -323,29 +323,47 @@ size_t FindDeclaration(const std::string& source) {
     return std::string::npos;
 }
 
-// Vector3.new(x, y, z) / Vector3(x, y, z) / Vec3(x, y, z) — вектор-литерал.
+// Vector3.new(x, y, z) / vector3.new(x, y, z) / Vector3(x, y, z) / Vec3(x, y, z)
+// — вектор-литерал; color(r, g, b[, a]) / Color.new(…) / rgb(…) — цвет.
 bool VectorCall(Reader& r, Value& out) {
     const size_t mark = r.I;
+    r.Skip();
+    bool color = false;
     bool named = false;
-    if (r.Keyword("Vector3")) {
-        named = true;
-        const size_t dot = r.I;
-        if (r.Eat('.') && r.Name() != "new") { r.I = mark; return false; }
-        if (r.S[dot] != '.') r.I = dot;
-    } else if (r.Keyword("Vec3")) {
-        named = true;
+    for (const char* w : {"Vector3", "vector3", "Vec3"}) {
+        if (r.Keyword(w)) { named = true; break; }
     }
-    if (!named || !r.Eat('(')) { r.I = mark; return false; }
-    float c[3] = {0.0f, 0.0f, 0.0f};
-    for (int i = 0; i < 3; ++i) {
+    if (!named)
+        for (const char* w : {"Color", "color", "rgb"}) {
+            if (r.Keyword(w)) { named = color = true; break; }
+        }
+    if (!named) { r.I = mark; return false; }
+    // `.new` — необязательная часть имени конструктора.
+    const size_t beforeDot = r.I;
+    if (r.Eat('.')) {
+        if (r.Name() != "new") { r.I = mark; return false; }
+    } else {
+        r.I = beforeDot;
+    }
+    if (!r.Eat('(')) { r.I = mark; return false; }
+    float c[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+    int count = 0;
+    const int most = color ? 4 : 3;
+    for (int i = 0; i < most; ++i) {
         double n = 0.0;
         bool integral = false;
         if (!r.Number(n, integral)) break;
         c[i] = (float)n;
+        ++count;
         if (!r.Eat(',')) break;
     }
     if (!r.Eat(')')) { r.I = mark; return false; }
-    out = Value(glm::vec3(c[0], c[1], c[2]));
+    if (color) {
+        (void)count;
+        out = Value::Convert(Value(glm::vec4(c[0], c[1], c[2], c[3])), Kind::Color);
+    } else {
+        out = Value(glm::vec3(c[0], c[1], c[2]));
+    }
     return true;
 }
 
@@ -367,8 +385,17 @@ bool VectorCall(Reader& r, Value& out) {
 // until и скобки): `x = 1` внутри функции полем не становится. Начало
 // оператора в Lua ничем не отмечено, поэтому признак — «имя, за которым `=`,
 // и перед которым не точка, не двоеточие и не запятая».
-void ParseTopLevelGlobals(const std::string& source, sage::vars::Table& out) {
+void ParseTopLevelGlobals(const std::string& source, sage::vars::Table& out,
+                          std::vector<TopLevelAssign>& assigns, bool strict) {
     Reader r(source);
+    // Строка по позиции: считается по ходу чтения (позиции только растут).
+    size_t lineAt = 0;
+    int line = 1;
+    auto lineOf = [&](size_t pos) {
+        for (; lineAt < pos && lineAt < source.size(); ++lineAt)
+            if (source[lineAt] == '\n') ++line;
+        return line;
+    };
     int depth = 0;        // блоки Lua
     int brackets = 0;     // ( { [
     bool afterLocal = false;
@@ -412,6 +439,7 @@ void ParseTopLevelGlobals(const std::string& source, sage::vars::Table& out) {
             continue;
         }
 
+        const size_t wordAt = r.I;
         const std::string word = r.Name();
         const char before = prev;
         prev = 'a';
@@ -437,6 +465,14 @@ void ParseTopLevelGlobals(const std::string& source, sage::vars::Table& out) {
         var.Declared = true;
         r.Skip();
         const size_t valueAt = r.I;
+        TopLevelAssign assign;
+        assign.Name = word;
+        assign.Line = lineOf(wordAt);
+        {
+            const size_t save = r.I;
+            if (r.Keyword("nil")) assign.IsNil = true;
+            r.I = save;
+        }
         bool known = FieldCall(r, var) || VectorCall(r, var.Data);
         if (!known && Scalar(r, var.Data)) {
             // «x = 1 + y», «x = 1 or 2» — выражение, а не литерал: не поле.
@@ -458,8 +494,16 @@ void ParseTopLevelGlobals(const std::string& source, sage::vars::Table& out) {
             }
             r.I = after;
         }
-        if (known) out.Put(var);
-        else r.I = valueAt;
+        if (known) {
+            assign.Literal = true;
+            assign.Var = var;
+            // Прежний вид — все литералы поля; стандартный — только помеченные
+            // `---@export…` (ApplyAnnotations).
+            if (!strict) out.Put(var);
+        } else {
+            r.I = valueAt;
+        }
+        assigns.push_back(std::move(assign));
     }
 }
 
@@ -483,14 +527,22 @@ bool ReturnsTable(const std::string& source) {
 
 } // namespace
 
-sage::vars::Table ParsePublicFields(const std::string& source) {
+sage::vars::Table ParsePublicFields(const std::string& source,
+                                    std::vector<sage::scripting::FieldDiagnostic>* diagnostics) {
     sage::vars::Table out;
     const size_t at = FindDeclaration(source);
     if (at == std::string::npos) {
         // Нет таблицы объявления: простой скрипт (глобальные функции) заводит
         // поля обычными присваиваниями верхнего уровня. У скрипта-таблицы
         // (`return Player`) глобальных полей не бывает — там всё в public.
-        if (!ReturnsTable(source)) ParseTopLevelGlobals(source, out);
+        if (!ReturnsTable(source)) {
+            // Стандартный вид (аннотации, функции в snake_case): полем
+            // становится только переменная с `---@export…`.
+            const bool strict = IsStandardStyleSource(source);
+            std::vector<TopLevelAssign> assigns;
+            ParseTopLevelGlobals(source, out, assigns, strict);
+            if (strict) ApplyAnnotations(source, assigns, out, diagnostics);
+        }
         return out;
     }
 
