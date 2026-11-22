@@ -170,3 +170,27 @@ TEST(Clip_broken_file_says_why) {
     std::error_code ec;
     fs::remove_all(dir, ec);
 }
+
+// --- 5. Короткие уникальные имена файлов импортированных клипов -------------
+//
+// Длинное «<модель>.<клип>» у Springtrap (43 клипа с именами пакета) не влезало
+// в MAX_PATH Windows. Имя короткое, стабильное и не сливается после очистки.
+TEST(Clip_import_file_name_is_short_stable_and_unique) {
+    const std::string longClip =
+        "Armature|Springtrap_Walk_Cycle_Forward_Loop_With_Very_Long_Suffix_v02";
+    const std::string a = ClipImportFileName("FixedSpringtrapWithAnimationsAndMaterials", longClip);
+    CHECK_TRUE(a.size() <= 16 + 1 + 24 + 1 + 8 + 9);
+    CHECK_EQ(a, ClipImportFileName("FixedSpringtrapWithAnimationsAndMaterials", longClip));   // стабильно
+    // «walk 01» и «walk|01» после очистки одинаковы, имена файлов — нет.
+    CHECK_TRUE(ClipImportFileName("hero", "walk 01") != ClipImportFileName("hero", "walk|01"));
+    // Общий префикс длиннее обрезки — всё равно разные.
+    const std::string base(40, 'x');
+    CHECK_TRUE(ClipImportFileName("hero", base + "1") != ClipImportFileName("hero", base + "2"));
+    // Разные модели в общем каталоге анимаций не сталкиваются.
+    CHECK_TRUE(ClipImportFileName("a", "Walk") != ClipImportFileName("b", "Walk"));
+    // Кириллица не режется посреди символа.
+    const std::string ru = ClipImportFileName("hero", std::string("ходьба_очень_долгая_анимация_персонажа"));
+    for (size_t i = 0; i < ru.size(); ++i)
+        if (((unsigned char)ru[i] & 0xC0) == 0x80) CHECK_TRUE(i > 0 && ((unsigned char)ru[i - 1] >= 0x80));
+    CHECK_TRUE(ru.size() > 9 && ru.substr(ru.size() - 9) == ".sageanim");
+}

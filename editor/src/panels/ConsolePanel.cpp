@@ -1,6 +1,7 @@
 #include "../PanelWindowId.h"
 #include "../PanelWindows.h"
 #include "ConsolePanel.h"
+#include "../InspectorControls.h"
 
 #include <ctime>
 #include "ui/UI.h"
@@ -16,6 +17,7 @@
 #include "EditorIcons.h"
 #include "../Localization.h"
 
+namespace ictl = sage::editor::ictl;
 namespace {
 
 // Цвет и значок уровня — одни и те же у кнопки фильтра и у строки журнала:
@@ -140,7 +142,6 @@ void ConsolePanel::Draw(bool* open, const std::string& windowId, EditorHost* hos
     if (ImGui::BeginTabBar("##console_modes")) {
         if (ImGui::BeginTabItem(T("Log###console_log"))) {
             DrawToolbar();
-            ImGui::Separator();
             DrawRows();
             ImGui::EndTabItem();
         }
@@ -196,34 +197,36 @@ void ConsolePanel::DrawToolbar() {
             flag = !flag;
         }
     };
+    // Полоса kit: высота, зазоры и правый край — её, а не ручной счёт SameLine.
+    ictl::BeginToolbar("##console_bar");
+    ictl::ToolbarNext();
     chip("info", LogLevel::Info, counts[0], m_filter.Info,
          T("Messages: show or hide. Ctrl+click shows only them."));
-    ImGui::SameLine(0.0f, ui.SpacingXS);
+    ictl::ToolbarNext();
     chip("warn", LogLevel::Warn, counts[1], m_filter.Warn,
          T("Warnings: show or hide. Ctrl+click shows only them."));
-    ImGui::SameLine(0.0f, ui.SpacingXS);
+    ictl::ToolbarNext();
     chip("error", LogLevel::Error, counts[2], m_filter.Error,
          T("Errors: show or hide. Ctrl+click shows only them."));
 
     // Поиск — всё, что осталось между уровнями и двумя кнопками справа.
     const float button = ImGui::GetFrameHeight();
-    const float right = button * 2.0f + ui.SpacingXS;
-    ImGui::SameLine(0.0f, ui.SpacingMD);
-    const float searchW = ImGui::GetContentRegionAvail().x - right - ui.SpacingMD;
+    const float right = button * 2.0f + ictl::ToolbarGap();
+    const float searchW = ictl::ToolbarAvail(right + ictl::ToolbarGap());
     if (searchW >= button * 2.5f) {
+        ictl::ToolbarNext();
         if (Sage::UI::SearchField("filter", m_search, sizeof(m_search), T("Search in console..."), searchW))
             m_selected = -1;
-        ImGui::SameLine(0.0f, ui.SpacingMD);
-    } else {
-        // Совсем узко — поиск уступает место кнопкам: без корзины и меню
-        // консоль не очистить, а искать в окне шириной с ладонь всё равно нечего.
-        ImGui::SameLine(std::max(ImGui::GetCursorPosX(), ImGui::GetWindowContentRegionMax().x - right));
     }
+    // Совсем узко — поиск уступает место кнопкам: без корзины и меню консоль
+    // не очистить, а искать в окне шириной с ладонь всё равно нечего.
     m_filter.Text = m_search;
 
+    ictl::ToolbarRight(right);
     if (EditorIcons::IconOnlyButton("trash", T("Clear the console"))) Clear();
-    ImGui::SameLine(0.0f, ui.SpacingXS);
+    ictl::ToolbarNext();
     if (EditorIcons::IconOnlyButton("dots", T("More console options"))) ImGui::OpenPopup("##console_more");
+    ictl::EndToolbar();
 
     Sage::UI::MenuScope moreMenu;
     if (ImGui::BeginPopup("##console_more")) {

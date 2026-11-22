@@ -101,3 +101,51 @@ TEST(PanelRegistry_layout_docks_by_space_and_order) {
     CHECK_EQ((int)ui.size(), 1);
     CHECK_EQ(ui[0], std::string("AssetsUI"));      // своё окно в пространстве интерфейса
 }
+
+// Пределы размера панели: умолчания защищают от сжатия в полоску, боковая
+// панель не раздувается на пол-экрана, явные значения и 0 («без предела»)
+// уважаются, масштаб интерфейса умножает всё.
+TEST(PanelRegistry_limits_have_safe_defaults_and_follow_scale) {
+    pe::PanelSpec side = Spec("Side", pe::PanelSection::Scene);
+    side.SceneDock.Slot = pe::PanelDock::Right;
+    pe::PanelSpec bottom = Spec("Bottom", pe::PanelSection::Scene);
+    bottom.SceneDock.Slot = pe::PanelDock::Bottom;
+
+    const auto s1 = pe::PanelRegistry::LimitsFor(side, EditorWorkspace::Scene, 1.0f);
+    CHECK_NEAR(s1.Min[0], pe::kDefaultMinWidth, 1e-4f);
+    CHECK_NEAR(s1.Min[1], pe::kDefaultMinHeight, 1e-4f);
+    CHECK_NEAR(s1.Max[0], pe::kDefaultSideMaxWidth, 1e-4f);   // боковая — с потолком ширины
+    CHECK_TRUE(s1.Max[1] >= 1e30f);
+    const auto b1 = pe::PanelRegistry::LimitsFor(bottom, EditorWorkspace::Scene, 1.0f);
+    CHECK_TRUE(b1.Max[0] >= 1e30f && b1.Max[1] >= 1e30f);      // нижняя — без потолка
+
+    side.Limits.MinW = 300.0f;
+    side.Limits.MaxW = 0.0f;   // явно «без предела»
+    const auto s2 = pe::PanelRegistry::LimitsFor(side, EditorWorkspace::Scene, 2.0f);
+    CHECK_NEAR(s2.Min[0], 600.0f, 1e-4f);
+    CHECK_TRUE(s2.Max[0] >= 1e30f);
+
+    // Максимум не бывает меньше минимума: противоречивая запись не ломает док.
+    side.Limits.MinW = 400.0f;
+    side.Limits.MaxW = 100.0f;
+    const auto s3 = pe::PanelRegistry::LimitsFor(side, EditorWorkspace::Scene, 1.0f);
+    CHECK_TRUE(s3.Max[0] >= s3.Min[0]);
+}
+
+// Пользовательские макеты хранят видимость панелей по Id: снимок возвращает
+// ровно то, что было, а неизвестные реестру Id применение пропускает.
+TEST(PanelRegistry_visibility_snapshot_roundtrip) {
+    pe::PanelRegistry reg;
+    reg.Register(Spec("A", pe::PanelSection::Scene));
+    reg.Register(Spec("B", pe::PanelSection::Scene));
+    reg.SetVisible("A", true);
+    reg.SetVisible("B", false);
+    const auto snap = reg.VisibilitySnapshot();
+    reg.SetVisible("A", false);
+    reg.SetVisible("B", true);
+    auto withGhost = snap;
+    withGhost["Removed"] = true;
+    reg.ApplyVisibility(withGhost);
+    CHECK_TRUE(reg.IsVisible("A"));
+    CHECK_FALSE(reg.IsVisible("B"));
+}

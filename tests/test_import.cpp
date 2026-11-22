@@ -722,6 +722,7 @@ TEST(texture_resolve_says_what_it_could_not_find) {
 // ============================================================================
 #include "GltfSkinModel.h"
 #include "sage/assets/import/SkinInfluences.h"
+#include "sage/anim/Skeleton.h"
 
 namespace {
 
@@ -842,6 +843,22 @@ TEST(skin_influences_keep_the_four_heaviest_and_normalize) {
     // привязка к корню.
     std::vector<SkinInfluence> none = {{-1, 1.0f}, {9, 1.0f}, {0, 0.0f}};
     CHECK_FALSE(sage::assets::ResolveInfluences(none, 5, joints, weights));
+}
+
+// Springtrap: 162 кости, а палитра была 128 — влияния на кости 128..161
+// отбрасывались, и части тела оставались без деформации.
+TEST(skin_influences_keep_bones_above_the_old_128_limit) {
+    using sage::assets::SkinInfluence;
+    CHECK_TRUE(sage::anim::kMaxBones >= 162);
+    std::vector<SkinInfluence> list = {{161, 0.7f}, {140, 0.3f}};
+    glm::vec4 joints(0.0f), weights(0.0f);
+    CHECK_TRUE(sage::assets::ResolveInfluences(list, 162, joints, weights));
+    CHECK_EQ((int)(joints.x + 0.5f), 161);
+    CHECK_EQ((int)(joints.y + 0.5f), 140);
+    CHECK_NEAR(weights.x, 0.7f, 1e-5f);
+    // Кость за настоящим пределом палитры по-прежнему отбрасывается.
+    std::vector<SkinInfluence> over = {{sage::anim::kMaxBones, 1.0f}};
+    CHECK_FALSE(sage::assets::ResolveInfluences(over, sage::anim::kMaxBones + 10, joints, weights));
 }
 
 TEST(texture_resolve_finds_a_sibling_folder_named_in_another_case) {

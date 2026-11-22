@@ -48,7 +48,8 @@ void EditorSceneRenderer::DrawSkeletons(Scene& scene, const std::vector<int>& se
         const int id = animView.get<IdComponent>(e).Id;
         const bool selected = std::find(selection.begin(), selection.end(), id) != selection.end();
         const glm::vec3 color = selected ? glm::vec3(1.0f, 0.8f, 0.2f) : glm::vec3(0.4f, 0.85f, 1.0f);
-        const glm::mat4 world = scene.WorldMatrix(e);
+        // Меш рисуется как «сущность * импорт * кость» — скелет обязан так же.
+        const glm::mat4 world = scene.WorldMatrix(e) * am.Model->ImportTransform();
         // Сустав — соразмерно скелету: точка в 2 см на великане не видна, а
         // на мыши закрывает всю лапу.
         glm::vec3 lo(1e30f), hi(-1e30f);

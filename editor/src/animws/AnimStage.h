@@ -66,6 +66,8 @@ public:
     void SelectEntity(entt::entity e) { m_entity = e; m_bone = -1; }
     // Мировая матрица кости (с трансформом копии) — для гизмо и рисования.
     glm::mat4 BoneWorld(int bone);
+    // Из пространства скелета в мир: трансформ сущности * настройки импорта.
+    glm::mat4 SkeletonToWorld();
     // Локальные TRS кости в показанной позе — то, что ставится ключом.
     bool BoneLocal(int bone, glm::vec3& t, glm::quat& r, glm::vec3& s);
     // Поставить кости новую МИРОВУЮ матрицу (гизмо): правка ложится в

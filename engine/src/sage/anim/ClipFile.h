@@ -86,4 +86,13 @@ AnimationClip Bind(const ClipAsset& asset, const Skeleton& skeleton, int* outMis
 // зовутся и «Armature|Walk», и «walk 01».
 std::string ClipFileName(const std::string& modelFileStem, const std::string& clipName);
 
+// КОРОТКОЕ имя файла клипа, вынутого из модели: <модель до 16>.<клип до 24>_<хэш>.
+// Полное «<модель>.<клип>» у пакетов с именами вроде
+// «Armature|Springtrap_Walk_Cycle_Forward_Loop_v02» вместе с каталогом
+// проекта не помещалось в MAX_PATH Windows, и запись клипа падала. Хэш (от
+// ПОЛНЫХ исходных имён) делает имя уникальным даже когда после очистки и
+// обрезки два клипа выглядят одинаково, и стабильным между переимпортами;
+// настоящее имя клипа остаётся внутри файла (ClipAsset::Name).
+std::string ClipImportFileName(const std::string& modelFileStem, const std::string& clipName);
+
 } // namespace sage::anim

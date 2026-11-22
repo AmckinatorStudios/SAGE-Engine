@@ -280,8 +280,19 @@ int AnimStage::RootSkeletalEntity() const { return m_animId; }
 glm::mat4 AnimStage::BoneWorld(int bone) {
     AnimationComponent* am = StageAnim();
     if (!am || bone < 0 || bone >= (int)am->Anim.GlobalMatrices().size()) return glm::mat4(1.0f);
+    return SkeletonToWorld() * am->Anim.GlobalMatrices()[(size_t)bone];
+}
+
+// Матрицы аниматора — в пространстве МОДЕЛИ до настроек импорта; меш рисуется
+// как «сущность * ImportTransform * кость». Без второго множителя скелет и
+// гизмо оставались в исходных единицах и не совпадали с геометрией при любом
+// масштабе, повороте и сдвиге импорта.
+glm::mat4 AnimStage::SkeletonToWorld() {
+    AnimationComponent* am = StageAnim();
     GameObject o = m_scene->Get(m_animId);
-    return m_scene->WorldMatrix(o.Entity()) * am->Anim.GlobalMatrices()[(size_t)bone];
+    glm::mat4 m = m_scene->WorldMatrix(o.Entity());
+    if (am && am->Model) m *= am->Model->ImportTransform();
+    return m;
 }
 
 bool AnimStage::BoneLocal(int bone, glm::vec3& t, glm::quat& r, glm::vec3& s) {
@@ -301,8 +312,7 @@ void AnimStage::SetBoneWorld(int bone, const glm::mat4& world, bool t, bool r, b
     if (!am || !sk || bone < 0 || bone >= sk->Count()) return;
     const auto& g = am->Anim.GlobalMatrices();
     if ((int)g.size() != sk->Count()) return;
-    GameObject o = m_scene->Get(m_animId);
-    const glm::mat4 model = glm::inverse(m_scene->WorldMatrix(o.Entity())) * world;
+    const glm::mat4 model = glm::inverse(SkeletonToWorld()) * world;
     const int parent = sk->Joints[(size_t)bone].Parent;
     const glm::mat4 pg = parent >= 0 ? g[(size_t)parent] : sk->Root;
     glm::vec3 lt, ls;

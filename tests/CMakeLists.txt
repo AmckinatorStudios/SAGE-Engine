@@ -102,6 +102,8 @@ add_executable(sage_tests
     test_triggers.cpp
     test_particles.cpp
     test_clipfile.cpp
+    test_editor_layouts.cpp
+    test_dock_limits.cpp
     test_components_mesh_animation.cpp
     test_sky.cpp
     test_bench.cpp

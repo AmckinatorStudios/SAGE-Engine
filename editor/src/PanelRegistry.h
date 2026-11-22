@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -57,6 +58,20 @@ constexpr unsigned Both = Scene | Interface;
 constexpr unsigned All = Scene | Interface | Animation;
 } // namespace panelspace
 
+// Пределы размера панели в логических точках (до масштаба интерфейса). ПО
+// УМОЛЧАНИЮ у каждой панели есть минимум (kDefaultMin*), чтобы её нельзя было
+// сжать в нечитаемую полоску ни сплиттером, ни изменением окна, а у боковых
+// панелей — и максимум по ширине (kDefaultSideMaxWidth), чтобы одна панель не
+// съедала редактор. -1 — взять умолчание, 0 — предела нет, > 0 — свой предел.
+// Докинг и плавающее окно читают одно и то же (см. PanelRegistry::LimitsFor).
+struct PanelLimits {
+    float MinW = -1.0f, MinH = -1.0f;
+    float MaxW = -1.0f, MaxH = -1.0f;
+};
+constexpr float kDefaultMinWidth = 180.0f;
+constexpr float kDefaultMinHeight = 96.0f;
+constexpr float kDefaultSideMaxWidth = 720.0f;
+
 struct PanelSpec {
     // Имя окна ImGui (часть после «###»). У панели с PerSpaceWindow к нему
     // добавляется суффикс пространства (PanelWindowId.h): «Assets» / «AssetsUI».
@@ -73,6 +88,8 @@ struct PanelSpec {
     PanelPlace SceneDock;                 // место в раскладке пространства сцены
     PanelPlace InterfaceDock;             // ... и пространства интерфейса
     PanelPlace AnimationDock;             // ... и пространства анимации
+
+    PanelLimits Limits;          // пределы размера в доке и в плавающем окне
 
     bool InLayout = false;       // часть постоянной раскладки: её возвращает «Сбросить раскладку»
     bool Detachable = true;      // есть в меню «Отдельным окном»
@@ -121,6 +138,10 @@ public:
     // Имя окна панели в пространстве (PerSpaceWindow — с суффиксом).
     static std::string WindowId(const PanelSpec& spec, EditorWorkspace workspace);
     static bool InSpace(const PanelSpec& spec, EditorWorkspace workspace);
+    // Итоговые пределы в ТОЧКАХ ЭКРАНА (с масштабом интерфейса): умолчания
+    // подставлены, FLT_MAX — «без предела». Чистая функция — проверяется тестом.
+    struct ResolvedLimits { float Min[2]; float Max[2]; };
+    static ResolvedLimits LimitsFor(const PanelSpec& spec, EditorWorkspace workspace, float scale);
     // Место панели в раскладке этого пространства.
     static const PanelPlace& PlaceIn(const PanelSpec& spec, EditorWorkspace workspace);
 
@@ -142,6 +163,11 @@ public:
     // Есть ли на экране хоть одна панель (пустой док — повод подсказать).
     bool AnyVisible() const;
     void CloseAll();
+    // Видимость всех панелей по Id — для сохранения пользовательских макетов.
+    // Применение берёт только известные реестру Id: макет, сохранённый до
+    // появления панели (или плагином, которого больше нет), ничего не ломает.
+    std::map<std::string, bool> VisibilitySnapshot() const;
+    void ApplyVisibility(const std::map<std::string, bool>& visible);
 
     // Команды «показать/скрыть» для всех панелей, которые уже есть, и для тех,
     // что зарегистрируют потом (реестр запоминает, куда добавлять).

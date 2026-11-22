@@ -1,3 +1,4 @@
+#include <unordered_set>
 #include "ModelMaterialImport.h"
 #include "sage/anim/Animator.h"
 
@@ -406,22 +407,42 @@ ClipImportResult ImportModelClips(const Project& project, const std::string& mod
     const std::string stem = fs::path(modelPath).stem().string();
     result.Refs.reserve(clips.size());
 
+    std::unordered_set<std::string> usedNames;   // имена этого импорта: коллизию ловим сами
     for (const sage::anim::AnimationClip& clip : clips) {
         // Клипы — в общий каталог анимаций папки модели: у персонажа их
         // десятки, и рядом с моделью они хоронили её саму (sage/assets/ModelData.h).
+        std::string name = sage::anim::ClipImportFileName(stem, clip.Name);
+        // Два клипа с одним именем в файле (или хэш-коллизия) получили бы один
+        // файл, и второй затёр бы первый.
+        for (int n = 2; !usedNames.insert(name).second; ++n)
+            name = sage::anim::ClipImportFileName(stem, clip.Name + "#" + std::to_string(n));
         const fs::path file = sage::assets::ModelDataPath(
-            modelPath, sage::assets::ModelData::Animations, sage::anim::ClipFileName(stem, clip.Name));
-        result.Refs.push_back(project.AssetRef(file));
-        if (fs::exists(file, ec)) continue;     // правку руками не стираем
+            modelPath, sage::assets::ModelData::Animations, name);
+        auto fail = [&](const std::string& why) {
+            if (result.FirstWarning.empty()) result.FirstWarning = why;
+            LOG_ERROR("Анимация") << "Клип не записан (" << clip.Name << "): " << why;
+        };
+        // Уже лежит — правку руками не стираем, ссылка валидна.
+        if (fs::exists(file, ec) && fs::file_size(file, ec) > 0) {
+            result.Refs.push_back(project.AssetRef(file));
+            continue;
+        }
         fs::create_directories(file.parent_path(), ec);
+        if (ec) { fail("не создан каталог " + file.parent_path().string() + ": " + ec.message()); continue; }
         try {
             sage::anim::SaveClip(sage::anim::ToAsset(clip, model->GetSkeleton()), file.string());
-            sage::AssetDatabase::Instance().Register(file.string(), "animation");
-            ++result.Created;
         } catch (const std::exception& e) {
-            if (result.FirstWarning.empty()) result.FirstWarning = e.what();
-            LOG_ERROR("Анимация") << "Клип не записан (" << clip.Name << "): " << e.what();
+            fail(e.what());
+            continue;
         }
+        // Запись подтверждаем по диску: ссылка на несуществующий файл хуже отсутствия ссылки.
+        if (!fs::exists(file, ec) || fs::file_size(file, ec) == 0) {
+            fail("файл не появился после записи: " + file.string());
+            continue;
+        }
+        sage::AssetDatabase::Instance().Register(file.string(), "animation");
+        result.Refs.push_back(project.AssetRef(file));
+        ++result.Created;
     }
 
     LOG_INFO("Анимация") << "Клипы модели " << modelRef << ": в файле " << result.Found

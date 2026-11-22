@@ -4758,6 +4758,7 @@ ImGuiWindow::ImGuiWindow(ImGuiContext* ctx, const char* name) : DrawListInst(NUL
     IDStack.push_back(ID);
     ViewportAllowPlatformMonitorExtend = -1;
     ViewportPos = ImVec2(FLT_MAX, FLT_MAX);
+    DockMaxSize = ImVec2(FLT_MAX, FLT_MAX);   // SAGE: нет предела, пока панель его не задала
     MoveId = GetID("#MOVE");
     TabId = GetID("#TAB");
     ScrollTarget = ImVec2(FLT_MAX, FLT_MAX);
@@ -7962,6 +7963,18 @@ bool ImGui::Begin(const char* name, bool* p_open, ImGuiWindowFlags flags)
             if (window->DockIsActive)
             {
                 IM_ASSERT(window->DockNode != NULL);
+                // SAGE: документ-узел сам ограничивает размер окна, но запоминаем запрошенные пределы —
+                // по ним узел не даёт сплиттеру и пересчёту размеров сжать/раздуть панель (см. DockNodeCalcLimit).
+                if (g.NextWindowData.HasFlags & ImGuiNextWindowDataFlags_HasSizeConstraint)
+                {
+                    window->DockMinSize = g.NextWindowData.SizeConstraintRect.Min;
+                    window->DockMaxSize = g.NextWindowData.SizeConstraintRect.Max;
+                }
+                else
+                {
+                    window->DockMinSize = ImVec2(0.0f, 0.0f);
+                    window->DockMaxSize = ImVec2(FLT_MAX, FLT_MAX);
+                }
                 g.NextWindowData.HasFlags &= ~ImGuiNextWindowDataFlags_HasSizeConstraint; // Docking currently override constraints
             }
 
@@ -20435,6 +20448,41 @@ void ImGui::DockNodeTreeMerge(ImGuiContext* ctx, ImGuiDockNode* parent_node, ImG
         DockContextDeleteNode(ctx, child_1);
 }
 
+// SAGE: предел размера узла по оси из ограничений его окон. want_max == false — наименьший размер,
+// ниже которого узел не сжимается; true — наибольший (FLT_MAX — без предела). У разделённого узла
+// пределы складываются вдоль оси разделения и берутся по строжайшему из детей поперёк неё. Видимых
+// окон нет — предел нейтральный. Вкладки добавляют высоту заголовка к минимуму по Y.
+static float DockNodeCalcLimit(ImGuiDockNode* node, ImGuiAxis axis, bool want_max)
+{
+    ImGuiContext& g = *GImGui;
+    const float none = want_max ? FLT_MAX : 0.0f;
+    if (node == NULL || !node->IsVisible)
+        return none;
+    if (node->IsLeafNode())
+    {
+        float v = none;
+        for (ImGuiWindow* w : node->Windows)
+        {
+            const float lim = want_max ? w->DockMaxSize[axis] : w->DockMinSize[axis];
+            v = want_max ? ImMin(v, lim) : ImMax(v, lim);
+        }
+        if (!want_max && axis == ImGuiAxis_Y && v > 0.0f && !node->IsNoTabBar() && !node->IsHiddenTabBar())
+            v += g.FontSize + g.Style.FramePadding.y * 2.0f;
+        return v;
+    }
+    ImGuiDockNode* c0 = node->ChildNodes[0];
+    ImGuiDockNode* c1 = node->ChildNodes[1];
+    const bool v0 = c0 && c0->IsVisible, v1 = c1 && c1->IsVisible;
+    if (!v0 || !v1)
+        return DockNodeCalcLimit(v0 ? c0 : c1, axis, want_max);
+    const float a = DockNodeCalcLimit(c0, axis, want_max);
+    const float b = DockNodeCalcLimit(c1, axis, want_max);
+    if ((ImGuiAxis)node->SplitAxis == axis)
+        return want_max ? ((a >= FLT_MAX || b >= FLT_MAX) ? FLT_MAX : a + b + g.Style.DockingSeparatorSize)
+                        : a + b + g.Style.DockingSeparatorSize;
+    return want_max ? ImMin(a, b) : ImMax(a, b);
+}
+
 // Update Pos/Size for a node hierarchy (don't affect child Windows yet)
 // (Depth-first, Pre-Order)
 void ImGui::DockNodeTreeUpdatePosSize(ImGuiDockNode* node, ImVec2 pos, ImVec2 size, ImGuiDockNode* only_write_to_single_node)
@@ -20518,6 +20566,19 @@ void ImGui::DockNodeTreeUpdatePosSize(ImGuiDockNode* node, ImVec2 pos, ImVec2 si
             child_1_size[axis] = (size_avail - child_0_size[axis]);
         }
 
+        // SAGE: пределы размера панелей. Зажимаем первого ребёнка в допустимый отрезок, второй получает
+        // остаток. Невыполнимые пределы (окно слишком мало на всех) игнорируются — лучше сжать, чем сломать.
+        {
+            const float min0 = ImMax(DockNodeCalcLimit(child_0, axis, false), g.Style.WindowMinSize[axis]);
+            const float min1 = ImMax(DockNodeCalcLimit(child_1, axis, false), g.Style.WindowMinSize[axis]);
+            const float max0 = DockNodeCalcLimit(child_0, axis, true);
+            const float max1 = DockNodeCalcLimit(child_1, axis, true);
+            const float lo = ImMax(min0, size_avail - max1);
+            const float hi = ImMin(max0, size_avail - min1);
+            if (lo <= hi)
+                child_0_size[axis] = ImTrunc(ImClamp(child_0_size[axis], lo, hi));
+            child_1_size[axis] = size_avail - child_0_size[axis];
+        }
         child_1_pos[axis] += spacing + child_0_size[axis];
     }
 
@@ -20586,8 +20647,23 @@ void ImGui::DockNodeTreeUpdateSplitter(ImGuiDockNode* node)
             ImVector<ImGuiDockNode*> touching_nodes[2];
             float min_size = g.Style.WindowMinSize[axis];
             float resize_limits[2];
-            resize_limits[0] = node->ChildNodes[0]->Pos[axis] + min_size;
-            resize_limits[1] = node->ChildNodes[1]->Pos[axis] + node->ChildNodes[1]->Size[axis] - min_size;
+            // SAGE: пределы панелей (см. DockNodeCalcLimit) двигают границы хода сплиттера.
+            const float lim_min0 = ImMax(min_size, DockNodeCalcLimit(node->ChildNodes[0], axis, false));
+            const float lim_min1 = ImMax(min_size, DockNodeCalcLimit(node->ChildNodes[1], axis, false));
+            const float lim_max0 = DockNodeCalcLimit(node->ChildNodes[0], axis, true);
+            const float lim_max1 = DockNodeCalcLimit(node->ChildNodes[1], axis, true);
+            const float end1 = node->ChildNodes[1]->Pos[axis] + node->ChildNodes[1]->Size[axis];
+            resize_limits[0] = node->ChildNodes[0]->Pos[axis] + lim_min0;
+            resize_limits[1] = end1 - lim_min1;
+            {
+                const float max_lo = lim_max1 < FLT_MAX ? end1 - lim_max1 : -FLT_MAX;
+                const float max_hi = lim_max0 < FLT_MAX ? node->ChildNodes[0]->Pos[axis] + lim_max0 : FLT_MAX;
+                if (ImMax(resize_limits[0], max_lo) <= ImMin(resize_limits[1], max_hi))
+                {
+                    resize_limits[0] = ImMax(resize_limits[0], max_lo);
+                    resize_limits[1] = ImMin(resize_limits[1], max_hi);
+                }
+            }
 
             ImGuiID splitter_id = GetID("##Splitter");
             if (g.ActiveId == splitter_id) // Only process when splitter is active

@@ -169,6 +169,7 @@ void EditorLayer::InitImGui() {
     // (см. PanelWindows.h). Читается ДО первого кадра: в кадре это уже поздно,
     // панель успеет нарисоваться в доке и уехать оттуда рывком.
     panelwindows::Load();
+    LoadLayouts();
 
     EditorTheme::LoadFont();
     // Init, а не Apply: он собирает список тем (встроенные + themes/*.json) и

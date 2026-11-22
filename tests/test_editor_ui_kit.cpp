@@ -365,3 +365,37 @@ TEST(UiKit_subsection_actions_do_not_toggle_and_rename_in_place) {
     f.Run(400.0f, drawResult);
     CHECK_EQ(got, -1);
 }
+
+// Полоса инструментов: все элементы стоят на одной высоте, зазор между
+// соседями один (kit), разделитель не нарушает ритм, правая часть прижата к
+// краю, а высота полосы не зависит от числа элементов.
+TEST(UiKit_toolbar_keeps_one_height_one_gap_and_right_edge) {
+    KitFrame f;
+    ImVec2 mn[4], mx[4];
+    float barH = 0.0f, rightLimit = 0.0f;
+    auto draw = [&] {
+        ictl::BeginToolbar("##bar");
+        ictl::ToolbarNext(); ictl::Button(nullptr, "One");
+        mn[0] = ImGui::GetItemRectMin(); mx[0] = ImGui::GetItemRectMax();
+        ictl::ToolbarNext(); ictl::Button(nullptr, "Two");
+        mn[1] = ImGui::GetItemRectMin(); mx[1] = ImGui::GetItemRectMax();
+        ictl::ToolbarNext(); ictl::ToolbarSeparator();
+        ictl::ToolbarNext(); ictl::Button(nullptr, "Three");
+        mn[2] = ImGui::GetItemRectMin(); mx[2] = ImGui::GetItemRectMax();
+        const float w = ImGui::CalcTextSize("Right").x + 2.0f * EditorTheme::KitMetrics().ButtonPadX;
+        ictl::ToolbarRight(w);
+        ictl::Button(nullptr, "Right");
+        mn[3] = ImGui::GetItemRectMin(); mx[3] = ImGui::GetItemRectMax();
+        rightLimit = ImGui::GetWindowPos().x + ImGui::GetWindowContentRegionMax().x;
+        barH = ImGui::GetWindowSize().y;
+        ictl::EndToolbar();
+    };
+    f.Run(500.0f, draw);
+    f.Run(500.0f, draw);   // второй кадр: размеры окна полосы уже известны
+    const float gap = EditorTheme::KitMetrics().ToolGap;
+    for (int i = 1; i < 4; ++i) CHECK_NEAR(mn[i].y, mn[0].y, 0.5f);
+    CHECK_NEAR(mn[1].x - mx[0].x, gap, 0.5f);
+    CHECK_NEAR(barH, ictl::ToolbarHeight(), 0.5f);
+    CHECK_TRUE(mx[3].x <= rightLimit + 0.5f);
+    CHECK_TRUE(mx[3].x >= rightLimit - 2.0f);
+}

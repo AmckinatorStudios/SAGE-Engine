@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 4391.
+// Язык: Русский. Строк: 4398.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -2200,6 +2200,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Удалить выбранные файлы: %zu?"},
     {"Delete the context",
      "Удалить контекст"},
+    {"Delete the layout",
+     "Удалить макет"},
     {"Delete the plugin folder «%s» from disk?",
      "Удалить папку плагина «%s» с диска?"},
     {"Delete the selected elements",
@@ -2218,6 +2220,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Удалить «"},
     {"Deletes the project folder from disk",
      "Удаляет папку проекта с диска"},
+    {"Deleting a layout",
+     "Удаление макета"},
     {"Deleting an object",
      "Удаление объекта"},
     {"Demo Segments",
@@ -3876,6 +3880,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Раскладка"},
     {"Layout mode is off — the viewport shows no UI frames.",
      "Режим вёрстки выключен — рамок интерфейса во вьюпорте нет."},
+    {"Layout name",
+     "Имя макета"},
+    {"Layouts",
+     "Макеты"},
     {"Lays the children out by itself",
      "Сам расставляет детей"},
     {"Leaves the nearest loop.",
@@ -4394,6 +4402,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Музыка"},
     {"My Game",
      "Моя игра"},
+    {"My Layout",
+     "Мой макет"},
     {"My plugins (every project, editor only)",
      "Мои плагины (во всех проектах, только редактор)"},
     {"My plugins folder",
@@ -4776,6 +4786,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Число байт в тексте."},
     {"Number of items.",
      "Число элементов."},
+    {"OK",
+     "OK"},
     {"Object",
      "Объект"},
     {"Object Effects",
@@ -6264,6 +6276,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сохранить *"},
     {"Save .sage9",
      "Сохранить .sage9"},
+    {"Save Current Layout...",
+     "Сохранить текущий макет…"},
     {"Save Material",
      "Сохранить материал"},
     {"Save Material *",
