@@ -13,7 +13,6 @@
 #include "../EditorTheme.h"
 #include "../Localization.h"
 #include "../PanelWindowId.h"
-#include "../PanelWindows.h"
 #include "../Project.h"
 #include "../ui/UI.h"
 #include "sage/anim/AnimProperty.h"
@@ -722,8 +721,7 @@ void AnimationPanel::Draw(EditorHost& host, bool* open, const std::string& windo
         --m_focusFrames;
     }
     ImGui::SetNextWindowSize(ImVec2(960.0f, 320.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(sage::editor::panelid::Title("anim", T("Animation Timeline"), windowId).c_str(), open,
-                     panelwindows::WindowFlags("Animation"))) {
+    if (!ImGui::Begin(sage::editor::panelid::Title("anim", T("Animation Timeline"), windowId).c_str(), open)) {
         ImGui::End();
         return;
     }

@@ -171,13 +171,10 @@ sage::ui::UIScope EditorLayer::UiScope() const {
     return sage::ui::UIScope::Only(obj.Entity());
 }
 
-// Панель, живущая своим окном системы, в док не заводится: DockBuilder втянул
-// бы её обратно вкладкой, отменив то, о чём человека не спрашивали.
 void EditorLayer::DockRegisteredPanels(EditorWorkspace workspace, unsigned int left, unsigned int right,
                                        unsigned int bottom, unsigned int center) {
     using sage::editor::PanelDock;
     m_panelRegistry.ForEachDocked(workspace, [&](const std::string& id, PanelDock slot) {
-        if (panelwindows::Detached(id.c_str())) return;
         const ImGuiID node = slot == PanelDock::Left ? left
                            : slot == PanelDock::Right ? right
                            : slot == PanelDock::Bottom ? bottom
@@ -248,12 +245,8 @@ void EditorLayer::BuildDefaultDockLayout(unsigned int dockspaceId) {
     ImGuiID left  = ImGui::DockBuilderSplitNode(center, ImGuiDir_Left, 0.23f, nullptr, &center);
     ImGuiID bottom = ImGui::DockBuilderSplitNode(center, ImGuiDir_Down, 0.28f, nullptr, &center);
 
-    // Сброс раскладки возвращает и состав ОКОН, а не только расстановку
-    // вкладок: окно, уехавшее на монитор, которого больше нет, иначе не
-    // вернуть ничем (см. PanelWindows.h).
-    panelwindows::ResetToDefaults();
-    // Панель, живущая своим окном системы, в док не заводится: DockBuilder
-    // втянул бы её обратно вкладкой, отменив то, о чём человека не спрашивали.
+    // DockBuilder заводит в узлы и вытащенные окна: сброс раскладки возвращает
+    // панели в редактор, а не только расставляет вкладки.
     // Кто куда — из реестра (PanelSpec::SceneDock). Viewport в центре —
     // ПЕРВЫМ: первая добавленная к узлу вкладка становится выбранной, и при
     // Game первым редактор открывался на игровом окне без пикинга и гизмо
@@ -326,11 +319,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
     ImGuiID dockspaceId = ImGui::GetID(kDockNames[(int)m_workspace]);
     // Сброс раскладки — ВСЕХ трёх пространств, и ДО того, как какой-либо из
     // доков подан в кадр: пересобирать узел, у которого DockSpace уже вызван,
-    // нельзя. Состав «отдельных окон» и видимость панелей возвращаются тут же.
+    // нельзя. Видимость панелей возвращается тут же, вытащенные окна — докованием.
     if (m_rebuildAllDocks) {
         m_rebuildAllDocks = false;
         m_rebuildDockLayout = false;
-        panelwindows::ResetToDefaults();
         m_panelRegistry.Restore();
         for (int w = 0; w < (int)EditorWorkspace::Count; ++w)
             BuildWorkspaceDock(w, ImGui::GetID(kDockNames[w]), w == (int)m_workspace);
@@ -350,7 +342,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::DockSpace(other, ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_KeepAliveOnly);
     }
 
-    // Куда возвращать панель, у которой сняли галочку «в отдельном окне».
+    // Куда возвращать вытащенное окно, если оно потерялось или его просят вернуть.
     panelwindows::SetHomeDock(dockspaceId);
     if (m_rebuildDockLayout || ImGui::DockBuilderGetNode(dockspaceId) == nullptr) {
         m_rebuildDockLayout = false;
@@ -491,19 +483,11 @@ void EditorLayer::DrawDockspaceAndMenu() {
             // не восстанавливалась «сбросом», хотя именно этого от него ждут.
             if (EditorIcons::MenuItem("refresh", T("Reset Layout"))) RequestDefaultLayout();
             DrawLayoutsMenu();
-            // Панель ОТДЕЛЬНЫМ ОКНОМ СИСТЕМЫ — меню, а не только перетаскивание
-            // мышью: вернуть вытащенное было нечем, кроме сброса раскладки.
-            if (EditorIcons::BeginMenu("window", T("Separate Window"))) {
-                ImGui::TextDisabled("%s", T("Panel becomes a window of the system"));
-                m_panelRegistry.DrawDetachMenu(m_workspace);
-                ImGui::Separator();
-                // Путь назад для случая «окно уехало на второй монитор, а
-                // монитора больше нет»: оттуда его не достать ни мышью, ни
-                // галочкой — окна не видно, чтобы за него взяться.
-                if (EditorIcons::MenuItem("layout", T("Bring all windows back")))
-                    panelwindows::AttachAll();
-                ImGui::EndMenu();
-            }
+            // Путь назад для случая «окно уехало на второй монитор, а монитора
+            // больше нет». Обычное возвращение — перетаскивание заголовка в док.
+            if (EditorIcons::MenuItem("layout", T("Return all windows to the editor"), nullptr,
+                                      m_panelRegistry.AnyFloating(m_workspace)))
+                m_panelRegistry.ReturnFloating(m_workspace);
             ImGui::Separator();
             // Настройки — одним окном: игра (экран, качество, освещение и
             // тени, управление) и редактор (язык, программа для кода,

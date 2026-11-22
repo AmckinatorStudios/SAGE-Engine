@@ -11,7 +11,6 @@
 #include "../EditorTheme.h"
 #include "../Localization.h"
 #include "../PanelWindowId.h"
-#include "../PanelWindows.h"
 #include "../Project.h"
 #include "../ui/UI.h"
 #include "sage/anim/AnimProperty.h"

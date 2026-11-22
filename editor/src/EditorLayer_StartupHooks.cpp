@@ -73,7 +73,6 @@ void FillUISample(Scene& scene, entt::entity root, const std::string& which);   
 #include "AssetExt.h"
 #include "Localization.h"
 #include "PanelWindowId.h"
-#include "PanelWindows.h"
 #include "Progress.h"
 
 
@@ -230,10 +229,8 @@ void EditorLayer::ApplyStartupHooks() {
             ui.Add("Take", sage::input::ActionType::Digital).Bind("E");
         }
     }
-    // Редактор интерфейса открывается в прогоне самопроверки нарочно: он живёт
-    // ОТДЕЛЬНЫМ окном системы (см. PanelWindows.h), а закрытая панель окна не
-    // заводит — проверять в кадре было бы нечего. На снимок главного окна это
-    // не влияет: окно у него своё.
+    // Холст интерфейса в прогоне самопроверки открыт нарочно: закрытая панель
+    // окна не заводит, и проверять в кадре было бы нечего.
     if (std::getenv("SAGE_EDITOR_SELFTEST")) m_panels[EditorPanel::InterfaceViewport] = true;
     if (const char* dlg = std::getenv("SAGE_EDITOR_OPEN_DIALOG")) {
         m_headlessProject = true;

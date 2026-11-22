@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 // ВСТРОЕННЫЕ ПАНЕЛИ РЕДАКТОРА — единственное место, где они перечислены.
 //
-// Меню «Окно», палитра команд, «Отдельным окном», раскладка по умолчанию,
+// Меню «Окно», палитра команд, раскладка по умолчанию,
 // «Сбросить раскладку» и отрисовка берут их из реестра (PanelRegistry.h).
 // Порядок регистрации — порядок в меню внутри раздела; место в доке задаёт
 // SceneDock/InterfaceDock.
@@ -27,6 +27,7 @@ void EditorLayer::RegisterPanels() {
         s.Icon = icon;
         s.Section = section;
         s.Visible = &m_panels[flag];
+        s.Detachable = true;   // Draw открывает одно докабельное окно
         s.Draw = std::forward<decltype(draw)>(draw);
         return s;
     };
@@ -94,9 +95,9 @@ void EditorLayer::RegisterPanels() {
             s.Spaces = panelspace::Animation;
             s.AnimationDock = {dock, 0};
             s.InLayout = true;
+            s.Detachable = true;
             s.DefaultVisible = true;
-            s.WrapWindow = false;
-            s.Draw = std::forward<decltype(draw)>(draw);
+                s.Draw = std::forward<decltype(draw)>(draw);
             m_panelRegistry.Register(std::move(s));
         };
         animPanel("AnimViewport", "Viewport", "world", PanelDock::Center,
@@ -143,7 +144,6 @@ void EditorLayer::RegisterPanels() {
         s.Spaces = panelspace::Interface;
         s.InterfaceDock = {PanelDock::Center, 1};
         s.InLayout = true;
-        s.Detachable = false;
         m_panelRegistry.Register(std::move(s));
     }
 
@@ -184,7 +184,6 @@ void EditorLayer::RegisterPanels() {
         s.InterfaceDock = {PanelDock::Bottom, 2};
         s.AnimationDock = {PanelDock::Bottom, 0};
         s.InLayout = true;
-        s.WrapWindow = false;
         s.DrawWhenHidden = true;
         m_panelRegistry.Register(std::move(s));
     }
@@ -199,8 +198,8 @@ void EditorLayer::RegisterPanels() {
         s.Spaces = panelspace::Animation;
         s.AnimationDock = {PanelDock::Bottom, 1};
         s.InLayout = true;
+        s.Detachable = true;
         s.DefaultVisible = true;
-        s.WrapWindow = false;
         s.DrawWhenHidden = true;   // закрытое окно возвращает объекту его граф
         s.Draw = [this](EditorHost& host, bool* open, const std::string& id) { m_animGraph.Draw(host, open, id); };
         m_panelRegistry.Register(std::move(s));
@@ -211,7 +210,6 @@ void EditorLayer::RegisterPanels() {
         s.PerSpaceWindow = true;
         s.SceneDock = {PanelDock::Bottom, 3};
         s.InterfaceDock = {PanelDock::Bottom, 3};
-        s.WrapWindow = false;
         s.DrawWhenHidden = true;
         m_panelRegistry.Register(std::move(s));
     }
@@ -225,7 +223,6 @@ void EditorLayer::RegisterPanels() {
         s.Title = "AI Graph";
         s.Icon = "wire";
         s.Section = PanelSection::Tools;
-        s.WrapWindow = false;
         s.Draw = [this](EditorHost&, bool* open, const std::string&) { m_aiGraph.Draw(*this, open); };
         m_panelRegistry.Register(std::move(s));
     }
@@ -235,7 +232,6 @@ void EditorLayer::RegisterPanels() {
         s.Title = "Script Graph";
         s.Icon = "wire";
         s.Section = PanelSection::Tools;
-        s.WrapWindow = false;
         s.Draw = [this](EditorHost&, bool* open, const std::string&) { m_visualScript.Draw(*this, open); };
         m_panelRegistry.Register(std::move(s));
     }
@@ -246,7 +242,6 @@ void EditorLayer::RegisterPanels() {
         s.Title = "Sprite Editor";
         s.Icon = "grid";
         s.Section = PanelSection::Tools;
-        s.WrapWindow = false;
         s.Draw = [this](EditorHost& host, bool* open, const std::string&) { m_spriteSheet.Draw(host, open); };
         m_panelRegistry.Register(std::move(s));
     }
@@ -258,14 +253,12 @@ void EditorLayer::RegisterPanels() {
         s.Section = PanelSection::Tools;
         // Открывается кнопкой окна AI Graph — в меню Window его нет.
         s.InMenu = false;
-        s.WrapWindow = false;
         s.Draw = [this](EditorHost&, bool* open, const std::string&) { m_aiDebug.Draw(*this, open, m_aiGraph); };
         m_panelRegistry.Register(std::move(s));
     }
     {
         PanelSpec s = make(EditorPanel::Profiler, "Profiler", "Profiler", "chart", PanelSection::Tools,
                            [this](EditorHost&, bool* open, const std::string&) { m_profiler.Draw(open); });
-        s.Detachable = false;
         m_panelRegistry.Register(std::move(s));
     }
 

@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 4401.
+// Язык: Русский. Строк: 4398.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1220,8 +1220,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Яркость картинки неба; окружающий свет и отражения следуют за ней"},
     {"Bring a file into the project",
      "Внести файл в проект"},
-    {"Bring all windows back",
-     "Собрать все окна в главное"},
     {"Bring back on screen",
      "Вернуть на экран"},
     {"Bring forward",
@@ -5230,8 +5228,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Раздел палитры"},
     {"Panel",
      "Панель"},
-    {"Panel becomes a window of the system",
-     "Панель становится окном системы"},
     {"Panel, label, image or bar on screen",
      "Панель, надпись, картинка или полоса на экране"},
     {"Panels",
@@ -6078,12 +6074,12 @@ constexpr TranslationPair kRussianStrings[] = {
      "Продолжить"},
     {"Return",
      "Вернуть"},
+    {"Return all windows to the editor",
+     "Вернуть все окна в редактор"},
     {"Return every quality setting to the chosen profile",
      "Вернуть все параметры качества к выбранному профилю"},
     {"Return to what is saved in the project",
      "Вернуть то, что сохранено в проекте"},
-    {"Returns the panel to a tab of the main window",
-     "Вернёт панель вкладкой в главное окно"},
     {"Reveal",
      "Открытием"},
     {"Reverse",
@@ -6578,8 +6574,6 @@ constexpr TranslationPair kRussianStrings[] = {
      "Чувствительность"},
     {"Sent by project scripts",
      "Шлют скрипты проекта"},
-    {"Separate Window",
-     "Отдельное окно"},
     {"Separate window",
      "В отдельном окне"},
     {"Sequence",

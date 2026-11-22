@@ -2,7 +2,6 @@
 #include "../CreateAssetDialog.h"
 #include "../DragSet.h"
 #include "../PanelWindowId.h"
-#include "../PanelWindows.h"
 #include "AssetsPanel.h"
 #include "FsCache.h"
 #include "ModelImportDialog.h"

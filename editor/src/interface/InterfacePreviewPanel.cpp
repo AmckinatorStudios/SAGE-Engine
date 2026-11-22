@@ -8,7 +8,6 @@
 #include "../EditorHost.h"
 #include "../Localization.h"
 #include "EditorIcons.h"
-#include "../PanelWindows.h"
 
 #include "sage/core/Config.h"
 #include "sage/ui/UIInteraction.h"
@@ -20,8 +19,7 @@ void InterfacePreviewPanel::Draw(EditorHost& host, bool& open) {
         --m_focusFrames;
     }
     ImGui::SetNextWindowSize(ImVec2(640.0f, 400.0f), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin(EditorIcons::WindowTitle("eye", T("Preview"), "InterfacePreview").c_str(), &open,
-                      panelwindows::WindowFlags("InterfacePreview"))) {
+    if (!ImGui::Begin(EditorIcons::WindowTitle("eye", T("Preview"), "InterfacePreview").c_str(), &open)) {
         m_focused = false;
         m_mouseInside = false;
         m_typed.clear();

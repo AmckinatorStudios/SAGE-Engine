@@ -1,11 +1,13 @@
 // Пользовательские макеты редактора: сохранить текущую расстановку панелей
 // под именем, переключаться между ними, переименовать, удалить.
 //
-// Макет — это снимок ТРЁХ вещей, потому что расстановка складывается из них:
+// Макет — это снимок ДВУХ вещей, потому что расстановка складывается из них:
 //   1) ini ImGui в памяти: доки всех трёх пространств (Scene, Interface,
-//      Animation), размеры, группы вкладок, активные вкладки, позиции окон;
-//   2) видимость панелей (реестр панелей) — в ini её нет;
-//   3) «отдельные окна системы» (panelwindows) — тоже не в ini.
+//      Animation), размеры, группы вкладок, активные вкладки, позиции окон —
+//      и вытащенных в отдельные окна системы тоже (их вьюпорт помнит ini);
+//   2) видимость панелей (реестр панелей) — в ini её нет.
+// Поле «detached» макетов старой версии при чтении игнорируется: отдельного
+// состояния «окно отдельное» больше нет.
 // Файл последней сессии sage_editor_imgui.ini при этом не трогается: макеты
 // лежат в настройках редактора и живут рядом с ним, а не вместо него.
 #include "EditorLayer.h"
@@ -17,7 +19,6 @@
 #include "EditorIcons.h"
 #include "EditorPrefs.h"
 #include "Localization.h"
-#include "PanelWindows.h"
 #include "imgui.h"
 #include "ui/UI.h"
 
@@ -46,9 +47,6 @@ void EditorLayer::LoadLayouts() {
                 if (j.contains("visible") && j["visible"].is_object())
                     for (auto it = j["visible"].begin(); it != j["visible"].end(); ++it)
                         if (it.value().is_boolean()) l.Visible[it.key()] = it.value().get<bool>();
-                if (j.contains("detached") && j["detached"].is_object())
-                    for (auto it = j["detached"].begin(); it != j["detached"].end(); ++it)
-                        if (it.value().is_boolean()) l.Detached[it.key()] = it.value().get<bool>();
                 m_layouts.push_back(std::move(l));
             }
         }
@@ -71,7 +69,6 @@ void EditorLayer::PersistLayouts() {
         j["name"] = l.Name;
         j["ini"] = l.Ini;
         j["visible"] = l.Visible;
-        j["detached"] = l.Detached;
         list.push_back(std::move(j));
     }
     sage::editor::prefs::SetString(kListKey, list.dump());
@@ -93,7 +90,6 @@ void EditorLayer::SaveLayoutAs(const std::string& rawName) {
     layout.Name = name;
     layout.Ini.assign(ini ? ini : "", len);
     layout.Visible = m_panelRegistry.VisibilitySnapshot();
-    layout.Detached = panelwindows::Snapshot();
 
     auto it = std::find_if(m_layouts.begin(), m_layouts.end(),
                            [&](const SavedLayout& l) { return l.Name == name; });
@@ -124,7 +120,6 @@ void EditorLayer::ApplyPendingLayout() {
     // держит указатели на окна и узлы дока, которые загрузка пересоздаёт.
     ImGui::LoadIniSettingsFromMemory(l.Ini.c_str(), l.Ini.size());
     m_panelRegistry.ApplyVisibility(l.Visible);
-    panelwindows::Apply(l.Detached);
     m_rebuildDockLayout = false;
     m_activeLayout = l.Name;
     sage::editor::prefs::SetString(kActiveKey, m_activeLayout);

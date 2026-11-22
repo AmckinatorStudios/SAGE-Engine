@@ -72,7 +72,6 @@
 #include "Localization.h"
 #include "ObjectCatalog.h"
 #include "PanelWindowId.h"
-#include "PanelWindows.h"
 
 namespace fs = std::filesystem;
 

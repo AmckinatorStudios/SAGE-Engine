@@ -1,6 +1,5 @@
 #include "sage/scene/ScaleLock.h"
 #include "../DragSet.h"
-#include "../PanelWindows.h"
 #include "ViewportPanel.h"
 #include "ModelImportDialog.h"
 

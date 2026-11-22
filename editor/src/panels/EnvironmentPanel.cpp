@@ -1,4 +1,3 @@
-#include "../PanelWindows.h"
 #include "EnvironmentPanel.h"
 #include "EditorTheme.h"
 
@@ -437,8 +436,7 @@ void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     m_drawn.clear();
 
     if (std::getenv("SAGE_EDITOR_SHOW_ENVIRONMENT")) ImGui::SetNextWindowFocus();   // снимок: окно впереди вкладки
-    ImGui::Begin(EditorIcons::WindowTitle("sun", T("Environment"), "Lighting").c_str(), open,
-                 panelwindows::WindowFlags("Lighting"));
+    ImGui::Begin(EditorIcons::WindowTitle("sun", T("Environment"), "Lighting").c_str(), open);
 
     // Ответ диалога приходит ЧЕРЕЗ КАДР: цель — ключом свойства, а поле
     // находится заново по схеме в уже текущей сцене.

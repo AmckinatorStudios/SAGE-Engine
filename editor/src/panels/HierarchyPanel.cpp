@@ -1,4 +1,3 @@
-#include "../PanelWindows.h"
 #include "HierarchyPanel.h"
 
 #include <algorithm>
@@ -471,8 +470,7 @@ void HierarchyPanel::Draw(EditorHost& host, bool* open, const std::string& windo
     Scene& scene = host.CurrentScene();
     entt::registry& reg = scene.Registry();
 
-    ImGui::Begin(EditorIcons::WindowTitle("hierarchy", T("Hierarchy"), windowId.c_str()).c_str(), open,
-                 panelwindows::WindowFlags(windowId.c_str()));
+    ImGui::Begin(EditorIcons::WindowTitle("hierarchy", T("Hierarchy"), windowId.c_str()).c_str(), open);
     // --- ДВЕ КНОПКИ НАД СПИСКОМ ---------------------------------------------
     //
     // Создать объект можно было двумя способами, и оба надо было ЗНАТЬ: меню

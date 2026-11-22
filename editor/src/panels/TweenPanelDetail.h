@@ -15,7 +15,6 @@
 #include "../Localization.h"
 #include "../ObjectSlot.h"
 #include "../PanelWindowId.h"
-#include "../PanelWindows.h"
 #include "../ui/ColorPicker.h"
 #include "../ui/UI.h"
 #include "sage/anim/AnimProperty.h"
