@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 4398.
+// Язык: Русский. Строк: 4401.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -500,10 +500,14 @@ constexpr TranslationPair kRussianStrings[] = {
      "Добавить элемент"},
     {"Add Layer",
      "Добавить слой"},
+    {"Add Method",
+     "Добавить метод"},
     {"Add Part",
      "Добавить часть"},
     {"Add Script",
      "Добавить скрипт"},
+    {"Add a built-in event of this object",
+     "Добавить встроенное событие этого объекта"},
     {"Add a group around the selection",
      "Группа вокруг выделенного"},
     {"Add a line to the shader:\nuniform float uWaveHeight; // 0.35 [0, 2] Wave height\nuniform vec3 uDeepColor; // color 0.02 0.16 0.28 Deep color",
@@ -962,6 +966,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сзади (-Z)"},
     {"Back face",
      "Зад"},
+    {"Back to events",
+     "Назад к событиям"},
     {"Back to the default",
      "Вернуть умолчание"},
     {"Back to the editor",
