@@ -91,6 +91,15 @@ namespace {
 // Блок морфинга — общий для цветного и depth-прохода: форма обязана совпадать,
 // иначе тень персонажа не соответствовала бы его лицу.
 const char* kMorphGlsl = R"(
+// Палитра костей лежит в ТЕКСТУРЕ, а не в uniform mat4[]: 256 матриц — это ровно
+// 1024 vec4-регистра, весь лимит вершинной стадии NVIDIA (C6020), и с любыми
+// другими uniform'ами программа не линковалась. Выборка texelFetch лимита
+// uniform не тратит; строка = кость, 4 текселя = столбцы матрицы.
+uniform sampler2D uBoneTex;
+mat4 BoneMatrix(int j) {
+    return mat4(texelFetch(uBoneTex, ivec2(0, j), 0), texelFetch(uBoneTex, ivec2(1, j), 0),
+                texelFetch(uBoneTex, ivec2(2, j), 0), texelFetch(uBoneTex, ivec2(3, j), 0));
+}
 const int MAX_ACTIVE_MORPHS = 8;
 uniform sampler2D uMorphPos;
 uniform sampler2D uMorphNrm;
@@ -135,8 +144,6 @@ out vec2 vUV2;
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProjection;
-const int MAX_BONES = @MAX_BONES@;
-uniform mat4 uBones[MAX_BONES];
 uniform int uSkinned; // 0 — bind-поза (без палитры)
 
 void main() {
@@ -152,10 +159,10 @@ void main() {
     if (uSkinned == 0 || wsum < 0.0001) {
         skin = mat4(1.0);
     } else {
-        skin = aWeights.x * uBones[int(aJoints.x)]
-             + aWeights.y * uBones[int(aJoints.y)]
-             + aWeights.z * uBones[int(aJoints.z)]
-             + aWeights.w * uBones[int(aJoints.w)];
+        skin = aWeights.x * BoneMatrix(int(aJoints.x))
+             + aWeights.y * BoneMatrix(int(aJoints.y))
+             + aWeights.z * BoneMatrix(int(aJoints.z))
+             + aWeights.w * BoneMatrix(int(aJoints.w));
     }
     vec4 skinnedPos = skin * vec4(morphedPos, 1.0);
     // Нормаль и касательную поворачивает та же матрица скиннинга: кость гнёт
@@ -191,30 +198,34 @@ void main() {
 // ни затенения, ни свечения, ни прозрачности.
 std::string SkinFragSource() { return sage::render::TexturedPbrFragSource(); }
 
-// Размер палитры в шейдере берётся из kMaxBones, а не пишется литералом: иначе
-// шейдер и загрузка влияний расходятся, и кость за палитрой читает чужую память.
-std::string WithBoneLimit(std::string body) {
-    const std::string key = "@MAX_BONES@";
-    for (size_t at = body.find(key); at != std::string::npos; at = body.find(key, at))
-        body.replace(at, key.size(), std::to_string(sage::anim::kMaxBones));
-    return body;
-}
-
 // Готовый исходник вершинной стадии: версия + блок морфинга + тело. Склейка
 // здесь, а не в двух местах, гарантирует, что цветной и depth-проход морфят
 // вершину ОДИНАКОВО (см. комментарий у kMorphGlsl).
 std::string SkinVertSource() {
-    return std::string("#version 330 core\n") + kMorphGlsl + WithBoneLimit(kSkinVertBody);
+    return std::string("#version 330 core\n") + kMorphGlsl + kSkinVertBody;
 }
 
-Shader& SkinShader() {
+// Сборка программы с перехватом ошибки: шейдер не собрался — пишем в лог и
+// возвращаем nullptr (повторно не пробуем: каждый кадр собирать заведомо
+// битую программу и спамить логом незачем). Вызывающий пропускает отрисовку
+// скина, а не рушит весь редактор исключением из середины кадра; битая
+// программа никогда не используется.
+Shader* BuildShader(const std::string& vert, const std::string& frag, const char* name) {
+    try {
+        return new Shader(Shader::FromSource(vert, frag, name));
+    } catch (const std::exception& e) {
+        LOG_ERROR("Anim") << "SkinnedModel: шейдер «" << name << "» не собран, скин не рисуется: "
+                          << e.what();
+        return nullptr;
+    }
+}
+
+Shader* SkinShader() {
     // Намеренно НЕ уничтожаем: function-local static с деструктором Shader снёс
     // бы GL-программу при выходе из процесса — уже ПОСЛЕ разрушения GL-контекста
-    // (segfault в glDeleteProgram). Утечка одной программы на выходе безвредна
-    // (ОС всё освободит), зато нет обращения к мёртвому контексту.
-    static Shader* shader =
-        new Shader(Shader::FromSource(SkinVertSource(), SkinFragSource(), "SkinnedModel"));
-    return *shader;
+    // (segfault в glDeleteProgram). Утечка одной программы на выходе безвредна.
+    static Shader* shader = BuildShader(SkinVertSource(), SkinFragSource(), "SkinnedModel");
+    return shader;
 }
 
 // Depth-only скиннинг-шейдер для карты теней: скиннинг в вершинной стадии,
@@ -229,8 +240,6 @@ out vec2 TexCoords;   // для выреза по альфе в тени (вол
 
 uniform mat4 uLightSpace;
 uniform mat4 uModel;
-const int MAX_BONES = @MAX_BONES@;
-uniform mat4 uBones[MAX_BONES];
 uniform int uSkinned;
 
 void main() {
@@ -243,10 +252,10 @@ void main() {
     if (uSkinned == 0 || wsum < 0.0001) {
         skin = mat4(1.0);
     } else {
-        skin = aWeights.x * uBones[int(aJoints.x)]
-             + aWeights.y * uBones[int(aJoints.y)]
-             + aWeights.z * uBones[int(aJoints.z)]
-             + aWeights.w * uBones[int(aJoints.w)];
+        skin = aWeights.x * BoneMatrix(int(aJoints.x))
+             + aWeights.y * BoneMatrix(int(aJoints.y))
+             + aWeights.z * BoneMatrix(int(aJoints.z))
+             + aWeights.w * BoneMatrix(int(aJoints.w));
     }
     TexCoords = aUV;
     gl_Position = uLightSpace * uModel * skin * vec4(morphedPos, 1.0);
@@ -255,7 +264,7 @@ void main() {
 
 // Исходник depth-стадии: версия + блок морфинга + тело (см. SkinVertSource).
 std::string SkinDepthVertSource() {
-    return std::string("#version 330 core\n") + kMorphGlsl + WithBoneLimit(kSkinDepthVertBody);
+    return std::string("#version 330 core\n") + kMorphGlsl + kSkinDepthVertBody;
 }
 
 // Вырез по альфе — тот же, что у цветного прохода: пряди волос и бахрома
@@ -270,9 +279,9 @@ void main() {
 }
 )";
 
-Shader& SkinDepthShader() {
-    static Shader* shader = new Shader(Shader::FromSource(SkinDepthVertSource(), kSkinDepthFrag, "SkinnedModelDepth"));
-    return *shader;
+Shader* SkinDepthShader() {
+    static Shader* shader = BuildShader(SkinDepthVertSource(), kSkinDepthFrag, "SkinnedModelDepth");
+    return shader;
 }
 
 // Силуэт: та же вершинная часть (скиннинг + морфы), но с записью цвета.
@@ -284,10 +293,10 @@ uniform vec3 uColor;
 void main() { FragColor = vec4(uColor, 1.0); }
 )";
 
-Shader& SkinSilhouetteShader() {
-    static Shader* shader = new Shader(
-        Shader::FromSource(SkinDepthVertSource(), kSkinSilhouetteFrag, "SkinnedModelSilhouette"));
-    return *shader;
+Shader* SkinSilhouetteShader() {
+    static Shader* shader =
+        BuildShader(SkinDepthVertSource(), kSkinSilhouetteFrag, "SkinnedModelSilhouette");
+    return shader;
 }
 
 } // namespace
@@ -309,6 +318,36 @@ constexpr int kMaxActiveMorphs = 8;
 // раскладку юнитов в render/ShadowMap.h).
 constexpr int kMorphPosUnit = 16;
 constexpr int kMorphNrmUnit = 17;
+constexpr int kBoneTexUnit = 18;
+
+// Загружает палитру в общую текстуру и выставляет uSkinned/uBoneTex. Текстура
+// одна на процесс: палитра нужна только на время вызова отрисовки, а Update —
+// это glTexSubImage на ≤16 КБ. Кость за kMaxBones не попадает в текстуру.
+void UploadBones(const Shader& shader, const std::vector<glm::mat4>& bones) {
+    const int boneCount = std::min((int)bones.size(), kMaxBones);
+    if (boneCount <= 0) {
+        shader.SetInt("uSkinned", 0);
+        return;
+    }
+    // Намеренно не уничтожаем (см. SkinShader): деструктор после смерти GL-контекста.
+    static sage::rhi::Texture2D* tex = nullptr;
+    static std::vector<glm::mat4> staging((size_t)kMaxBones, glm::mat4(1.0f));
+    std::copy(bones.begin(), bones.begin() + boneCount, staging.begin());
+    if (!tex) {
+        sage::rhi::Texture2DDesc desc;
+        desc.Width = 4;
+        desc.Height = kMaxBones;
+        desc.Channels = 4;
+        desc.Float32 = true;   // 32F: 16 бит на матрицу кости дают видимый дрейф вершин
+        desc.GenerateMipmaps = false;
+        tex = sage::rhi::GraphicsDevice::Get().CreateTexture2D(desc, staging.data()).release();
+    } else {
+        tex->Update(staging.data());
+    }
+    shader.SetInt("uSkinned", 1);
+    shader.SetInt("uBoneTex", kBoneTexUnit);
+    tex->Bind(kBoneTexUnit);
+}
 
 void UploadMorphs(const Shader& shader, const SkinnedSubMesh& sub,
                   const std::vector<float>* weights) {
@@ -361,7 +400,9 @@ void SkinnedModel::Draw(const glm::mat4& entityModel, const glm::mat4& view, con
                         const sage::render::LightClusters* clusters, sage::gi::GIState* gi,
                         const SkinnedMaterial* overrideMaterial) const {
     const glm::mat4 model = entityModel * m_import;   // настройки импорта (см. SetImportTransform)
-    Shader& shader = SkinShader();
+    Shader* shaderPtr = SkinShader();
+    if (!shaderPtr) return;
+    Shader& shader = *shaderPtr;
     shader.Use();
     shader.SetMat4("uModel", model);
     shader.SetMat4("uView", view);
@@ -391,13 +432,7 @@ void SkinnedModel::Draw(const glm::mat4& entityModel, const glm::mat4& view, con
     sage::render::UploadReflection(shader, reflections ? reflections->At(glm::vec3(entityModel[3]))
                                                        : sage::render::ReflectionBinding{});
 
-    int boneCount = std::min((int)bones.size(), kMaxBones);
-    if (boneCount > 0) {
-        shader.SetInt("uSkinned", 1);
-        shader.SetMat4Array("uBones", bones.data(), boneCount);
-    } else {
-        shader.SetInt("uSkinned", 0);
-    }
+    UploadBones(shader, bones);
 
     // Юниты — ТЕ ЖЕ, что у текстурного прохода статики (см. RenderBatch):
     // albedo=0, тень=1, нормали=2, металл=3, шероховатость=4, AO=5, свечение=12.
@@ -520,18 +555,14 @@ void SkinnedModel::DrawDepth(const glm::mat4& entityModel, const glm::mat4& ligh
                              const std::vector<glm::mat4>& bones,
                              const std::vector<float>* morphWeights) const {
     const glm::mat4 model = entityModel * m_import;   // настройки импорта (см. SetImportTransform)
-    Shader& shader = SkinDepthShader();
+    Shader* shaderPtr = SkinDepthShader();
+    if (!shaderPtr) return;
+    Shader& shader = *shaderPtr;
     shader.Use();
     shader.SetMat4("uLightSpace", lightMatrix);
     shader.SetMat4("uModel", model);
 
-    int boneCount = std::min((int)bones.size(), kMaxBones);
-    if (boneCount > 0) {
-        shader.SetInt("uSkinned", 1);
-        shader.SetMat4Array("uBones", bones.data(), boneCount);
-    } else {
-        shader.SetInt("uSkinned", 0);
-    }
+    UploadBones(shader, bones);
 
     shader.SetInt("uAlbedoMap", 0);
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
@@ -554,7 +585,9 @@ void SkinnedModel::DrawSilhouette(const glm::mat4& entityModel, const glm::mat4&
                                   const std::vector<glm::mat4>& bones,
                                   const std::vector<float>* morphWeights) const {
     const glm::mat4 model = entityModel * m_import;   // настройки импорта (см. SetImportTransform)
-    Shader& shader = SkinSilhouetteShader();
+    Shader* shaderPtr = SkinSilhouetteShader();
+    if (!shaderPtr) return;
+    Shader& shader = *shaderPtr;
     shader.Use();
     // uLightSpace — имя из общего с depth-проходом вершинного шейдера; здесь в
     // него едет обычная матрица вида-проекции камеры.
@@ -562,13 +595,7 @@ void SkinnedModel::DrawSilhouette(const glm::mat4& entityModel, const glm::mat4&
     shader.SetMat4("uModel", model);
     shader.SetVec3("uColor", glm::vec3(1.0f));
 
-    int boneCount = std::min((int)bones.size(), kMaxBones);
-    if (boneCount > 0) {
-        shader.SetInt("uSkinned", 1);
-        shader.SetMat4Array("uBones", bones.data(), boneCount);
-    } else {
-        shader.SetInt("uSkinned", 0);
-    }
+    UploadBones(shader, bones);
 
     for (const auto& sub : m_subMeshes) {
         UploadMorphs(shader, sub, morphWeights);
