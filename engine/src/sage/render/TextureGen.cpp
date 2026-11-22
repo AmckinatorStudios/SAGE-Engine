@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 
 namespace sage::render {
@@ -17,7 +18,11 @@ namespace {
 // пришлось бы держать в статической памяти и инициализировать по seed, а здесь
 // seed — просто ещё одно слагаемое.
 inline float Hash(int x, int y, unsigned int seed) {
-    unsigned int h = (unsigned int)(x * 374761393) + (unsigned int)(y * 668265263) + seed * 362437u;
+    // Вся арифметика беззнаковая: знаковое переполнение int — UB, и оптимизатор
+    // вправе испортить хеш. Беззнаковое умножение по модулю 2^32 даёт те же биты,
+    // что прежнее умножение int в дополнительном коде, — текстуры не меняются.
+    const uint32_t ux = (uint32_t)x, uy = (uint32_t)y;
+    uint32_t h = ux * 374761393u + uy * 668265263u + (uint32_t)seed * 362437u;
     h = (h ^ (h >> 13)) * 1274126177u;
     h ^= h >> 16;
     return (float)(h & 0xFFFFFFu) / (float)0xFFFFFF;
