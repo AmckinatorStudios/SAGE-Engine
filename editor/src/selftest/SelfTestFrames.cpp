@@ -83,6 +83,15 @@ void EditorLayer::CheckMultiWindowFrame() {
             m_multiWindowWait = 7;
             return;
         case 1: {
+            // Профайлер мог остаться в доке с прошлого запуска (его место помнит
+            // imgui.ini) — проверять надо плавающий, поэтому вытаскиваем его так же,
+            // как это делает перетаскивание вкладки.
+            ImGuiWindow* ui0 = ImGui::FindWindowByName("Profiler");
+            if (ui0 != nullptr && ui0->DockId != 0) {
+                ImGui::DockContextQueueUndockWindow(ImGui::GetCurrentContext(), ui0);
+                m_multiWindowWait = 7;
+                return;
+            }
             const ImGuiWindow* ui = ImGui::FindWindowByName("Profiler");
             const ImGuiWindow* docked = ImGui::FindWindowByName("Hierarchy");
             if (ui == nullptr || ui->Viewport == nullptr) return fail("окна панели нет в кадре");
