@@ -122,6 +122,65 @@ void Separator(bool vertical) {
     ImGui::Dummy(ImVec2(0.0f, gap + t));
 }
 
+namespace {
+// Полосы не вкладываются (полоса в полосе — это уже группа), поэтому достаточно
+// одного признака «первый элемент ряда».
+bool g_toolbarFirst = true;
+} // namespace
+
+float ToolbarGap() { return K().ToolGap; }
+
+float ToolbarHeight() { return std::floor(ImGui::GetFrameHeight() + 2.0f * K().ToolbarPadY); }
+
+bool BeginToolbar(const char* id) {
+    const float h = ToolbarHeight();
+    // Поля окна полосы: по бокам — kit, по вертикали — столько, чтобы поле
+    // стояло ровно по центру (при масштабе высота поля дробная — округляем).
+    const float padY = std::floor((h - ImGui::GetFrameHeight()) * 0.5f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(K().ToolbarPadX, padY));
+    ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, K().Rounding);
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, EditorTheme::Color(Role::SurfaceAlt));
+    const bool visible = ImGui::BeginChild(id, ImVec2(0.0f, h), ImGuiChildFlags_AlwaysUseWindowPadding,
+                                           ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    ImGui::PopStyleColor();
+    ImGui::PopStyleVar(2);
+    // Промежуток между элементами задаёт ToolbarNext(), а не ItemSpacing темы.
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(K().ToolGap, ImGui::GetStyle().ItemSpacing.y));
+    g_toolbarFirst = true;
+    return visible;
+}
+
+void EndToolbar() {
+    ImGui::PopStyleVar();
+    ImGui::EndChild();
+}
+
+void ToolbarNext() {
+    if (g_toolbarFirst) { g_toolbarFirst = false; return; }
+    ImGui::SameLine(0.0f, K().ToolGap);
+}
+
+void ToolbarSeparator() {
+    // Линия на всю высоту поля, с отступами по kit; ширина — толщина линии.
+    const float t = K().SeparatorThickness;
+    const ImVec2 p = ImGui::GetCursorScreenPos();
+    const float h = ImGui::GetFrameHeight();
+    ImGui::GetWindowDrawList()->AddRectFilled(ImVec2(p.x, p.y + K().SeparatorInset),
+                                              ImVec2(p.x + t, p.y + h - K().SeparatorInset),
+                                              EditorTheme::Color32(Role::Line));
+    ImGui::Dummy(ImVec2(t, h));
+}
+
+void ToolbarRight(float width) {
+    const float x = ImGui::GetWindowContentRegionMax().x - width;
+    ImGui::SameLine(std::max(ImGui::GetCursorPosX() + K().ToolGap, x));
+    g_toolbarFirst = false;
+}
+
+float ToolbarAvail(float reserveRight) {
+    return std::max(0.0f, ImGui::GetContentRegionAvail().x - reserveRight);
+}
+
 void SeparatorText(const char* text) {
     // Подпись части группы и тонкая линия до края — той же толщины и цвета,
     // что все разделители kit.

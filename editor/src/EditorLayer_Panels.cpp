@@ -40,6 +40,7 @@ void EditorLayer::RegisterPanels() {
         s.Spaces = panelspace::Scene;
         s.SceneDock = {PanelDock::Center, 0};
         s.InLayout = true;
+        s.Limits = {320.0f, 200.0f, 0.0f, 0.0f};
         m_panelRegistry.Register(std::move(s));
     }
     {
@@ -58,6 +59,7 @@ void EditorLayer::RegisterPanels() {
         s.Spaces = panelspace::Scene;
         s.SceneDock = {PanelDock::Left, 0};
         s.InLayout = true;
+        s.Limits = {200.0f, 120.0f, 480.0f, 0.0f};
         m_panelRegistry.Register(std::move(s));
     }
     {
@@ -66,6 +68,7 @@ void EditorLayer::RegisterPanels() {
         s.Spaces = panelspace::Scene;
         s.SceneDock = {PanelDock::Right, 1};
         s.InLayout = true;
+        s.Limits = {260.0f, 160.0f, 640.0f, 0.0f};
         m_panelRegistry.Register(std::move(s));
     }
     {
@@ -154,6 +157,7 @@ void EditorLayer::RegisterPanels() {
         s.InterfaceDock = {PanelDock::Bottom, 0};
         s.AnimationDock = {PanelDock::Bottom, 2};
         s.InLayout = true;
+        s.Limits = {240.0f, 140.0f, 0.0f, 0.0f};
         m_panelRegistry.Register(std::move(s));
     }
     {
@@ -165,6 +169,7 @@ void EditorLayer::RegisterPanels() {
         s.InterfaceDock = {PanelDock::Bottom, 1};
         s.AnimationDock = {PanelDock::Bottom, 3};
         s.InLayout = true;
+        s.Limits = {240.0f, 120.0f, 0.0f, 0.0f};
         m_panelRegistry.Register(std::move(s));
     }
     {

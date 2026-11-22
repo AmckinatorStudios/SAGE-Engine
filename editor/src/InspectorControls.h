@@ -219,6 +219,34 @@ void SeparatorText(const char* text);
 void BeginGroup(const char* title = nullptr);
 void EndGroup();
 
+// ПОЛОСА ИНСТРУМЕНТОВ — ряд кнопок, групп и полей ОДНОЙ высоты без ручной
+// расстановки. Раньше каждая панель считала SameLine и отступы сама, и при
+// добавлении кнопки ряд «ехал»: соседи разной высоты, зазоры 4/6/8 точек,
+// правый край на глаз. Теперь полоса даёт высоту (поле + поля kit), вертикальное
+// центрирование и единый промежуток между элементами:
+//
+//   if (ictl::BeginToolbar("##console_bar")) {
+//       ictl::ToolbarNext(); ictl::Button("trash", nullptr, "Clear");
+//       ictl::ToolbarNext(); ictl::ToolbarSeparator();
+//       ictl::ToolbarNext(); ictl::Button("dots", nullptr, "More");
+//   }
+//   ictl::EndToolbar();   // зовётся ВСЕГДА, как у ImGui::BeginChild
+//
+// ToolbarNext() — перед каждым элементом (у первого ничего не делает);
+// ToolbarRight(w) — следующий элемент и всё после него прижать вправо
+// (w — суммарная ширина правой части); ToolbarAvail() — сколько места осталось
+// (для поля поиска, занимающего остаток).
+bool BeginToolbar(const char* id);
+void EndToolbar();
+void ToolbarNext();
+void ToolbarSeparator();
+void ToolbarRight(float width);
+float ToolbarAvail(float reserveRight = 0.0f);
+// Высота полосы — одна на редактор (поле + поля kit); для расчёта раскладки снаружи.
+float ToolbarHeight();
+// Зазор между элементами ряда (kit) — для расчёта ширины правой части.
+float ToolbarGap();
+
 // Подпись раздела ЗАГЛАВНЫМИ (и кириллицей), без «###id».
 std::string UpperTitle(const char* title);
 
