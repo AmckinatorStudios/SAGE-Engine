@@ -1,6 +1,7 @@
 #include "sage/scripting/ScriptFields.h"
 
 #include <algorithm>
+#include <cstring>
 #include <cctype>
 
 #include "sage/scripting/Languages.h"
@@ -71,14 +72,16 @@ std::vector<std::string> ParseMethods(const std::string& path, const std::string
     return lang.Methods(path, source);
 }
 
-std::vector<std::string> ParseEmittedSignals(const std::string& source) {
+// Общий разбор вызова `x:<call>("имя")` — для emit и define_event.
+static std::vector<std::string> ParseCallNames(const std::string& source, const char* call) {
+    const size_t callLen = std::strlen(call);
     std::vector<std::string> out;
     const size_t n = source.size();
     for (size_t i = source.find(":"); i != std::string::npos && i < n; i = source.find(":", i + 1)) {
         size_t j = i + 1;
         while (j < n && (source[j] == ' ' || source[j] == '\t')) ++j;
-        if (source.compare(j, 4, "emit") != 0) continue;
-        j += 4;
+        if (source.compare(j, callLen, call) != 0) continue;
+        j += callLen;
         // «emitter» и подобные — не вызов emit.
         if (j < n && (std::isalnum((unsigned char)source[j]) || source[j] == '_')) continue;
         while (j < n && (source[j] == ' ' || source[j] == '\t')) ++j;
@@ -97,6 +100,12 @@ std::vector<std::string> ParseEmittedSignals(const std::string& source) {
         if (valid && std::find(out.begin(), out.end(), name) == out.end()) out.push_back(std::move(name));
     }
     return out;
+}
+
+std::vector<std::string> ParseEmittedSignals(const std::string& source) { return ParseCallNames(source, "emit"); }
+
+std::vector<std::string> ParseDefinedEvents(const std::string& source) {
+    return ParseCallNames(source, "define_event");
 }
 
 } // namespace sage::scripting

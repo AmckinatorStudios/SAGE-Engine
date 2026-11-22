@@ -46,50 +46,46 @@ long long StampOf(const std::filesystem::path& p) {
     return (long long)t.time_since_epoch().count();
 }
 
-// Заголовок события: «On Click» — переведённым, если перевод есть.
-std::string TitleOf(const std::string& signal) { return T(sage::signals::Title(signal)); }
-
-// Сигналы, которые шлют скрипты проекта (`self:emit("player_died")`), — для
-// списка событий. Обход папки — не чаще раза в две секунды: инспектор
-// спрашивает каждый кадр, а скрипты правят реже.
-const std::vector<std::string>& ProjectEmittedSignals(EditorHost& host) {
-    static std::string forDir;
-    static double at = -100.0;
-    static std::vector<std::string> names;
-    const std::string dir = host.CurrentProject().Loaded() ? host.CurrentProject().Dir().string() : std::string();
-    const double now = ImGui::GetTime();
-    if (dir == forDir && now - at < 2.0) return names;
-    forDir = dir;
-    at = now;
-    names.clear();
-    if (dir.empty()) return names;
-    std::error_code ec;
-    std::set<std::string> seen;
-    for (auto it = std::filesystem::recursive_directory_iterator(host.CurrentProject().AssetsDir(), ec);
-         !ec && it != std::filesystem::recursive_directory_iterator(); it.increment(ec)) {
-        if (!it->is_regular_file(ec)) continue;
-        if (!sage::scripting::IsScriptPath(it->path().string())) continue;
-        if (it->file_size(ec) > 512 * 1024) continue; // не скрипт, а данные
-        std::ifstream in(it->path(), std::ios::binary);
-        const std::string src((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-        for (std::string& n : sage::scripting::ParseEmittedSignals(src))
-            if (seen.insert(n).second) names.push_back(std::move(n));
-    }
-    return names;
+// Заголовок: встроенные — «On Click», свои — имя как объявлено («Died»).
+std::string TitleOf(const std::string& signal) {
+    const std::string t = sage::signals::Title(signal);
+    static const char* kBuiltin[] = {sage::signals::kClicked,       sage::signals::kPressed,
+                                     sage::signals::kReleased,      sage::signals::kHovered,
+                                     sage::signals::kUnhovered,     sage::signals::kValueChanged,
+                                     sage::signals::kTextChanged,   sage::signals::kSubmitted,
+                                     sage::signals::kCollision,     sage::signals::kCollisionEnded,
+                                     sage::signals::kTriggerEntered, sage::signals::kTriggerExited};
+    for (const char* b : kBuiltin)
+        if (signal == b) return T(t);
+    return signal;
 }
 
-// Список для поля события: объявленные сигналы объекта, затем — из скриптов.
-std::vector<suggest::Item> EventItems(EditorHost& host, const entt::registry& reg, entt::entity e) {
-    std::vector<suggest::Item> items;
-    for (const sage::signals::SignalInfo& s : sage::signals::Of(reg, e))
-        items.push_back({s.Name, TitleOf(s.Name) + "   " + s.Name, T("Events of this object"),
-                         s.Source + ": " + T(s.Help)});
-    for (const std::string& n : ProjectEmittedSignals(host)) {
-        if (suggest::Known(items, n)) continue;
-        items.push_back({n, TitleOf(n) + "   " + n, T("Sent by project scripts"),
-                         std::string(T("A script sends it: obj:emit(\"")) + n + "\")"});
+// События, которые объявляют СКРИПТЫ ЭТОГО объекта (`self:define_event("Died")`).
+// По тексту, до запуска игры; кэш по времени правки файла.
+std::vector<std::string> DefinedEventsOf(EditorHost& host, const entt::registry& reg, entt::entity e) {
+    std::vector<std::string> out;
+    const ScriptComponent* sc = reg.try_get<ScriptComponent>(e);
+    if (!sc) return out;
+    static std::map<std::string, CachedMethods> cache;
+    for (const ScriptEntry& entry : sc->Scripts) {
+        if (entry.Path.empty()) continue;
+        std::filesystem::path full = entry.Path;
+        if (full.is_relative() && host.CurrentProject().Loaded()) full = host.CurrentProject().Dir() / full;
+        CachedMethods& c = cache[full.string()];
+        const long long stamp = StampOf(full);
+        if (stamp != c.Stamp) {
+            c.Stamp = stamp;
+            c.Methods.clear();
+            std::ifstream in(full, std::ios::binary);
+            if (in) {
+                const std::string src((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+                c.Methods = sage::scripting::ParseDefinedEvents(src);
+            }
+        }
+        for (const std::string& n : c.Methods)
+            if (std::find(out.begin(), out.end(), n) == out.end()) out.push_back(n);
     }
-    return items;
+    return out;
 }
 
 } // namespace
@@ -130,57 +126,101 @@ bool DrawSignalLinks(EditorHost& host, GameObject obj) {
     bool changed = false;
     ImGui::PushID("signal_links");
 
-    SignalLinksComponent* sl = reg.try_get<SignalLinksComponent>(obj.Entity());
+    // Какое событие открыто для правки. Один на редактор: другой объект —
+    // снова список.
+    static entt::entity openFor = entt::null;
+    static std::string open;
+    if (openFor != obj.Entity()) {
+        openFor = obj.Entity();
+        open.clear();
+    }
 
-    // Порядок групп — порядок первой связи каждого события: человек видит
-    // события в том порядке, в каком он их добавлял.
-    std::vector<std::string> order;
+    SignalLinksComponent* sl = reg.try_get<SignalLinksComponent>(obj.Entity());
+    const std::vector<std::string> defined = DefinedEventsOf(host, reg, obj.Entity());
+
+    // Список строк: события с записью в сцене (в порядке добавления), затем
+    // объявленные скриптом, которых там ещё нет — они видны сразу.
+    std::vector<std::string> rows;
     if (sl)
         for (const Link& l : sl->Links)
-            if (std::find(order.begin(), order.end(), l.Signal) == order.end()) order.push_back(l.Signal);
+            if (std::find(rows.begin(), rows.end(), l.Signal) == rows.end()) rows.push_back(l.Signal);
+    for (const std::string& n : defined)
+        if (std::find(rows.begin(), rows.end(), n) == rows.end()) rows.push_back(n);
+    if (!open.empty() && std::find(rows.begin(), rows.end(), open) == rows.end()) open.clear();
+
+    auto countOf = [&](const std::string& signal) {
+        int n = 0;
+        if (sl)
+            for (const Link& l : sl->Links)
+                if (l.Signal == signal && (l.Target.Valid() || !l.Method.empty() || !l.Broadcast.empty())) ++n;
+        return n;
+    };
+
+    if (open.empty()) {
+        // --- Список: одна строка — одно событие -----------------------------
+        std::string toOpen;
+        for (const std::string& signal : rows) {
+            ImGui::PushID(signal.c_str());
+            const std::string count = std::to_string(countOf(signal));
+            const float w = ImGui::GetContentRegionAvail().x;
+            if (ImGui::Selectable("##row", false, 0, ImVec2(w, 0))) toOpen = signal;
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip(T("In a script: obj.%s:connect(fn)"), signal.c_str());
+            ImGui::SameLine(ImGui::GetStyle().FramePadding.x);
+            ImGui::TextUnformatted(TitleOf(signal).c_str());
+            const float arrow = ImGui::CalcTextSize(">").x;
+            ImGui::SameLine(w - ImGui::CalcTextSize(count.c_str()).x - arrow - ImGui::GetStyle().ItemSpacing.x * 2);
+            ImGui::TextDisabled("%s  >", count.c_str());
+            ImGui::PopID();
+        }
+        if (!toOpen.empty()) open = toOpen;
+        if (rows.empty()) ImGui::TextDisabled("%s", T("Nothing happens yet"));
+
+        // Встроенные события этого объекта, которых ещё нет в списке.
+        std::vector<sage::signals::SignalInfo> avail;
+        for (const sage::signals::SignalInfo& s : sage::signals::Of(reg, obj.Entity()))
+            if (std::find(rows.begin(), rows.end(), s.Name) == rows.end()) avail.push_back(s);
+        ImGui::BeginDisabled(avail.empty());
+        if (EditorIcons::IconOnlyButton("plus", T("Add a built-in event of this object"))) ImGui::OpenPopup("add_event");
+        ImGui::EndDisabled();
+        if (ImGui::BeginPopup("add_event")) {
+            for (const sage::signals::SignalInfo& s : avail) {
+                if (ImGui::MenuItem(TitleOf(s.Name).c_str())) {
+                    host.PushUndoSnapshot();
+                    reg.get_or_emplace<SignalLinksComponent>(obj.Entity()).Links.push_back(Link{s.Name, {}, {}, true, {}});
+                    changed = true;
+                }
+                if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(s.Help));
+            }
+            ImGui::EndPopup();
+        }
+        ImGui::PopID();
+        return changed;
+    }
+
+    // --- Редактирование события: список его методов -------------------------
+    const std::string signal = open;
+    if (EditorIcons::IconOnlyButton("back", T("Back to events"))) {
+        open.clear();
+        ImGui::PopID();
+        return changed;
+    }
+    ImGui::SameLine();
+    ImGui::AlignTextToFramePadding();
+    ImGui::Text("%s / %s", T("Events"), TitleOf(signal).c_str());
 
     int removeAt = -1;
-    std::string addTo;   // «+» у события: ещё один метод на то же событие
-    std::string renameFrom, renameTo;
-    const std::vector<suggest::Item> eventItems = EventItems(host, reg, obj.Entity());
-    for (const std::string& signal : order) {
-        ImGui::PushID(signal.c_str());
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(TitleOf(signal).c_str());
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip(T("In a script: obj.%s:connect(fn)"), signal.c_str());
-        // Имя события правится на месте — вручную или из списка: раньше
-        // ошибиться в нём можно было только один раз, а исправить — лишь
-        // удалив все связи события и заведя их заново.
-        ImGui::SameLine();
-        {
-            const float plus = ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x;
-            std::string name = signal;
-            ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - plus);
-            if (suggest::Field("name", name, eventItems, "event_name") && name != signal &&
-                sage::signals::IsValidName(name)) {
-                renameFrom = signal;
-                renameTo = name;
-            }
-        }
-        ImGui::SameLine();
-        if (EditorIcons::IconOnlyButton("plus", T("Call one more method on this event"))) addTo = signal;
-
-        ImGui::Indent();
+    if (sl) {
+        ImGui::BeginChild("##methods", ImVec2(0, ImGui::GetFrameHeightWithSpacing() * 6), false);
         for (size_t i = 0; i < sl->Links.size(); ++i) {
             Link& link = sl->Links[i];
             if (link.Signal != signal) continue;
             ImGui::PushID((int)i);
-
             // Строка связи — таблицей: слот объекта занимает всю доступную
-            // ширину, и только ячейка таблицы даёт ему честные «пол-строки»
-            // рядом с методом.
+            // ширину, и только ячейка таблицы даёт ему «пол-строки» рядом с методом.
             const ImGuiTableFlags tf = ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoPadOuterX;
             if (ImGui::BeginTable("##link", 4, tf)) {
                 const float icon = ImGui::GetFrameHeight();
-                // Колонка галочки — по самой галочке (она меньше поля, см.
-                // CheckboxScale): колонка в высоту поля оставляла справа от
-                // неё пустую полосу, и слот цели отъезжал от своей галки.
                 const float check = std::ceil(icon * ImGui::GetStyle().CheckboxScale);
                 ImGui::TableSetupColumn("on", ImGuiTableColumnFlags_WidthFixed, check);
                 ImGui::TableSetupColumn("target", ImGuiTableColumnFlags_WidthStretch, 1.4f);
@@ -197,19 +237,15 @@ bool DrawSignalLinks(EditorHost& host, GameObject obj) {
 
                 if (!link.Broadcast.empty()) {
                     // Переходник из старой сцены: связь слала событие по имени.
-                    // Изменить её нельзя (так связи больше не заводят), убрать — можно.
                     ImGui::TableSetColumnIndex(1);
                     ImGui::AlignTextToFramePadding();
-                    // Код, а не подпись: переводить имя функции нельзя.
                     const std::string code = "Events.emit(\"" + link.Broadcast + "\")";
                     ImGui::TextDisabled("%s", code.c_str());
                     if (ImGui::IsItemHovered())
                         ImGui::SetTooltip("%s", T("A link from an older scene: it sends a global event by name.\n"
                                                  "Subscribe to it in a script with Events.on(name, fn)."));
                 } else {
-                    // Цель — только объект со скриптом: у объекта без скрипта
-                    // звать нечего, и дать его выбрать значит завести связь,
-                    // которая заведомо не сработает.
+                    // Цель — только объект со скриптом: звать у остальных нечего.
                     ImGui::TableSetColumnIndex(1);
                     objectslot::Options opt;
                     opt.EmptyLabel = "Target";
@@ -231,10 +267,8 @@ bool DrawSignalLinks(EditorHost& host, GameObject obj) {
                     std::vector<suggest::Item> methodItems;
                     for (const std::string& m : methods) methodItems.push_back({m, m + "()", {}, {}});
                     const bool known = link.Method.empty() || suggest::Known(methodItems, link.Method);
-                    // Метод пишут вручную или берут из списка, прочитанного из
-                    // скрипта цели. Вручную — для метода, которого в скрипте
-                    // ещё нет; такая связь помечена: с опечаткой она молча не
-                    // сработает, и сказать об этом надо здесь.
+                    // Метод, которого нет в скрипте цели, помечен: с опечаткой
+                    // связь молча не сработает.
                     if (!known) ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
                     std::string method = link.Method;
                     ImGui::SetNextItemWidth(-FLT_MIN);
@@ -254,64 +288,23 @@ bool DrawSignalLinks(EditorHost& host, GameObject obj) {
             }
             ImGui::PopID();
         }
-        ImGui::Unindent();
-        ImGui::PopID();
+        ImGui::EndChild();
+    }
+
+    if (EditorIcons::Button("plus", T("Add Method"))) {
+        host.PushUndoSnapshot();
+        reg.get_or_emplace<SignalLinksComponent>(obj.Entity()).Links.push_back(Link{signal, {}, {}, true, {}});
+        changed = true;
     }
 
     if (removeAt >= 0 && sl) {
         host.PushUndoSnapshot();
         sl->Links.erase(sl->Links.begin() + removeAt);
-        if (sl->Links.empty()) reg.remove<SignalLinksComponent>(obj.Entity());
-        sl = reg.try_get<SignalLinksComponent>(obj.Entity());
-        changed = true;
-    }
-    if (!renameFrom.empty() && sl) {
-        host.PushUndoSnapshot();
-        for (Link& l : sl->Links)
-            if (l.Signal == renameFrom) l.Signal = renameTo;
-        changed = true;
-    }
-    if (!addTo.empty()) {
-        host.PushUndoSnapshot();
-        reg.get_or_emplace<SignalLinksComponent>(obj.Entity()).Links.push_back(Link{addTo, {}, {}, true, {}});
-        changed = true;
-    }
-
-    // --- + Add Event ---------------------------------------------------------
-    // Одно поле: имя пишут вручную (своё событие, которое шлёт скрипт:
-    // `obj:emit("player_died")`) или берут из списка — сигналы объекта и те,
-    // что шлют скрипты проекта. Пример в подсказке — имя из кода игры, не
-    // подпись: не переводится.
-    std::string chosen;
-    {
-        static std::string draft;
-        // Недописанное имя у одного объекта не переезжает к другому.
-        static entt::entity draftFor = entt::null;
-        if (draftFor != obj.Entity()) {
-            draft.clear();
-            draftFor = obj.Entity();
-        }
-        const float add = ImGui::CalcTextSize(T("Add Event")).x + ImGui::GetFrameHeight() +
-                          ImGui::GetStyle().FramePadding.x * 3.0f + ImGui::GetStyle().ItemSpacing.x;
-        ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - add);
-        const bool picked = suggest::Field("new_event", draft, eventItems, "player_died");
-        ImGui::SameLine();
-        const bool valid = sage::signals::IsValidName(draft);
-        ImGui::BeginDisabled(!valid);
-        const bool pressed = EditorIcons::Button("plus", T("Add Event"));
-        ImGui::EndDisabled();
-        // Выбор из списка добавляет сразу; набранное — по Enter или кнопке.
-        if (valid && (pressed || (picked && (suggest::Known(eventItems, draft) ||
-                                             ImGui::IsKeyPressed(ImGuiKey_Enter) ||
-                                             ImGui::IsKeyPressed(ImGuiKey_KeypadEnter))))) {
-            chosen = draft;
-            draft.clear();
-        }
-    }
-    if (order.empty()) ImGui::TextDisabled("%s", T("Nothing happens yet"));
-    if (!chosen.empty()) {
-        host.PushUndoSnapshot();
-        reg.get_or_emplace<SignalLinksComponent>(obj.Entity()).Links.push_back(Link{chosen, {}, {}, true, {}});
+        // Событие остаётся в списке с нулём методов: убирают метод, а не событие.
+        const bool left = std::any_of(sl->Links.begin(), sl->Links.end(),
+                                      [&](const Link& l) { return l.Signal == signal; });
+        if (!left && std::find(defined.begin(), defined.end(), signal) == defined.end())
+            sl->Links.push_back(Link{signal, {}, {}, true, {}});
         changed = true;
     }
 
