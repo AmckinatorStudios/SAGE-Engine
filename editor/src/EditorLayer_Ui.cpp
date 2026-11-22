@@ -411,10 +411,10 @@ void EditorLayer::DrawDockspaceAndMenu() {
             ImGui::EndMenu();
         }
         if (EditorIcons::BeginMenu("play", T("Play"))) {
-            if (EditorIcons::MenuItem("play", T("Play"), nullptr, !m_play.Active())) StartPlay();
+            if (EditorIcons::MenuItem("play", T("Play"), nullptr, !m_play.Active() && !m_externalRunning)) StartPlay();
             if (EditorIcons::MenuItem("pause", T("Pause"), nullptr, m_play.Playing())) PausePlay();
             if (EditorIcons::MenuItem("play", T("Resume"), nullptr, m_play.Paused())) ResumePlay();
-            if (EditorIcons::MenuItem("stop", T("Stop"), nullptr, InPlayMode())) StopPlay();
+            if (EditorIcons::MenuItem("stop", T("Stop"), nullptr, InPlayMode() || m_externalRunning)) StopPlay();
             ImGui::EndMenu();
         }
         // ОБЪЕКТ — ОДИН КАТАЛОГ НА ВЕСЬ РЕДАКТОР.

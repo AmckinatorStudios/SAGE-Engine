@@ -249,7 +249,10 @@ void PlayerLayer::OnAttach() {
     sage::save::SetGameName(m_projectName);
 
     // 3. Главная сцена.
-    fs::path scenePath = FindMainScene();
+    // SAGE_PLAY_SCENE — сцена, которую редактор запускает кнопкой Play (текущая,
+    // в том числе несохранённая): стартовая сцена проекта тут была бы чужой.
+    fs::path scenePath = sage::EnvPath("SAGE_PLAY_SCENE");
+    if (scenePath.empty()) scenePath = FindMainScene();
     if (scenePath.empty()) {
         Fail("В проекте нет ни одной сцены",
              {"Проект найден, но играть нечего: в assets/Scenes нет ни одного файла .sage.",

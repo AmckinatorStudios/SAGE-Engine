@@ -42,6 +42,7 @@
 
 namespace sage { class Application; }
 #include "EditorPlaySession.h"
+#include "ExternalGame.h"
 #include "aigraph/AiDebugPanel.h"
 #include "aigraph/AiGraphPanel.h"
 #include "animgraph/AnimGraphPanel.h"
@@ -279,6 +280,7 @@ public:
     // заметку шаблона.
     EditorPlayState GetPlayState() const override { return m_play.State(); }
     bool InPlayMode() const override { return m_play.Active(); }
+    bool ExternalGameRunning() const override { return m_externalRunning; }
     PhysicsScene* PlayPhysics() override { return m_play.Active() ? m_play.Physics() : nullptr; }
     ScriptEngine* PlayScripts() override { return m_play.Active() ? m_play.Scripts() : nullptr; }
     void SyncBodyToTransform(GameObject object) override;
@@ -717,6 +719,13 @@ private:
     // гашения в Stop — там, а не здесь: это единственное место редактора, где
     // сцена живёт не как документ, и смешивать его с редактированием опасно.
     EditorPlaySession m_play;
+    // Режим Window панели Game: отдельный процесс SagePlayer (EditorLayer_Play.cpp).
+    ExternalGame m_external;
+    bool m_externalRunning = false;
+    std::filesystem::path m_externalTemp; // временные сцена и настройки запуска
+    bool StartExternalGame();
+    void StopExternalGame();
+    void PollExternalGame();
     // Сцену на время Stop заменяет сессия, поэтому ей отдаётся указатель НА
     // указатель. Отдельное поле, а не &m_scene: unique_ptr — не Scene*.
     Scene* m_scenePtr = nullptr;

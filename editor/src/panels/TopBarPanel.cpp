@@ -109,6 +109,7 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
     const bool playing = state == EditorPlayState::Playing;
     const bool paused = state == EditorPlayState::Paused;
     const bool inPlay = host.InPlayMode();
+    const bool external = host.ExternalGameRunning(); // окно игры — не Play редактора
     const EditorWorkspace space = host.Workspace();
     bool openMore = false;
 
@@ -191,11 +192,11 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
             const char* icon = "play";
             const char* label = paused ? T("Resume") : T("Play");
             const char* tip = paused ? T("Resume") : T("Run the scene (it is restored on Stop)");
-            const bool pressed = lv.playLabel ? EditorIcons::Button(icon, label, tip, playing)
-                                              : EditorIcons::IconOnlyButton(icon, tip, playing);
+            const bool pressed = lv.playLabel ? EditorIcons::Button(icon, label, tip, playing || external)
+                                              : EditorIcons::IconOnlyButton(icon, tip, playing || external);
             if (pressed) {
                 if (paused) host.ResumePlay();
-                else if (!playing) host.StartPlay();
+                else if (!playing && !external) host.StartPlay();
             }
             ImGui::PopStyleColor(4);
         });
@@ -210,7 +211,7 @@ void TopBarPanel::Draw(EditorHost& host, float height) {
             ImGui::EndDisabled();
         });
         pen.Item(m.IconW(), [&] {
-            ImGui::BeginDisabled(!inPlay);
+            ImGui::BeginDisabled(!inPlay && !external);
             if (EditorIcons::IconOnlyButton("stop", T("Stop and restore the scene"))) host.StopPlay();
             ImGui::EndDisabled();
         });

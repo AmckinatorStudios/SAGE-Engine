@@ -4382,6 +4382,15 @@
     "Time of Day": "Время суток",
     "Time of day turns the sun object; in the game time runs by itself. Works with any sky.\nThe sky's \"Night palette\" is separate: it only recolours the sky by the sun's height": "Время суток поворачивает объект-солнце; в игре время идёт само. Работает с любым небом.\n«Ночная палитра» неба — отдельная вещь: она лишь перекрашивает небо по высоте солнца",
     "Turns on the time-of-day cycle: Time of Day moves the sun object": "Включает цикл суток: «Время суток» двигает объект-солнце",
-    "World height (Y) where the fog is densest, in metres": "Высота мира (Y), где туман плотнее всего, в метрах"
+    "World height (Y) where the fog is densest, in metres": "Высота мира (Y), где туман плотнее всего, в метрах",
+    "Embedded": "Во вкладке",
+    "Play inside the editor, in this panel": "Играть внутри редактора, в этой панели",
+    "Play in a separate game window (the real player)": "Играть в отдельном окне игры (настоящий плеер)",
+    "The game is running in a separate window": "Игра идёт в отдельном окне",
+    "Press Play to run the game in a separate window": "Нажмите Play, чтобы запустить игру в отдельном окне",
+    "Open a project to run the game": "Откройте проект, чтобы запустить игру",
+    "SagePlayer not found": "SagePlayer не найден",
+    "Could not prepare the scene for the game window": "Не удалось подготовить сцену для окна игры",
+    "Could not start the game window": "Не удалось запустить окно игры"
   }
 }

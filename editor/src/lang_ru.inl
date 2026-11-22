@@ -1,7 +1,7 @@
 // СГЕНЕРИРОВАНО scripts/gen_lang.py из editor/lang/ru.json — не править руками.
 // Правки вносятся в JSON, затем: python3 scripts/gen_lang.py
 //
-// Язык: Русский. Строк: 4382.
+// Язык: Русский. Строк: 4391.
 struct TranslationPair {
     const char* Key;
     const char* Value;
@@ -1926,6 +1926,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Граф не открылся: "},
     {"Could not pack: ",
      "Не упаковалось: "},
+    {"Could not prepare the scene for the game window",
+     "Не удалось подготовить сцену для окна игры"},
     {"Could not read the sprite sheet: ",
      "Не удалось прочитать лист спрайтов: "},
     {"Could not read the texture: ",
@@ -1936,6 +1938,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Не удалось сохранить стиль: "},
     {"Could not save: ",
      "Не удалось сохранить: "},
+    {"Could not start the game window",
+     "Не удалось запустить окно игры"},
     {"Could not write the game package",
      "Не удалось записать пакет игры"},
     {"Could not write the game package: ",
@@ -2586,6 +2590,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Эллипс"},
     {"Ellipsis",
      "Многоточие"},
+    {"Embedded",
+     "Во вкладке"},
     {"Embers",
      "Угольки"},
     {"Emission",
@@ -5024,6 +5030,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Сначала откройте проект: плагины проекта лежат в его папке plugins"},
     {"Open a project to move the interface into its own file",
      "Откройте проект, чтобы вынести интерфейс в свой файл"},
+    {"Open a project to run the game",
+     "Откройте проект, чтобы запустить игру"},
     {"Open a project to save the interface",
      "Откройте проект, чтобы сохранить интерфейс"},
     {"Open a project to work with AI graphs.",
@@ -5404,6 +5412,10 @@ constexpr TranslationPair kRussianStrings[] = {
      "Играть (Пробел)"},
     {"Play On Start",
      "Играть при старте"},
+    {"Play in a separate game window (the real player)",
+     "Играть в отдельном окне игры (настоящий плеер)"},
+    {"Play inside the editor, in this panel",
+     "Играть внутри редактора, в этой панели"},
     {"Play on start",
      "Играть при запуске"},
     {"Play the animation graph in the preview",
@@ -5500,6 +5512,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Заготовка"},
     {"Preset:",
      "Пресет:"},
+    {"Press Play to run the game in a separate window",
+     "Нажмите Play, чтобы запустить игру в отдельном окне"},
     {"Press a control",
      "Нажмите клавишу"},
     {"Press a control...",
@@ -6226,6 +6240,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Поле безопасной зоны, процент кадра"},
     {"Safe area: everything outside it can be cut off (camera notch, rounded corners, TV overscan)",
      "Безопасная зона: всё за ней может обрезаться (вырез камеры, скруглённые углы, края телевизора)"},
+    {"SagePlayer not found",
+     "SagePlayer не найден"},
     {"SagePlayer not found for this platform: put it into runtime/",
      "SagePlayer для этой платформы не найден: положите его в runtime/"},
     {"SagePlayer not found. Put it next to the editor, build the SagePlayer target, or set SAGE_PLAYER_PATH. Looked in:",
@@ -7490,6 +7506,8 @@ constexpr TranslationPair kRussianStrings[] = {
      "Шрифт текста интерфейса игры (не редактора)."},
     {"The frame exactly as the player sees it.",
      "Кадр ровно таким, каким его увидит игрок."},
+    {"The game is running in a separate window",
+     "Игра идёт в отдельном окне"},
     {"The game looks through this object",
      "Игра смотрит через этот объект"},
     {"The game part picks the settings up on the next Play.",
