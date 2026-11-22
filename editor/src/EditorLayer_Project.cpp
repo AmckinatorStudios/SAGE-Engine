@@ -17,7 +17,6 @@
 #include "ProjectLauncher/ProjectDatabase.h"
 #include "SceneCover.h"
 #include "Thumbnails.h"
-#include "sage/assets/Pack.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -91,32 +90,6 @@ float RayUnitCube(const glm::vec3& ro, const glm::vec3& rd) {
 
 constexpr float kStatusBarHeight = 26.0f;
 
-// Копирование каталога В УЖЕ СУЩЕСТВУЮЩИЙ каталог, файл за файлом.
-//
-// ЗАЧЕМ, если есть fs::copy с recursive|overwrite_existing. Затем, что НА
-// WINDOWS ОН ЭТОГО НЕ ДЕЛАЕТ: когда каталог-приёмник уже есть, реализация
-// отдаёт EEXIST («File exists») и не копирует НИЧЕГО. На Linux тот же вызов
-// молча сливает содержимое, поэтому беда не видна ни в CI, ни на машине
-// разработчика — ровно тот случай, про который CLAUDE.md говорит «правка,
-// проверенная на одной платформе, проверена наполовину».
-//
-// Стоило это создания проекта из готового шаблона: CreateNew уже завёл
-// assets/ и scenes/, дальше шаблон копировался поверх — и на Windows человек
-// получал отказ «Failed to copy template … File exists» и пустой проект.
-void CopyInto(const fs::path& src, const fs::path& dst, std::error_code& ec) {
-    if (!fs::is_directory(src, ec)) {
-        fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
-        return;
-    }
-    fs::create_directories(dst, ec);
-    if (ec) return;
-    for (const fs::directory_entry& e : fs::directory_iterator(src, ec)) {
-        if (ec) return;
-        CopyInto(e.path(), dst / e.path().filename(), ec);
-        if (ec) return;
-    }
-}
-
 } // namespace
 
 
@@ -137,44 +110,7 @@ bool EditorLayer::OpenFileInSystemEditor(const fs::path& path, int line) {
     return ok;
 }
 
-// Материал шаблона: файл в assets/materials/<имя>.sagemat + ссылка на него.
-// Почему файлом, а не полем Color — см. объявление в EditorLayer.h.
-std::string EditorLayer::TemplateMaterial(const std::string& name, const glm::vec3& albedo,
-                                          float metallic, float roughness) {
-    if (!m_project.Loaded()) return {};
-    std::error_code ec;
-    const fs::path dir = m_project.AssetsDir() / "materials";
-    fs::create_directories(dir, ec);
-    if (ec) return {};
-
-    Material mat;
-    mat.Albedo = albedo;
-    mat.Metallic = metallic;
-    mat.Roughness = roughness;
-    const fs::path path = dir / (name + ".sagemat");
-    mat.SaveToFile(sage::PathToUtf8(path));
-    if (!fs::exists(path, ec)) return {};
-
-    // Ссылка ОТНОСИТЕЛЬНАЯ (assets/materials/...): абсолютный путь пережил бы
-    // ровно до первого переноса проекта на другую машину.
-    return m_project.AssetRef(path);
-}
-
-void EditorLayer::PaintWithMaterial(GameObject object, const std::string& name,
-                                    const glm::vec3& albedo, float metallic, float roughness) {
-    MeshRendererComponent& mr = object.Renderer();
-    const std::string ref = TemplateMaterial(name, albedo, metallic, roughness);
-    if (ref.empty()) {
-        // Проекта нет — файл писать некуда, и цвет остаётся у объекта. Это не
-        // «второй способ красить»: ровно для такого случая Color и оставлен —
-        // объект БЕЗ материала (см. ecs/RenderComponents.h).
-        mr.Color = albedo;
-        return;
-    }
-    AssignMaterial(mr, ref, ResourceManager::Instance().GetMaterial(ref));
-}
-
-void EditorLayer::NewScene(ProjectTemplateKind content) {
+void EditorLayer::NewScene() {
     if (InPlayMode()) StopPlay(); // нельзя подменять сцену под работающими скриптами
     // Новый уровень встаёт на место УРОВНЯ: документ интерфейса — в сторону.
     if (m_uiDocActive) SetWorkspace(EditorWorkspace::Scene);
@@ -184,115 +120,6 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
     m_scenePath.clear();
     m_sceneDirty = false;
 
-    if (content == ProjectTemplateKind::Demo) {
-        // Скайбокс включён по умолчанию — сцена сразу с атмосферным фоном.
-        m_scene->Lighting.Skybox.Enabled = true;
-
-        // ЦВЕТ ПРИХОДИТ ИЗ МАТЕРИАЛА, а не из поля объекта.
-        //
-        // Шаблон — это ещё и образец того, как устроен проект: по нему учатся,
-        // открыв инспектор первого же куба. Пока кубы красились полем Color,
-        // образец врал: цвет был, материала не было, и откуда взялся цвет,
-        // ответить было нечем. Теперь у каждой формы свой .sagemat в
-        // assets/materials — тот самый файл, который человек и правит дальше.
-        //
-        // Шероховатость у металла (Tower) ниже: витрина обязана показывать не
-        // только разные цвета, но и разные ПОВЕРХНОСТИ — иначе непонятно,
-        // зачем материалу что-то кроме цвета.
-        struct Def {
-            const char* name; glm::vec3 pos; glm::vec3 color; glm::vec3 scale;
-            float metallic; float roughness;
-        };
-        Def defs[] = {
-            {"Ground",     {0.0f, -0.75f, 0.0f}, {0.30f, 0.32f, 0.36f}, {6.0f, 0.3f, 6.0f}, 0.0f, 0.85f},
-            {"Red Cube",   {-1.6f, 0.3f, 0.0f},  {0.85f, 0.30f, 0.30f}, {1.0f, 1.0f, 1.0f}, 0.0f, 0.55f},
-            {"Green Cube", {0.0f, 0.3f, 0.0f},   {0.35f, 0.75f, 0.40f}, {1.0f, 1.0f, 1.0f}, 0.0f, 0.55f},
-            {"Blue Cube",  {1.6f, 0.3f, 0.0f},   {0.35f, 0.55f, 0.90f}, {1.0f, 1.0f, 1.0f}, 0.0f, 0.55f},
-            {"Tower",      {0.0f, 1.6f, -1.8f},  {0.90f, 0.80f, 0.35f}, {0.6f, 2.4f, 0.6f}, 1.0f, 0.25f},
-        };
-        for (const Def& d : defs) {
-            GameObject obj = CreateCubeEntity(d.name);
-            obj.GetTransform().Position = d.pos;
-            obj.GetTransform().Scale = d.scale;
-            PaintWithMaterial(obj, d.name, d.color, d.metallic, d.roughness);
-        }
-
-        // Криволинейные примитивы — витрина форм И проверка аутлайна выделения:
-        // кайма строится из СИЛУЭТА реального меша, поэтому одинаково точна для
-        // сферы/цилиндра/конуса, а не только для боксов.
-        struct Prim { const char* name; MeshRef::Type type; glm::vec3 pos; glm::vec3 color; };
-        Prim prims[] = {
-            {"Sphere",   MeshRef::Type::Sphere,   {-3.0f, 0.5f, 1.8f}, {0.85f, 0.55f, 0.25f}},
-            {"Cylinder", MeshRef::Type::Cylinder, {-1.5f, 0.5f, 2.2f}, {0.55f, 0.35f, 0.80f}},
-            {"Cone",     MeshRef::Type::Cone,     {1.5f,  0.5f, 2.2f}, {0.30f, 0.70f, 0.70f}},
-        };
-        for (const Prim& p : prims) {
-            GameObject obj = CreatePrimitiveEntity(p.name, p.type);
-            obj.GetTransform().Position = p.pos;
-            PaintWithMaterial(obj, p.name, p.color, 0.0f, 0.45f);
-        }
-
-        // СВЕТ, КАМЕРА И ЭЛЕМЕНТЫ ИНТЕРФЕЙСА СОЗДАЮТСЯ ПУСТЫМИ ОБЪЕКТАМИ.
-        //
-        // Scene::CreateObject вешает MeshRenderer (см. Scene.h) — и лампа в
-        // шаблоне приезжала с компонентом «Меш»: в инспекторе секция с моделью,
-        // цветом и тенями, которых у света нет вовсе. Шаблон — это ещё и
-        // образец того, как устроен проект: по нему учатся, открыв инспектор
-        // первого же объекта, и лишний компонент учит неправильному. Объект,
-        // который ничего не рисует мешем, обязан заводиться через
-        // CreateEmptyObject — ровно так же, как это делает каталог объектов.
-        //
-        // Игровая камера сцены — панель Game сразу показывает картинку. НАРОЧНО
-        // поставлена НЕ как редакторская орбитальная камера ({6.5,5,6.5}, взгляд
-        // сверху): низкий, почти фронтальный «кинематографичный» ракурс с уровня
-        // сцены — так сразу видно, что панель Game показывает СВОЮ, игровую
-        // камеру, а не вид вьюпорта. Сущность без меша (не рисуется в мире).
-        GameObject camObj = m_scene->CreateEmptyObject("Main Camera");
-        camObj.GetTransform().Position = {0.0f, 1.5f, 6.5f};
-        camObj.GetTransform().Rotation = {-6.0f, 0.0f, 0.0f}; // чуть вниз, вдоль -Z
-        m_scene->Registry().emplace<CameraComponent>(camObj.Entity());
-        // И «Пост-обработка» на ней: витрина показывает игровой кадр, а кадр
-        // обрабатывает КАМЕРА (см. sage/render/PostProcessComponent.h). Без
-        // компонента шаблон выглядел бы сырым — и учил бы, что так и надо.
-        m_scene->Registry().emplace<sage::render::PostProcessComponent>(camObj.Entity());
-
-        // Солнце — такая же сущность, как всё остальное. Раньше его роль играли
-        // три поля в настройках сцены; теперь его видно в иерархии, можно
-        // повернуть гизмо и увидеть, как поехали тени.
-        sage::ecs::CreateSunEntity(*m_scene);
-
-        // Тёплая лампа — демонстрация точечного света-сущности (LightComponent).
-        GameObject lamp = m_scene->CreateEmptyObject("Lamp");
-        lamp.GetTransform().Position = {2.4f, 1.6f, 1.8f};
-        m_scene->Registry().emplace<LightComponent>(lamp.Entity());
-
-        // Прожектор сверху — демонстрация конусного света (Spot): смотрит вниз
-        // (поворот -90° по X направляет «вперёд» -Z в -Y), кладёт круг света
-        // на кубы и пол.
-        GameObject spot = m_scene->CreateEmptyObject("Spotlight");
-        spot.GetTransform().Position = {0.0f, 5.0f, 0.0f};
-        spot.GetTransform().Rotation = {-90.0f, 0.0f, 0.0f};
-        LightComponent spotLc;
-        spotLc.Kind = LightComponent::Type::Spot;
-        spotLc.Color = {0.55f, 0.7f, 1.0f};
-        spotLc.Intensity = 4.0f;
-        spotLc.Range = 12.0f;
-        spotLc.InnerConeDeg = 18.0f;
-        spotLc.OuterConeDeg = 30.0f;
-        m_scene->Registry().emplace<LightComponent>(spot.Entity(), spotLc);
-
-        // Интерфейса в демо-сцене нет: он живёт в файлах .sageui и создаётся в
-        // пространстве «Интерфейс», а не россыпью элементов в сцене.
-    }
-
-    if (content == ProjectTemplateKind::Demo) {
-        // Что-то выбрано сразу — гизмо видно, Inspector не пустой. Выбираем
-        // криволинейный примитив: сразу демонстрирует аутлайн на изогнутом
-        // силуэте (кайма строится из силуэта меша — точна для любой формы).
-        GameObject sel = m_scene->FindByName("Cone");
-        if (!sel.Valid()) sel = m_scene->FindByName("Green Cube");
-        if (sel.Valid()) m_selection.SetPrimary(sel.Id());
-    }
     UpdateWindowTitle();
 }
 
@@ -305,10 +132,10 @@ void EditorLayer::NewScene(ProjectTemplateKind content) {
 // иерархии, его можно выбрать, повернуть гизмо и удалить — и вот тогда
 // темнота будет объяснимой, потому что удалил её сам.
 //
-// Отдельно от NewScene намеренно: NewScene(Empty) — чистый лист для кода и
+// Отдельно от NewScene намеренно: NewScene() — чистый лист для кода и
 // самопроверки, и класть туда объекты значит менять смысл «пусто».
 void EditorLayer::NewSceneForUser() {
-    NewScene(ProjectTemplateKind::Empty);
+    NewScene();
     sage::ecs::CreateSunEntity(*m_scene);
     // Выделение НЕ трогаем: смена проекта обязана оставлять его пустым (номера
     // объектов прошлой сцены принадлежат в новой другим), и солнце,
@@ -394,185 +221,26 @@ void EditorLayer::TakeSceneShot() {
     if (ec) LOG_WARN("Editor") << "Обложка проекта не обновилась: " << ec.message();
 }
 
-// Заметка шаблона — В КОНСОЛЬ, а не только в диалог.
-//
-// Из стартового окна проект создают без диалога, и пояснение там показать
-// негде; а именно там его и не хватает: витрина строит мир скриптами, и
-// созданный проект выглядит пустым. Строка в консоли — то место, куда человек
-// смотрит, когда что-то «не работает», и она обязана быть там раньше вопроса.
-void EditorLayer::AnnounceTemplateNote(const ProjectTemplate& tpl) {
-    m_templateNote.clear();
-    if (tpl.Note.empty()) return;
-    // Через T(): у встроенного шаблона заметка — ключ перевода, и в консоли она
-    // обязана быть на том же языке, что и весь интерфейс. У УСТАНОВЛЕННОГО
-    // шаблона перевода взяться неоткуда: там это текст из его template.json,
-    // и T() честно вернёт его как есть.
-    m_templateNote = sage::editor::T(tpl.Note.c_str());
-    LOG_INFO("Editor") << m_templateNote;
-}
-
-
-// --- Съёмка обложек шаблонов -------------------------------------------------
-//
-// По кадру на шаблон: создать проект, дать сцене устояться, снять игровой кадр.
-// Машина состояний, а не цикл, потому что снимок берётся ПОСЛЕ RenderGame —
-// внутри кадра, а не между вызовами.
-//
-// У шаблона-копии (витрина) мир собирают скрипты, и в остановленном редакторе
-// сцена почти пуста. Обложка обязана показывать проект таким, каким он будет,
-// поэтому для него включается Play и делается несколько шагов скриптов — иначе
-// снимок честно покажет пустоту и обманет ровно так же, как рисунок.
-void EditorLayer::TickTemplateShots() {
-    if (m_coverShotDir.empty()) return;
-    const std::vector<ProjectTemplate>& all = ProjectTemplates();
-
-    // Ждём, пока снимется текущий: съёмка происходит в конце кадра.
-    if (!m_coverShotPath.empty()) return;
-
-    if (m_coverShotIndex >= 0 && !m_coverShotDone && m_coverShotWait > 0) {
-        // Кадры «на устояться»: первый кадр после загрузки сцены ещё не имеет
-        // ни теней, ни отражений, ни собранного скриптами мира.
-        --m_coverShotWait;
-        if (InPlayMode() && m_play.Scripts()) m_play.StepScripts(*m_scene, 1.0f / 60.0f);
-        if (m_coverShotWait == 0) {
-            m_coverShotPath =
-                (std::filesystem::path(m_coverShotDir) / (all[(size_t)m_coverShotIndex].Id + ".png"))
-                    .string();
-        }
-        return;
-    }
-
-    // Предыдущий снят — переходим к следующему шаблону.
-    const int next = m_coverShotIndex + 1;
-    if (next >= (int)all.size()) {
-        LOG_INFO("Editor") << "Обложки шаблонов сняты: " << all.size();
-        m_coverShotDir.clear();
-        sage::Application::Get().Close();
-        return;
-    }
-    m_coverShotIndex = next;
-    m_coverShotDone = false;
-
-    const ProjectTemplate& tpl = all[(size_t)next];
-    // Один шаблон вместо всех: SAGE_EDITOR_TEMPLATE рядом с папкой снимков.
-    // Нужно и для пересъёмки одной обложки, и для разбора — свежий процесс на
-    // один шаблон исключает влияние предыдущей сцены.
-    if (const char* only = std::getenv("SAGE_EDITOR_TEMPLATE")) {
-        if (tpl.Id != only) { m_coverShotWait = 0; return; }
-    }
-    if (!ProjectTemplateAvailable(tpl)) {
-        LOG_WARN("Editor") << "Обложка пропущена: шаблон " << tpl.Id << " не установлен";
-        m_coverShotWait = 0;
-        return;
-    }
-    if (InPlayMode()) StopPlay();
-    std::error_code ec;
-    const std::string dir = "sage_cover_" + tpl.Id;
-    std::filesystem::remove_all(dir, ec);
-    std::string err;
-    if (!CreateProject(".", dir, tpl.Id, err)) {
-        LOG_ERROR("Editor") << "Обложка: проект по шаблону " << tpl.Id << " не создался: " << err;
-        m_coverShotWait = 0;
-        return;
-    }
-    // Мир, который строят скрипты, обязан быть построен ДО снимка.
-    if (tpl.Kind == ProjectTemplateKind::Copy) StartPlay();
-    m_coverShotWait = 12;
-}
-
-bool EditorLayer::CreateProject(const std::string& dir, const std::string& name,
-                               const std::string& templateId, std::string& err) {
-    // Шаблон разбирается ДО создания папок: получить проект и узнать, что имя
-    // шаблона не то, — худший из порядков.
-    const ProjectTemplate* tpl = FindProjectTemplate(templateId);
-    if (!tpl) {
-        std::string known;
-        for (const ProjectTemplate& t : ProjectTemplates()) {
-            if (!known.empty()) known += ", ";
-            known += t.Id;
-        }
-        err = "Unknown project template '" + templateId + "'; known: " + known;
-        return false;
-    }
-    // Готовый проект обязан быть на диске ДО создания папок: иначе человек
-    // получил бы пустой проект с именем «Витрина» и никакого объяснения.
-    if (tpl->Kind == ProjectTemplateKind::Copy && !ProjectTemplateAvailable(*tpl)) {
-        err = "Template '" + tpl->Id + "' is not installed next to the editor (" +
-              (ProjectTemplatesRoot() / tpl->SourceDir).string() + ")";
-        return false;
-    }
+bool EditorLayer::CreateProject(const std::string& dir, const std::string& name, std::string& err) {
     if (!m_project.CreateNew(dir, name, err)) return false;
     ForgetPreviousProject();
-    const ProjectTemplateKind kind = tpl->Kind;
     // ПАНЕЛЬ АССЕТОВ ЖИВЁТ В assets/ И ТОЛЬКО В НЕЙ (см. AssetsPanel.cpp).
     m_assetsCwd = m_project.AssetsDir();
     m_projects.Touch(m_project.Dir().string());
 
-    if (kind == ProjectTemplateKind::Copy) {
-        // Копия ГОТОВОГО проекта: сцены, скрипты, модели и настройки — как
-        // есть. Имя проекта при этом остаётся тем, которое выбрал человек:
-        // копируется содержимое, а не чужая вывеска.
-        const fs::path src = ProjectTemplatesRoot() / tpl->SourceDir;
-        std::error_code ec;
-        for (const fs::directory_entry& e : fs::directory_iterator(src, ec)) {
-            // Файл проекта пропускаем — он уже создан с нужным именем.
-            if (e.path().filename() == "project.sageproj") continue;
-            CopyInto(e.path(), m_project.Dir() / e.path().filename(), ec);
-            if (ec) {
-                err = "Failed to copy template '" + tpl->Id + "': " + ec.message();
-                return false;
-            }
-        }
-        m_project.Adopt();          // папки на месте, база ассетов знает корень
-        m_settings = sage::EngineConfig{};
-        m_settings.LoadFile((m_project.Dir() / "sage.cfg").string());
-        m_settings.ApplyEnvOverrides();
-        ApplyEngineSettings();
-        // Открываем первую сцену копии — иначе человек видит демо-сцену
-        // редактора вместо проекта, который только что попросил.
-        std::vector<fs::path> scenes;
-        for (const fs::directory_entry& e : fs::directory_iterator(m_project.ScenesDir(), ec)) {
-            if (e.path().extension() == ".sage") scenes.push_back(e.path());
-        }
-        std::sort(scenes.begin(), scenes.end());
-        if (scenes.empty()) {
-            err = "Template '" + tpl->Id + "' has no scenes";
-            return false;
-        }
-        if (!LoadSceneFromFile(scenes.front())) {
-            err = "Failed to load the template scene: " + scenes.front().string();
-            return false;
-        }
-        LOG_INFO("Editor") << "Project created from template '" << tpl->Id << "': "
-                           << m_project.Dir().string();
-        AnnounceTemplateNote(*tpl);
-        UpdateWindowTitle();
-        return true;
-    }
+    // Новый проект — пустой ПРОЕКТ, а не чистый лист для кода: сцену в нём
+    // открывает человек, и она обязана быть освещена своим солнцем.
+    NewSceneForUser();
 
-    // Пустой шаблон — это пустой ПРОЕКТ, а не чистый лист для кода: сцену
-    // в нём открывает человек, и она обязана быть освещена своим солнцем.
-    if (kind == ProjectTemplateKind::Empty) NewSceneForUser();
-    else NewScene(kind);
-
-    // ШАБЛОН ОБЯЗАН ОСТАВИТЬ ФАЙЛ СЦЕНЫ, а не только картинку в окне.
-    //
-    // Ровно эта жалоба и привела сюда: «выберу базовый шаблон — сцену
-    // показывает, а самого файла сцены НЕТ». Так и было: встроенный шаблон
-    // строил сцену в памяти, m_scenePath оставался пустым, и дальше всё
-    // ломалось по цепочке — в scenes/ пусто, в панели ассетов сцену не
-    // открыть, Ctrl+S спрашивает, куда сохранять, собранная игра не находит
-    // с чего начать. Проект без сцены на диске — это не проект.
-    //
-    // Имя main.sage не случайное: с него начинает плеер (см.
-    // runtime/src/PlayerLayer.cpp) и его же ищут шаблоны-копии.
+    // ПРОЕКТ ОБЯЗАН ОСТАВИТЬ ФАЙЛ СЦЕНЫ, а не только картинку в окне: без него
+    // в scenes/ пусто, Ctrl+S спрашивает, куда сохранять, а собранная игра не
+    // находит, с чего начать. Имя main.sage не случайное: с него начинает
+    // плеер (см. runtime/src/PlayerLayer.cpp).
     const fs::path scenePath = m_project.ScenesDir() / "main.sage";
     if (!SaveSceneToFile(scenePath)) {
         err = "Failed to write the first scene: " + sage::PathToUtf8(scenePath);
         return false;
     }
-
-    AnnounceTemplateNote(*tpl);
     UpdateWindowTitle();
     return true;
 }
@@ -616,7 +284,7 @@ void EditorLayer::ForgetPreviousProject() {
     // ссылка на файл разрешилась бы в НОВЫЙ проект — старый интерфейс лёг бы
     // поверх чужого файла.
     CloseInterfaceDocument(/*save=*/false);
-    NewScene(ProjectTemplateKind::Empty);
+    NewScene();
 
     ResourceManager::Instance().ForgetProjectAssets();
     m_renderer.Particles().Clear();

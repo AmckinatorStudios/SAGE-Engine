@@ -54,7 +54,6 @@
 
 #include "ImGuizmo.h"
 #include "EditorTheme.h"
-#include "TemplateStore.h"
 #include "sage/assets/Pack.h"
 #include "ScreenColor.h"
 #include "sage/core/Version.h"

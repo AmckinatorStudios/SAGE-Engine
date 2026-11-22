@@ -361,7 +361,7 @@ bool EditorLayer::SelfTestToolsAssetsAndPanels() {
             ok = false;
         }
         if (ok) {
-            NewScene(ProjectTemplateKind::Empty); // пустая сцена — чтобы «сохранилось» не путать с «осталось в памяти»
+            NewScene(); // пустая сцена — чтобы «сохранилось» не путать с «осталось в памяти»
             if (!LoadSceneFromFile(allPath)) {
                 LOG_ERROR("Editor") << "SELFTEST: сцена со всеми компонентами не загрузилась";
                 ok = false;

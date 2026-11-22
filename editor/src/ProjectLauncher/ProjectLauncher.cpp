@@ -14,7 +14,6 @@
 #include "../EditorTheme.h"
 #include "../Localization.h"
 #include "../Project.h"
-#include "../ProjectTemplates.h"
 #include "../ui/UI.h"
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
@@ -164,10 +163,6 @@ std::string ProjectLauncher::CreateBlockedReason() const {
     // система, надо отсечь здесь, а не получить невнятную ошибку записи.
     for (const char* c = m_nameBuf; *c; ++c) {
         if (std::strchr("/\\:*?\"<>|", *c)) return T("A name cannot contain / \\ : * ? \" < > |");
-    }
-    if (const ProjectTemplate* tpl = FindProjectTemplate(kNewProjectTemplate)) {
-        if (!ProjectTemplateAvailable(*tpl))
-            return T("This template is not installed next to the editor");
     }
     std::error_code ec;
     const fs::path target = fs::path(m_dirBuf) / m_nameBuf;

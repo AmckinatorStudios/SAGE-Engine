@@ -5,7 +5,7 @@
 ## Содержание
 
 - [CI и smoke-тесты](#ci-и-smoke-тесты)
-- [Сборка готового продукта под платформу](#сборка-готового-продукта-под-платформу)
+- [Интеграционный тест TestGame](#интеграционный-тест-testgame)
 - [Настройки игры: название, автор, версия, иконка](#настройки-игры-название-автор-версия-иконка)
 - [Пользовательские папки: скины, музыка, моды игрока](#пользовательские-папки-скины-музыка-моды-игрока)
 - [Сборка игры из проекта без редактора (sage_build)](#сборка-игры-из-проекта-без-редактора-sage_build)
@@ -13,28 +13,29 @@
 
 ## CI и smoke-тесты
 `.github/workflows/ci.yml` на каждый push/PR:
-- **Linux**: собирает движок + `Sandbox` + `TestGame` + `SageEditor`, затем
+- **Linux**: собирает движок + `SageEditor` + `SagePlayer` + тесты (включая
+  интеграционный `TestGame`), затем
   гоняет headless (`xvfb-run`) `scripts/ci_smoke_test.sh` — тот же скрипт можно
   запустить локально, чтобы воспроизвести падение CI:
   ```bash
   cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j$(nproc)
   ./scripts/ci_smoke_test.sh build
   ```
-  Одиннадцать проверок: `Sandbox` реально рисует кадр (скриншот на заданном кадре,
-  файл непустой); `SageEditor` проходит собственный self-test
+  Десять проверок: `SageEditor` проходит собственный self-test
   (`SAGE_EDITOR_SELFTEST=1` — создание проекта, сохранение/загрузка сцены,
   undo/redo, Play-режим); плагин-пример `example_stats` грузится и выгружается
   без падения (см. «Плагины редактора»); `TestGame` в автопилоте проходит
-  реальный игровой цикл — сериализация сцены, подбор предметов, портал между
-  комнатами, рендер с тенями/пост-процессом/HUD — без единой ERROR-строки;
+  реальный игровой цикл — сериализация сцены, Lua-скрипты, подбор предметов,
+  портал между комнатами, рендер с тенями/пост-процессом/HUD (скриншот на
+  заданном кадре) — без единой ERROR-строки;
   собранная игра запускается из чужого каталога и по `.sageproj`; E2E-прогон
   «игра с Lua создаётся в редакторе, играется и собирается в exe»; обработчик
   падений ловит настоящее падение и пишет отчёт; отказ запуска без дисплея
-  слышно в логе; пути с кириллицей; шаблон скачивается по HTTP и ставится;
+  слышно в логе; пути с кириллицей; захват мыши в собранной игре;
   **выход из движка завершается кодом 0** без обходного `ResourceManager::Clear()`
   (см. `tests/exit_probe.cpp` и [history.md](history.md)).
 - **Windows (build-only)**: кросс-компиляция через `mingw-w64` тем же
-  `cmake/mingw-toolchain.cmake`, что и `scripts/build_windows.sh` — ловит
+  `cmake/mingw-toolchain.cmake`, что и релизная сборка — ловит
   поломки Windows-сборки без необходимости реально запускать .exe в CI.
 
 ### Headless-сессия над ЧУЖИМ проектом
@@ -63,39 +64,26 @@ Boat](https://github.com/AmckinatorStudios/The-Boat) на каждый push пр
 автопилотом внутри редактора, собирается в exe и проходится ещё раз уже
 собранным бинарником.
 
-## Сборка готового продукта под платформу
-Есть скрипты, которые одной командой создают ГОТОВЫЙ К РАЗДАЧЕ архив —
-бинарник + все assets, версионировано:
+## Интеграционный тест TestGame
+`tests/integration/testgame/` — тестовое приложение движка (не пример для
+пользователя): стресс-тест подсистем на настоящем игровом цикле — Lua, физика,
+звук, анимация со скелетом, сцены и порталы, UI, рендер с тенями. Собирается
+вместе с тестами (`SAGE_BUILD_TESTS=ON`), отдельно отключается флагом
+`-DSAGE_BUILD_INTEGRATION_TESTS=OFF`. Бинарник —
+`build/tests/integration/testgame/TestGame`, рядом его ассеты.
 
-```
-scripts/
-  build_linux.sh      — собрать + упаковать под Linux (из Linux)
-  build_windows.sh     — собрать + упаковать под Windows (кросс-компиляция из Linux)
-  build_windows.bat      — собрать + упаковать под Windows (если собираешь прямо на Windows)
-  build_all.sh             — собрать сразу под обе платформы
-  ci_smoke_test.sh          — headless smoke-тест (см. "CI и smoke-тесты" выше)
-```
-
-Использование:
+Запуск отдельно от smoke:
 ```bash
-./scripts/build_linux.sh              # соберёт "Sandbox" (имя по умолчанию)
-./scripts/build_windows.sh            # кросс-компиляция в .exe
-./scripts/build_all.sh                # обе платформы разом
-
-./scripts/build_linux.sh MyGame       # для СВОЕЙ игры на этом же движке —
-                                       # просто другое имя (см. games/<name>/), весь код общий
+cmake --build build --target TestGame
+cd build/tests/integration/testgame && SAGE_TESTGAME_AUTOPILOT=1 ./TestGame
 ```
+Переменные: `SAGE_TESTGAME_AUTOPILOT=1` — бот сам собирает предметы и проходит
+портал; `SAGE_TESTGAME_START_ROOM=room2` — старт в комнате; `SAGE_TESTGAME_STRESS=N`
+— N×N кубов для проверки батчинга и отсечения; `SAGE_TESTGAME_PBR_DIR` — PBR-сет
+с диска. Smoke-тест проверяет лог-маркеры `TESTGAME:` и отсутствие ERROR.
 
-Результат появляется в `dist/`:
-```
-dist/linux/Sandbox-0.3.0-linux-x64.tar.gz
-dist/windows/Sandbox-0.3.0-windows-x64.zip
-```
-
-Версия берётся из файла `VERSION` в корне — подними её перед следующим
-релизом. Каждый архив самодостаточен: распаковал — запустил, ничего
-доустанавливать не нужно (Windows-сборка статически линкует рантайм MinGW,
-DLL не требуются).
+Готовый к раздаче архив игры собирает редактор («Build Game») или `sage_build`
+(см. ниже).
 
 ## Настройки игры: название, автор, версия, иконка
 
@@ -174,9 +162,9 @@ Windows. Код возврата: 0 — собрано, 1 — ошибка, 2 �
 
 ## Как собрать вручную (без скриптов, для разработки)
 
-Имена таргетов фиксированы (задаются через `sage_add_game`): `Sandbox` (пример
-игры), `SageEditor` (редактор), `sage_engine` (библиотека). `-DGAME_NAME`
-не нужен — таргет каждой игры называется так, как указано в её CMakeLists.
+Таргеты: `sage_engine` (библиотека), `SageEditor` (редактор), `SagePlayer`
+(плеер), `sage_build`, `sage_tests`, `sage_render_tests`, `TestGame`
+(интеграционный тест).
 
 ### Linux
 ```bash
@@ -184,10 +172,9 @@ sudo apt install cmake g++ libx11-dev libxrandr-dev libxinerama-dev \
                   libxcursor-dev libxi-dev libgl1-mesa-dev
 cmake -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
-./build/games/sandbox/Sandbox      # запуск примера
 ./build/editor/SageEditor          # запуск редактора
 ```
-Собрать только один таргет: `cmake --build build --target Sandbox` (или `SageEditor`).
+Собрать только один таргет: `cmake --build build --target SageEditor`.
 
 ### Windows
 ```

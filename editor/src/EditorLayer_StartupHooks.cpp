@@ -38,7 +38,6 @@ void FillUISample(Scene& scene, entt::entity root, const std::string& which);   
 #include "ImGuizmo.h"
 
 #include "EditorTheme.h"
-#include "TemplateStore.h"
 #include "EditorIcons.h"
 #include "ModelMaterialImport.h"
 #include "Thumbnails.h"
@@ -106,7 +105,11 @@ void EditorLayer::ApplyStartupHooks() {
     if (std::getenv("SAGE_EDITOR_SELFTEST")) {
         RunSelfTest();
         // Мышь проверяется уже в кадрах, после самопроверки: до главного цикла
-        // кадра нет, а щёлкать надо по нарисованному вьюпорту.
+        // кадра нет, а щёлкать надо по нарисованному вьюпорту. Сцена пробы —
+        // фикстура проекта самопроверки (её объекты ищет проба), а не то, что
+        // оставил последний шаг самопроверки.
+        if (m_project.Loaded() && !LoadSceneFromFile(m_project.ScenesDir() / "main.sage"))
+            BuildFixtureScene();
         m_probeStep = 0;
     }
     if (std::getenv("SAGE_EDITOR_E2E")) RunE2EGameTest();
@@ -128,7 +131,7 @@ void EditorLayer::ApplyStartupHooks() {
             "SAGE_EDITOR_SELECT_ENTITY",
             "SAGE_EDITOR_SELECT_ASSET", "SAGE_EDITOR_SHOW_ABOUT",
             "SAGE_EDITOR_AUTOPLAY",       "SAGE_EDITOR_VARS_DEMO",
-            "SAGE_EDITOR_TEMPLATE_SHOTS", "SAGE_EDITOR_SHOW_TWEEN",
+            "SAGE_EDITOR_SHOW_TWEEN",
             "SAGE_EDITOR_PALETTE",          "SAGE_EDITOR_LOAD_MODELS",
             "SAGE_EDITOR_SHOW_CONSOLE",  "SAGE_EDITOR_SHOW_PROBLEMS",
             "SAGE_EDITOR_SHOW_PLUGINS",   "SAGE_EDITOR_SHOW_ENVIRONMENT", "SAGE_EDITOR_SHADER_DEMO",  "SAGE_EDITOR_LIGHT_COOKIE", "SAGE_EDITOR_PRIMITIVES",
@@ -142,7 +145,7 @@ void EditorLayer::ApplyStartupHooks() {
         if (std::getenv("SAGE_SHOW_LAUNCHER")) m_headlessProject = false;
         if (m_headlessProject && !m_project.Loaded()) {
             std::string err;
-            if (!CreateProject(".", "sage_headless_project", DefaultProjectTemplate(), err))
+            if (!CreateFixtureProject(".", "sage_headless_project", err))
                 LOG_ERROR("Editor") << "Не удалось создать проект для headless-прогона: " << err;
         }
     }
@@ -235,52 +238,6 @@ void EditorLayer::ApplyStartupHooks() {
     if (const char* dlg = std::getenv("SAGE_EDITOR_OPEN_DIALOG")) {
         m_headlessProject = true;
         m_pendingDialog = dlg;   // откроется в кадре, на уровне окна-хоста
-    }
-    // Открыть редактор СРАЗУ на нужном шаблоне — чтобы на шаблон можно было
-    // ПОСМОТРЕТЬ, а не поверить описанию. Проверять шаблоны числом сущностей
-    // (это делает самопроверка) недостаточно: «пусто» и «пусто, но остался
-    // скайбокс» дают одинаковый ноль, а выглядят по-разному.
-    // ОБЛОЖКИ ШАБЛОНОВ — НАСТОЯЩИЕ СНИМКИ, а не рисунки.
-    //
-    // Обложка рисовалась кодом (десяток примитивов в ImDrawList) и обещала то,
-    // чего в шаблоне может уже не быть: рисунок правят руками отдельно от
-    // самого шаблона, и разъезжаются они молча. Снимок так не умеет — он
-    // делается ИЗ ТОГО ЖЕ шаблона, который создаётся кнопкой.
-    //
-    // Пересоздаются одной командой:
-    //   SAGE_EDITOR_TEMPLATE_SHOTS=<папка> SageEditor
-    // и кладутся в editor/assets/templates/<id>.png. Хук, а не шаг сборки:
-    // снимать кадр нужно с живым графическим контекстом и настоящей сценой, то
-    // есть самим редактором, и делать это на каждой сборке — платить минутой
-    // за картинку, которая меняется раз в полгода.
-    if (const std::string outDir = sage::EnvString("SAGE_EDITOR_TEMPLATE_SHOTS");
-        !outDir.empty()) {
-        m_headlessProject = true;
-        m_coverShotDir = outDir;
-        std::error_code shotEc;
-        std::filesystem::create_directories(m_coverShotDir, shotEc);
-        LOG_INFO("Editor") << "Съёмка обложек шаблонов в " << m_coverShotDir;
-    }
-
-    if (const char* tplId = std::getenv("SAGE_EDITOR_TEMPLATE");
-        tplId && m_coverShotDir.empty()) {
-        m_headlessProject = true;
-        // СОЗДАЁМ ПРОЕКТ, а не «пересобираем сцену по виду шаблона».
-        //
-        // Раньше здесь звался NewScene(tpl->Kind), и для готового проекта
-        // (Kind::Copy) это не значило ничего: NewScene умеет строить сцену
-        // кодом, а витрина — файлы на диске. Хук молча отдавал ПУСТУЮ сцену,
-        // то есть проверял глазами не тот шаблон, который просили, — и именно
-        // на этом «шаблон showcase не работает» и выглядело правдой.
-        std::string tplErr;
-        const std::string dir = std::string("sage_template_") + tplId;
-        std::error_code rmEc;
-        std::filesystem::remove_all(dir, rmEc);
-        if (!CreateProject(".", dir, tplId, tplErr))
-            LOG_ERROR("Editor") << "SAGE_EDITOR_TEMPLATE: " << tplErr;
-        else
-            LOG_INFO("Editor") << "SAGE_EDITOR_TEMPLATE: создан проект по шаблону '" << tplId
-                               << "', сущностей " << m_scene->Count();
     }
     // Выбрать сущность по имени — для скриншот-проверок того, что рисуется
     // ТОЛЬКО при выделении: гизмо, аутлайн, габариты. Без этого проверить их
@@ -691,7 +648,7 @@ void EditorLayer::ApplyStartupHooks() {
     // автоигра). Проект всё равно должен быть — работы без него нет.
     if (m_headlessProject && !m_project.Loaded()) {
         std::string err;
-        if (!CreateProject(".", "sage_headless_project", DefaultProjectTemplate(), err))
+        if (!CreateFixtureProject(".", "sage_headless_project", err))
             LOG_ERROR("Editor") << "Не удалось создать проект для headless-прогона: " << err;
     }
 }

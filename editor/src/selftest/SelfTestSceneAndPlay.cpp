@@ -508,7 +508,7 @@ bool EditorLayer::SelfTestSceneAndPlay() {
         }
 
         // Сцена-назначение: узнаётся по имени объекта.
-        NewScene(ProjectTemplateKind::Empty);
+        NewScene();
         m_scene->CreateObject("SelfTestLevelTwoMarker");
         const fs::path secondPath = m_project.ScenesDir() / "selftest_level2.sage";
         if (!SaveSceneToFile(secondPath)) {
@@ -518,7 +518,7 @@ bool EditorLayer::SelfTestSceneAndPlay() {
 
         // Сцена-источник: в ней портал.
         if (ok) {
-            NewScene(ProjectTemplateKind::Empty);
+            NewScene();
             GameObject portal = m_scene->CreateObject("SelfTestPortal");
             m_scene->Registry().emplace<ScriptComponent>(
                 portal.Entity(), ScriptComponent{"assets/scripts/selftest_portal.lua"});

@@ -66,7 +66,7 @@ cmake --build build-windows -j"$(nproc)"
 | 3 | подсказки API | `python3 scripts/gen_script_api.py --check` |
 | 4 | модульные тесты | `./build/tests/sage_tests` |
 | 5 | кадровые тесты рендера | `xvfb-run -a --server-args="-screen 0 800x600x24" ./build/tests/render/sage_render_tests --references tests/render/references` |
-| 6 | smoke (Sandbox + самопроверка редактора) | `bash scripts/ci_smoke_test.sh build` |
+| 6 | smoke (TestGame + самопроверка редактора + плеер) | `bash scripts/ci_smoke_test.sh build` |
 | 7 | сборка Windows | `cmake -B build-windows -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-toolchain.cmake -DCMAKE_BUILD_TYPE=Release` и `cmake --build build-windows -j"$(nproc)"` |
 
 Порядок работы: изменения закончены и закоммичены → полный прогон → ошибки

@@ -16,7 +16,7 @@ bool EditorLayer::SelfTestToolsLayoutAndData() {
     // Кликать по самим кнопкам панели в CI нечем, но кнопка не делает ничего,
     // кроме вызова uiops::*, — и вызывается он здесь тем же способом.
     if (ok) {
-        NewScene(ProjectTemplateKind::Empty);
+        NewScene();
         entt::registry& reg = m_scene->Registry();
 
         // Экран-родитель на весь кадр и три элемента разной ширины в нём.
@@ -212,7 +212,7 @@ bool EditorLayer::SelfTestToolsLayoutAndData() {
             ok = false;
         }
         if (ok) {
-            NewScene(ProjectTemplateKind::Empty);
+            NewScene();
             if (!LoadSceneFromFile(scenePath)) {
                 LOG_ERROR("Editor") << "SELFTEST: сцена с переменными не загрузилась";
                 ok = false;
@@ -377,82 +377,6 @@ bool EditorLayer::SelfTestToolsLayoutAndData() {
         }
         fs::remove(pf, ec);
         sage::scene::ClearPrefabCache();
-    }
-
-// --- Заметка «что делать дальше» после создания проекта -----------------
-    //
-    // Есть шаблоны, чей проект сразу после создания выглядит ПУСТЫМ: мир в них
-    // строят скрипты при запуске, а в сцене на диске — пара объектов. Со
-    // стороны это неотличимо от «шаблон не работает», и заметка — единственное,
-    // что отличает одно от другого. Она обязана дойти до редактора, а не
-    // остаться в файле описания.
-    //
-    // Шаблон для проверки делаем свой: готовых проектов внутри сборки больше
-    // нет, и полагаться на то, что у запускающего установлена какая-то
-    // конкретная витрина, значит проверять «повезло или нет».
-    if (ok) {
-        namespace tstore = sage::editor::templates;
-        const fs::path notePack = fs::absolute("selftest_note.sagetemplate", ec);
-        fs::remove(notePack, ec);
-        fs::remove_all("selftest_tpl_notesrc", ec);
-        tstore::Uninstall("selftestnote", err);
-
-        std::string noteErr;
-        tstore::Manifest info;
-        info.Id = "selftestnote";
-        info.Name = "Шаблон с заметкой";
-        info.Note = "Нажмите «Играть», чтобы увидеть мир этого шаблона.";
-        const bool made = CreateProject(".", "selftest_tpl_notesrc", "demo", noteErr) &&
-                          SaveSceneToFile(m_project.ScenesDir() / "main.sage") &&
-                          tstore::Pack(m_project.Dir(), info, notePack, noteErr) &&
-                          tstore::InstallFromFile(notePack, noteErr);
-        if (!made) {
-            LOG_ERROR("Editor") << "SELFTEST: шаблон с заметкой не подготовился: " << noteErr;
-            ok = false;
-        } else {
-            RefreshProjectTemplates();
-            fs::remove_all("selftest_tpl_note", ec);
-            if (!CreateProject(".", "selftest_tpl_note", "selftestnote", noteErr)) {
-                LOG_ERROR("Editor") << "SELFTEST: проект из шаблона с заметкой не создался: "
-                                    << noteErr;
-                ok = false;
-            } else {
-                if (TemplateNote().empty()) {
-                    LOG_ERROR("Editor") << "SELFTEST: заметка шаблона не дошла до редактора";
-                    ok = false;
-                }
-                // Play отвечает на вопрос «почему пусто» делом — заметке
-                // дальше висеть незачем.
-                StartPlay();
-                if (!TemplateNote().empty()) {
-                    LOG_ERROR("Editor") << "SELFTEST: заметка пережила запуск игры";
-                    ok = false;
-                }
-                StopPlay();
-            }
-            // Чужая сцена держит текстуры занятыми, а проверка бюджета
-            // видеопамяти меряет ОБЩИЙ резидентный размер — убираем за собой
-            // сразу, иначе она провалится не из-за вытеснения, а из-за нас.
-            NewScene(ProjectTemplateKind::Empty);
-            ResourceManager::Instance().GarbageCollectUnused();
-        }
-        fs::remove_all("selftest_tpl_note", ec);
-        fs::remove_all("selftest_tpl_notesrc", ec);
-        fs::remove(notePack, ec);
-        tstore::Uninstall("selftestnote", err);
-        RefreshProjectTemplates();
-    }
-    // А у шаблона, который показывает себя сам, заметки быть не должно:
-    // строка «что делать дальше» там, где и так всё видно, — шум.
-    if (ok) {
-        fs::remove_all("selftest_tpl_plain", ec);
-        std::string plainErr;
-        if (CreateProject(".", "selftest_tpl_plain", "demo", plainErr) &&
-            !TemplateNote().empty()) {
-            LOG_ERROR("Editor") << "SELFTEST: у демо-шаблона появилась заметка";
-            ok = false;
-        }
-        fs::remove_all("selftest_tpl_plain", ec);
     }
 
     // --- ОФОРМЛЕНИЕ: тема — данные, и её видно ------------------------------

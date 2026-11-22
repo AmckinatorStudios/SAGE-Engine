@@ -21,7 +21,7 @@ void EditorLayer::RunSelfTest() {
 
     std::error_code ec;
     fs::remove_all("selftest_project", ec); // от прошлого прогона
-    if (!CreateProject(".", "selftest_project", DefaultProjectTemplate(), err)) {
+    if (!CreateFixtureProject(".", "selftest_project", err)) {
         LOG_ERROR("Editor") << "SELFTEST: create project failed: " << err;
         ok = false;
     }
@@ -30,7 +30,7 @@ void EditorLayer::RunSelfTest() {
         fs::path scenePath = m_project.ScenesDir() / "selftest.sage";
         if (!SaveSceneToFile(scenePath)) ok = false;
         if (ok) {
-            NewScene(ProjectTemplateKind::Empty); // пустая сцена — убеждаемся, что загрузка реально восстанавливает
+            NewScene(); // пустая сцена — убеждаемся, что загрузка реально восстанавливает
             if (!LoadSceneFromFile(scenePath)) ok = false;
         }
         if (ok && m_scene->Count() != before) {

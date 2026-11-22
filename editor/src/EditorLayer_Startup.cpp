@@ -30,7 +30,6 @@
 #include "ImGuizmo.h"
 
 #include "EditorTheme.h"
-#include "TemplateStore.h"
 #include "EditorIcons.h"
 #include "ModelMaterialImport.h"
 #include "Thumbnails.h"
@@ -287,7 +286,7 @@ void EditorLayer::InitEditorServices() {
 
     m_tools.GizmoOp = (int)ImGuizmo::TRANSLATE; // дефолтный режим гизмо (default 0 невалиден)
 
-    NewScene(ProjectTemplateKind::Demo);
+    NewScene();
 
     ViewportPanel::ResetCamera(m_camera);
 
@@ -373,44 +372,6 @@ void EditorLayer::InitPlugins() {
     }
     // Lua (LuaPlugins.h): встроенные, «мои» и плагины проекта.
     sage::editor::luaplugins::Rescan(*this);
-
-    // Скачивание шаблона из каталога — БЕЗ ЧЕЛОВЕКА.
-    //
-    // Сеть — единственная часть системы шаблонов, которую нельзя проверить ни
-    // модульным тестом, ни самопроверкой: там нет ни сервера, ни щелчка по
-    // кнопке. Эти два хука дают smoke-тесту поднять свой http-сервер, положить
-    // на него каталог и убедиться, что редактор действительно скачал и
-    // поставил шаблон, — то есть проверить ровно тот путь, которым пойдёт
-    // человек, а не соседний.
-    if (const std::string url = sage::EnvString("SAGE_EDITOR_TEMPLATE_CATALOG"); !url.empty()) {
-        sage::editor::templates::SetCatalogUrl(url);
-        LOG_INFO("Editor") << "Каталог шаблонов: " << url;
-    }
-    if (const std::string want = sage::EnvString("SAGE_EDITOR_INSTALL_TEMPLATE"); !want.empty()) {
-        m_headlessProject = true;
-        std::vector<sage::editor::templates::Manifest> list;
-        std::string tplErr;
-        if (!sage::editor::templates::FetchCatalog(list, tplErr)) {
-            LOG_ERROR("Editor") << "TEMPLATE: каталог не получен: " << tplErr;
-        } else {
-            bool done = false;
-            for (const sage::editor::templates::Manifest& m : list) {
-                if (m.Id != want) continue;
-                if (sage::editor::templates::Download(m, tplErr)) {
-                    RefreshProjectTemplates();
-                    const ProjectTemplate* put = FindProjectTemplate(want);
-                    LOG_INFO("Editor") << "TEMPLATE: установлен " << m.Name << ", в списке: "
-                                       << (put ? "да" : "НЕТ");
-                    done = put != nullptr;
-                } else {
-                    LOG_ERROR("Editor") << "TEMPLATE: не скачался: " << tplErr;
-                }
-                break;
-            }
-            if (!done) LOG_ERROR("Editor") << "TEMPLATE: FAIL";
-            else LOG_INFO("Editor") << "TEMPLATE: OK";
-        }
-    }
 
     // Команды — после загрузки тем: часть из них перечисляет темы поимённо.
     RegisterCommands();

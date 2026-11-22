@@ -12,6 +12,34 @@
 
 ## 0.5.0 → 1.0 (в работе)
 
+### 2026-11-22 (Очистка репозитория: без игр, примеров и шаблонов)
+
+#### Изменено
+- Каталога `games/` больше нет. Sandbox, Showcase и VoxelWorld убраны из
+  репозитория движка; TestGame перенесён в `tests/integration/testgame` как
+  тестовое приложение (smoke-тест, `test_animgraph`).
+- Флаги CMake `SAGE_BUILD_SAMPLES` и `SAGE_BUILD_VOXELWORLD` убраны; TestGame
+  собирается вместе с тестами, отдельно отключается
+  `-DSAGE_BUILD_INTEGRATION_TESTS=OFF`.
+- «Новый проект» (диалог и стартовое окно) всегда создаёт пустой проект:
+  папки, `project.sageproj`, `assets/Scenes/main.sage` с солнцем. Выбора
+  шаблона, карточек с обложками и заметки шаблона во вьюпорте больше нет.
+  `EditorHost::CreateProject` — без параметра шаблона.
+- Smoke-тест: шаг Sandbox снят (рендер, Lua и снимок проверяет TestGame), шаг
+  скачивания шаблона снят — проверок 10.
+- Самопроверка редактора и headless-хуки работают на сцене-фикстуре
+  (`selftest/SelfTestFixtureScene.cpp`, бывшая демо-сцена) вместо
+  демо-шаблона; шаг GI-запекания заводит свой свет, проба ввода открывает
+  фикстуру сама, а не полагается на сцену прошлого шага.
+- Удалена система шаблонов проектов: `ProjectTemplates`, `TemplateStore` (установка,
+  каталог, скачивание через curl, `.sagetemplate`), `ProjectTemplateCover`,
+  обложки `editor/assets/templates`, хуки `SAGE_EDITOR_TEMPLATE`,
+  `SAGE_EDITOR_TEMPLATE_SHOTS`, `SAGE_EDITOR_TEMPLATE_CATALOG`,
+  `SAGE_EDITOR_INSTALL_TEMPLATE`, упаковщик `tools/sage_template`.
+- Релиз Windows больше не публикует `showcase.sagetemplate` и `templates.json`.
+- Скрипты `scripts/build_{linux,windows,all}.sh`, `build_windows.bat` —
+  упаковка C++-игр из `games/`; игру собирает «Build Game» или `sage_build`.
+
 ### 2026-11-22 (Надёжность ядра и сохранность данных)
 
 #### Исправлено

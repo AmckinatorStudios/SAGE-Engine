@@ -39,25 +39,11 @@ cmake --build build-windows -j$(nproc)
 
 ## Новая игра
 
-```cmake
-# games/mygame/CMakeLists.txt
-sage_add_game(NAME MyGame SOURCES src/main.cpp ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/assets)
-```
-
-```cpp
-// games/mygame/src/main.cpp
-#include "sage/core/GameModule.h"
-sage::Application* sage::CreateApplication(int, char**) {
-    auto* app = new sage::Application({.Title = "My Game"});
-    app->PushLayer(std::make_unique<MyGameLayer>());
-    return app;
-}
-SAGE_MAIN()
-```
-
-Плюс `add_subdirectory(games/mygame)` в корневой CMakeLists. Готовые примеры —
-`games/sandbox` (минимальный) и `games/testgame` (игра-стресс-тест, гоняется в
-CI каждым коммитом).
+Игра создаётся в редакторе: «Новый проект» даёт пустой проект (папки,
+`project.sageproj`, сцена `scenes/main.sage` с солнцем), «Build Game» собирает
+его вместе с `SagePlayer`. Свой C++-код игра держит в отдельном репозитории и
+подключает движок через `add_subdirectory` + `sage_add_game`
+([docs/architecture.md](docs/architecture.md)).
 
 ## Документация
 
@@ -89,8 +75,8 @@ engine/     ядро (sage::engine): core, rhi, ecs, scene, render, input, event
             anim, physics, audio, net, ui, assets, gi, scripting
 editor/     SageEditor — редактор на ImGui
 runtime/    SagePlayer — плеер собранной игры
-games/      sandbox, testgame — примеры на движке
-tests/      модульные и кадровые (эталонные) тесты
+tests/      модульные, кадровые (render/) и интеграционные (integration/testgame) тесты
+tools/      sage_build (сборка игры без редактора), sage_api (каталог API скриптов)
 external/   вендоренные зависимости
 docs/       документация
 ```

@@ -28,11 +28,11 @@ class ScriptEngine;
 class AudioEngine;
 
 // ---------------------------------------------------------------------------
-// TestGameLayer — «боевая» тестовая игра SAGE (games/testgame).
+// TestGameLayer — «боевая» тестовая игра SAGE (tests/integration/testgame).
 //
 // НЕ игра ради игры, а стресс-тест движка: маленький, но полный игровой цикл,
 // который сознательно нагружает подсистемы, у которых иначе не остаётся ни
-// одного реального потребителя (см. README, «games/testgame»):
+// одного реального потребителя (см. docs/build.md, «Интеграционный тест TestGame»):
 //   • Игрок от первого лица: InputSystem (именованные действия WASD/мышь) +
 //     СВОЯ AABB-коллизия со стенами (коллизии — забота игры, не движка).
 //   • Две комнаты-сцены через SceneManager, переход по пульсирующему порталу.
@@ -54,8 +54,7 @@ class AudioEngine;
 class TestGameLayer : public sage::Layer {
 public:
     // Конструктор/деструктор в .cpp: у unique_ptr<ScriptEngine/AudioEngine>
-    // должен быть полный тип в точке генерации деструктора (тот же приём, что
-    // в SandboxLayer).
+    // должен быть полный тип в точке генерации деструктора.
     TestGameLayer();
     ~TestGameLayer() override;
 

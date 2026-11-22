@@ -1,5 +1,5 @@
 # TestGame — боевая тестовая игра SAGE: стресс-тест подсистем движка на
-# реальном игровом цикле (см. src/TestGameLayer.h и README «games/testgame»).
+# реальном игровом цикле (см. src/TestGameLayer.h и docs/build.md, «Интеграционный тест TestGame»).
 sage_add_game(
     NAME TestGame
     SOURCES

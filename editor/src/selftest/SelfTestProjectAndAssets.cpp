@@ -1,9 +1,9 @@
 #include "SelfTestCommon.h"
 
-// --- проект, шаблоны, ассеты и материалы -----------------------------------
+// --- проект, ассеты и материалы --------------------------------------------
 //
 // Первая половина того, что редактор обязан уметь до всякой сцены: создать
-// проект, дать обещанный шаблоном старт, сохранить и загрузить, переименовать
+// пустой проект, сохранить и загрузить, переименовать
 // файл вместе с его сайдкаром, назначить материал. Ошибка здесь означает, что
 // работать в редакторе нельзя вообще, поэтому этот блок идёт первым.
 bool EditorLayer::SelfTestProjectAndAssets() {
@@ -12,32 +12,26 @@ bool EditorLayer::SelfTestProjectAndAssets() {
     std::string err;
     (void)ec; (void)err;
 
-    // --- Шаблоны проекта: каждый даёт то, что обещает ---------------------
+    // --- Новый проект: пустой проект и сцена-фикстура ----------------------
     //
     // Проверяется не «функция вернула true», а содержимое стартовой сцены:
-    // пустой шаблон обязан быть ПУСТЫМ (иначе его выбор ничего не значит), а
-    // интерфейсный — принести готовые экраны. Пока выбор был булевым флагом,
-    // проверять было нечего: вариантов было два, и один из них никто не звал.
+    // новый проект обязан быть ПУСТЫМ (одно солнце), а фикстура самопроверки —
+    // принести объекты с материалами-файлами и свет без компонента «Меш».
     if (ok) {
-        // Painted — объект, у которого проверяется МАТЕРИАЛ. Отдельным полем, а
-        // не «тем же, что Expect»: у интерфейсного шаблона Expect — экран меню,
-        // и материала у него нет по определению, а покрашенный пол есть.
-        struct TemplateCheck { const char* Id; bool Empty; const char* Expect; const char* Painted; };
-        // ВСЕ шаблоны, строящие сцену кодом. «Демо» не проверялся вообще — при
-        // том, что он предлагается по умолчанию и именно его видит человек,
-        // открывший редактор впервые.
-        //
-        // «Стартера интерфейса» в списке больше нет: он давал ту же демо-сцену
-        // с другим набором чужих объектов (см. ProjectTemplates.cpp).
-        const TemplateCheck checks[] = {
+        // Painted — объект, у которого проверяется МАТЕРИАЛ.
+        struct ProjectCheck { const char* Id; bool Empty; const char* Expect; const char* Painted; };
+        const ProjectCheck checks[] = {
             {"empty", true, nullptr, nullptr},
-            {"demo", false, "Green Cube", "Green Cube"},
+            {"fixture", false, "Green Cube", "Green Cube"},
         };
-        for (const TemplateCheck& c : checks) {
+        for (const ProjectCheck& c : checks) {
             fs::remove_all(std::string("selftest_tpl_") + c.Id, ec);
             std::string tplErr;
-            if (!CreateProject(".", std::string("selftest_tpl_") + c.Id, c.Id, tplErr)) {
-                LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id << " не создался: " << tplErr;
+            const std::string dir = std::string("selftest_tpl_") + c.Id;
+            const bool made = c.Empty ? CreateProject(".", dir, tplErr)
+                                      : CreateFixtureProject(".", dir, tplErr);
+            if (!made) {
+                LOG_ERROR("Editor") << "SELFTEST: проект " << c.Id << " не создался: " << tplErr;
                 ok = false;
                 break;
             }
@@ -48,51 +42,49 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                 //   • элементы интерфейса — они живут компонентами НА сущностях,
                 //     то есть считаются вместе с ними, и отдельная проверка
                 //     нужна как обещание: интерфейс здесь тоже не появится;
-                //   • настройки сцены — они НЕ сущности, и скайбокс, включённый
-                //     «за компанию» с остальными шаблонами, дал бы пустому
-                //     проекту небо при нулевом счётчике объектов.
+                //   • настройки сцены — они НЕ сущности, и включённый скайбокс
+                //     дал бы пустому проекту небо при нулевом счётчике объектов.
                 // ПУСТОЙ — ЭТО ПУСТОЙ ПЛЮС СОЛНЦЕ, и это не оговорка. Свет в
                 // сцене дают только объекты (см. LightingEnvironment::Sun):
                 // движок больше не подсвечивает сцену сам собой, и пустой
                 // проект без объекта-солнца открывался бы чёрным вьюпортом.
                 // Солнце — обычный объект: видно в иерархии, можно удалить.
                 if (m_scene->Count() != 1) {
-                    LOG_ERROR("Editor") << "SELFTEST: пустой шаблон принёс " << m_scene->Count()
+                    LOG_ERROR("Editor") << "SELFTEST: пустой проект принёс " << m_scene->Count()
                                         << " сущностей (ожидалось одно солнце)";
                     ok = false;
                 }
                 if (!sage::ecs::SceneHasAnyLight(*m_scene)) {
-                    LOG_ERROR("Editor") << "SELFTEST: пустой шаблон приехал без света вовсе";
+                    LOG_ERROR("Editor") << "SELFTEST: пустой проект приехал без света вовсе";
                     ok = false;
                 }
                 const auto uiView = m_scene->Registry().view<sage::ui::Element>();
                 if (uiView.begin() != uiView.end()) {
-                    LOG_ERROR("Editor") << "SELFTEST: пустой шаблон принёс элементы интерфейса";
+                    LOG_ERROR("Editor") << "SELFTEST: пустой проект принёс элементы интерфейса";
                     ok = false;
                 }
                 if (m_scene->Lighting.Skybox.Enabled) {
-                    LOG_ERROR("Editor") << "SELFTEST: пустой шаблон включил скайбокс";
+                    LOG_ERROR("Editor") << "SELFTEST: пустой проект включил скайбокс";
                     ok = false;
                 }
             }
             if (c.Expect && !m_scene->FindByName(c.Expect).Valid()) {
-                LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id << " не принёс " << c.Expect;
+                LOG_ERROR("Editor") << "SELFTEST: проект " << c.Id << " не принёс " << c.Expect;
                 ok = false;
             }
 
             // У СВЕТА, КАМЕРЫ И ЭЛЕМЕНТА ИНТЕРФЕЙСА НЕТ КОМПОНЕНТА «МЕШ».
             //
-            // Scene::CreateObject вешает MeshRenderer всем подряд, и шаблоны
-            // звали именно его: лампа приезжала с секцией «Меш» — моделью,
-            // цветом и тенями, которых у света нет. Шаблон — образец того, как
-            // устроен проект, и лишний компонент в нём учит неправильному.
+            // Scene::CreateObject вешает MeshRenderer всем подряд; свет и камера
+            // обязаны заводиться пустыми объектами, иначе у лампы в инспекторе
+            // секция «Меш» с моделью и тенями, которых у света нет.
             {
                 entt::registry& reg = m_scene->Registry();
                 auto complain = [&](entt::entity e, const char* what) {
                     if (!reg.all_of<MeshRendererComponent>(e)) return;
                     const auto* nm = reg.try_get<NameComponent>(e);
                     LOG_ERROR("Editor") << "SELFTEST: у объекта " << (nm ? nm->Name : "?")
-                                        << " шаблона " << c.Id << " висит компонент «Меш», хотя это "
+                                        << " проекта " << c.Id << " висит компонент «Меш», хотя это "
                                         << what;
                     ok = false;
                 };
@@ -101,283 +93,44 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                 for (auto e : reg.view<sage::ui::Element>()) complain(e, "элемент интерфейса");
             }
 
-            // ФАЙЛ СЦЕНЫ НА ДИСКЕ — у КАЖДОГО шаблона, пустого в том числе.
-            // Ровно та поломка, с которой пришли: сцену показывает, а файла
-            // нет. Дальше по цепочке ломается всё: в scenes/ пусто, Ctrl+S
-            // спрашивает куда, собранная игра не находит, с чего начать.
-            const fs::path made = fs::path(std::string("selftest_tpl_") + c.Id) / "assets" / "Scenes" /
+            // ФАЙЛ СЦЕНЫ НА ДИСКЕ — у КАЖДОГО нового проекта, пустого в том
+            // числе: без него в scenes/ пусто, Ctrl+S спрашивает куда, а
+            // собранная игра не находит, с чего начать.
+            const fs::path sceneFile = fs::path(std::string("selftest_tpl_") + c.Id) / "assets" / "Scenes" /
                                   "main.sage";
-            if (!fs::exists(made, ec)) {
-                LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id << " не создал файл сцены "
-                                    << made.string();
+            if (!fs::exists(sceneFile, ec)) {
+                LOG_ERROR("Editor") << "SELFTEST: проект " << c.Id << " не создал файл сцены "
+                                    << sceneFile.string();
                 ok = false;
             } else if (m_scenePath.filename() != "main.sage") {
                 // И редактор обязан СЧИТАТЬ её открытой: иначе первое же
                 // Ctrl+S спросит путь, будто сцена ничья.
-                LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id
+                LOG_ERROR("Editor") << "SELFTEST: проект " << c.Id
                                     << " оставил редактор без пути сцены";
                 ok = false;
             }
 
-            // ЦВЕТ — ИЗ МАТЕРИАЛА, А НЕ ИЗ ПОЛЯ ОБЪЕКТА. Вторая половина той
-            // же жалобы: «формы разного цвета, а материалов у них нет».
+            // ЦВЕТ — ИЗ МАТЕРИАЛА-ФАЙЛА, А НЕ ИЗ ПОЛЯ ОБЪЕКТА.
             if (c.Painted) {
                 GameObject shown = m_scene->FindByName(c.Painted);
                 if (!shown.Valid() || !shown.HasRenderer()) {
-                    LOG_ERROR("Editor") << "SELFTEST: шаблон " << c.Id << " не принёс "
+                    LOG_ERROR("Editor") << "SELFTEST: проект " << c.Id << " не принёс "
                                         << c.Painted;
                     ok = false;
                 } else if (shown.Renderer().MaterialPath.empty()) {
-                    LOG_ERROR("Editor") << "SELFTEST: у объекта " << c.Painted << " шаблона "
+                    LOG_ERROR("Editor") << "SELFTEST: у объекта " << c.Painted << " проекта "
                                         << c.Id << " нет материала";
                     ok = false;
                 } else if (!fs::exists(fs::path(std::string("selftest_tpl_") + c.Id) /
                                            shown.Renderer().MaterialPath, ec)) {
                     LOG_ERROR("Editor") << "SELFTEST: материал " << shown.Renderer().MaterialPath
-                                        << " шаблона " << c.Id << " не записан на диск";
+                                        << " проекта " << c.Id << " не записан на диск";
                     ok = false;
                 }
             }
 
             fs::remove_all(std::string("selftest_tpl_") + c.Id, ec);
             if (!ok) break;
-        }
-        // --- Шаблон-КОПИЯ: упаковать, поставить, создать, снять ------------
-        //
-        // Готовых проектов больше НЕТ ВНУТРИ СБОРКИ (см. ProjectTemplates.cpp):
-        // они ставятся файлом .sagetemplate. Поэтому проверка не ищет витрину
-        // рядом с редактором — она проходит весь путь целиком: делает шаблон из
-        // проекта, ставит его, создаёт из него проект и снимает обратно. Так
-        // проверяется ровно то, чем пользуется человек, и без сети.
-        if (ok) {
-            namespace tstore = sage::editor::templates;
-            const fs::path pack = fs::absolute("selftest_template.sagetemplate", ec);
-            fs::remove(pack, ec);
-            fs::remove_all("selftest_tpl_copy", ec);
-            tstore::Uninstall("selftestpack", err);   // от прошлого прогона
-
-            // 1. Сделать проект и упаковать ЕГО. Именно свой, а не «текущий»:
-            //    выше по циклу проекты шаблонов создаются и тут же удаляются, и
-            //    текущим может оказаться уже стёртая папка — упаковывать было
-            //    бы нечего, причём по причине, к шаблонам отношения не имеющей.
-            fs::remove_all("selftest_tpl_src", ec);
-            std::string srcErr;
-            if (!CreateProject(".", "selftest_tpl_src", "demo", srcErr)) {
-                LOG_ERROR("Editor") << "SELFTEST: проект под шаблон не создался: " << srcErr;
-                ok = false;
-            } else if (!SaveSceneToFile(m_project.ScenesDir() / "main.sage")) {
-                // Сцену НАДО записать: свежесозданный проект держит её только в
-                // памяти, а шаблон — это файлы. Шаблон без сцен и создать из
-                // себя ничего не может, о чём CreateProject честно и скажет.
-                LOG_ERROR("Editor") << "SELFTEST: сцена под шаблон не сохранилась";
-                ok = false;
-            }
-            tstore::Manifest info;
-            info.Id = "selftestpack";
-            info.Name = "Шаблон самопроверки";
-            info.Summary = "Проверочный шаблон";
-            info.Note = "Заметка шаблона";
-            info.Version = "1.0";
-            std::string packErr;
-            if (ok && !tstore::Pack(m_project.Dir(), info, pack, packErr)) {
-                LOG_ERROR("Editor") << "SELFTEST: проект не упаковался в шаблон: " << packErr;
-                ok = false;
-            } else if (ok && fs::file_size(pack, ec) == 0) {
-                LOG_ERROR("Editor") << "SELFTEST: файл шаблона пуст";
-                ok = false;
-            }
-
-            // 2. Поставить и убедиться, что список шаблонов его УВИДЕЛ. Список
-            //    кэшируется, и без обновления установленный шаблон появлялся бы
-            //    только после перезапуска — то есть «установка не работает».
-            if (ok) {
-                if (!tstore::InstallFromFile(pack, packErr)) {
-                    LOG_ERROR("Editor") << "SELFTEST: шаблон не установился: " << packErr;
-                    ok = false;
-                } else {
-                    RefreshProjectTemplates();
-                    const ProjectTemplate* put = FindProjectTemplate("selftestpack");
-                    if (!put) {
-                        LOG_ERROR("Editor") << "SELFTEST: установленный шаблон не попал в список";
-                        ok = false;
-                    } else if (!ProjectTemplateAvailable(*put)) {
-                        LOG_ERROR("Editor") << "SELFTEST: установленный шаблон объявил себя недоступным";
-                        ok = false;
-                    } else if (put->Name != "Шаблон самопроверки") {
-                        LOG_ERROR("Editor") << "SELFTEST: имя шаблона не доехало: '" << put->Name << "'";
-                        ok = false;
-                    } else if (put->Note.empty()) {
-                        LOG_ERROR("Editor") << "SELFTEST: заметка шаблона не доехала";
-                        ok = false;
-                    }
-                }
-            }
-
-            // 3. Создать из него проект: содержимое обязано приехать целиком, а
-            //    имя проекта остаться тем, которое попросили, — копируется
-            //    содержимое, а не чужая вывеска.
-            if (ok) {
-                std::string copyErr;
-                if (!CreateProject(".", "selftest_tpl_copy", "selftestpack", copyErr)) {
-                    LOG_ERROR("Editor") << "SELFTEST: из установленного шаблона проект не создался: "
-                                        << copyErr;
-                    ok = false;
-                } else {
-                    if (m_scene->Count() == 0) {
-                        LOG_ERROR("Editor") << "SELFTEST: шаблон-копия открыл пустую сцену";
-                        ok = false;
-                    }
-                    if (m_project.Name() != "selftest_tpl_copy") {
-                        LOG_ERROR("Editor") << "SELFTEST: копия шаблона назвалась '"
-                                            << m_project.Name() << "'";
-                        ok = false;
-                    }
-                    int scenes = 0;
-                    for (const auto& e : fs::directory_iterator(
-                             fs::path("selftest_tpl_copy") / "assets" / "Scenes", ec))
-                        if (e.path().extension() == ".sage") ++scenes;
-                    if (scenes == 0) {
-                        LOG_ERROR("Editor") << "SELFTEST: в копии шаблона нет ни одной сцены";
-                        ok = false;
-                    }
-                    // Сайдкары редактора в САМ ПАКЕТ не кладутся намеренно: они
-                    // описывают ЛОКАЛЬНЫЙ импорт. Смотрим в пакет, а не в
-                    // созданный проект: там база ассетов заводит свои сайдкары
-                    // заново, и найти их в проекте — норма, а не протечка.
-                    sage::assets::PackReader check;
-                    if (check.Open(pack)) {
-                        for (const std::string& inside : check.Paths()) {
-                            if (inside.size() > 5 &&
-                                inside.compare(inside.size() - 5, 5, ".meta") == 0) {
-                                LOG_ERROR("Editor") << "SELFTEST: в шаблон попал сайдкар " << inside;
-                                ok = false;
-                                break;
-                            }
-                        }
-                    }
-                }
-                fs::remove_all("selftest_tpl_copy", ec);
-            }
-
-            // 4. Снять шаблон: он обязан пропасть и из списка, и с диска.
-            //    Установка без удаления — это папка, которая только растёт.
-            if (ok) {
-                std::string rmErr;
-                if (!tstore::Uninstall("selftestpack", rmErr)) {
-                    LOG_ERROR("Editor") << "SELFTEST: шаблон не удалился: " << rmErr;
-                    ok = false;
-                } else {
-                    RefreshProjectTemplates();
-                    if (FindProjectTemplate("selftestpack")) {
-                        LOG_ERROR("Editor") << "SELFTEST: удалённый шаблон остался в списке";
-                        ok = false;
-                    }
-                    if (fs::exists(tstore::Root() / "selftestpack", ec)) {
-                        LOG_ERROR("Editor") << "SELFTEST: папка удалённого шаблона осталась";
-                        ok = false;
-                    }
-                }
-            }
-
-            // 5. Шаблон приходит из сети и с чужого диска, поэтому пути внутри
-            //    него — недоверенные. Пакет, который пытается записать файл ВЫШЕ
-            //    своей папки, обязан быть отвергнут целиком: иначе «установка
-            //    шаблона» становится записью куда угодно на диске.
-            if (ok) {
-                const fs::path evil = fs::absolute("selftest_evil.sagetemplate", ec);
-                fs::remove(evil, ec);
-                sage::assets::PackWriter bad;
-                const std::string dummy = "{}";
-                bad.Add("project.sageproj", std::vector<uint8_t>(dummy.begin(), dummy.end()));
-                bad.Add("../../selftest_escaped.txt",
-                        std::vector<uint8_t>(dummy.begin(), dummy.end()));
-                if (bad.Save(evil)) {
-                    std::string evilErr;
-                    if (tstore::InstallFromFile(evil, evilErr)) {
-                        LOG_ERROR("Editor") << "SELFTEST: шаблон с выходом за свою папку установился";
-                        ok = false;
-                    }
-                    if (fs::exists("selftest_escaped.txt", ec) ||
-                        fs::exists(tstore::Root().parent_path() / "selftest_escaped.txt", ec)) {
-                        LOG_ERROR("Editor") << "SELFTEST: шаблон записал файл за пределами templates/";
-                        ok = false;
-                    }
-                    // И мусора после отказа не остаётся: полушаблон в
-                    // templates/ выглядел бы установленным.
-                    if (fs::exists(tstore::Root() / "selftest_evil", ec)) {
-                        LOG_ERROR("Editor") << "SELFTEST: после отказа осталась папка шаблона";
-                        ok = false;
-                    }
-                }
-                fs::remove(evil, ec);
-                fs::remove("selftest_escaped.txt", ec);
-            }
-
-            // 6. Каталог для скачивания разбирается без сети: сеть в прогоне
-            //    без человека недоступна, а разбор чужого JSON — самое хрупкое
-            //    место всей затеи.
-            if (ok) {
-                std::vector<tstore::Manifest> list;
-                std::string catErr;
-                const std::string good =
-                    R"({"templates":[{"id":"a","name":"A","url":"https://x/a.sagetemplate",)"
-                    R"("bytes":10},{"id":"b","name":"B"}]})";
-                if (!tstore::ParseCatalog(good, list, catErr) || list.size() != 2) {
-                    LOG_ERROR("Editor") << "SELFTEST: каталог шаблонов не разобрался: " << catErr;
-                    ok = false;
-                } else if (list[0].Url.empty() || list[0].Bytes != 10) {
-                    LOG_ERROR("Editor") << "SELFTEST: поля каталога потерялись";
-                    ok = false;
-                }
-                // Мусор вместо каталога — отказ с объяснением, а не пустой
-                // список, который выглядит как «шаблонов нет».
-                if (ok && tstore::ParseCatalog("не json", list, catErr)) {
-                    LOG_ERROR("Editor") << "SELFTEST: испорченный каталог разобрался";
-                    ok = false;
-                }
-                // Запись без id пропускается: назвать и поставить такой шаблон
-                // всё равно нечем.
-                if (ok && tstore::ParseCatalog(R"([{"name":"без id"},{"id":"c"}])", list, catErr) &&
-                    (list.size() != 1 || list[0].Id != "c")) {
-                    LOG_ERROR("Editor") << "SELFTEST: запись каталога без id не отброшена";
-                    ok = false;
-                }
-            }
-            fs::remove(pack, ec);
-            fs::remove_all("selftest_tpl_src", ec);
-            // Вернуть текущим проект самопроверки: дальше идут его шаги, а
-            // папка, из которой мы делали шаблон, только что удалена — работать
-            // «в удалённом проекте» нельзя, и следующая же проверка упала бы не
-            // по своей вине.
-            if (ok && !OpenProject("selftest_project", err)) {
-                LOG_ERROR("Editor") << "SELFTEST: не вернуться в проект самопроверки: " << err;
-                ok = false;
-            }
-        }
-
-        // --- Доступность шаблона — часть ВЫБОРА, а не сюрприз после нажатия ---
-        //
-        // Карточка витрины показывалась одинаково, стоит её папка рядом с
-        // редактором или нет: выбор проходил, «Создать» отказывало сообщением
-        // на английском, и человек читал это как «шаблон не работает». Признак
-        // обязан быть у самих данных, и здесь проверяется он, а не рисунок.
-        if (ok) {
-            for (const ProjectTemplate& t : ProjectTemplates()) {
-                if (t.Kind == ProjectTemplateKind::Copy) continue;
-                if (!ProjectTemplateAvailable(t)) {
-                    LOG_ERROR("Editor") << "SELFTEST: шаблон " << t.Id
-                                        << " объявил себя недоступным, хотя не требует файлов";
-                    ok = false;
-                }
-            }
-        }
-
-        // Неизвестное имя шаблона — отказ, а не «создам что-нибудь».
-        std::string bogusErr;
-        if (ok && CreateProject(".", "selftest_tpl_bogus", "нет-такого", bogusErr)) {
-            LOG_ERROR("Editor") << "SELFTEST: неизвестный шаблон создал проект";
-            fs::remove_all("selftest_tpl_bogus", ec);
-            ok = false;
         }
         // Вернуться в проект самопроверки: дальше идут его шаги.
         if (ok && !OpenProject("selftest_project", err)) {
@@ -415,7 +168,7 @@ bool EditorLayer::SelfTestProjectAndAssets() {
         }
 
         std::string ghostErr;
-        if (ok && !CreateProject(".", "selftest_ghost_project", "empty", ghostErr)) {
+        if (ok && !CreateProject(".", "selftest_ghost_project", ghostErr)) {
             LOG_ERROR("Editor") << "SELFTEST: не создать проект для проверки призраков: "
                                 << ghostErr;
             ok = false;
@@ -431,7 +184,7 @@ bool EditorLayer::SelfTestProjectAndAssets() {
                                     << particles.StreamCount();
                 ok = false;
             }
-            // Объект прошлой сцены. Пустой шаблон не приносит своих, поэтому
+            // Объект прошлой сцены. Пустой проект не приносит своих, поэтому
             // любой найденный здесь — чужой.
             bool ghostObject = false;
             m_scene->Registry().view<NameComponent>().each(

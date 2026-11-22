@@ -14,7 +14,6 @@
 #include "../EditorTheme.h"
 #include "../Localization.h"
 #include "../Project.h"
-#include "../ProjectTemplates.h"
 #include "../ui/UI.h"
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
@@ -125,7 +124,7 @@ void ProjectLauncher::DrawDialogs(EditorHost& host, ProjectDatabase& db) {
             // первом запуске ещё нет.
             fs::create_directories(m_dirBuf, ec);
             std::string err;
-            if (host.CreateProject(m_dirBuf, m_nameBuf, kNewProjectTemplate, err)) {
+            if (host.CreateProject(m_dirBuf, m_nameBuf, err)) {
                 const fs::path dir = fs::path(m_dirBuf) / m_nameBuf;
                 db.Refresh(sage::PathToUtf8(dir));
                 m_selected = sage::PathToUtf8(dir);

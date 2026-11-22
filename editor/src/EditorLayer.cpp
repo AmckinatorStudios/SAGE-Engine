@@ -31,7 +31,6 @@
 #include "ImGuizmo.h"
 
 #include "EditorTheme.h"
-#include "TemplateStore.h"
 #include "EditorIcons.h"
 #include "ModelMaterialImport.h"
 #include "Thumbnails.h"
@@ -537,11 +536,6 @@ void EditorLayer::OnRender() {
     // проход сцены, поэтому рисуются ТОЛЬКО те, что панель попросила: одиночный
     // вьюпорт, самый частый случай, не платит за раскладку, которой не
     // пользуются.
-    // Съёмка обложек шаблонов идёт ДО кадра: она меняет проект и сцену, и делать
-    // это посреди сбора кадра значило бы рисовать половину одной сцены и
-    // половину другой.
-    TickTemplateShots();
-
     for (int i = 1; i < m_viewCount; ++i) {
         const ViewRequest& r = m_viewRequests[i];
         if (!r.Active || r.W < 8 || r.H < 8) continue;
@@ -584,17 +578,6 @@ void EditorLayer::OnRender() {
         GameObject cam = m_scene->Get(m_cameraPreviewId);
         if (cam.Valid()) m_renderer.RenderCameraPreview(*m_scene, env, cfg, cam.Entity());
         m_cameraPreviewId = -1;
-    }
-
-    // Снимок обложки шаблона делается ЗДЕСЬ и только здесь: игровой кадр
-    // существует ровно после RenderGame, а до неё это прошлогодняя картинка.
-    if (!m_coverShotPath.empty()) {
-        if (m_renderer.SaveGameFrame(m_coverShotPath))
-            LOG_INFO("Editor") << "Обложка шаблона снята: " << m_coverShotPath;
-        else
-            LOG_ERROR("Editor") << "Обложка шаблона не снялась: игрового кадра нет";
-        m_coverShotPath.clear();
-        m_coverShotDone = true;
     }
 
     // Снимок, заказанный игрой в Play (game.screenshot), — тоже здесь: кадр

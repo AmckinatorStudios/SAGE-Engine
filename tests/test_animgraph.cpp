@@ -1,6 +1,6 @@
 // Граф анимации (sage/anim/AnimGraph.h): файл и версия, правила проводов,
 // проигрывание клипов, смешивание поз, независимость экземпляров, передача
-// позы в Animator и работа на настоящей модели со скелетом (games/testgame).
+// позы в Animator и работа на настоящей модели со скелетом (tests/integration/testgame).
 #include "TestFramework.h"
 
 #include <algorithm>
@@ -365,10 +365,10 @@ TEST(AnimGraph_pose_reaches_animator) {
 // --- Настоящая модель --------------------------------------------------------
 
 TEST(AnimGraph_real_skinned_model) {
-    // Модель и клипы, которыми пользуется games/testgame: тотем со скелетом и
+    // Модель и клипы интеграционного TestGame: тотем со скелетом и
     // два клипа, вынутые из него в .sageanim.
     namespace fs = std::filesystem;
-    const fs::path models = fs::path(SAGE_TEST_DATA_DIR) / ".." / ".." / "games" / "testgame" / "assets" / "models";
+    const fs::path models = fs::path(SAGE_TEST_DATA_DIR) / ".." / "integration" / "testgame" / "assets" / "models";
     sage::render::ModelData data;
     try {
         data = sage::render::ParseSkinnedModelFile((models / "totem.glb").string());
