@@ -3,7 +3,6 @@
 #include "sage/scene/SceneSerializerDetail.h"
 #include "sage/audio/AudioComponents.h"
 #include "sage/assets/Pack.h"
-#include "sage/ecs/LightSystem.h"
 #include "sage/render/LodGroup.h"
 #include "sage/gi/GI.h"
 #include "sage/render/PostChainIO.h"

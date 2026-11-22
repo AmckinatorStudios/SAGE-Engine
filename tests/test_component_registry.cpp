@@ -311,3 +311,80 @@ TEST(ComponentRegistry_callbacks_run_unlocked_and_concurrent_use_is_safe) {
         if (type->Key == "ai_agent") ++ai;
     CHECK_EQ(ai, 1);
 }
+
+// ---------------------------------------------------------------------------
+// Состояние экземпляра при копии сбрасывает САМ компонент (ResetInstanceState),
+// и сбрасывает целиком. Когда этот список жил в Prefab.cpp, он отставал от
+// компонентов: у копии AnimationComponent оставался ClipResolvedFrom, равный её
+// ClipPath, — система считала свой клип уже подключённым, и копия играла клип
+// модели вместо своего .sageanim.
+// ---------------------------------------------------------------------------
+#include "sage/scene/Components.h"
+
+namespace {
+struct TestTimer {
+    float Period = 1.0f;   // настройка — едет с копией
+    int Ticks = 0;         // состояние экземпляра — нет
+    void ResetInstanceState() { Ticks = 0; }
+};
+} // namespace
+
+TEST(component_copy_resets_instance_state_of_every_owner) {
+    Scene scene;
+    GameObject hero = scene.CreateObject("Hero");
+    auto& reg = scene.Registry();
+
+    AnimationComponent am;
+    am.ClipPath = "walk.sageanim";
+    am.ClipResolvedFrom = "walk.sageanim";
+    am.GraphPath = "hero.sagegraph";
+    am.GraphResolvedFrom = "hero.sagegraph";
+    am.MissingBones = 3;
+    am.Ready = true;
+    am.ResolvedFrom = "hero.glb";
+    reg.emplace<AnimationComponent>(hero.Entity(), am);
+
+    RigidBodyComponent rb;
+    rb.RuntimeBody = 7;
+    reg.emplace<RigidBodyComponent>(hero.Entity(), rb);
+
+    AudioSourceComponent au;
+    au.Clip = "step.wav";
+    au.Handle = 5;
+    au.Playing = true;
+    reg.emplace<AudioSourceComponent>(hero.Entity(), au);
+
+    CHECK_TRUE(sage::scene::RegisterComponent(sage::scene::MakeComponentType<TestTimer>(
+        "test_timer",
+        [](const TestTimer& t) { return nlohmann::json{{"period", t.Period}}; },
+        [](const nlohmann::json& j, TestTimer& t) { t.Period = j.value("period", t.Period); })));
+    reg.emplace<TestTimer>(hero.Entity(), TestTimer{2.5f, 9});
+
+    GameObject copy = sage::scene::CopySubtree(scene, hero.Entity(), scene, entt::null);
+    CHECK_TRUE(copy.Valid());
+    if (!copy.Valid()) return;
+
+    const auto* ca = reg.try_get<AnimationComponent>(copy.Entity());
+    CHECK_TRUE(ca != nullptr);
+    if (ca) {
+        CHECK_EQ(ca->ClipPath, std::string("walk.sageanim"));   // настройки — как были
+        CHECK_EQ(ca->GraphPath, std::string("hero.sagegraph"));
+        CHECK_TRUE(ca->ClipResolvedFrom.empty());               // рантайм — с нуля
+        CHECK_TRUE(ca->GraphResolvedFrom.empty());
+        CHECK_TRUE(ca->ResolvedFrom.empty());
+        CHECK_EQ(ca->MissingBones, 0);
+        CHECK_TRUE(!ca->Ready);
+    }
+    const auto* cr = reg.try_get<RigidBodyComponent>(copy.Entity());
+    CHECK_TRUE(cr && cr->RuntimeBody == sage::physics::kInvalidBody);
+    const auto* cs = reg.try_get<AudioSourceComponent>(copy.Entity());
+    CHECK_TRUE(cs && cs->Handle == 0 && !cs->Playing && cs->Clip == "step.wav");
+    const auto* ct = reg.try_get<TestTimer>(copy.Entity());
+    CHECK_TRUE(ct && ct->Ticks == 0);
+    if (ct) CHECK_NEAR(ct->Period, 2.5f, 1e-6f);
+
+    // Оригинал не тронут.
+    CHECK_EQ(reg.get<AnimationComponent>(hero.Entity()).ClipResolvedFrom, std::string("walk.sageanim"));
+    CHECK_EQ(reg.get<RigidBodyComponent>(hero.Entity()).RuntimeBody, (sage::physics::BodyHandle)7);
+    sage::scene::UnregisterComponent("test_timer");
+}

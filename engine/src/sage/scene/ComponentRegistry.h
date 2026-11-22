@@ -2,6 +2,8 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <entt/entt.hpp>
@@ -106,6 +108,32 @@ void SaveRegisteredComponents(const entt::registry& reg, entt::entity e, nlohman
 void LoadRegisteredComponents(entt::registry& reg, entt::entity e, const nlohmann::json& object);
 void CopyRegisteredComponents(const entt::registry& src, entt::entity se, entt::registry& dst, entt::entity de);
 
+// СОСТОЯНИЕ ЭКЗЕМПЛЯРА ПРИ КОПИИ.
+//
+// Копия объекта (Ctrl+D, префаб, вставка, перенос между сценами) берёт
+// НАСТРОЙКИ компонента, но не его рантайм: дескриптор физического тела, голос
+// звука, загруженную модель, «уже запущено». Что из полей рантайм — знает
+// только сам компонент, поэтому он и объявляет
+//     void ResetInstanceState();
+// а копирование зовёт его у копии. Раньше этот список жил в копировании сцены
+// (Prefab.cpp) и знал внутренности физики, звука, анимации и рендера — и
+// отставал от них: новое рантайм-поле компонента копия наследовала молча.
+template <typename T, typename = void>
+struct HasInstanceState : std::false_type {};
+template <typename T>
+struct HasInstanceState<T, std::void_t<decltype(std::declval<T&>().ResetInstanceState())>>
+    : std::true_type {};
+
+// Копия компонента T с s на d (если он есть у s): настройки — как есть,
+// состояние экземпляра — сброшено (см. выше).
+template <typename T>
+void CopyComponent(const entt::registry& s, entt::entity se, entt::registry& d, entt::entity de) {
+    const T* c = s.try_get<T>(se);
+    if (!c) return;
+    T& copy = d.emplace_or_replace<T>(de, *c);
+    if constexpr (HasInstanceState<T>::value) copy.ResetInstanceState();
+}
+
 // Удобная сборка описания для обычной структуры T.
 template <typename T, typename SaveFn, typename LoadFn>
 ComponentType MakeComponentType(std::string key, SaveFn save, LoadFn load) {
@@ -120,7 +148,7 @@ ComponentType MakeComponentType(std::string key, SaveFn save, LoadFn load) {
     };
     t.Remove = [](entt::registry& r, entt::entity e) { r.remove<T>(e); };
     t.Copy = [](const entt::registry& s, entt::entity se, entt::registry& d, entt::entity de) {
-        d.emplace_or_replace<T>(de, s.get<T>(se));
+        CopyComponent<T>(s, se, d, de);
     };
     return t;
 }

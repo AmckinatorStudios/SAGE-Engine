@@ -318,6 +318,13 @@ struct DecalComponent {
     // Локальный же меняется тогда и только тогда, когда наклейку двигают.
     // В файл не пишется — это след последней сборки, а не настройка.
     glm::vec3 BuiltPosition{0.0f}, BuiltRotation{0.0f}, BuiltScale{0.0f};
+
+    // Копия объекта (см. sage::scene::CopyComponent): настройки едут, а
+    // геометрия наклейки — нет: она строится по месту, а у копии место другое.
+    void ResetInstanceState() {
+        Dirty = true;
+        Triangles = 0;
+    }
 };
 
 // Переопределение юниформ шейдера ДЛЯ ОДНОЙ СУЩНОСТИ. Материал общий: правка
@@ -384,4 +391,8 @@ struct RenderTextureComponent {
     glm::vec3 LightDir{-0.45f, -0.78f, -0.44f};
     float LightIntensity = 1.9f;
     float Ambient = 0.55f;
+
+    // Копия объекта (см. sage::scene::CopyComponent): настройки едут, а
+    // снятый кадр — нет: копия снимает свой.
+    void ResetInstanceState() { Dirty = true; }
 };

@@ -53,4 +53,11 @@ struct ReflectionProbeComponent {
     bool Dirty = true;                  // нужно снять (после загрузки/правки)
     std::shared_ptr<void> Runtime;      // sage::render::EnvironmentMap; void — чтобы
                                         // Components.h не тянул за собой рендер
+
+    // Копия объекта (см. sage::scene::CopyComponent): настройки едут, а
+    // снятая карта — нет: она принадлежит ТОЧКЕ, а копия стоит в другой.
+    void ResetInstanceState() {
+        Runtime.reset();
+        Dirty = true;
+    }
 };

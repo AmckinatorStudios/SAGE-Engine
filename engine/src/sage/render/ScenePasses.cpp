@@ -16,7 +16,7 @@
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Scene.h"
 
-#include "sage/anim/AnimationSystem.h"
+#include "sage/render/SkinnedModelPass.h"
 #include "sage/core/Profiler.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include "sage/scene/Light.h"
@@ -39,7 +39,7 @@ void RenderShadowDepth(ShadowMap& shadows, Scene& scene, sage::ecs::RenderBatch&
         // ECS-статика (инстансно + отсечение). Сцену обходит только первый
         // каскад, остальные берут его список (см. RenderBatch::RenderDepth).
         batch.RenderDepth(scene, light, /*reuseGather=*/c > 0);
-        sage::anim::DrawAnimatedModelsDepth(scene, light);  // скелеты тоже отбрасывают тень
+        DrawAnimatedModelsDepth(scene, light);  // скелеты тоже отбрасывают тень
 
         // Одна карта на всю сцену: остальные каскады — её копии, и рисовать в
         // них значило бы платить за N одинаковых карт.
@@ -58,7 +58,7 @@ void RenderLocalShadowDepth(LocalShadowAtlas& atlas, Scene& scene, sage::ecs::Re
         const glm::mat4& light = atlas.PassMatrix(p);
         if (extra) extra(light);
         batch.RenderDepth(scene, light, /*reuseGather=*/p > 0);
-        sage::anim::DrawAnimatedModelsDepth(scene, light);
+        DrawAnimatedModelsDepth(scene, light);
     }
     atlas.End(screenWidth, screenHeight);
 }
@@ -186,7 +186,7 @@ sage::ecs::RenderStats RenderSceneColor(Scene& scene, sage::ecs::RenderBatch& ba
     // Скелетные модели — тем же текстурным PBR-шейдером, что и статика, и
     // G-буфер пишут так же (см. RenderBatch::RenderColor).
     device.SetGBufferWrites(true);
-    sage::anim::DrawAnimatedModels(scene, input.View, input.Proj, input.ViewPos, *input.Env,
+    DrawAnimatedModels(scene, input.View, input.Proj, input.ViewPos, *input.Env,
                                    input.Shadows, &input.Reflection, input.ShadingMode,
                                    &batch.Clusters(), input.Layers);
     batch.SetLayerFilter(nullptr);

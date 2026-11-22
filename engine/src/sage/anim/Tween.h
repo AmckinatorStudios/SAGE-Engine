@@ -138,6 +138,10 @@ struct TweenClip {
 struct TweenComponent {
     std::vector<TweenClip> Tweens;
     bool Started = false;         // рантайм: PlayOnStart уже запущены
+
+    // Копия объекта (см. sage::scene::CopyComponent): настройки едут, а
+    // «уже запущены при старте» — про оригинал; копия запускает свои сама.
+    void ResetInstanceState() { Started = false; }
 };
 
 // --- Проигрыватель ----------------------------------------------------------------

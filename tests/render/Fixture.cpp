@@ -8,7 +8,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
-#include "sage/anim/AnimationSystem.h"
+#include "sage/render/SkinnedModelPass.h"
 #include "sage/ecs/LightSystem.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -168,7 +168,7 @@ Image RenderFrame(FrameRenderer& r, Scene& scene, const glm::mat4& proj,
     r.Batch.RenderColor(scene, view, proj, kEye, env, ShadowBinding(r.Shadow, true), 0);
     // Скелетные модели рисуются отдельным проходом (свой шейдер со скиннингом),
     // как и в редакторе с инструментом.
-    sage::anim::DrawAnimatedModels(scene, view, proj, kEye, env, ShadowBinding(r.Shadow, true));
+    sage::render::DrawAnimatedModels(scene, view, proj, kEye, env, ShadowBinding(r.Shadow, true));
 
     if (grid) r.Grid.Draw(view, proj, kEye, *grid);
     device.SetSRGBWrite(false);

@@ -22,9 +22,7 @@ namespace {
 
 template <typename T>
 void CopyIfPresent(GameObject& src, GameObject& dst) {
-    if (const T* c = src.Registry()->try_get<T>(src.Entity())) {
-        dst.Registry()->emplace_or_replace<T>(dst.Entity(), *c);
-    }
+    CopyComponent<T>(*src.Registry(), src.Entity(), *dst.Registry(), dst.Entity());
 }
 
 // Разобранные префабы. Ключ — путь как его дали: тот же путь придёт и в
@@ -138,61 +136,9 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     CopyIfPresent<CharacterControllerComponent>(src, dst);
     CopyIfPresent<ShaderParamsComponent>(src, dst);
 
-    // Дальше — сброс того, что принадлежит ЭКЗЕМПЛЯРУ, а не шаблону. Скопируй
-    // мы это как есть, две сущности делили бы один дескриптор тела, и удаление
-    // одной уносило бы физику другой.
-    if (auto* rb = dst.Registry()->try_get<RigidBodyComponent>(dst.Entity()))
-        rb->RuntimeBody = sage::physics::kInvalidBody;
-    if (auto* cc = dst.Registry()->try_get<CharacterControllerComponent>(dst.Entity())) {
-        cc->Runtime = sage::physics::kInvalidCharacter;
-        cc->Grounded = false;
-    }
-    if (auto* jc = dst.Registry()->try_get<JointComponent>(dst.Entity()))
-        jc->RuntimeJoint = sage::physics::kInvalidJoint;
-    if (auto* am = dst.Registry()->try_get<AnimationComponent>(dst.Entity())) {
-        am->Model.reset();
-        am->Anim = sage::anim::Animator{};
-        am->Ready = false;
-        // И ПУТЬ, из которого собран скелет: он тоже рантайм. Оставленный, он
-        // совпал бы с путём в Mesh копии, и система решила бы, что скелет уже
-        // готов, — а Model при этом пуста, то есть копия осталась бы без
-        // анимации до первой смены модели.
-        am->ResolvedFrom.clear();
-    }
-    // Индексы костей и залипшая опора — состояние экземпляра: у копии модель
-    // загрузится заново, и цели должны разрешиться по именам с нуля.
-    if (auto* ik = dst.Registry()->try_get<IKComponent>(dst.Entity()))
-        for (IKGoal& g : ik->Goals) { g.Resolved = false; g.Locked = false; }
-    // Снятая карта принадлежит ТОЧКЕ, а копия стоит в другой: делить её нельзя,
-    // иначе копия отражала бы окружение оригинала.
-    if (auto* rp = dst.Registry()->try_get<ReflectionProbeComponent>(dst.Entity())) {
-        rp->Runtime.reset();
-        rp->Dirty = true;
-    }
-    if (auto* pe = dst.Registry()->try_get<ParticleEmitterComponent>(dst.Entity())) {
-        pe->PendingEmit = 0;
-        pe->RestartRequested = pe->ClearRequested = false;
-    }
-    // Голос звука принадлежит оригиналу: копия с его номером глушила бы чужой
-    // звук и считала бы себя уже играющей (AutoPlay не сработал бы).
-    if (auto* au = dst.Registry()->try_get<AudioSourceComponent>(dst.Entity())) {
-        au->Handle = 0;
-        au->Playing = au->Paused = false;
-        au->Request = AudioRequest::None;
-    }
-    // «Уже запущены при старте» — про оригинал; копия запускает свои сама.
-    if (auto* tw = dst.Registry()->try_get<sage::anim::TweenComponent>(dst.Entity())) tw->Started = false;
-    // Геометрия наклейки строится по месту — у копии место другое.
-    if (auto* dc = dst.Registry()->try_get<DecalComponent>(dst.Entity())) {
-        dc->Dirty = true;
-        dc->Triangles = 0;
-    }
-    if (auto* pa = dst.Registry()->try_get<PropertyAnimatorComponent>(dst.Entity())) {
-        pa->Clip.reset();
-        pa->Ready = false;
-        pa->Time = 0.0f;
-    }
-    if (auto* rt = dst.Registry()->try_get<RenderTextureComponent>(dst.Entity())) rt->Dirty = true;
+    // Состояние ЭКЗЕМПЛЯРА (дескрипторы физики, голос звука, загруженная
+    // модель, «уже запущено») сбрасывает сам компонент — CopyComponent зовёт
+    // его ResetInstanceState (sage/scene/ComponentRegistry.h).
 }
 
 namespace {
