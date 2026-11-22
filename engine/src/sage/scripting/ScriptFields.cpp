@@ -23,7 +23,8 @@ bool IsHook(const std::string& name) {
         "Awake", "Start", "Update", "FixedUpdate", "LateUpdate", "OnEnable", "OnDisable",
         "OnDestroy", "OnCollisionEnter", "OnCollisionExit", "OnTriggerEnter", "OnTriggerExit",
         "OnTriggerStay", "OnAnimationEvent", "OnMessage", "OnQuit", "OnStart", "OnUpdate",
-        "OnFixedUpdate", "OnLateUpdate"};
+        "OnFixedUpdate", "OnLateUpdate", "start", "update", "fixed_update", "late_update",
+        "on_enable", "on_disable", "on_destroy"};
     for (const char* h : kHooks)
         if (name == h) return true;
     return false;

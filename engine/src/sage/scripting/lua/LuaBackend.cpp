@@ -30,6 +30,23 @@ const char* LegacyHookName(Hook hook) {
     }
 }
 
+// Хук в стандарте SAGE: start, update(delta), fixed_update, late_update,
+// on_enable, on_disable, on_destroy. Пусто — у хука нет snake_case-имени
+// (столкновения и клавиши приходят событиями: events.connect(object,
+// "collision", ...), а старые On*-функции продолжают работать).
+const char* StandardHookName(Hook hook) {
+    switch (hook) {
+        case Hook::Start: return "start";
+        case Hook::Update: return "update";
+        case Hook::FixedUpdate: return "fixed_update";
+        case Hook::LateUpdate: return "late_update";
+        case Hook::OnEnable: return "on_enable";
+        case Hook::OnDisable: return "on_disable";
+        case Hook::OnDestroy: return "on_destroy";
+        default: return nullptr;
+    }
+}
+
 // Фабрика экземпляра: self ищет сначала в классе скрипта, затем в общей базе
 // (GetComponent, get_component, …), затем — компонент по имени типа
 // (`self.Audio`). Метатаблица, а не копирование методов в каждый экземпляр:
@@ -157,6 +174,9 @@ Backend::Backend(const LuaBackendConfig& config) : m_interop(config.Interop) {
         ScriptModuleContext ctx{*m_lua, m_interop, this};
         InstallScriptModules(ctx, builtins, /*withRegistry=*/true, /*final=*/true);
         if (m_interop) m_interop->RegisterShortNames();
+        // Стандарт SAGE — после всего: строчные имена разделов раздаются уже
+        // готовым таблицам, а компоненты получают прокси со snake_case-полями.
+        InstallStandard(*this);
     }
 
     // Мост из прежнего движка: сообщения и выход обязаны доходить и до
@@ -443,6 +463,12 @@ void Backend::FillHooks(Instance& inst) {
         // Destroy() — нынешнее имя OnDestroy у простого скрипта.
         if (inst.Simple && hook == Hook::OnDestroy && fn.get_type() != sol::type::function)
             fn = inst.Class.raw_get<sol::object>("Destroy");
+        // Стандарт: start()/update(delta)/on_destroy(). Прежнее написание
+        // (Start/Update) главнее: файл, где есть и то и другое, — старый, а
+        // `update` в нём вспомогательная функция, не хук.
+        if (inst.Simple && fn.get_type() != sol::type::function)
+            if (const char* standard = StandardHookName(hook))
+                fn = inst.Class.raw_get<sol::object>(standard);
         if (!fn.valid() && inst.Legacy) {
             if (const char* legacy = LegacyHookName(hook)) fn = inst.Class[legacy];
         }
@@ -485,6 +511,9 @@ InstanceId Backend::Create(const ScriptSource& source, GameObject owner, ScriptE
     selfTable["game_object"] = selfTable["gameObject"];
     selfTable["transform"] = owner.Valid() ? sol::make_object(*m_lua, TransformRef(owner)) : sol::object(sol::lua_nil);
     env["self"] = selfTable;
+    // `object` — тот же объект под именем стандарта SAGE: методы через точку
+    // (object.destroy()), без self. Это тот же прокси, что selfTable.gameObject.
+    env["object"] = selfTable["gameObject"];
     sol::set_environment(env, chunk);
     sol::protected_function_result result = chunk();
     if (!result.valid()) {

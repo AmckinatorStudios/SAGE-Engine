@@ -293,8 +293,10 @@ void RegisterComponents(Backend& backend) {
 // публичное поле field.component("...") ходят сюда, поэтому «Animation» значит
 // одно и то же в обоих местах — и остаётся значить после добавления нового
 // компонента.
-sol::object Backend::ComponentOf(GameObject object, const std::string& component) {
+sol::object Backend::ComponentOf(GameObject object, const std::string& rawComponent) {
     if (!object.Valid()) return sol::lua_nil;
+    // "rigid_body" и "RigidBody" — один компонент.
+    const std::string component = CanonicalComponent(rawComponent);
     entt::registry& reg = *object.Registry();
     const entt::entity e = object.Entity();
 
@@ -319,6 +321,11 @@ sol::object Backend::ComponentOf(GameObject object, const std::string& component
                                               : sol::lua_nil;
     }
     if (component == "Script") return ScriptOf(object);
+    // RigidBody, Collider, Light, Mesh…: поля компонента — через безопасный
+    // прокси (LuaApi_Standard.cpp).
+    if (sol::object proxy = StandardComponentOf(*this, object, component); proxy.valid() &&
+                                                                          proxy.get_type() != sol::type::lua_nil)
+        return proxy;
     // Неизвестное имя — не ошибка, а nil: список компонентов растёт, и скрипт,
     // спросивший то, чего в этой сборке нет, должен уметь это проверить.
     return sol::lua_nil;

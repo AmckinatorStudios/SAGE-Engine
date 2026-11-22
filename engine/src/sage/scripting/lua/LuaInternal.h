@@ -102,6 +102,45 @@ struct ConnectionRef {
     std::string Signal;
 };
 
+// --- Стандарт SAGE: методы через точку -----------------------------------------
+//
+// `object.destroy()` без `self`: метод, найденный у прокси, отдаётся
+// привязанным к нему замыканием. Двоеточие (`object:destroy()`) продолжает
+// работать — прежние скрипты на нём написаны: первый аргумент, который и есть
+// этот же объект, молча отбрасывается. Чужой объект первым аргументом
+// (`child.set_parent(other)`) остаётся аргументом.
+bool SameObject(const GameObject& a, const GameObject& b);
+
+// Имя компонента из скрипта -> имя, по которому его знает бэкенд: "rigid_body"
+// и "RigidBody" — один компонент (стандарт — snake_case, прежнее — PascalCase).
+std::string CanonicalComponent(const std::string& name);
+
+// Тот же ли это владелец: для прокси объекта — тот же объект, для соединения —
+// тот же номер.
+template <class R>
+bool SameRef(const R& a, const R& b) { return SameObject(a.Obj, b.Obj); }
+inline bool SameRef(const ConnectionRef& a, const ConnectionRef& b) { return a.Id == b.Id; }
+
+template <class R>
+sol::object BindMethod(sol::state_view lua, const sol::object& fn, const R& owner) {
+    if (fn.get_type() != sol::type::function) return fn;
+    sol::protected_function f = fn.as<sol::protected_function>();
+    return sol::make_object(lua, [f, owner](sol::variadic_args va) -> sol::variadic_results {
+        std::vector<sol::object> args;
+        size_t from = 0;
+        if (va.size() > 0 && va[0].is<R>() && SameRef(va[0].as<R&>(), owner)) from = 1;
+        for (size_t i = from; i < va.size(); ++i) args.push_back(sol::object(va[i]));
+        sol::protected_function_result r = f(owner, sol::as_args(args));
+        if (!r.valid()) {
+            sol::error e = r;
+            throw e;
+        }
+        sol::variadic_results out;
+        for (int i = 0; i < r.return_count(); ++i) out.push_back(sol::object(r[i]));
+        return out;
+    });
+}
+
 class Backend : public LanguageBackend {
 public:
     explicit Backend(const LuaBackendConfig& config);
@@ -405,6 +444,14 @@ void RegisterTweens(Backend& backend);
 // `field.number(...)` и прочие — они нужны и при ВЫПОЛНЕНИИ файла, а не только
 // при разборе объявления (см. LuaFields.cpp).
 void RegisterFields(Backend& backend);
+// Стандарт SAGE: строчные имена разделов, input.was_pressed, прокси компонентов
+// по snake_case-именам (см. LuaApi_Standard.cpp). Зовётся ПОСЛЕДНИМ, когда все
+// разделы и короткие имена прежнего движка уже есть.
+void InstallStandard(Backend& backend);
+// Прокси компонента из списка стандарта (RigidBody, Collider, Light, Mesh,
+// Joint, ParticleEmitter, Decal) или nil.
+sol::object StandardComponentOf(Backend& backend, GameObject object, const std::string& canonical);
+bool StandardHasComponent(const GameObject& object, const std::string& canonical);
 
 // Публичные поля скрипта: разбор `X.public = { ... }` ТЕКСТОМ (см. LuaFields.cpp).
 sage::vars::Table ParsePublicFields(const std::string& source);

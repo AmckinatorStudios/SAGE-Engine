@@ -61,9 +61,9 @@ int LuaHandlerStore::Connect(sage::events::Bus& bus, int object, const std::stri
         fn.push(main);
         sol::protected_function onMain(main, -1);
         lua_pop(main, 1);
-        m_shared->Fns.emplace(key, Entry{std::move(onMain), once, id, &bus, owner});
+        m_shared->Fns.emplace(key, Entry{std::move(onMain), once, id, &bus, owner, object, name});
     } else {
-        m_shared->Fns.emplace(key, Entry{std::move(fn), once, id, &bus, owner});
+        m_shared->Fns.emplace(key, Entry{std::move(fn), once, id, &bus, owner, object, name});
     }
 
     // Соединения, снятые без ведома хранилища (объект уничтожен, disconnect
@@ -74,6 +74,23 @@ int LuaHandlerStore::Connect(sage::events::Bus& bus, int object, const std::stri
         m_pruneAt = std::max<size_t>(64, m_shared->Fns.size() * 2);
     }
     return id;
+}
+
+std::vector<int> LuaHandlerStore::Find(int object, const std::string& name, const sol::object& fn) const {
+    std::vector<int> out;
+    lua_State* L = fn.lua_state();
+    if (!L) return out;
+    for (const auto& [key, e] : m_shared->Fns) {
+        if (e.Object != object || e.Name != name) continue;
+        // Сравнение по значению Lua (rawequal): функция одна и та же, даже если
+        // подписка сделана из корутины, а снятие — из другого потока.
+        fn.push(L);
+        e.Fn.push(L);
+        const bool same = lua_rawequal(L, -1, -2) != 0;
+        lua_pop(L, 2);
+        if (same) out.push_back(e.Connection);
+    }
+    return out;
 }
 
 void LuaHandlerStore::Prune(const sage::events::Bus& bus) {

@@ -281,8 +281,9 @@ TEST(ScriptModules_cost_is_paid_at_startup_only) {
     const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
     std::printf("       установка всего API скриптов: %.1f мс\n", ms);
     CHECK_TRUE(ms < 2000.0);
-    // Функция модуля — C-функция, а не Lua-обёртка установщика.
-    const bool direct = se.Lua().script("return debug == nil and type(sage.math.Clamp) == 'function'").get<bool>();
+    // Функция модуля — C-функция, а не Lua-обёртка установщика. Стандартной
+    // библиотеки debug в скриптах нет: `debug` — раздел движка (debug.log).
+    const bool direct = se.Lua().script("return (debug == nil or (debug.sethook == nil and debug.getinfo == nil)) and type(sage.math.Clamp) == 'function'").get<bool>();
     CHECK_TRUE(direct);
 }
 
