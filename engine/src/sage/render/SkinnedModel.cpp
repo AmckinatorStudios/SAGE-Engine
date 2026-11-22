@@ -135,7 +135,7 @@ out vec2 vUV2;
 uniform mat4 uModel;
 uniform mat4 uView;
 uniform mat4 uProjection;
-const int MAX_BONES = 128;
+const int MAX_BONES = @MAX_BONES@;
 uniform mat4 uBones[MAX_BONES];
 uniform int uSkinned; // 0 — bind-поза (без палитры)
 
@@ -191,11 +191,20 @@ void main() {
 // ни затенения, ни свечения, ни прозрачности.
 std::string SkinFragSource() { return sage::render::TexturedPbrFragSource(); }
 
+// Размер палитры в шейдере берётся из kMaxBones, а не пишется литералом: иначе
+// шейдер и загрузка влияний расходятся, и кость за палитрой читает чужую память.
+std::string WithBoneLimit(std::string body) {
+    const std::string key = "@MAX_BONES@";
+    for (size_t at = body.find(key); at != std::string::npos; at = body.find(key, at))
+        body.replace(at, key.size(), std::to_string(sage::anim::kMaxBones));
+    return body;
+}
+
 // Готовый исходник вершинной стадии: версия + блок морфинга + тело. Склейка
 // здесь, а не в двух местах, гарантирует, что цветной и depth-проход морфят
 // вершину ОДИНАКОВО (см. комментарий у kMorphGlsl).
 std::string SkinVertSource() {
-    return std::string("#version 330 core\n") + kMorphGlsl + kSkinVertBody;
+    return std::string("#version 330 core\n") + kMorphGlsl + WithBoneLimit(kSkinVertBody);
 }
 
 Shader& SkinShader() {
@@ -220,7 +229,7 @@ out vec2 TexCoords;   // для выреза по альфе в тени (вол
 
 uniform mat4 uLightSpace;
 uniform mat4 uModel;
-const int MAX_BONES = 128;
+const int MAX_BONES = @MAX_BONES@;
 uniform mat4 uBones[MAX_BONES];
 uniform int uSkinned;
 
@@ -246,7 +255,7 @@ void main() {
 
 // Исходник depth-стадии: версия + блок морфинга + тело (см. SkinVertSource).
 std::string SkinDepthVertSource() {
-    return std::string("#version 330 core\n") + kMorphGlsl + kSkinDepthVertBody;
+    return std::string("#version 330 core\n") + kMorphGlsl + WithBoneLimit(kSkinDepthVertBody);
 }
 
 // Вырез по альфе — тот же, что у цветного прохода: пряди волос и бахрома
@@ -886,12 +895,26 @@ std::unique_ptr<SkinnedModel> WithImportSettings(std::unique_ptr<SkinnedModel> m
                                                  const ModelData& data, const std::string& path) {
     if (!model) return model;
     glm::vec3 lo(std::numeric_limits<float>::max()), hi(std::numeric_limits<float>::lowest());
-    for (const ModelSubMeshData& sub : data.SubMeshes)
+    std::vector<::ModelLoader::PartBounds> parts;
+    for (const ModelSubMeshData& sub : data.SubMeshes) {
+        ::ModelLoader::PartBounds part;
+        part.Lo = glm::vec3(std::numeric_limits<float>::max());
+        part.Hi = glm::vec3(std::numeric_limits<float>::lowest());
+        part.Vertices = sub.Vertices.size();
         for (const SkinnedVertex& v : sub.Vertices) {
-            lo = glm::min(lo, v.Position);
-            hi = glm::max(hi, v.Position);
+            part.Lo = glm::min(part.Lo, v.Position);
+            part.Hi = glm::max(part.Hi, v.Position);
         }
-    const ::ModelLoader::ImportSettings s = ::ModelLoader::ResolveImportSettings(path, lo, hi);
+        if (part.Vertices == 0) continue;
+        lo = glm::min(lo, part.Lo);
+        hi = glm::max(hi, part.Hi);
+        parts.push_back(part);
+    }
+    // Единицы решаются по границам БЕЗ выбросов, центровка и нормировка —
+    // по всем (это явный выбор человека в настройках импорта).
+    glm::vec3 rlo, rhi;
+    ::ModelLoader::RobustBounds(parts, rlo, rhi);
+    const ::ModelLoader::ImportSettings s = ::ModelLoader::ResolveImportSettings(path, rlo, rhi);
     model->SetImportTransform(::ModelLoader::ImportMatrix(s, lo, hi));
     return model;
 }

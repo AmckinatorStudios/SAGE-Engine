@@ -195,6 +195,9 @@ struct Kit {
     float ButtonPadXCompact = 6.0f;
     float SwitchHeight = 0.8f;    // переключатель: доля высоты поля
     float SwitchWidth = 1.9f;     // … ширина от его высоты
+    float ToolbarPadX = 6.0f;     // полоса инструментов: поле от края до первого элемента
+    float ToolbarPadY = 4.0f;     // … сверху и снизу (высота полосы = поле + 2×это)
+    float ToolGap = 4.0f;         // между соседними элементами ряда инструментов
 };
 // Текущая таблица (с учётом масштаба интерфейса).
 const Kit& KitMetrics();

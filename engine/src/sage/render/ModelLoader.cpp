@@ -145,6 +145,37 @@ float AutoUnitScale(const ImportSettings& s, bool hasSkeleton, float maxExtent) 
     return s.AutoUnits && hasSkeleton && maxExtent > kCentimetreGuess ? 0.01f : 1.0f;
 }
 
+void RobustBounds(const std::vector<PartBounds>& parts, glm::vec3& lo, glm::vec3& hi) {
+    lo = glm::vec3(std::numeric_limits<float>::max());
+    hi = glm::vec3(std::numeric_limits<float>::lowest());
+    auto extentOf = [](const PartBounds& p) {
+        const glm::vec3 d = p.Hi - p.Lo;
+        return glm::max(d.x, glm::max(d.y, d.z));
+    };
+    float limit = std::numeric_limits<float>::max();
+    if (parts.size() >= 3) {
+        // Медиана габаритов, взвешенная числом вершин: тело с основной массой
+        // вершин задаёт норму, а пара мелких деталей её не сдвигает.
+        std::vector<const PartBounds*> byExtent;
+        size_t total = 0;
+        for (const PartBounds& p : parts) { byExtent.push_back(&p); total += p.Vertices; }
+        std::sort(byExtent.begin(), byExtent.end(),
+                  [&](const PartBounds* a, const PartBounds* b) { return extentOf(*a) < extentOf(*b); });
+        size_t acc = 0;
+        float median = extentOf(*byExtent.back());
+        for (const PartBounds* p : byExtent) {
+            acc += p->Vertices;
+            if (acc * 2 >= total) { median = extentOf(*p); break; }
+        }
+        if (median > 1e-6f) limit = median * 20.0f;
+    }
+    for (const PartBounds& p : parts) {
+        if (p.Vertices == 0 || extentOf(p) > limit) continue;
+        lo = glm::min(lo, p.Lo);
+        hi = glm::max(hi, p.Hi);
+    }
+}
+
 ImportSettings ResolveImportSettings(const std::string& path, const glm::vec3& lo,
                                      const glm::vec3& hi) {
     ImportSettings s = LoadImportSettings(path);

@@ -80,15 +80,16 @@ Theme ModernDark() {
     t.Dark = true;
     ImVec4* c = t.Colors;
     // Слои — лесенкой графита, шаг примерно в 4 % яркости: меньше не видно,
-    // больше рябит. Оттенок нейтрально-тёплый, без синевы: холодные тени
+    // больше рябит. Панель заметно светлее фона (зазор между доками читается
+    // как «щель», а не как линия), поле и кнопка — ещё на ступень выше панели. Оттенок нейтрально-тёплый, без синевы: холодные тени
     // спорили с жёлтым акцентом и красили весь интерфейс в «сталь».
     c[(int)Role::Bg] = Hex("#0B0B0A");
-    c[(int)Role::Surface] = Hex("#121211");
-    c[(int)Role::SurfaceAlt] = Hex("#1B1A18");
-    c[(int)Role::Elevated] = Hex("#242321");
+    c[(int)Role::Surface] = Hex("#181816");
+    c[(int)Role::SurfaceAlt] = Hex("#211F1D");
+    c[(int)Role::Elevated] = Hex("#2B2927");
     // Поле — светлее панели и отделено рамкой Line: пустое поле и флажок не
     // должны сливаться с фоном.
-    c[(int)Role::Input] = Hex("#1E1D1A");
+    c[(int)Role::Input] = Hex("#272622");
     c[(int)Role::Overlay] = Hex("#151513F7");
 
     c[(int)Role::Line] = Hex("#35332E");
@@ -183,10 +184,10 @@ Theme PremiumGold() {
     ImVec4* c = t.Colors;
     // Лесенка слоёв — тот же шаг яркости, что у тёмной, но с тёплым оттенком.
     c[(int)Role::Bg] = Hex("#0A0907");
-    c[(int)Role::Surface] = Hex("#12100C");
-    c[(int)Role::SurfaceAlt] = Hex("#191611");
-    c[(int)Role::Elevated] = Hex("#221E17");
-    c[(int)Role::Input] = Hex("#1F1B14");
+    c[(int)Role::Surface] = Hex("#171510");
+    c[(int)Role::SurfaceAlt] = Hex("#201C15");
+    c[(int)Role::Elevated] = Hex("#2A241B");
+    c[(int)Role::Input] = Hex("#26211A");
     c[(int)Role::Overlay] = Hex("#15130FF7");
 
     // Линии — с золотом: обычная едва тёплая, заметная — приглушённое золото.
@@ -479,7 +480,8 @@ Kit ScaledKit(float k, float radiusFrame, float separatorSize, float fontSize) {
     for (float* f : {&kit.LabelMin, &kit.LabelMax, &kit.LabelGap, &kit.TagGap, &kit.PairGap, &kit.AxisGap, &kit.Indent,
                      &kit.GroupGap, &kit.SectionGap, &kit.FieldMin, &kit.SegmentMin, &kit.NumberMin, &kit.NumberMax,
                      &kit.SeparatorInset, &kit.TagPad, &kit.TagInset, &kit.HeaderExtra,
-                     &kit.HeaderPadX, &kit.ButtonPadX, &kit.ButtonPadXCompact, &kit.IconGap})
+                     &kit.HeaderPadX, &kit.ButtonPadX, &kit.ButtonPadXCompact, &kit.IconGap, &kit.ToolbarPadX, &kit.ToolbarPadY,
+                     &kit.ToolGap})
         *f = std::floor(*f * k);
     kit.Rounding = radiusFrame;
     kit.SeparatorThickness = std::max(1.0f, std::floor(separatorSize * k));
@@ -626,7 +628,9 @@ void Apply() {
     style.TabBarOverlineSize = 0.0f;
     style.SeparatorSize = ui.BorderWidth;
     style.SeparatorTextBorderSize = ui.BorderWidth;
-    style.DockingSeparatorSize = ui.BorderWidth * 2.0f;
+    // Щель между доками — 4 точки (сетка): сквозь неё виден фон, и панели читаются
+    // отдельными плитками; две точки были и невидимы, и неудобны для захвата мышью.
+    style.DockingSeparatorSize = std::max(ui.BorderWidth * 2.0f, ui.SpacingXS);
     // Крестик закрытия — только у той вкладки, на которую навели. Ряд из
     // одинаковых «×» рядом с каждым заголовком — самая узнаваемая примета
     // старого интерфейса, и заодно источник случайно закрытых панелей.

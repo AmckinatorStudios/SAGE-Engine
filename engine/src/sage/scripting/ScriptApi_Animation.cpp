@@ -213,7 +213,8 @@ void ScriptEngine::RegisterAnimationApi() {
             // позиция, чем ноль.
             const glm::vec3 local = glm::vec3(g[(size_t)i][3]);
             if (!m_scene) return local;
-            return glm::vec3(m_scene->WorldMatrix(obj.Entity()) * glm::vec4(local, 1.0f));
+            return glm::vec3(m_scene->WorldMatrix(obj.Entity()) * am->Model->ImportTransform() *
+                             glm::vec4(local, 1.0f));
         }
         return glm::vec3(0.0f);
     });
@@ -231,7 +232,9 @@ void ScriptEngine::RegisterAnimationApi() {
         for (int i = 0; i < sk.Count() && i < (int)g.size(); ++i) {
             if (sk.Joints[(size_t)i].Name != bone) continue;
             glm::vec3 dir(g[(size_t)i] * glm::vec4(axis, 0.0f));
-            if (m_scene) dir = glm::vec3(m_scene->WorldMatrix(obj.Entity()) * glm::vec4(dir, 0.0f));
+            if (m_scene)
+                dir = glm::vec3(m_scene->WorldMatrix(obj.Entity()) * am->Model->ImportTransform() *
+                                glm::vec4(dir, 0.0f));
             const float len = glm::length(dir);
             return len > 1e-6f ? dir / len : glm::vec3(0.0f);
         }

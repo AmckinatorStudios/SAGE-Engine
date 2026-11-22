@@ -3,7 +3,10 @@
 #include <algorithm>
 #include <cctype>
 
+#include <cfloat>
 #include "imgui.h"
+#include "imgui_internal.h"
+#include "EditorTheme.h"
 
 #include "EditorIcons.h"
 #include "Localization.h"
@@ -127,6 +130,21 @@ bool PanelRegistry::InSpace(const PanelSpec& spec, EditorWorkspace workspace) {
     return (spec.Spaces & (1u << (unsigned)workspace)) != 0;
 }
 
+PanelRegistry::ResolvedLimits PanelRegistry::LimitsFor(const PanelSpec& spec, EditorWorkspace workspace,
+                                                       float scale) {
+    const PanelPlace& place = PlaceIn(spec, workspace);
+    const bool side = place.Slot == PanelDock::Left || place.Slot == PanelDock::Right;
+    auto pick = [&](float v, float dflt) { return v < 0.0f ? dflt : v; };
+    ResolvedLimits r;
+    r.Min[0] = pick(spec.Limits.MinW, kDefaultMinWidth) * scale;
+    r.Min[1] = pick(spec.Limits.MinH, kDefaultMinHeight) * scale;
+    const float maxW = pick(spec.Limits.MaxW, side ? kDefaultSideMaxWidth : 0.0f);
+    const float maxH = pick(spec.Limits.MaxH, 0.0f);
+    r.Max[0] = maxW > 0.0f ? std::max(maxW * scale, r.Min[0]) : FLT_MAX;
+    r.Max[1] = maxH > 0.0f ? std::max(maxH * scale, r.Min[1]) : FLT_MAX;
+    return r;
+}
+
 void PanelRegistry::DrawPanels(EditorHost& host, EditorWorkspace workspace) {
     // По индексу, а не итератором: Draw панели вправе зарегистрировать или
     // снять другую панель (плагин перезагрузил себя кнопкой в своём окне).
@@ -140,7 +158,15 @@ void PanelRegistry::DrawPanels(EditorHost& host, EditorWorkspace workspace) {
         const auto draw = e.Spec.Draw;
         const bool wrap = e.Spec.WrapWindow && *open;
         if (wrap) panelwindows::Before(id.c_str());
+        // Пределы размера — перед Begin панели: докинг читает их у окна (см.
+        // DockNodeCalcLimit в imgui.cpp). Не доставшиеся окну (Draw ничего не
+        // открыл) снимаем, чтобы не ограничить чужое окно следующим Begin.
+        if (*open) {
+            const ResolvedLimits lim = LimitsFor(e.Spec, workspace, EditorTheme::EffectiveScale());
+            ImGui::SetNextWindowSizeConstraints(ImVec2(lim.Min[0], lim.Min[1]), ImVec2(lim.Max[0], lim.Max[1]));
+        }
         draw(host, open, id);
+        if (*open) ImGui::GetCurrentContext()->NextWindowData.HasFlags &= ~ImGuiNextWindowDataFlags_HasSizeConstraint;
         if (wrap) panelwindows::After(id.c_str());
     }
 }
