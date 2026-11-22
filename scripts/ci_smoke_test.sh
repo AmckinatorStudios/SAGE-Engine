@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Headless smoke-тест движка: собранные Sandbox и SageEditor реально
+# Headless smoke-тест движка: собранные TestGame, SageEditor и SagePlayer реально
 # запускаются, рисуют кадр и корректно завершаются (exit 0). Дополняет
 # unit-тесты (tests/, цель sage_tests — 682 проверки без GL), но не заменяет их:
 # здесь проверяется то, чего модульный тест не видит В ПРИНЦИПЕ — живой запуск,
@@ -11,7 +11,6 @@ set -euo pipefail
 
 BUILD_DIR="${1:-build}"
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-SANDBOX_EXE="${BUILD_DIR}/games/sandbox/Sandbox"
 EDITOR_EXE="${BUILD_DIR}/editor/SageEditor"
 SCRATCH_DIR=$(mktemp -d)
 trap 'rm -rf "${SCRATCH_DIR}"' EXIT
@@ -26,28 +25,7 @@ run_headless() {
     fi
 }
 
-echo "=== Smoke-тест 1/12: Sandbox (рендер сцены + скриптинг) ==="
-if [ ! -x "${SANDBOX_EXE}" ]; then
-    echo "ОШИБКА: не найден собранный бинарник ${SANDBOX_EXE}"
-    exit 1
-fi
-SANDBOX_LOG="${SCRATCH_DIR}/sandbox.log"
-SANDBOX_SHOT="${SCRATCH_DIR}/sandbox.png"
-STATUS=0
-( cd "$(dirname "${SANDBOX_EXE}")" && \
-  run_headless env SAGE_SCREENSHOT_AT_FRAME=10 SAGE_SCREENSHOT_PATH="${SANDBOX_SHOT}" \
-      "./$(basename "${SANDBOX_EXE}")" ) > "${SANDBOX_LOG}" 2>&1 || STATUS=$?
-if [ ${STATUS} -ne 0 ]; then
-    echo "ОШИБКА: Sandbox завершился с кодом ${STATUS}"; cat "${SANDBOX_LOG}"; exit 1
-fi
-SHOT_SIZE=$(stat -c%s "${SANDBOX_SHOT}" 2>/dev/null || echo 0)
-if [ "${SHOT_SIZE}" -lt 1024 ]; then
-    echo "ОШИБКА: скриншот Sandbox отсутствует или подозрительно мал (${SHOT_SIZE} байт)"
-    cat "${SANDBOX_LOG}"; exit 1
-fi
-echo "OK: Sandbox отрисовал кадр, скриншот ${SHOT_SIZE} байт"
-
-echo "=== Smoke-тест 2/12: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
+echo "=== Smoke-тест 1/10: SageEditor (self-test: проект+сцена+undo/redo+play) ==="
 if [ ! -x "${EDITOR_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${EDITOR_EXE}"
     exit 1
@@ -98,15 +76,15 @@ for CHECK in UI_INSPECTOR ENVIRONMENT TWEEN AI_GRAPH CREATE_DIALOG SETTINGS_SEAR
 done
 echo "OK: SageEditor self-test прошёл (включая отдельное окно редактора интерфейса, мышь во вьюпорте и Lua-тесты в Play)"
 
-echo "=== Smoke-тест 3/12: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
+echo "=== Smoke-тест 2/10: плагины редактора (opt-in, SAGE_EDITOR_PLUGINS=1) ==="
 if ! grep -q "Загружен плагин: Example Stats" "${EDITOR_LOG}"; then
     echo "ОШИБКА: плагин example_stats не загрузился при SAGE_EDITOR_PLUGINS=1"
     cat "${EDITOR_LOG}"; exit 1
 fi
 echo "OK: плагин example_stats загрузился и выгрузился без падения (плагины — opt-in)"
 
-echo "=== Smoke-тест 4/12: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
-TESTGAME_EXE="${BUILD_DIR}/games/testgame/TestGame"
+echo "=== Smoke-тест 3/10: TestGame (боевая игра: автопилот собирает монеты и проходит портал) ==="
+TESTGAME_EXE="${BUILD_DIR}/tests/integration/testgame/TestGame"
 if [ ! -x "${TESTGAME_EXE}" ]; then
     echo "ОШИБКА: не найден собранный бинарник ${TESTGAME_EXE}"
     exit 1
@@ -141,7 +119,7 @@ if grep -q "ERROR" "${TESTGAME_LOG}"; then
 fi
 echo "OK: TestGame прошёл игровой цикл (подбор + портал + рендер, скриншот ${SHOT_SIZE} байт, без ERROR)"
 
-echo "=== Smoke-тест 5/12: собранная игра (SagePlayer + проект из редактора) ==="
+echo "=== Smoke-тест 4/10: собранная игра (SagePlayer + проект из редактора) ==="
 # Self-test редактора (тест 2) собрал selftest-проект в запускаемую игру через
 # File > Build Game — здесь она реально запускается отдельным процессом.
 GAME_DIR="${BUILD_DIR}/editor/selftest_dist/selftest_project"
@@ -381,7 +359,7 @@ if cmp -s "${POST_OFF}" "${POST_ON}"; then
 fi
 echo "OK: пост-обработка камеры выполняется в собранной игре (кадры отличаются)"
 
-echo "=== Smoke-тест 6/12: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
+echo "=== Smoke-тест 5/10: E2E — игра с Lua-логикой создаётся В РЕДАКТОРЕ, играется и собирается в exe ==="
 # Редактор (SAGE_EDITOR_E2E=1) сам создаёт проект «Coin Rush»: пишет три Lua-
 # скрипта (бот-сборщик, монеты с OnMessage, HUD-счёт из Lua), строит сцену,
 # сохраняет и перечитывает .sage, проигрывает её в Play (проверяя, что бот
@@ -422,7 +400,7 @@ if [ "${SHOT_SIZE}" -lt 1024 ]; then
 fi
 echo "OK: E2E — редактор создал игру с Lua-логикой, сыграл её, собрал exe; собранный exe собрал ${COLLECTED}/5 монет (скриншот ${SHOT_SIZE} байт)"
 
-echo "=== Smoke-тест 7/12: обработчик падений (настоящее падение) ==="
+echo "=== Smoke-тест 6/10: обработчик падений (настоящее падение) ==="
 # Единственный честный способ проверить обработчик падений — уронить процесс.
 # Обычным тестом это не сделать: обработчик по замыслу доводит падение до
 # конца и убивает процесс, а вместе с ним весь прогон. Поэтому падение вынесено
@@ -465,7 +443,7 @@ if [ ! -f "${CRASH_DIR}/crashprobe-recovered.txt" ]; then
 fi
 echo "OK: падение перехвачено (segv и terminate), отчёт со стеком и контекстом записан, работа сохранена"
 
-echo "=== Smoke-тест 8/12: отказ запуска слышно ==="
+echo "=== Smoke-тест 7/10: отказ запуска слышно ==="
 # «Просто запускаю — ничего не происходит, даже ошибки нет, а в логе только
 # строка о старте». Так выглядел ЛЮБОЙ отказ запуска: причина уходила в stderr,
 # которого у окна Windows нет, и в лог не попадала вовсе.
@@ -499,7 +477,7 @@ if ! grep -q "GLFW" "${STARTFAIL_DIR}/sage_editor.log"; then
 fi
 echo "OK: отказ запуска записан в лог с причиной от GLFW (код ${STATUS})"
 
-echo "=== Smoke-тест 9/12: путь с кириллицей (имя пользователя по-русски) ==="
+echo "=== Smoke-тест 8/10: путь с кириллицей (имя пользователя по-русски) ==="
 # ЭТО ПРОВЕРКА ТОЙ САМОЙ ОШИБКИ, из-за которой редактор не запускался на
 # русской Windows: «filesystem error: Cannot convert character sequence».
 # Причина — путь с кириллицей, пришедший из окружения (APPDATA у пользователя
@@ -585,97 +563,7 @@ fi
 echo "OK: кириллица в пути работает везде — настройки редактора, папка проекта,"
 echo "    аргумент командной строки и запись кадра (${UNI_SHOT_SIZE} байт)"
 
-echo "=== Smoke-тест 10/12: шаблон скачивается из каталога и ставится ==="
-# СЕТЬ — единственная часть системы шаблонов, которую не проверить ни модульным
-# тестом, ни самопроверкой редактора: там нет ни сервера, ни щелчка по кнопке.
-# А именно ею шаблоны теперь и раздаются: готовых проектов внутри сборки больше
-# нет (см. editor/src/TemplateStore.h), и «скачать» — это основной путь, а не
-# приятное дополнение.
-#
-# Поэтому поднимаем СВОЙ http-сервер: настоящая загрузка по настоящему HTTP, но
-# без интернета — в CI его может не быть, а проверка, которая падает от чужой
-# сети, перестаёт быть проверкой.
-if ! command -v curl >/dev/null 2>&1; then
-    echo "ПРОПУСК: curl не найден — скачивание шаблонов проверить нечем"
-else
-    TPL_DIR="${SCRATCH_DIR}/tplserver"
-    mkdir -p "${TPL_DIR}"
-    PACKER="${BUILD_DIR}/tools/sage_template/sage_template"
-    if [ ! -x "${PACKER}" ]; then
-        echo "ОШИБКА: не собран упаковщик шаблонов ${PACKER}"; exit 1
-    fi
-    # Шаблон делаем из витрины — того самого проекта, который раньше ехал
-    # внутри сборки.
-    "${PACKER}" pack games/showcase "${TPL_DIR}/showcase.sagetemplate" \
-        --id showcase --name "Витрина" --summary "Проверка загрузки" \
-        --note "Мир строят скрипты." --version "smoke" > /dev/null
-    TPL_SIZE=$(stat -c%s "${TPL_DIR}/showcase.sagetemplate")
-
-    # Порт выбирает ОС, а не мы. Прибитый гвоздями номер однажды окажется
-    # занят чужим сервером — и проверка не упадёт, а тихо скачает чужой
-    # каталог и объявит, что всё работает. Ровно это здесь и случилось на
-    # первом же прогоне.
-    PORT=$(python3 -c "import socket;s=socket.socket();s.bind(('127.0.0.1',0));print(s.getsockname()[1]);s.close()")
-    python3 - "$PORT" "$TPL_SIZE" > "${TPL_DIR}/templates.json" <<'PYEOF'
-import json, sys
-port, size = sys.argv[1], int(sys.argv[2])
-print(json.dumps({"templates": [{
-    "id": "showcase", "name": "Витрина", "summary": "Проверка загрузки",
-    "note": "Мир строят скрипты.", "version": "smoke",
-    "url": "http://127.0.0.1:%s/showcase.sagetemplate" % port, "bytes": size,
-}]}, ensure_ascii=False))
-PYEOF
-
-    ( cd "${TPL_DIR}" && python3 -m http.server "${PORT}" --bind 127.0.0.1 >/dev/null 2>&1 &
-      echo $! > "${TPL_DIR}/server.pid" )
-
-    # Дождаться сервера и убедиться, что отвечает ИМЕННО ОН, а не кто-то
-    # другой на том же порту: маркер "smoke" есть только в нашем каталоге.
-    SERVED=""
-    for _ in 1 2 3 4 5 6 7 8 9 10; do
-        SERVED=$(curl -fsS --max-time 2 "http://127.0.0.1:${PORT}/templates.json" 2>/dev/null || true)
-        [ -n "${SERVED}" ] && break
-        sleep 0.5
-    done
-    if ! printf '%s' "${SERVED}" | grep -q '"version": *"smoke"'; then
-        echo "ОШИБКА: на порту ${PORT} отвечает не наш каталог — проверять нечего"
-        printf '%s\n' "${SERVED}" | head -5
-        kill "$(cat "${TPL_DIR}/server.pid")" 2>/dev/null || true
-        exit 1
-    fi
-
-    rm -rf "$(dirname "${EDITOR_EXE}")/templates"
-    TPL_LOG="${SCRATCH_DIR}/template_download.log"
-    STATUS=0
-    ( cd "$(dirname "${EDITOR_EXE}")" && \
-      run_headless env SAGE_EDITOR_TEMPLATE_CATALOG="http://127.0.0.1:${PORT}/templates.json" \
-          SAGE_EDITOR_INSTALL_TEMPLATE=showcase \
-          SAGE_SCREENSHOT_AT_FRAME=10 SAGE_SCREENSHOT_PATH="${SCRATCH_DIR}/tpl.png" \
-          "./$(basename "${EDITOR_EXE}")" ) > "${TPL_LOG}" 2>&1 || STATUS=$?
-    kill "$(cat "${TPL_DIR}/server.pid")" 2>/dev/null || true
-
-    if [ ${STATUS} -ne 0 ]; then
-        echo "ОШИБКА: редактор при загрузке шаблона завершился кодом ${STATUS}"
-        cat "${TPL_LOG}"; exit 1
-    fi
-    if ! grep -q "TEMPLATE: OK" "${TPL_LOG}"; then
-        echo "ОШИБКА: шаблон не скачался или не попал в список"
-        grep -E "TEMPLATE:|Каталог" "${TPL_LOG}"; exit 1
-    fi
-    # И на диске лежит не пустая папка, а проект: установка, после которой
-    # шаблоном нельзя воспользоваться, — это не установка.
-    INSTALLED="$(dirname "${EDITOR_EXE}")/templates/showcase/project.sageproj"
-    if [ ! -f "${INSTALLED}" ]; then
-        echo "ОШИБКА: установленный шаблон без project.sageproj"; exit 1
-    fi
-    SCENES=$(find "$(dirname "${EDITOR_EXE}")/templates/showcase/scenes" -name '*.sage' 2>/dev/null | wc -l)
-    if [ "${SCENES}" -eq 0 ]; then
-        echo "ОШИБКА: в установленном шаблоне нет сцен"; exit 1
-    fi
-    echo "OK: шаблон скачан по HTTP и установлен (${TPL_SIZE} байт, сцен ${SCENES})"
-fi
-
-echo "=== Smoke-тест 11/12: выход из движка — код возврата ==="
+echo "=== Smoke-тест 9/10: выход из движка — код возврата ==="
 # Падение при выходе случается ПОСЛЕ main: обработчик выхода разрушает
 # статические объекты движка уже без графического контекста. В логе к тому
 # моменту всё хорошо, отчёт напечатан, и наружу виден только код возврата — им и
@@ -697,7 +585,7 @@ if [ ${STATUS} -ne 0 ]; then
 fi
 echo "OK: движок завершился сам, без обходного Clear() (код 0)"
 
-echo "=== Smoke-тест 12/12: захват мыши в собранной игре — настоящая мышь X11 ==="
+echo "=== Smoke-тест 10/10: захват мыши в собранной игре — настоящая мышь X11 ==="
 # Камера от первого лица просит захват каждый кадр и копит поворот; мышь двигает
 # X-сервер (XTest), как её двигал бы человек: долгий поворот, alt-tab в другое
 # окно, возврат. Пробы редактора подают положения курсора в окно сами — это

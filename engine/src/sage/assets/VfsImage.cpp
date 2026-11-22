@@ -2,9 +2,8 @@
 
 #include <stb_image.h>   // реализация — в render/Texture.cpp
 
-// Картинки через vfs — отдельным файлом, а не в Pack.cpp: пакет собирает и
-// упаковщик шаблонов (tools/sage_template), которому декодер картинок не нужен
-// и не подключён.
+// Картинки через vfs — отдельным файлом, а не в Pack.cpp: сам пакет декодера
+// картинок не требует, и Pack.cpp не тянет stb_image.
 namespace sage::assets::vfs {
 
 unsigned char* LoadImage(const std::string& path, int* width, int* height, int* channels,

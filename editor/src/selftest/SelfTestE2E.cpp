@@ -22,7 +22,7 @@ void EditorLayer::RunE2EGameTest() {
     std::string err;
     // E2E собирает игру САМ, поэтому берёт пустой шаблон: демо-объекты
     // чужого шаблона в его проверках только мешали бы.
-    if (!CreateProject(".", "e2e_game", "empty", err)) {
+    if (!CreateProject(".", "e2e_game", err)) {
         LOG_ERROR("Editor") << "E2E: create project failed: " << err;
         LOG_ERROR("Editor") << "E2E: FAIL";
         return;
@@ -86,7 +86,7 @@ end
 )LUA");
 
     // --- 3. Сцена игры — редакторскими операциями создания сущностей ---
-    NewScene(ProjectTemplateKind::Empty);
+    NewScene();
     m_scene->Lighting.Skybox.Enabled = true;
 
     GameObject ground = CreatePrimitiveEntity("Ground", MeshRef::Type::Cube);

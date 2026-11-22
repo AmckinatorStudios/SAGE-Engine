@@ -42,7 +42,7 @@ void ScriptEngine::RegisterMathTypes() {
     // ВАЖНО: sol::constructors регистрирует только Vec3.new(...) — вызов
     // Vec3(...) как функции требует ОТДЕЛЬНОЙ регистрации call_constructor
     // (без него Lua падает с «attempt to call a table value»; найдено боевым
-    // тестом games/testgame — прежние скрипты векторы не конструировали).
+    // тестом tests/integration/testgame — прежние скрипты векторы не конструировали).
     m_lua.new_usertype<glm::vec3>("Vec3",
         sol::constructors<glm::vec3(), glm::vec3(float, float, float)>(),
         sol::call_constructor, sol::constructors<glm::vec3(), glm::vec3(float, float, float)>(),

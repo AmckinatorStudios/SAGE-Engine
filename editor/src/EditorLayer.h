@@ -39,7 +39,6 @@
 #include "EditorHistory.h"
 #include "EditorSelection.h"
 #include "EditorTools.h"
-#include "ProjectTemplates.h"
 
 namespace sage { class Application; }
 #include "EditorPlaySession.h"
@@ -142,7 +141,7 @@ public:
     bool LoadSceneFromFile(const std::filesystem::path& path) override;
     bool SaveSceneToFile(const std::filesystem::path& path) override;
     bool CreateProject(const std::string& dir, const std::string& name,
-                       const std::string& templateId, std::string& err) override;
+                       std::string& err) override;
     bool OpenProject(const std::string& path, std::string& err) override;
     // Упаковывает открытый проект в готовую к запуску игру: SagePlayer +
     // рантайм-ассеты + project/. false + err при ошибке.
@@ -224,22 +223,8 @@ public:
     }
 
     // --- EditorHost: undo/redo ---
-    const std::string& TemplateNote() const override { return m_templateNote; }
     const std::string& RenderWarning() const override { return m_renderer.Warning(); }
-    void ClearTemplateNote() override { m_templateNote.clear(); }
     void MergeScriptVars(GameObject object) override;
-    // Сообщает в консоль заметку шаблона (см. ProjectTemplate::Note).
-    void AnnounceTemplateNote(const ProjectTemplate& tpl);
-    std::string m_templateNote;   // «что делать дальше» после создания проекта
-    // Съёмка обложек шаблонов (SAGE_EDITOR_TEMPLATE_SHOTS): куда складывать,
-    // что снимаем прямо сейчас и снялось ли. Живёт в слое, потому что снимок
-    // делается ПОСЛЕ RenderGame, а шаблоны перебираются в кадре.
-    std::string m_coverShotDir;
-    std::string m_coverShotPath;
-    bool m_coverShotDone = false;
-    int m_coverShotIndex = -1;
-    int m_coverShotWait = 0;
-    void TickTemplateShots();
 
     // --- Обложка сцены (см. SceneCover.h) ---
     // Заказ и съёмка разнесены: путь известен в момент сохранения, а кадр — в
@@ -435,36 +420,13 @@ private:
     void DrawAboutWindow(); // Help > About: версия движка + версии подсистем (v1)
 
     // --- сцена / рендер (превью-рендер вынесен в EditorSceneRenderer) ---
-    // Новая сцена по ШАБЛОНУ (см. ProjectTemplates.h). Empty — пустая; она же
-    // используется пунктом «Новая сцена» и самопроверкой.
-    void NewScene(ProjectTemplateKind content);
+    // Пустая сцена: чистый лист для кода и самопроверки.
+    void NewScene();
     // Новая сцена по просьбе человека: пустая, но со своим солнцем-объектом.
     void NewSceneForUser();
     // Смена проекта: прошлый исчезает целиком — сцена, кэш ресурсов, частицы,
     // обложки, префабы, выделение. Подробности — в EditorLayer_Project.cpp.
     void ForgetPreviousProject();
-
-    // Материал шаблона — ФАЙЛОМ в assets/materials, а не полем Color.
-    //
-    // Ровно та жалоба, с которой пришли: «формы разного цвета, это может быть
-    // материал — нет, на свойствах самих объектов материалов НЕТ». Шаблон
-    // красил кубы полем Color компонента, и человек, открывший инспектор
-    // красного куба, видел пустой слот материала и цвет неизвестно откуда.
-    // Шаблон обязан показывать, КАК В ДВИЖКЕ ДЕЛАЮТ: материал — это файл,
-    // объект на него ссылается, правка файла перекрашивает всех, кто на него
-    // ссылается.
-    //
-    // Возвращает ссылку на ассет (assets/materials/<имя>.sagemat) или пусто,
-    // если проекта нет: демо-сцена стартового редактора живёт без проекта, и
-    // писать её материалы некуда — там объект остаётся при своём цвете.
-    std::string TemplateMaterial(const std::string& name, const glm::vec3& albedo,
-                                 float metallic = 0.0f, float roughness = 0.6f);
-
-    // Покрасить объект шаблона: завести ему материал и назначить. Без проекта
-    // (демо-сцена стартового редактора) остаётся цвет объекта — иначе шаблон
-    // отдавал бы белые формы там, где файл материала писать некуда.
-    void PaintWithMaterial(GameObject object, const std::string& name, const glm::vec3& albedo,
-                           float metallic = 0.0f, float roughness = 0.6f);
 
     // Диалог, который надо открыть в ближайшем кадре (SAGE_EDITOR_OPEN_DIALOG).
     // Открывать сразу нельзя: OpenPopup обязан звучать на уровне окна-хоста.
@@ -488,6 +450,11 @@ public:
 private:
     void UpdateWindowTitle();
     void RunSelfTest();
+    // Сцена-фикстура самопроверки и headless-хуков (selftest/SelfTestFixtureScene.cpp):
+    // кубы с материалами, примитивы, камера, солнце, лампа, прожектор.
+    void BuildFixtureScene();
+    // Пустой проект + сцена-фикстура в scenes/main.sage.
+    bool CreateFixtureProject(const std::string& dir, const std::string& name, std::string& err);
     // Блоки самопроверки по областям. Возвращают свой итог и выполняются ВСЕ,
     // независимо друг от друга: прогон обязан показать все поломки разом, а не
     // остановиться на первой. Раньше это была одна функция на две тысячи строк

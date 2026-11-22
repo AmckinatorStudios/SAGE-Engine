@@ -44,6 +44,7 @@ add_executable(SageEditor WIN32
     src/selftest/UISampleShots.cpp
     src/selftest/PrimitiveShowcase.cpp
     src/selftest/SelfTestFixtures.cpp
+    src/selftest/SelfTestFixtureScene.cpp
     src/selftest/SelfTestFrames.cpp
     src/selftest/SelfTestCreateDialog.cpp
     src/selftest/SelfTestInputProbe.cpp
@@ -105,9 +106,6 @@ add_executable(SageEditor WIN32
     src/ScreenColor.cpp
     src/ModelMaterialImport.cpp
     src/ModelHierarchy.cpp
-    src/ProjectTemplates.cpp
-    src/TemplateStore.cpp
-    src/ProjectTemplateCover.cpp
     src/Project.cpp
     src/PluginManager.cpp
     src/ProjectLauncher/ProjectLauncher.cpp
@@ -319,19 +317,6 @@ add_custom_command(TARGET SageEditor POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_CURRENT_SOURCE_DIR}/plugins/lua $<TARGET_FILE_DIR:SageEditor>/plugins
     COMMENT "Копирование встроенных плагинов на Lua рядом с бинарником")
-
-# ШАБЛОНЫ РЯДОМ С БИНАРНИКОМ БОЛЬШЕ НЕ КОПИРУЮТСЯ.
-#
-# Здесь стояла копия games/showcase в templates/showcase — и она ехала в архиве
-# релиза к каждому скачавшему. Готовый проект это СОДЕРЖИМОЕ, а не часть
-# программы: он не нужен большинству, растёт со временем и обновляется отдельно
-# от редактора. Шаблоны, уже лежащие папками в templates/ (src/TemplateStore.h),
-# редактор подхватывает сам; отдельного окна скачивания и установки шаблонов
-# в редакторе больше нет.
-#
-# Витрина при этом никуда не делась: сборка релиза пакует games/showcase в
-# showcase.sagetemplate и кладёт его в тот же релиз отдельным файлом
-# (.github/workflows/windows.yml).
 
 # Плагины редактора (см. src/PluginAPI.h) — каждый sage_add_editor_plugin()
 # ниже собирается отдельной динамической библиотекой и копируется в plugins/

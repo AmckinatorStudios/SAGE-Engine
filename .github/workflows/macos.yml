@@ -40,7 +40,7 @@ jobs:
           cmake -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
             -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DSAGE_VULKAN=OFF -DSAGE_BUILD_SAMPLES=OFF
+            -DSAGE_VULKAN=OFF -DSAGE_BUILD_INTEGRATION_TESTS=OFF
           # -k 0: собрать всё, что собирается, и показать ВСЕ ошибки разом —
           # Mac проверяется только здесь, и чинить по одной ошибке за прогон
           # слишком долго.

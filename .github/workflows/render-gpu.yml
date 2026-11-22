@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Сборка
         run: |
-          cmake -B build-gpu -DCMAKE_BUILD_TYPE=Release -DSAGE_VULKAN=OFF -DSAGE_BUILD_SAMPLES=OFF
+          cmake -B build-gpu -DCMAKE_BUILD_TYPE=Release -DSAGE_VULKAN=OFF -DSAGE_BUILD_INTEGRATION_TESTS=OFF
           cmake --build build-gpu -j4 --target sage_render_tests
       - name: Проверки
         run: |

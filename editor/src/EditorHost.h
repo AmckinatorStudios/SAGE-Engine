@@ -92,11 +92,10 @@ public:
     virtual Project& CurrentProject() = 0;
     virtual bool LoadSceneFromFile(const std::filesystem::path& path) = 0;
     virtual bool SaveSceneToFile(const std::filesystem::path& path) = 0;
-    // Создать проект по ШАБЛОНУ (идентификатор из ProjectTemplates.h).
-    // Шаблон приходит строкой, а не флагом: вариантов больше двух, и список
-    // читают три места сразу (диалог, стартовое окно, самопроверка).
+    // Создать пустой проект: папки, файл проекта и первая сцена scenes/main.sage
+    // с объектом-солнцем.
     virtual bool CreateProject(const std::string& dir, const std::string& name,
-                               const std::string& templateId, std::string& err) = 0;
+                               std::string& err) = 0;
     virtual bool OpenProject(const std::string& path, std::string& err) = 0;
     // Упаковывает открытый проект в готовую к запуску игру (SagePlayer + ассеты).
     // false + err при ошибке. Нужен панели диалогов (Build Game...).
@@ -267,20 +266,10 @@ public:
     //
     // В хосте, а не в панели: путь скрипта разрешается корнем ПРОЕКТА, и знание
     // о том, где лежат ассеты, панели инспектора не принадлежит.
-    // Заметка только что созданного проекта — «что делать дальше», если это не
-    // видно само. Пусто — заметки нет.
-    //
-    // Живёт у хоста, а не в панели: заметку рождает создание проекта (из
-    // стартового окна ИЛИ из диалога), а показывает вьюпорт, и связать их
-    // иначе нечем. Гасится закрытием и запуском игры — она отвечает ровно на
-    // один вопрос и не должна висеть дальше.
-    virtual const std::string& TemplateNote() const = 0;
-
     // Что с рендером не так — одной строкой, для показа В КАДРЕ. Пусто — всё в
     // порядке. Человек, у которого чёрный вьюпорт, смотрит во вьюпорт, а не в
     // консоль: «не понятно из-за чего» начинается ровно с молчания на экране.
     virtual const std::string& RenderWarning() const = 0;
-    virtual void ClearTemplateNote() = 0;
 
     virtual void MergeScriptVars(GameObject object) = 0;
 

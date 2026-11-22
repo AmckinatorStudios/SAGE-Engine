@@ -18,7 +18,7 @@ bool EditorLayer::SelfTestCatalogAndLiveFiles() {
     // приезжают настроенными — у ящика есть тело и коллайдер, у прожектора
     // поворот вниз, у дыма конфиг именно дыма.
     if (ok) {
-        NewScene(ProjectTemplateKind::Empty);
+        NewScene();
         namespace catalog = sage::editor::objectcatalog;
         const catalog::Group root = catalog::Catalog();
 

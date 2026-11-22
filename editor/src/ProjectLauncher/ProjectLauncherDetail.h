@@ -13,7 +13,6 @@
 #include "../EditorTheme.h"
 #include "../Localization.h"
 #include "../Project.h"
-#include "../ProjectTemplates.h"
 #include "../ui/UI.h"
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"
@@ -25,10 +24,6 @@ namespace Sage::Launcher {
 namespace launcher_detail {
 
 using EditorTheme::Role;
-
-// Новые проекты всегда создаются из встроенного пустого шаблона: выбор шаблона
-// из стартового окна убран, а сами шаблоны остаются в редакторе.
-inline constexpr const char* kNewProjectTemplate = "empty";
 
 // Кегль из токенов — в единицах ДО масштаба интерфейса: ImGui умножает на
 // style.FontScaleMain сам, а токены приходят уже умноженными (см. UIStyle.h).

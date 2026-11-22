@@ -45,7 +45,7 @@ import os
 import re
 import sys
 
-ROOTS = ["engine/src", "editor/src", "runtime/src", "games"]
+ROOTS = ["engine/src", "editor/src", "runtime/src", "tests/integration"]
 
 # Где EnvPath и живёт: внутри него getenv — не нарушение, а реализация.
 ALLOWED_FILES = {
@@ -59,7 +59,6 @@ PATH_NAMES = {
     "APPDATA",
     "HOMEDRIVE",
     "SAGE_PROJECT",
-    "SAGE_EDITOR_TEMPLATE_SHOTS",
     "SAGE_EDITOR_LOAD_MODELS",
     "SAGE_EDITOR_L10N_MISSING",
     "SAGE_EDITOR_OPEN_PROJECT",

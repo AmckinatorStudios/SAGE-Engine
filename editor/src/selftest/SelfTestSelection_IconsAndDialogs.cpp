@@ -364,7 +364,7 @@ bool EditorLayer::SelfTestIconsAndDialogs() {
         png("wall_height.png", 60, 60, 60);   // движок её не применяет
         sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
 
-        NewScene(ProjectTemplateKind::Empty);
+        NewScene();
         GameObject wall = m_scene->CreateObject("Wall");
         wall.Renderer().Ref = MeshRef{MeshRef::Type::Cube};
         wall.Renderer().MeshPtr = ResourceManager::Instance().GetPrimitive(MeshRef::Type::Cube);

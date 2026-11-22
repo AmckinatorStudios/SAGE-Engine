@@ -13,7 +13,8 @@
 // конфигурирует Application и добавляет свои слои. Так игра не дублирует
 // цикл/обработку ошибок и остаётся тонкой надстройкой над движком.
 //
-// Пример (games/<name>/src/main.cpp):
+// Пример (main.cpp приложения на движке; так устроены runtime/ и
+// tests/integration/testgame/):
 //     #include "sage/app/GameModule.h"
 //     sage::Application* sage::CreateApplication(int, char**) {
 //         auto* app = new sage::Application({.Title = "My Game"});

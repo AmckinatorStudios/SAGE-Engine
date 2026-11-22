@@ -31,6 +31,10 @@ bool EditorLayer::SelfTestGIBake() {
     for (auto e : scene.Registry().view<GIStaticComponent>()) hadStatic.push_back(e);
     for (entt::entity e : hadStatic) scene.Registry().remove<GIStaticComponent>(e);
 
+    // Свет постановки — свой: шаг не должен зависеть от того, какую сцену
+    // оставили предыдущие проверки (без света отсвет стены равен нулю).
+    if (!sage::ecs::SceneHasAnyLight(scene)) made.push_back(sage::ecs::CreateSunEntity(scene).Id());
+
     GameObject floor = box("GI Bake Floor", {0.0f, -0.05f, 0.0f}, {12.0f, 0.1f, 12.0f}, {0.6f, 0.6f, 0.6f});
     GameObject wall = box("GI Bake Wall", {1.5f, 1.5f, 0.0f}, {0.2f, 3.0f, 6.0f}, {0.9f, 0.05f, 0.05f});
     GameObject ball = box("GI Bake Dynamic", {-2.0f, 2.0f, 0.0f}, {0.5f, 0.5f, 0.5f}, {1.0f, 1.0f, 1.0f});

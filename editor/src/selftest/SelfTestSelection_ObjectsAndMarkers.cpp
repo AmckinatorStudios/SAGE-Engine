@@ -13,7 +13,7 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
     // в обход рисуемых, выключенный свет не приходит в сбор источников, и обоих
     // не выбрать рамкой — в кадре их нет.
     if (ok) {
-        NewScene(ProjectTemplateKind::Empty);
+        NewScene();
         entt::registry& reg = m_scene->Registry();
         GameObject box = CreatePrimitiveEntity("HiddenBox", MeshRef::Type::Cube);
         GameObject lamp = m_scene->Get(CreateCatalogObject("light.point"));
@@ -76,7 +76,7 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
     // Capsule), а НАРИСОВАТЬ её было нечем, и персонаж собирался из цилиндра —
     // видимое тело не совпадало с тем, чем он сталкивается.
     if (ok) {
-        NewScene(ProjectTemplateKind::Empty);
+        NewScene();
         GameObject cap = CreatePrimitiveEntity("CapsuleShape", MeshRef::Type::Capsule);
         const MeshRendererComponent& mr = cap.Renderer();
         if (!mr.MeshPtr || mr.MeshPtr->TriangleCount() <= 0) {
@@ -163,7 +163,7 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
     // его можно разглядеть; но вопросы к нему про движение. Шаг двигает мир
     // ровно на один кадр и снова останавливает.
     if (ok) {
-        NewScene(ProjectTemplateKind::Empty);
+        NewScene();
         GameObject box = CreatePrimitiveEntity("StepBox", MeshRef::Type::Cube);
         box.GetTransform().Position = glm::vec3(0.0f, 20.0f, 0.0f);
         m_scene->Registry().emplace_or_replace<RigidBodyComponent>(box.Entity());
@@ -214,7 +214,7 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
     // навсегда. Никакой особости у меша нет, и невидимый объект — законное
     // состояние.
     if (ok) {
-        NewScene(ProjectTemplateKind::Empty);
+        NewScene();
         GameObject box = CreatePrimitiveEntity("MeshRemovable", MeshRef::Type::Cube);
         entt::registry& reg = m_scene->Registry();
         const int boxId = box.Id();
@@ -263,7 +263,7 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
     // их точке показывает, что они там есть, — но щелчок по нему проваливался
     // сквозь у всех, кроме камеры и света: значок обманывал.
     if (ok) {
-        NewScene(ProjectTemplateKind::Empty);
+        NewScene();
         struct Probe { const char* Catalog; const char* What; };
         const Probe kProbes[] = {
             {"fx.particles", "эмиттер частиц"},
@@ -299,7 +299,7 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
     // это не получая. Свет — единственное исключение: солнце, точечный и
     // прожектор ведут себя по-разному, и перепутать их дорого.
     if (ok) {
-        NewScene(ProjectTemplateKind::Empty);
+        NewScene();
         entt::registry& reg = m_scene->Registry();
         auto iconOf = [&](GameObject& o) { return std::string(HierarchyPanel::IconFor(reg, o.Entity())); };
 
@@ -470,7 +470,7 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
     // живёт в кадре редактора, и прогон планировщика напрямую (как в проверке
     // физики выше) прошёл бы мимо неё — то есть не заметил бы поломки.
     if (ok) {
-        NewScene(ProjectTemplateKind::Empty);
+        NewScene();
         GameObject box = CreatePrimitiveEntity("PauseBox", MeshRef::Type::Cube);
         box.GetTransform().Position = glm::vec3(0.0f, 20.0f, 0.0f);
         m_scene->Registry().emplace_or_replace<RigidBodyComponent>(box.Entity());
@@ -563,7 +563,7 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
     // проверка спрашивает «что выберет эта рамка на экране», а не подглядывает
     // в реализацию.
     if (ok) {
-        NewScene(ProjectTemplateKind::Empty);
+        NewScene();
         GameObject a = CreatePrimitiveEntity("RectA", MeshRef::Type::Cube);
         GameObject b = CreatePrimitiveEntity("RectB", MeshRef::Type::Cube);
         GameObject c = CreatePrimitiveEntity("RectC", MeshRef::Type::Cube);

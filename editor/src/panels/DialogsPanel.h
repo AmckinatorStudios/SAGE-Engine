@@ -1,5 +1,4 @@
 #pragma once
-#include "../ProjectTemplates.h"
 #include <string>
 #include <vector>
 
@@ -33,9 +32,6 @@ public:
 private:
     char m_projectName[128] = "MyGame";
     char m_projectDir[512] = "";
-    // Выбранный шаблон проекта (см. ProjectTemplates.h). Строкой, потому что
-    // список шаблонов живёт там, а не здесь.
-    std::string m_templateId = DefaultProjectTemplate();
     char m_openPath[512] = "";
     char m_sceneName[128] = "level1";
     char m_buildDir[512] = "";

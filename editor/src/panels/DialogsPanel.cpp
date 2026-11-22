@@ -1,7 +1,5 @@
 #include "DialogsPanel.h"
 
-#include "../ProjectTemplates.h"
-#include "../ProjectTemplateCover.h"
 #include "EditorHost.h"
 #include "Project.h"
 
@@ -110,46 +108,15 @@ void DialogsPanel::Draw(EditorHost& host) {
         }
         EditorTheme::Hint(T("Creates <Location>/<Name>/project.sageproj + scenes/ + assets/"));
 
-        // Шаблон — С ЧЕГО начинается проект. Пока выбора не было, каждый новый
-        // проект начинался с девяти демо-объектов, которые первым делом
-        // удаляли.
-        ImGui::SeparatorText(T("Start from"));
-        // Карточками с обложкой — тем же виджетом, что и в стартовом окне.
-        // Двух похожих списков шаблонов в редакторе быть не должно: они
-        // разъедутся ровно так же, как разъезжались подписи и порядок.
-        for (size_t i = 0; i < ProjectTemplates().size(); ++i) {
-            const ProjectTemplate& tpl = ProjectTemplates()[i];
-            if (i > 0) ImGui::SameLine();
-            if (ProjectTemplateCard(tpl, m_templateId == tpl.Id, 190.0f)) m_templateId = tpl.Id;
-        }
-
-        // Пояснение выбранного шаблона — под рядом карточек, а не только
-        // подсказкой при наведении: у мыши, ведущей к кнопке «Создать», подсказки
-        // уже нет, а решение принимают именно в этот момент.
-        const ProjectTemplate* chosen = FindProjectTemplate(m_templateId);
-        if (chosen) {
-            ImGui::TextDisabled("%s", T(chosen->Summary));
-            if (chosen->Note[0] != '\0') ImGui::TextWrapped("%s", T(chosen->Note));
-        }
-        // Недоступный шаблон гасит кнопку ЗДЕСЬ. Отказ после нажатия человек
-        // читает как поломку: он выбрал то, что ему предложили.
-        const bool blocked = chosen && !ProjectTemplateAvailable(*chosen);
-        if (blocked) {
-            ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.35f, 1.0f), "%s",
-                               T("This template is not installed next to the editor"));
-        }
-
         if (!m_error.empty()) ImGui::TextColored(ImVec4(1, 0.4f, 0.4f, 1), "%s", m_error.c_str());
-        ImGui::BeginDisabled(blocked);
         if (ImGui::Button(T("Create"), ImVec2(120, 0))) {
             std::string err;
-            if (host.CreateProject(m_projectDir, m_projectName, m_templateId, err)) {
+            if (host.CreateProject(m_projectDir, m_projectName, err)) {
                 ImGui::CloseCurrentPopup();
             } else {
                 m_error = err;
             }
         }
-        ImGui::EndDisabled();
         ImGui::SameLine();
         if (ImGui::Button(T("Cancel"), ImVec2(120, 0))) ImGui::CloseCurrentPopup();
         ImGui::EndPopup();
