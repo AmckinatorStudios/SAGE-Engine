@@ -60,7 +60,7 @@ std::string TitleOf(const std::string& signal) {
     return signal;
 }
 
-// События, которые объявляют СКРИПТЫ ЭТОГО объекта (`self:define_event("Died")`).
+// События, которые объявляют СКРИПТЫ ЭТОГО объекта (`events.create(object, "player_died")`).
 // По тексту, до запуска игры; кэш по времени правки файла.
 std::vector<std::string> DefinedEventsOf(EditorHost& host, const entt::registry& reg, entt::entity e) {
     std::vector<std::string> out;

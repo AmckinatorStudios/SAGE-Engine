@@ -27,7 +27,7 @@ std::vector<FieldDiagnostic> ParseFieldProblems(const std::string& path, const s
     return lang.FieldProblems(path, source);
 }
 
-void ReportFieldProblems(const std::string& path, const std::string& source) {
+void ReportFieldProblems(const std::string& path, const std::string& source, bool force) {
     // Хеш текста на файл: тот же текст — те же находки, повторять их каждый
     // кадр показа инспектора значило бы забить консоль.
     static std::mutex mutex;
@@ -36,7 +36,7 @@ void ReportFieldProblems(const std::string& path, const std::string& source) {
     {
         std::lock_guard<std::mutex> lock(mutex);
         auto it = seen.find(path);
-        if (it != seen.end() && it->second == hash) return;
+        if (!force && it != seen.end() && it->second == hash) return;
         seen[path] = hash;
     }
     sage::Problems::Resolve(path, "script.annotation");
@@ -145,10 +145,73 @@ static std::vector<std::string> ParseCallNames(const std::string& source, const 
     return out;
 }
 
-std::vector<std::string> ParseEmittedSignals(const std::string& source) { return ParseCallNames(source, "emit"); }
+
+
+// `events.create(object, "name")` — первый аргумент любой (`object`,
+// `scene.find("Door")`), имя — строка. Глобальная форма `events.create("name")`
+// сигналом объекта не является и в список объекта не попадает.
+static std::vector<std::string> ParseEventsCall(const std::string& source, const char* lowerHead,
+                                                const char* upperHead) {
+    std::vector<std::string> out;
+    const size_t n = source.size();
+    for (const char* head : {lowerHead, upperHead}) {
+        const size_t headLen = std::strlen(head);
+        for (size_t at = source.find(head); at != std::string::npos; at = source.find(head, at + 1)) {
+            if (at > 0 && IdentChar(source[at - 1])) continue;
+            size_t j = at + headLen;
+            while (j < n && (source[j] == ' ' || source[j] == '\t')) ++j;
+            if (j >= n || source[j] != '(') continue;
+            ++j;
+            while (j < n && (source[j] == ' ' || source[j] == '\t')) ++j;
+            // Первый аргумент — строка: это глобальная форма (имя события, затем
+            // данные), сигналом объекта она не является.
+            if (j < n && (source[j] == '"' || source[j] == '\'')) continue;
+            // Первый аргумент — до запятой верхнего уровня.
+            int depth = 0;
+            bool comma = false;
+            for (; j < n && source[j] != '\n'; ++j) {
+                const char c = source[j];
+                if (c == '(' || c == '{' || c == '[') ++depth;
+                else if (c == ')' || c == '}' || c == ']') {
+                    if (depth == 0) break;
+                    --depth;
+                } else if (c == '"' || c == '\'') {
+                    const char q = c;
+                    for (++j; j < n && source[j] != q && source[j] != '\n'; ++j) {}
+                } else if (c == ',' && depth == 0) { comma = true; ++j; break; }
+            }
+            if (!comma) continue;
+            while (j < n && (source[j] == ' ' || source[j] == '\t')) ++j;
+            if (j >= n || (source[j] != '"' && source[j] != '\'')) continue;
+            const char quote = source[j++];
+            const size_t start = j;
+            while (j < n && source[j] != quote && source[j] != '\n') ++j;
+            if (j >= n || source[j] != quote) continue;
+            std::string name = source.substr(start, j - start);
+            const bool valid = !name.empty() && std::none_of(name.begin(), name.end(), [](unsigned char c) {
+                return std::isspace(c) || c < 32;
+            });
+            if (valid && std::find(out.begin(), out.end(), name) == out.end()) out.push_back(std::move(name));
+        }
+    }
+    return out;
+}
+
+// Сигналы, которые скрипт шлёт: `obj:emit("hit")` (прежнее) и
+// `events.trigger(obj, "hit")` (стандарт).
+std::vector<std::string> ParseEmittedSignals(const std::string& source) {
+    std::vector<std::string> out = ParseEventsCall(source, "events.trigger", "Events.trigger");
+    for (std::string& name : ParseCallNames(source, "emit"))
+        if (std::find(out.begin(), out.end(), name) == out.end()) out.push_back(std::move(name));
+    return out;
+}
 
 std::vector<std::string> ParseDefinedEvents(const std::string& source) {
-    return ParseCallNames(source, "define_event");
+    // Стандарт: events.create(object, "имя"); прежнее: obj:define_event("имя").
+    std::vector<std::string> out = ParseEventsCall(source, "events.create", "Events.create");
+    for (std::string& name : ParseCallNames(source, "define_event"))
+        if (std::find(out.begin(), out.end(), name) == out.end()) out.push_back(std::move(name));
+    return out;
 }
 
 } // namespace sage::scripting

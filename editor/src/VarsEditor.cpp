@@ -2,6 +2,7 @@
 #include "InspectorFields.h"
 #include "InspectorControls.h"
 
+#include <cctype>
 #include <climits>
 #include <algorithm>
 
@@ -74,6 +75,30 @@ bool DrawEntityRef(EditorHost& host, const char* id, sage::vars::EntityRef& ref)
     return true;
 }
 
+// Вид ассета из объявления (`---@export_resource "Animation"`): слот берёт
+// только такие файлы. Незнакомое слово — любой файл: объявление не должно
+// превращать слот в нерабочий.
+static assetslot::Kind AssetKindFromHint(const std::string& hint) {
+    std::string h;
+    for (char c : hint)
+        if (c != '_' && c != ' ' && c != '-') h += (char)std::tolower((unsigned char)c);
+    static const std::pair<const char*, assetslot::Kind> kMap[] = {
+        {"model", assetslot::Kind::Model},        {"mesh", assetslot::Kind::Model},
+        {"material", assetslot::Kind::Material},  {"texture", assetslot::Kind::Texture},
+        {"script", assetslot::Kind::Script},      {"shader", assetslot::Kind::Shader},
+        {"prefab", assetslot::Kind::Prefab},      {"scene", assetslot::Kind::Scene},
+        {"audio", assetslot::Kind::Audio},        {"sound", assetslot::Kind::Audio},
+        {"animation", assetslot::Kind::Animation},{"folder", assetslot::Kind::Folder},
+        {"font", assetslot::Kind::Font},          {"effect", assetslot::Kind::Effect},
+        {"uistyle", assetslot::Kind::UiStyle},    {"aigraph", assetslot::Kind::AiGraph},
+        {"visualscript", assetslot::Kind::VisualScript}, {"interface", assetslot::Kind::Interface},
+        {"animgraph", assetslot::Kind::AnimGraph},
+    };
+    for (const auto& [name, kind] : kMap)
+        if (h == name) return kind;
+    return assetslot::Kind::Any;
+}
+
 bool DrawValue(EditorHost& host, const char* id, Value& value, const Var* meta,
                AssetPreview* preview) {
     ImGui::PushID(id);
@@ -111,7 +136,24 @@ bool DrawValue(EditorHost& host, const char* id, Value& value, const Var* meta,
         }
         case Kind::String: {
             std::string v = value.AsString();
-            if (InputText("##v", v)) { value = Value(v); changed = true; }
+            if (meta && !meta->Options.empty()) {
+                // Список из объявления (`---@export_enum "Idle" "Walk"`): значение
+                // — одно из строк, набирать его руками незачем.
+                std::vector<const char*> items;
+                int current = 0;
+                for (size_t i = 0; i < meta->Options.size(); ++i) {
+                    items.push_back(meta->Options[i].c_str());
+                    if (meta->Options[i] == v) current = (int)i;
+                }
+                if (ictl::Combo("##v", &current, items.data(), (int)items.size())) {
+                    host.PushUndoSnapshot();
+                    value = Value(meta->Options[(size_t)current]);
+                    changed = true;
+                }
+            } else if (InputText("##v", v)) {
+                value = Value(v);
+                changed = true;
+            }
             break;
         }
         case Kind::Vec2: {
@@ -149,8 +191,8 @@ bool DrawValue(EditorHost& host, const char* id, Value& value, const Var* meta,
             const std::string path = value.AsAsset().Path;
             ImGui::BeginGroup();
             const assetslot::Result r =
-                assetslot::Draw(host, "asset", assetslot::Kind::Any, path, preview,
-                                T("No file"));
+                assetslot::Draw(host, "asset", AssetKindFromHint(meta ? meta->Hint : std::string()), path,
+                                preview, T("No file"));
             // Слот двигает курсор сам (обложка рисуется в своей позиции), а от
             // ЭЛЕМЕНТА в конце ImGui считает высоту ячейки. Без него окно не
             // знает, докуда выросло, и ругается на каждом кадре.

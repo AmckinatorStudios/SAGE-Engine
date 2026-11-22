@@ -78,7 +78,14 @@ void EnsureBuiltins() {
             lua::ParsePublicFields(src, &found);
             return found;
         };
-        luaLang.Check = [](const std::string& path, const std::string& src) { return LintScriptSource(path, src); };
+        luaLang.Check = [](const std::string& path, const std::string& src) {
+            ScriptLintResult res = LintScriptSource(path, src);
+            // Аннотации Inspector проверяются вместе со скриптом: «Проверить
+            // скрипты» показывает и их ошибки.
+            for (const FieldDiagnostic& d : ParseFieldProblems(path, src)) (d.Error ? res.Errors : res.Warnings)++;
+            ReportFieldProblems(path, src, /*force=*/true);
+            return res;
+        };
 
         // SAGE Lua — компилятор в Lua: исполняет Lua-бэкенд, поля и методы —
         // из объявления класса, которое уже проверил компилятор (а не по

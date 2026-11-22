@@ -3,6 +3,7 @@
 // Связка — та же, что у редактора (бэкенд поверх прежнего ScriptEngine).
 #include "TestFramework.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -467,4 +468,28 @@ end
     CHECK_TRUE(w.Global<bool>(o, "tint_ok"));
     CHECK_EQ(w.Global<std::string>(o, "state_seen"), std::string("Idle"));
     CHECK_TRUE(w.Global<bool>(o, "target_missing"));
+}
+
+// Инспектор находит события по тексту, до запуска: events.create(object, "…").
+TEST(LuaStandard_events_create_discovered_statically) {
+    const std::string src = R"(
+events.create(object, "player_died")
+events.create(scene.find("Door"), 'opened')
+events.create("global_only")
+local function die()
+    events.trigger(object, "player_died", {reason = "fall"})
+    events.trigger("level_loaded", "forest")
+end
+object.define_event("legacy_one")
+)";
+    const std::vector<std::string> defined = sage::scripting::ParseDefinedEvents(src);
+    auto has = [&](const std::vector<std::string>& v, const char* n) {
+        return std::find(v.begin(), v.end(), n) != v.end();
+    };
+    CHECK_TRUE(has(defined, "player_died"));
+    CHECK_TRUE(has(defined, "opened"));
+    CHECK_FALSE(has(defined, "global_only"));   // глобальное событие — не сигнал объекта
+    const std::vector<std::string> emitted = sage::scripting::ParseEmittedSignals(src);
+    CHECK_TRUE(has(emitted, "player_died"));
+    CHECK_FALSE(has(emitted, "forest"));
 }
