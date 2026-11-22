@@ -74,6 +74,7 @@ int main(int argc, char** argv) {
         RunAnimationChecks(renderer);
         RunReflectionChecks(renderer);
         RunShadowChecks(renderer, *scene);
+        RunShadowQualityChecks(renderer);
         RunSceneChecks(renderer);
         RunMaterialChecks(renderer);
         RunVolumetricChecks();

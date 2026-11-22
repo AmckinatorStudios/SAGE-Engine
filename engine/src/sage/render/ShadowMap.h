@@ -127,7 +127,7 @@ public:
         // Карта фиксированного радиуса: дальше него теней нет, и растворять их
         // надо по нему же, а не по дальности камеры.
         m_shadowDistance = radius * 2.0f;
-        const glm::mat4 m = FitOrtho(sunDir, center, radius);
+        const glm::mat4 m = FitOrtho(sunDir, center, radius); // radius — квантованный
         for (int i = 0; i < m_cascades; ++i) {
             m_lightMatrix[(size_t)i] = m;
             m_radius[(size_t)i] = radius;
@@ -139,10 +139,19 @@ public:
     // подгоняет под каждый свою карту.
     //
     // lambda — как делить дальность. 0 — равными кусками (дальним каскадам
-    // хорошо, ближним плохо), 1 — логарифмически (наоборот). Практика давно
-    // сошлась на середине: около 0.6 ближний каскад получает подробность, а
-    // дальний не вырождается в полоску у горизонта.
-    void SetCascades(glm::vec3 sunDir, const CameraView& view, float lambda = 0.6f) {
+    // хорошо, ближним плохо), 1 — логарифмически (наоборот).
+    //
+    // ПОЧЕМУ 0.8, А НЕ 0.6. При обычном угле обзора (60°, 16:9) описанная
+    // сфера каждого куска фрустума упирается в его ДАЛЬНЕЕ кольцо (см.
+    // FrustumSphere): радиус ≈ 1.18 × дальняя граница куска, и каскады
+    // получаются вложенными — каждый накрывает всё от камеры до своей границы.
+    // Тогда тексель каскада пропорционален его границе, и при 0.6 ближний
+    // каскад тянулся до 16.6 м (тексель 1.9 см на 2048 при дальности 120 м),
+    // а следующий — до 38.8 м. При 0.8 границы 8.9 и 25 м: ближний тексель
+    // 1.0 см, средний 2.9 см — вдвое и в полтора раза подробнее там, куда
+    // смотрят. Дальний каскад от lambda не зависит вовсе: его радиус задаёт
+    // ShadowDistance.
+    void SetCascades(glm::vec3 sunDir, const CameraView& view, float lambda = 0.8f) {
         const float nearZ = std::max(view.Near, 0.01f);
         const float farZ = std::max(view.ShadowDistance, nearZ * 2.0f);
         m_shadowDistance = farZ;
@@ -154,7 +163,7 @@ public:
             float radius;
             FrustumSphere(view, splitNear, splitFar, worldCenter, radius);
             m_lightMatrix[(size_t)i] = FitOrtho(sunDir, worldCenter, radius);
-            m_radius[(size_t)i] = radius;
+            m_radius[(size_t)i] = radius; // уже квантованный FitOrtho
             splitNear = splitFar;
         }
         m_activeCascades = m_cascades;
@@ -179,6 +188,29 @@ public:
     float CascadePenumbraTexels(int cascade) const {
         const float texel = std::max(CascadeTexelSize(cascade), 1e-6f);
         return CascadeDepthRange(cascade) * std::tan(glm::radians(m_sunAngle) * 0.5f) / texel;
+    }
+
+    // Предел полутени в текселях. Цена широкого ядра от ширины не зависит (шаг
+    // сетки растёт, число чтений то же), но с шагом растут промежутки между
+    // узлами, и тонкий заслон начинает в них проваливаться.
+    static constexpr float kMaxPenumbraTexels = 12.0f;
+    // Высота заслона, для которой ищется полутень (метры над приёмником). Это
+    // не предел теней — тень от заслона выше просто не становится мягче, чем
+    // от этой высоты. Предел задан В МЕТРАХ, а не в текселях, чтобы полутень
+    // одного предмета была одной ширины во всех каскадах и не менялась
+    // ступенькой на их стыке (тексельный предел срабатывает раньше только при
+    // очень большом солнце).
+    static constexpr float kPenumbraSearchMetres = 10.0f;
+
+    // Радиус поиска заслонов в текселях каскада: полутень от заслона на
+    // kPenumbraSearchMetres выше приёмника. Если он не шире ядра фильтра
+    // (два текселя), полутень на этом каскаде тоньше ядра — искать её
+    // незачем, и шейдер обходится одним ядром (шестнадцать чтений вместо
+    // двадцати). Так у дальних каскадов, где тексель — десятки сантиметров.
+    float CascadeSearchTexels(int cascade) const {
+        const float texel = std::max(CascadeTexelSize(cascade), 1e-6f);
+        const float perMetre = std::tan(glm::radians(m_sunAngle) * 0.5f) / texel;
+        return std::min(perMetre * kPenumbraSearchMetres, kMaxPenumbraTexels);
     }
 
     void FitSingle(glm::vec3 sunDir, const CameraView& view) {
@@ -210,20 +242,25 @@ public:
         return m_radius[(size_t)Clamp(cascade)] * 4.0f + m_casterRange;
     }
 
-    // Запас по глубине для сравнения с картой, в единицах pc.z.
+    // Один тексель каскада, выраженный в единицах записанной глубины (pc.z):
+    // texel / диапазон ортобокса. Мера, в которой шейдер задаёт и постоянный
+    // запас сравнения, и предел наклона плоскости приёмника.
     //
-    // ЗАЧЕМ СЧИТАТЬ, А НЕ ПОДБИРАТЬ КОНСТАНТУ. Запас должен покрывать ошибку
-    // квантования: точка на поверхности попадает в тексель шириной texel метров,
-    // а записана в нём одна глубина на весь тексель. Величина ошибки — мировая
-    // (доли метра), а сравнение идёт в долях диапазона ортобокса, и коэффициент
-    // между ними у каждого каскада СВОЙ: у ближнего диапазон в разы короче.
-    // Одна константа на всех поэтому не существует — она либо мала для дальнего
-    // каскада (рябь самозатенения по всему полу), либо велика для ближнего
-    // (тень отрывается от предмета). Здесь она считается из тех самых чисел,
-    // которыми карта и построена.
-    float CascadeDepthBias(int cascade) const {
+    // ПОЧЕМУ ЗАПАС СЧИТАЕТСЯ ОТ ТЕКСЕЛЯ, А НЕ КОНСТАНТОЙ. Остаточная ошибка
+    // сравнения — мировая (доли текселя в метрах), а сравнение идёт в долях
+    // диапазона ортобокса, и коэффициент между ними у каждого каскада СВОЙ.
+    // Одна константа на всех либо мала для дальнего каскада (рябь по полу),
+    // либо велика для ближнего (тень отрывается от предмета).
+    //
+    // Раньше здесь был сам запас, ДВА текселя, и шейдер растил его ещё вчетверо
+    // по наклону и вшестеро по ширине фильтра: до полусотни текселей глубины.
+    // Так прятали самозатенение широкого фильтра — ценой отрыва тени от
+    // предмета и света, просачивающегося под ним. Теперь наклон поверхности
+    // учитывает плоскость приёмника (см. ReceiverSlope в PbrShaderLighting.h),
+    // и постоянному запасу остаётся лишь доля текселя.
+    float CascadeDepthPerTexel(int cascade) const {
         const float texel = CascadeTexelSize(cascade);
-        return (texel * 2.0f) / std::max(CascadeDepthRange(cascade), 1e-3f);
+        return texel / std::max(CascadeDepthRange(cascade), 1e-3f);
     }
 
     // Насколько далеко ВВЕРХ ПО ЛУЧУ от накрытой области может стоять предмет,
@@ -252,7 +289,7 @@ public:
         //
         // Самозатенение вместо этого лечится там, где ему и место, — при
         // выборке: сдвигом точки выборки вдоль нормали и наклонным bias'ом
-        // (см. ShadowPCF в PbrShader.h). Они не отрывают тень от предмета.
+        // (см. SunShadowMap в PbrShaderLighting.h). Они не отрывают тень от предмета.
         device.SetCullMode(sage::rhi::CullMode::Back);
     }
 
@@ -319,7 +356,11 @@ private:
     }
 
     // Ортобокс света вокруг сферы (center, radius) с привязкой к сетке текселей.
-    glm::mat4 FitOrtho(glm::vec3 sunDir, glm::vec3 center, float radius) const {
+    // radius на выходе — КВАНТОВАННЫЙ, ровно тот, с которым построена матрица:
+    // раньше наружу (в размер текселя и запасы шейдера) уходил исходный, и
+    // тексель, по которому шейдер отступает и фильтрует, расходился с
+    // настоящим на доли процента — по-разному на каждом кадре.
+    glm::mat4 FitOrtho(glm::vec3 sunDir, glm::vec3 center, float& radius) const {
         glm::vec3 dir = glm::normalize(sunDir);
         // Безопасный up: когда солнце почти в зените (dir ~ вертикаль),
         // обычный up (0,1,0) вырождается — берём горизонтальный.
@@ -350,7 +391,11 @@ private:
             glm::vec3 inLight = glm::vec3(basis * glm::vec4(center, 1.0f));
             inLight.x = std::floor(inLight.x / texelWorld) * texelWorld;
             inLight.y = std::floor(inLight.y / texelWorld) * texelWorld;
-            center = glm::vec3(glm::inverse(basis) * glm::vec4(inLight, 1.0f));
+            // И по глубине: иначе записанные глубины «плывут» вместе с
+            // камерой на доли запаса сравнения, и там, где запаса впритык,
+            // самозатенение мерцает при ходьбе, хотя карта стоит на месте.
+            inLight.z = std::floor(inLight.z / texelWorld) * texelWorld;
+            center =glm::vec3(glm::inverse(basis) * glm::vec4(inLight, 1.0f));
         }
 
         // «Камеру света» отодвигаем назад по лучу так, чтобы в кадр попал не
@@ -423,13 +468,17 @@ struct ShadowBinding {
     // разы крупнее ближнего, и общий отступ на всех либо не спасает ближний от
     // полос самозатенения, либо отрывает тень в дальнем.
     float TexelWorld[ShadowMap::kMaxCascades];
-    // Запас по глубине каждого каскада в единицах записанной глубины — считается
-    // из размера текселя и диапазона ортобокса (см. ShadowMap::CascadeDepthBias).
-    float DepthBias[ShadowMap::kMaxCascades];
+    // Тексель каскада в единицах записанной глубины (см.
+    // ShadowMap::CascadeDepthPerTexel): от него шейдер берёт постоянный запас
+    // сравнения и предел наклона плоскости приёмника.
+    float DepthPerTexel[ShadowMap::kMaxCascades];
     // Полуширина полутени в текселях на единицу глубины (см.
     // ShadowMap::CascadePenumbraTexels): по ней шейдер растит фильтр с
     // удалением от заслона.
     float PenumbraTexels[ShadowMap::kMaxCascades];
+    // Радиус поиска заслонов в текселях (ShadowMap::CascadeSearchTexels). Не
+    // шире ядра — полутень искать не нужно.
+    float SearchTexels[ShadowMap::kMaxCascades];
     int Count = 1;
     bool Enabled = false;
     // Сторона карты в текселях. Нужна тем, кто фильтрует выборку САМ: объёмный
@@ -456,11 +505,12 @@ struct ShadowBinding {
         // Ноль, а не «какой-нибудь» размер: у привязки без карт отступать не от
         // чего, и выдуманное значение сдвигало бы выборку неизвестно куда.
         for (float& t : TexelWorld) t = 0.0f;
-        // Запас по умолчанию — на случай привязки, собранной вручную (см.
+        // Значение по умолчанию — на случай привязки, собранной вручную (см.
         // конструктор с одной матрицей): без карт посчитать его не из чего, а
-        // ноль означал бы самозатенение на всей сцене.
-        for (float& b : DepthBias) b = 0.0005f;
+        // ноль означал бы нулевой запас и самозатенение на всей сцене.
+        for (float& b : DepthPerTexel) b = 0.0005f;
         for (float& p : PenumbraTexels) p = 0.0f;
+        for (float& s : SearchTexels) s = 0.0f;
     }
 
     // Одна карта — частный случай каскадов с Count == 1.
@@ -478,8 +528,9 @@ struct ShadowBinding {
             Matrices[i] = shadows.LightMatrix(i);
             Textures[i] = shadows.DepthTexture(i);
             TexelWorld[i] = shadows.CascadeTexelSize(i);
-            DepthBias[i] = shadows.CascadeDepthBias(i);
+            DepthPerTexel[i] = shadows.CascadeDepthPerTexel(i);
             PenumbraTexels[i] = shadows.CascadePenumbraTexels(i);
+            SearchTexels[i] = shadows.CascadeSearchTexels(i);
         }
         Enabled = enabled;
         SetFadeFromDistance(shadows.ShadowDistance());

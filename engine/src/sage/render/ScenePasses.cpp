@@ -36,7 +36,9 @@ void RenderShadowDepth(ShadowMap& shadows, Scene& scene, sage::ecs::RenderBatch&
         // обратно между каскадами дешевле, чем между видами геометрии.
         if (extra) extra(light);
 
-        batch.RenderDepth(scene, light);                    // ECS-статика (инстансно + отсечение)
+        // ECS-статика (инстансно + отсечение). Сцену обходит только первый
+        // каскад, остальные берут его список (см. RenderBatch::RenderDepth).
+        batch.RenderDepth(scene, light, /*reuseGather=*/c > 0);
         sage::anim::DrawAnimatedModelsDepth(scene, light);  // скелеты тоже отбрасывают тень
 
         // Одна карта на всю сцену: остальные каскады — её копии, и рисовать в
@@ -55,7 +57,7 @@ void RenderLocalShadowDepth(LocalShadowAtlas& atlas, Scene& scene, sage::ecs::Re
         atlas.BeginPass(p);
         const glm::mat4& light = atlas.PassMatrix(p);
         if (extra) extra(light);
-        batch.RenderDepth(scene, light);
+        batch.RenderDepth(scene, light, /*reuseGather=*/p > 0);
         sage::anim::DrawAnimatedModelsDepth(scene, light);
     }
     atlas.End(screenWidth, screenHeight);

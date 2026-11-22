@@ -44,20 +44,17 @@ uniform sampler2D uShadowMap;   // каскад 0 — самый ближний 
 uniform sampler2D uShadowMap1;
 uniform sampler2D uShadowMap2;
 uniform mat4 uShadowLightSpace[3];
-// Размер текселя карты каскада В МЕТРАХ. Нужен, чтобы отступить от поверхности
-// вдоль нормали ровно на тексель этого каскада: у дальнего каскада тексель в
-// разы крупнее, и один общий отступ для всех либо не спасает ближний от полос
-// самозатенения, либо отрывает тень в дальнем.
-uniform float uShadowTexelWorld[3];
-// Запас по глубине каждого каскада, уже в единицах записанной глубины.
-// Считается из размера текселя и глубины ортобокса на стороне процессора
-// (ShadowMap::CascadeDepthBias): одной константы на все каскады не существует —
-// у ближнего и дальнего разный масштаб и по ширине текселя, и по диапазону.
-uniform float uShadowDepthBias[3];
-// Полуширина полутени в текселях каскада на единицу глубины «приёмник −
-// заслон» (ShadowMap::CascadePenumbraTexels): из неё и разницы глубин — радиус
-// фильтра. 0 — резкая тень на всю длину.
-uniform float uShadowPenumbra[3];
+// Параметры каскада одним vec4 — все считаются на процессоре из того, чем карта
+// построена (см. ShadowBinding):
+//   x — размер текселя В МЕТРАХ: на него отступает точка выборки вдоль нормали.
+//       У дальнего каскада тексель в разы крупнее, и общий отступ для всех либо
+//       не спасает ближний, либо отрывает тень в дальнем;
+//   y — тот же тексель в единицах записанной глубины (ShadowMap::
+//       CascadeDepthPerTexel): мера постоянного запаса и предела наклона;
+//   z — полуширина полутени в текселях на единицу глубины «приёмник − заслон»
+//       (ShadowMap::CascadePenumbraTexels); 0 — резкая тень на всю длину;
+//   w — радиус поиска заслонов в текселях (ShadowMap::CascadeSearchTexels).
+uniform vec4 uShadowCascade[3];
 uniform int uShadowCascades;    // сколько каскадов реально заполнено (1..3)
 uniform bool uShadowsEnabled;
 // --- Тени локальных источников (см. render/ShadowAtlas.h) ------------------
@@ -234,63 +231,216 @@ float FilterDisk(sampler2D map, vec4 rect, vec2 uv, float depth, float bias, flo
     return shadow / 8.0;
 }
 
-// Тень по одной карте. pc — координаты фрагмента в пространстве этого каскада,
-// уже приведённые к [0,1] (смещение по нормали к ним УЖЕ применено — см.
-// CascadeCoords).
+// --- Тень солнца: выборка одной карты каскада --------------------------------
 //
-// ПОЛУТЕНЬ ПО РАССТОЯНИЮ ДО ЗАСЛОНА (как у настоящего солнца). Раньше фильтр
-// был одного радиуса везде: тень одинаково мылилась и у основания столба, и в
-// десяти метрах от него — неестественно мягко там, где предмет касается земли,
-// и неестественно резко вдали. Теперь радиус = (глубина приёмника − глубина
-// заслона) × penumbra: у самого предмета тень резкая, с удалением от него —
-// расплывается. penumbra считается из углового размера солнца
-// (ShadowSettings::SunAngle).
+// ЧТО БЫЛО И ПОЧЕМУ ЗАМЕНЕНО. Здесь стоял диск Вогеля из восьми билинейных
+// точек, повёрнутый на каждый пиксель шумом, плюс поиск заслонов по девяти
+// точкам. Каждая часть давала свой дефект:
+//   • поворот на пиксель превращал полутень в ЗЕРНО: восьми точек мало, чтобы
+//     шум сложился в градиент, а накопления по кадрам (TAA) у нас нет — зерно
+//     так и оставалось на экране;
+//   • поиск заслонов читал карту текстурной выборкой в произвольной точке, а
+//     карта фильтруется линейно: на ступеньке «стена — пол» возвращалась
+//     СРЕДНЯЯ глубина, какой в сцене нет, отсюда ложные заслоны и пятна;
+//   • запас глубины рос вчетверо по наклону и вшестеро по ширине фильтра — до
+//     полусотни текселей. Он прятал самозатенение широкого диска, но отрывал
+//     тень от предмета и пускал свет под него.
 //
-// РАННИЙ ВЫХОД — главная экономия. Поиск заслонов стоит девяти чтений; если
-// ни одна точка не закрыта, фрагмент освещён и фильтр (32 чтения) не нужен.
-// Таких фрагментов в кадре большинство. Если закрыты все девять, а полутень
-// уже области поиска, фрагмент целиком в тени — тоже без фильтра.
+// КАК ТЕПЕРЬ. Чтения — только texelFetch по центрам текселей (никакой
+// интерполяции глубин), узор неподвижен (никакого шума), а наклон поверхности
+// учитывает ПЛОСКОСТЬ ПРИЁМНИКА: глубина приёмника в каждом тапе своя, по
+// плоскости касательной к поверхности. Поэтому широкому ядру не нужен широкий
+// запас, и постоянному остаётся доля текселя.
+
+// Доля текселя (в единицах uShadowCascade.y) постоянного запаса сравнения.
+// Покрывает то, чего плоскость не знает: нормаль вершины у сглаженной
+// низкополигональной модели не совпадает с гранью, и 24 бита глубины.
+const float kSunBiasTexels = 0.5;
+// Предел наклона плоскости приёмника: тангенс угла между нормалью и лучом.
+// Почти вдоль луча наклон уходит в бесконечность, а свет на такую грань всё
+// равно падает с множителем ndl около нуля; без предела дальние тапы ядра
+// уезжали бы глубиной в никуда.
+const float kSunMaxSlope = 4.0;
+// Носитель ядра (3x3 билинейных сравнения = сетка 4x4 центров) — два шага в
+// каждую сторону.
+const float kSunKernelTexels = 2.0;
+
+// Наклон глубины приёмника на ТЕКСЕЛЬ карты по u и v — из нормали, без
+// производных экрана (см. CascadeCoords о том, почему их здесь нельзя).
 //
-// Фильтр — диск Вогеля со случайным поворотом на пиксель: регулярная сетка
-// давала полутени считанное число ступеней яркости, которые на пологой кромке
-// читаются полосами, а поворот рассыпает их в мелкий шум. Точки остаются
-// БИЛИНЕЙНЫМИ: точечная выборка внутри текселя отвечает всем пикселям
-// одинаково, и край тени становится ступенькой шириной в тексель.
-float ShadowPCF(sampler2D map, vec3 pc, float ndl, float rotation, float baseBias, float penumbra) {
-    vec2 texel = 1.0 / vec2(textureSize(map, 0));
-    vec4 rect = vec4(0.0, 0.0, 1.0, 1.0);
+// Ортоматрица света — масштаб на вращение (M = S·R), поэтому нормаль в её
+// пространстве считается без обращения матрицы: i-я компонента — скалярное
+// произведение с i-й строкой, делённое на квадрат длины строки. Плоскость
+// n·Δ = 0 даёт Δглубины = −(n.x·Δu + n.y·Δv) / n.z.
+vec2 ReceiverSlope(int cascade, vec3 normal, float texelUV) {
+    mat4 m = uShadowLightSpace[cascade];
+    vec3 r0 = vec3(m[0][0], m[1][0], m[2][0]);
+    vec3 r1 = vec3(m[0][1], m[1][1], m[2][1]);
+    vec3 r2 = vec3(m[0][2], m[1][2], m[2][2]);
+    vec3 n = vec3(dot(r0, normal) / dot(r0, r0), dot(r1, normal) / dot(r1, r1),
+                  dot(r2, normal) / dot(r2, r2));
+    float nz = n.z >= 0.0 ? max(n.z, 1e-8) : min(n.z, -1e-8);
+    vec2 slope = -n.xy / nz * texelUV;
+    float cap = uShadowCascade[cascade].y * kSunMaxSlope;
+    float len = length(slope);
+    return len > cap ? slope * (cap / len) : slope;
+}
 
-    // Наклонный bias: у поверхности, стоящей боком к свету, глубина внутри
-    // одного текселя меняется сильнее, и запас нужен больше. Базовая величина
-    // приходит из каскада (см. uShadowDepthBias), здесь только наклон.
-    float slope = clamp(1.0 - abs(ndl), 0.0, 1.0);
-    float bias = baseBias * (1.0 + 3.0 * slope);
+// Одно сравнение в текселе k с глубиной приёмника zr (уже по плоскости в этом
+// текселе). Возвращает разницу глубин «приёмник − заслон» (> 0 — тексель в
+// тени), чтобы и фильтр, и оценка полутени брали одно и то же чтение.
+//
+// Без зажима координат: CascadeMargin не пускает в каскад фрагмент, чьё ядро
+// (вместе с поиском и широкой полутенью) выходит за край карты.
+float SunDelta(sampler2D map, ivec2 k, float zr, float bias) {
+    float d = texelFetch(map, k, 0).r;
+    return zr - bias > d ? zr - d : 0.0;
+}
 
-    const float kMaxRadius = 8.0;
-    // Искать заслоны надо так далеко, как широка самая широкая полутень, какую
-    // может дать эта точка (заслон у самого источника), — но не дальше
-    // потолка фильтра.
-    float search = clamp(pc.z * penumbra, kShadowFilterTexels, kMaxRadius * 0.75);
-    float blockerDepth;
-    float blockers = BlockerSearch(map, rect, pc.xy, pc.z, bias, search, texel, blockerDepth);
-    if (blockers == 0.0) return 0.0;
+// Веса четырёх узлов по оси для ядра «3x3 билинейных сравнения»: три
+// билинейные выборки со сдвигом в узел накрывают четыре центра, и их вклад
+// складывается в (1 − t, 1, 1, t) / 3. Результат гладок (кусочно-квадратичен,
+// без изломов) и непрерывен по положению фрагмента.
+vec4 SunKernelWeights(float t) {
+    return vec4(1.0 - t, 1.0, 1.0, t) / 3.0;
+}
+// Заслоны копятся в blk с весами: x — вес узлов в тени, y — вес × разница
+// глубин. Веса — те же, что у фильтра (и билинейные у поиска), поэтому оценка
+// расстояния до заслона НЕПРЕРЫВНА по положению фрагмента: соседние пиксели
+// получают близкие числа, и ширина полутени не скачет от пикселя к пикселю
+// (прежний поиск по отдельным точкам давал ровно такие скачки — зерно).
 
-    float radius = clamp((pc.z - blockerDepth) * penumbra, 0.0, kMaxRadius);
-    radius = max(radius, kShadowFilterTexels);
-    if (blockers == 9.0 && radius <= search) return 1.0;
-    // Шире фильтр — дальше тапы от центра по наклонной поверхности: запас
-    // растёт вместе с ним, иначе широкая полутень сама себя затеняет.
-    float wideBias = bias * max(1.0, radius / kShadowFilterTexels);
-    return FilterDisk(map, rect, pc.xy, pc.z, wideBias, radius, rotation, texel);
+// ЯДРО: 3x3 билинейных сравнения, собранные в 4x4 центров текселей, —
+// шестнадцать чтений.
+//
+// Ядро выбрано по числам, а не на вкус (моделирование прямой кромки под углом
+// 17° к сетке карты): «пила» — колебание яркости вдоль кромки от ступеней
+// текселей — у одиночного билинейного сравнения 0.18 полной контрастности, у
+// кубического B-сплайна по тем же шестнадцати центрам 0.11, у этого ядра
+// 0.03; ширина кромки — 1.6, 1.9 и 2.9 текселя. Ступени гаснут втрое сильнее
+// ценой текселя размытия: при текселе ближнего каскада в сантиметр кромка
+// остаётся резкой.
+float SunKernel(sampler2D map, vec2 g, float z, vec2 slope, float bias, inout vec2 blk) {
+    vec2 c = floor(g);
+    vec2 t = g - c;
+    vec4 wx = SunKernelWeights(t.x);
+    vec4 wy = SunKernelWeights(t.y);
+    ivec2 k0 = ivec2(c) - 1;
+    float z0 = z + dot(slope, c - 1.0 - g); // приёмник в первом текселе ядра
+    float s = 0.0;
+    for (int j = 0; j < 4; ++j) {
+        for (int i = 0; i < 4; ++i) {
+            float d = SunDelta(map, k0 + ivec2(i, j), z0 + slope.x * float(i) + slope.y * float(j), bias);
+            if (d > 0.0) {
+                float w = wx[i] * wy[j];
+                s += w;
+                blk += vec2(w, w * d);
+            }
+        }
+    }
+    return s;
+}
+
+// Поиск заслонов за пределами ядра: четыре узла неподвижной решётки с шагом
+// stride текселей (решётка кратна шагу, поэтому от положения фрагмента зависят
+// только веса, а не то, какие тексели прочитаны), веса билинейные. Четыре, а
+// не девять узлов, — потому что этот поиск платит каждый освещённый пиксель
+// ближних каскадов: узлы рядом с фрагментом уже прочитаны ядром, а решётка
+// добавляет только дальние заслоны, от которых и зависит внешняя полутень.
+void SunBlockerSearch(sampler2D map, vec2 g, float z, vec2 slope, float bias, float stride,
+                      inout vec2 blk) {
+    vec2 gs = g / stride;
+    vec2 c = floor(gs);
+    vec2 t = gs - c;
+    for (int j = 0; j < 2; ++j) {
+        for (int i = 0; i < 2; ++i) {
+            vec2 k = floor((c + vec2(i, j)) * stride + 0.5);
+            float d = SunDelta(map, ivec2(k), z + dot(slope, k - g), bias);
+            if (d > 0.0) {
+                float w = (i == 0 ? 1.0 - t.x : t.x) * (j == 0 ? 1.0 - t.y : t.y);
+                blk += vec2(w, w * d);
+            }
+        }
+    }
+}
+
+// Билинейное сравнение в произвольной точке p (в координатах центров).
+float SunBilinear(sampler2D map, vec2 p, vec2 g, float z, vec2 slope, float bias) {
+    vec2 b = floor(p);
+    vec2 f = p - b;
+    ivec2 k = ivec2(b);
+    float zb = z + dot(slope, b - g);
+    float a = step(1e-12, SunDelta(map, k, zb, bias));
+    float c = step(1e-12, SunDelta(map, k + ivec2(1, 0), zb + slope.x, bias));
+    float d = step(1e-12, SunDelta(map, k + ivec2(0, 1), zb + slope.y, bias));
+    float e = step(1e-12, SunDelta(map, k + ivec2(1, 1), zb + slope.x + slope.y, bias));
+    return mix(mix(a, c, f.x), mix(d, e, f.x), f.y);
+}
+
+// ШИРОКАЯ ПОЛУТЕНЬ: то же ядро, но по сетке с шагом stride текселей, и в узлах
+// — билинейное сравнение. При stride == 1 узлы попадают ровно в центры, и
+// ответ совпадает с SunKernel: переход от узкого ядра к широкому непрерывен,
+// без ступеньки на кромке. Неподвижная сетка вместо повёрнутого диска: ступени
+// между узлами сглажены весами ядра, а не рассыпаны в зерно.
+float SunKernelWide(sampler2D map, vec2 g, float z, vec2 slope, float bias, float stride) {
+    vec2 gv = g / stride;
+    vec2 c = floor(gv);
+    vec2 t = gv - c;
+    vec4 wx = SunKernelWeights(t.x);
+    vec4 wy = SunKernelWeights(t.y);
+    float s = 0.0;
+    for (int j = 0; j < 4; ++j)
+        for (int i = 0; i < 4; ++i)
+            s += wx[i] * wy[j] *
+                 SunBilinear(map, (c + vec2(i - 1, j - 1)) * stride, g, z, slope, bias);
+    return s;
+}
+
+// Тень по одной карте каскада. pc — координаты фрагмента в [0,1] (отступ по
+// нормали к ним уже применён — см. CascadeCoords), info — uShadowCascade.
+//
+// ПОЛУТЕНЬ ПО РАССТОЯНИЮ ДО ЗАСЛОНА. У основания предмета тень резкая, с
+// удалением от него расплывается: полуширина = (приёмник − заслон) × info.z,
+// как у настоящего солнца с угловым размером ShadowSettings::SunAngle. Ядро
+// расширяется непрерывно (корень из суммы квадратов), а не включается порогом:
+// иначе на границе порога ширина кромки менялась бы ступенькой.
+//
+// ЦЕНА. Ядро — шестнадцать чтений всегда. Поиск заслонов (четыре) — только у
+// каскадов, где полутень вообще может быть шире ядра (info.w); у дальних
+// тексель крупнее любой полутени, и остаётся одно ядро. Широкое ядро
+// (шестьдесят четыре) — только на кромке тени, где полутень заметна.
+float SunShadowMap(sampler2D map, vec3 pc, vec2 slope, vec4 info) {
+    vec2 size = vec2(textureSize(map, 0));
+    vec2 g = pc.xy * size - 0.5;
+    float bias = info.y * kSunBiasTexels;
+    vec2 blk = vec2(0.0);
+    float base = SunKernel(map, g, pc.z, slope, bias, blk);
+    if (info.w <= kSunKernelTexels) return base;
+
+    vec2 near = blk;
+    SunBlockerSearch(map, g, pc.z, slope, bias, info.w, blk);
+    if (blk.x <= 0.0) return 0.0;               // ни одного заслона в радиусе полутени
+    if (near.x >= 0.9999 && blk.x >= 1.9999) return 1.0; // всё вокруг в тени
+    float radius = min(blk.y / blk.x * info.z, info.w);
+    // Размытия ядра и полутени складываются как дисперсии — корнем из суммы
+    // квадратов. Полутень меньше трёх четвертей текселя меняет ширину кромки
+    // меньше чем на семь процентов — разница неразличима, а широкое ядро стоит
+    // шестьдесят четыре чтения, поэтому эта доля вычитается: шаг растёт с
+    // единицы, без ступеньки на границе.
+    const float kOwnPenumbra = 0.75;
+    float extra = max(radius * radius - kOwnPenumbra * kOwnPenumbra, 0.0);
+    float stride = sqrt(1.0 + extra / (kSunKernelTexels * kSunKernelTexels));
+    if (stride < 1.02) return base;
+    return SunKernelWide(map, g, pc.z, slope, bias, stride);
 }
 
 // Угол поворота диска выборки — свой у каждого пикселя (interleaved gradient
 // noise). Без него все пиксели берут пробы в одних и тех же местах, и полутень
 // получает считаное число ступеней яркости, которые на пологой кромке видны
 // полосами. С поворотом те же ступени рассыпаются в мелкий шум, а глаз
-// собирает его в ровный градиент. Общий для солнца и для локальных теней:
-// разные повороты у разных источников дали бы разный характер шума на одной
-// поверхности.
+// собирает его в ровный градиент. Только для локальных теней: у солнца
+// фильтр неподвижный и без шума (см. SunShadowMap) — его полутень видна на
+// всей открытой сцене, и зерно там бросалось в глаза сильнее всего.
 float ShadowRotation() {
     float ign = fract(52.9829189 * fract(dot(gl_FragCoord.xy,
                                              vec2(0.06711056, 0.00583715))));
@@ -351,7 +501,7 @@ float AtlasShadowPCF(vec4 rect, vec2 uv, float depth, float bias, float rotation
     // зажимать надо с учётом её тапов, а не только центра.
     vec4 bounds = vec4(rect.xy + texel * 1.5, rect.xy + vec2(rect.z) - texel * 1.5);
     vec2 p = rect.xy + uv * rect.z;
-    // Тот же ранний выход, что у солнца: девять точечных чтений решают, есть
+    // Ранний выход: девять точечных чтений решают, есть
     // ли рядом заслон, и освещённый фрагмент (а их большинство) фильтр не
     // платит. Размер лампы неизвестен — полутень постоянная.
     float blockerDepth;
@@ -477,39 +627,52 @@ float PointShadow(int slot, vec3 worldPos, vec3 normal, vec3 lightPos, float lin
 // PBR: ровно та картинка, которую видно на скриншоте.
 //
 // Отступ считается от размера текселя каскада — величины, известной на стороне
-// процессора. Скользящий угол закрывает запас по глубине (uShadowDepthBias), он
-// тоже считается из текселя и диапазона ортобокса.
+// процессора.
+//
+// ВЕЛИЧИНА ОТСТУПА. Раньше здесь было до 5.6 текселя (полтора радиуса фильтра,
+// и ещё втрое по наклону): им вместе с огромным запасом глубины глушили
+// самозатенение широкого диска. Отступ сдвигает точку выборки ВДОЛЬ ПОВЕРХНОСТИ
+// в проекции на карту — на столько же уезжает и тень, отсюда её отрыв от
+// предмета. Теперь наклон учитывает плоскость приёмника (ReceiverSlope), и
+// отступу остаётся одно: кривизна и рёбра, где плоскость перестаёт быть
+// правдой. Это тексель, умноженный на синус угла к лучу: у грани, смотрящей
+// прямо на солнце, он ноль (плоскость там точна), к скользящему углу — тексель.
 vec3 CascadeCoords(int cascade, vec3 worldPos, vec3 normal, float ndl) {
-    float slope = clamp(1.0 - abs(ndl), 0.0, 1.0);
-    // Множитель 1.5 к радиусу фильтра — это диагональ квадрата текселя
-    // (sqrt(2), с запасом): крайний тап диска может уйти по диагонали, и
-    // отступ обязан перекрывать именно её, а не сторону.
-    float offset = uShadowTexelWorld[cascade] * kShadowFilterTexels * 1.5 * (1.0 + 2.0 * slope);
+    float sinT = sqrt(max(1.0 - ndl * ndl, 0.0));
+    float offset = uShadowCascade[cascade].x * sinT;
     vec4 lp = uShadowLightSpace[cascade] * vec4(worldPos + normal * offset, 1.0);
     return (lp.xyz / lp.w) * 0.5 + 0.5;
 }
 
-// Влезает ли фрагмент в каскад с запасом на ядро фильтра. Запас обязателен:
-// на самом краю карты тапы 3x3 уходят за её пределы и приносят оттуда мусор,
-// который выглядит как рамка ложной тени по границе каскада.
+// Запас у края карты под ядро фильтра, в uv: носитель широкого ядра (не
+// больше ядра плюс радиус поиска) и билинейный узел. На самом краю тапы уходят за
+// пределы карты и приносят оттуда мусор — рамку ложной тени по границе
+// каскада. Раньше запас был постоянной долей карты (2%), и при карте 512 он
+// становился уже самого фильтра.
+float CascadeMargin(int cascade, float texelUV) {
+    return (uShadowCascade[cascade].w + kSunKernelTexels + 1.5) * texelUV;
+}
+
+// Влезает ли фрагмент в каскад с запасом на ядро фильтра.
 bool InsideCascade(vec3 pc, float margin) {
     return pc.z <= 1.0 &&
            all(greaterThanEqual(pc.xy, vec2(margin))) &&
            all(lessThanEqual(pc.xy, vec2(1.0 - margin)));
 }
 
-// Насколько фрагмент близок к краю каскада: 0 — в середине, 1 — на границе.
-// По этому числу ближний и дальний каскады смешиваются в узкой полосе, иначе
-// на стыке видна ступенька: слева тень мягкая и подробная, справа — грубая.
+// Насколько фрагмент близок к краю каскада: 0 — в середине, 1 — на границе
+// допустимой области. По этому числу ближний и дальний каскады смешиваются в
+// полосе шириной band, иначе на стыке видна ступенька: слева тень подробная,
+// справа — грубая. smoothstep, а не прямая: на прямой видны оба излома полосы.
 //
 // Если следующего каскада в этой точке нет, подмешивать НЕЧЕГО — и подмешивать
 // туда ноль (то есть «свет») нельзя: по всей границе каскада тень плавно
 // выцветала бы в освещённую полосу. В этом случае остаётся значение своего
 // каскада — см. CalcSunShadow.
-float CascadeEdge(vec3 pc, float band) {
+float CascadeEdge(vec3 pc, float margin, float band) {
     vec2 d = min(pc.xy, vec2(1.0) - pc.xy); // расстояние до ближайшего края
-    float m = min(d.x, d.y);
-    return 1.0 - clamp(m / band, 0.0, 1.0);
+    float m = min(d.x, d.y) - margin;
+    return 1.0 - smoothstep(0.0, band, m);
 }
 
 // --- Отладочные виды -----------------------------------------------------
@@ -559,7 +722,7 @@ bool DebugShade(int mode, vec3 N, vec3 worldPos, vec3 albedo, float metallic,
         for (int i = 0; i < 3; ++i) {
             if (i >= uShadowCascades) break;
             vec3 pc = CascadeCoords(i, worldPos, N, 1.0);
-            if (InsideCascade(pc, 0.02)) {
+            if (InsideCascade(pc, CascadeMargin(i, 1.0 / float(textureSize(uShadowMap, 0).x)))) {
                 vec3 tint = i == 0 ? vec3(1.0, 0.35, 0.3)
                           : i == 1 ? vec3(0.35, 1.0, 0.4)
                                    : vec3(0.4, 0.55, 1.0);
@@ -582,6 +745,17 @@ bool DebugShade(int mode, vec3 N, vec3 worldPos, vec3 albedo, float metallic,
     return false;
 }
 
+// Выборка каскада с номером cascade. Ветвление вместо индекса — потому что
+// GLSL 330 запрещает индексировать массив сэмплеров переменной, а sampler
+// нельзя положить в локальную переменную.
+float SunCascadeShadow(int cascade, vec3 pc, vec3 normal, float texelUV) {
+    vec2 slope = ReceiverSlope(cascade, normal, texelUV);
+    vec4 info = uShadowCascade[cascade];
+    if (cascade == 0) return SunShadowMap(uShadowMap, pc, slope, info);
+    if (cascade == 1) return SunShadowMap(uShadowMap1, pc, slope, info);
+    return SunShadowMap(uShadowMap2, pc, slope, info);
+}
+
 float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
     float ndl = dot(normal, sunDir);
 
@@ -589,53 +763,33 @@ float CalcSunShadow(vec3 worldPos, vec3 normal, vec3 sunDir) {
     //
     // Это не микрооптимизация. Солнце такую грань не освещает вовсе (вклад
     // умножается на max(dot(N,L),0) == 0), то есть результат выборки ни на что
-    // не влияет — а стоит он тридцати двух чтений карты, и на каждый каскад,
-    // который фрагмент заденет полосой смешивания. В любой замкнутой сцене от
-    // солнца отвёрнута примерно половина видимых граней: столько же выборок
-    // делалось впустую каждый кадр.
+    // не влияет. В любой замкнутой сцене от солнца отвёрнута примерно половина
+    // видимых граней: столько же выборок делалось бы впустую каждый кадр.
     if (ndl <= 0.0) return 0.0;
-    const float kMargin = 0.02; // запас под диск фильтра у края карты
-    const float kBand = 0.10;   // ширина полосы смешивания каскадов
-
-    float rot = ShadowRotation();
+    // Полоса смешивания каскадов — доля карты. Узкая полоса дешевле (в ней
+    // считаются оба каскада), но шов в ней заметнее; десятой доли хватает,
+    // чтобы смена подробности читалась как плавная.
+    const float kBand = 0.10;
+    // Все каскады одного разрешения (ShadowMap), поэтому тексель в uv один.
+    float texelUV = 1.0 / float(textureSize(uShadowMap, 0).x);
 
     // Каскады перебираются от ближнего к дальнему, и берётся ПЕРВЫЙ
     // подходящий: он самый подробный из тех, что накрывают эту точку.
-    //
-    // Выбор развёрнут вручную и выглядит длинно. Причина не в лени: GLSL 330
-    // запрещает индексировать массив сэмплеров переменной, а sampler нельзя
-    // положить в локальную переменную. Цикл здесь физически невозможен.
-    vec3 pc0 = CascadeCoords(0, worldPos, normal, ndl);
-    if (InsideCascade(pc0, kMargin)) {
-        float s = ShadowPCF(uShadowMap, pc0, ndl, rot, uShadowDepthBias[0], uShadowPenumbra[0]);
-        if (uShadowCascades > 1) {
-            float w = CascadeEdge(pc0, kBand);
+    for (int c = 0; c < 3; ++c) {
+        if (c >= uShadowCascades) break;
+        vec3 pc = CascadeCoords(c, worldPos, normal, ndl);
+        float margin = CascadeMargin(c, texelUV);
+        if (!InsideCascade(pc, margin)) continue;
+        float s = SunCascadeShadow(c, pc, normal, texelUV);
+        if (c + 1 < uShadowCascades) {
+            float w = CascadeEdge(pc, margin, kBand);
             if (w > 0.0) {
-                vec3 pc1 = CascadeCoords(1, worldPos, normal, ndl);
-                float far = InsideCascade(pc1, kMargin) ? ShadowPCF(uShadowMap1, pc1, ndl, rot, uShadowDepthBias[1], uShadowPenumbra[1]) : s;
-                s = mix(s, far, w);
+                vec3 pn = CascadeCoords(c + 1, worldPos, normal, ndl);
+                if (InsideCascade(pn, CascadeMargin(c + 1, texelUV)))
+                    s = mix(s, SunCascadeShadow(c + 1, pn, normal, texelUV), w);
             }
         }
         return s;
-    }
-    if (uShadowCascades > 1) {
-        vec3 pc1 = CascadeCoords(1, worldPos, normal, ndl);
-        if (InsideCascade(pc1, kMargin)) {
-            float s = ShadowPCF(uShadowMap1, pc1, ndl, rot, uShadowDepthBias[1], uShadowPenumbra[1]);
-            if (uShadowCascades > 2) {
-                float w = CascadeEdge(pc1, kBand);
-                if (w > 0.0) {
-                    vec3 pc2 = CascadeCoords(2, worldPos, normal, ndl);
-                    float far = InsideCascade(pc2, kMargin) ? ShadowPCF(uShadowMap2, pc2, ndl, rot, uShadowDepthBias[2], uShadowPenumbra[2]) : s;
-                    s = mix(s, far, w);
-                }
-            }
-            return s;
-        }
-    }
-    if (uShadowCascades > 2) {
-        vec3 pc2 = CascadeCoords(2, worldPos, normal, ndl);
-        if (InsideCascade(pc2, kMargin)) return ShadowPCF(uShadowMap2, pc2, ndl, rot, uShadowDepthBias[2], uShadowPenumbra[2]);
     }
     // Дальше последнего каскада тени нет — там всё освещено. Тянуть её краем
     // карты значило бы рисовать полосу ложной тени до горизонта.
