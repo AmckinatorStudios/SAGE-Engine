@@ -1,6 +1,13 @@
 {
   "name": "Русский",
   "strings": {
+    "OK": "OK",
+    "Delete the layout": "Удалить макет",
+    "Deleting a layout": "Удаление макета",
+    "Layout name": "Имя макета",
+    "My Layout": "Мой макет",
+    "Save Current Layout...": "Сохранить текущий макет…",
+    "Layouts": "Макеты",
     "Open an existing project (Ctrl+O)": "Открыть существующий проект (Ctrl+O)",
     "Not opened yet": "Ещё не открывали",
     "Just now": "Только что",

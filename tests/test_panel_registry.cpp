@@ -131,3 +131,21 @@ TEST(PanelRegistry_limits_have_safe_defaults_and_follow_scale) {
     const auto s3 = pe::PanelRegistry::LimitsFor(side, EditorWorkspace::Scene, 1.0f);
     CHECK_TRUE(s3.Max[0] >= s3.Min[0]);
 }
+
+// Пользовательские макеты хранят видимость панелей по Id: снимок возвращает
+// ровно то, что было, а неизвестные реестру Id применение пропускает.
+TEST(PanelRegistry_visibility_snapshot_roundtrip) {
+    pe::PanelRegistry reg;
+    reg.Register(Spec("A", pe::PanelSection::Scene));
+    reg.Register(Spec("B", pe::PanelSection::Scene));
+    reg.SetVisible("A", true);
+    reg.SetVisible("B", false);
+    const auto snap = reg.VisibilitySnapshot();
+    reg.SetVisible("A", false);
+    reg.SetVisible("B", true);
+    auto withGhost = snap;
+    withGhost["Removed"] = true;
+    reg.ApplyVisibility(withGhost);
+    CHECK_TRUE(reg.IsVisible("A"));
+    CHECK_FALSE(reg.IsVisible("B"));
+}

@@ -158,7 +158,7 @@ void EditorLayer::RegisterCommands() {
     m_commands.Add({"window.buildSettings", T("Build Settings..."), window, "", "build", {},
                     [this] { OpenSettings(SettingsPanel::Category::BuildSettings); }});
     m_commands.Add({"window.reset", T("Reset Layout"), window, "", "grid", {},
-                    [this] { m_panelRegistry.Restore(); m_rebuildDockLayout = true; }});
+                    [this] { RequestDefaultLayout(); }});
 
     // Оформление — командами тоже: тема меняется без похода в меню, и это тот
     // случай, когда её меняют часто (свет в комнате не постоянен).
@@ -625,6 +625,7 @@ void EditorLayer::OnRender() {
     TickColliderHandleProbe();
     TickViewportToolbarProbe();
     PinMouseWhileCaptured();
+    ApplyPendingLayout();
     ImGui::NewFrame();
     if (!app.GetWindow().CursorCaptured()) m_freeMousePos = ImGui::GetIO().MousePos;
     ImGuizmo::BeginFrame();

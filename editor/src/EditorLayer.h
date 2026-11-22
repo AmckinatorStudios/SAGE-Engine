@@ -4,6 +4,7 @@
 #include <optional>
 #include <memory>
 #include <string>
+#include <map>
 #include <vector>
 #include <filesystem>
 #include <functional>
@@ -426,8 +427,17 @@ private:
     void BuildDefaultDockLayout(unsigned int dockspaceId);
     // Раскладка пространства «Интерфейс». Своя, а не общая: у него другой
     // состав панелей и другой главный — холст, а не вьюпорт сцены.
-    void BuildInterfaceDockLayout(unsigned int dockspaceId);
-    void BuildAnimationDockLayout(unsigned int dockspaceId);
+    void BuildInterfaceDockLayout(unsigned int dockspaceId, bool focus = true);
+    void BuildAnimationDockLayout(unsigned int dockspaceId, bool focus = true);
+    // Пользовательские макеты (EditorLayer_Layouts.cpp).
+    void LoadLayouts();             // из настроек редактора, при запуске
+    void DrawLayoutsMenu();         // Window > Layouts
+    void DrawLayoutDialog();        // имя при «Сохранить как» и «Переименовать»
+    void ApplyPendingLayout();      // ДО NewFrame: ini в память можно грузить только там
+    void RequestDefaultLayout();    // Window > Reset Layout и «Default»
+    void SaveLayoutAs(const std::string& name);
+    void OverwriteLayout(size_t index);
+    void PersistLayouts();
     // Рисует панели текущего пространства.
     void DrawWorkspacePanels();
     void DrawStatusBar(float height);
@@ -777,7 +787,27 @@ private:
     glm::mat4 m_view{1.0f}, m_proj{1.0f}; // последние view/proj кадра (гизмо/пикинг)
 
     // --- docking ---
-    bool m_rebuildDockLayout = false; // форс-перестройка (Window > Reset Layout)
+    bool m_rebuildDockLayout = false; // форс-перестройка текущего пространства
+    bool m_rebuildAllDocks = false;   // Window > Reset Layout: все три пространства
+
+    // Пользовательский макет: ini ImGui ЦЕЛИКОМ (в нём доки всех трёх
+    // пространств, размеры, вкладки, позиции окон) плюс видимость панелей и
+    // «отдельные окна» — то, чего в ini нет. Отдельная от ini последней сессии
+    // (sage_editor_imgui.ini) копия: автосохранение сессии работает как прежде.
+    struct SavedLayout {
+        std::string Name;
+        std::string Ini;
+        std::map<std::string, bool> Visible;
+        std::map<std::string, bool> Detached;
+    };
+    std::vector<SavedLayout> m_layouts;
+    std::string m_activeLayout;       // имя выбранного макета; пусто — стандартный
+    int m_pendingLayout = -1;         // индекс макета, который применить в начале кадра
+    enum class LayoutDialogMode { None, SaveAs, Rename };
+    LayoutDialogMode m_layoutDialog = LayoutDialogMode::None;
+    bool m_layoutDialogOpen = false;
+    int m_layoutDialogTarget = -1;
+    char m_layoutNameBuf[64] = {};
 
     // Общих окон между пространствами БОЛЬШЕ НЕТ: у ассетов, консоли и
     // анимации своё окно в каждом (см. PanelWindowId.h). Вместе с ними ушла и

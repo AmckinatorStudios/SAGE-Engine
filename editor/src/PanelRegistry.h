@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -162,6 +163,11 @@ public:
     // Есть ли на экране хоть одна панель (пустой док — повод подсказать).
     bool AnyVisible() const;
     void CloseAll();
+    // Видимость всех панелей по Id — для сохранения пользовательских макетов.
+    // Применение берёт только известные реестру Id: макет, сохранённый до
+    // появления панели (или плагином, которого больше нет), ничего не ломает.
+    std::map<std::string, bool> VisibilitySnapshot() const;
+    void ApplyVisibility(const std::map<std::string, bool>& visible);
 
     // Команды «показать/скрыть» для всех панелей, которые уже есть, и для тех,
     // что зарегистрируют потом (реестр запоминает, куда добавлять).

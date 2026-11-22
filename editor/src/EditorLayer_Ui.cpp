@@ -186,7 +186,7 @@ void EditorLayer::DockRegisteredPanels(EditorWorkspace workspace, unsigned int l
     });
 }
 
-void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
+void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId, bool focus) {
     // У вёрстки другой главный: ХОЛСТ, а не вьюпорт сцены. Всё остальное
     // стоит вокруг него так же, как в пространстве сцены, — привычка к
     // расположению панелей важнее, чем оригинальность раскладки.
@@ -209,11 +209,12 @@ void EditorLayer::BuildInterfaceDockLayout(unsigned int dockspaceId) {
     // ПО ИДЕНТИФИКАТОРУ, а не по имени: имя панели переводится («Canvas» /
     // «Холст»), и SetWindowFocus по строке в русском редакторе не находил
     // ничего — молча.
+    if (!focus) return;
     if (ImGuiWindow* canvas = ImGui::FindWindowByID(ImHashStr("InterfaceViewport")))
         ImGui::FocusWindow(canvas);
 }
 
-void EditorLayer::BuildAnimationDockLayout(unsigned int dockspaceId) {
+void EditorLayer::BuildAnimationDockLayout(unsigned int dockspaceId, bool focus) {
     // Привычная раскладка сцены: иерархия слева, инспектор справа, вьюпорт в
     // центре. Снизу — ОДИН узел вкладками: Assets, Console, клип и граф
     // анимации. Нижняя полоса выше, чем у сцены: на ней работают — шкала
@@ -229,6 +230,7 @@ void EditorLayer::BuildAnimationDockLayout(unsigned int dockspaceId) {
     DockRegisteredPanels(EditorWorkspace::Animation, left, right, bottom, center);
     ImGui::DockBuilderFinish(dockspaceId);
 
+    if (!focus) return;
     // Вперёд — таймлайн: с ним приходят в это пространство чаще всего.
     if (ImGuiWindow* clip = ImGui::FindWindowByID(ImHashStr("AnimationAnim"))) ImGui::FocusWindow(clip);
     if (ImGuiWindow* view = ImGui::FindWindowByID(ImHashStr("AnimViewport"))) ImGui::FocusWindow(view);
@@ -314,7 +316,25 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // панелями сцены, и новые панели в неё не встали бы.
     static const char* const kDockNames[(int)EditorWorkspace::Count] = {
         "SageDockSpace", "SageInterfaceDock", "SageAnimationWorkspace"};
+    // focus — только для видимого пространства: фокус окна, которого в этом
+    // кадре нет, отнял бы клавиатуру у видимого.
+    auto BuildWorkspaceDock = [this](int w, ImGuiID id, bool focus) {
+        if (w == (int)EditorWorkspace::Interface) BuildInterfaceDockLayout(id, focus);
+        else if (w == (int)EditorWorkspace::Animation) BuildAnimationDockLayout(id, focus);
+        else BuildDefaultDockLayout(id);
+    };
     ImGuiID dockspaceId = ImGui::GetID(kDockNames[(int)m_workspace]);
+    // Сброс раскладки — ВСЕХ трёх пространств, и ДО того, как какой-либо из
+    // доков подан в кадр: пересобирать узел, у которого DockSpace уже вызван,
+    // нельзя. Состав «отдельных окон» и видимость панелей возвращаются тут же.
+    if (m_rebuildAllDocks) {
+        m_rebuildAllDocks = false;
+        m_rebuildDockLayout = false;
+        panelwindows::ResetToDefaults();
+        m_panelRegistry.Restore();
+        for (int w = 0; w < (int)EditorWorkspace::Count; ++w)
+            BuildWorkspaceDock(w, ImGui::GetID(kDockNames[w]), w == (int)m_workspace);
+    }
     // ОСТАЛЬНЫЕ ДОК-ПРОСТРАНСТВА ДЕРЖИМ ЖИВЫМИ, хоть и не показываем.
     //
     // Не подать его ImGui значит сказать «этого дока больше нет»: узлы, в
@@ -332,13 +352,9 @@ void EditorLayer::DrawDockspaceAndMenu() {
 
     // Куда возвращать панель, у которой сняли галочку «в отдельном окне».
     panelwindows::SetHomeDock(dockspaceId);
-    // Строим дефолтную раскладку, если её ещё нет (первый запуск без ini)
-    // или пользователь попросил сброс (Window > Reset Layout).
     if (m_rebuildDockLayout || ImGui::DockBuilderGetNode(dockspaceId) == nullptr) {
         m_rebuildDockLayout = false;
-        if (m_workspace == EditorWorkspace::Interface) BuildInterfaceDockLayout(dockspaceId);
-        else if (m_workspace == EditorWorkspace::Animation) BuildAnimationDockLayout(dockspaceId);
-        else BuildDefaultDockLayout(dockspaceId);
+        BuildWorkspaceDock((int)m_workspace, dockspaceId, true);
     }
 
     // Док-пространство занимает всё между тулбаром и статус-баром.
@@ -473,10 +489,8 @@ void EditorLayer::DrawDockspaceAndMenu() {
             Sage::UI::MenuSection(T("Window Management"));
             // Сброс раскладки возвращает и сами панели: закрытая вкладка иначе
             // не восстанавливалась «сбросом», хотя именно этого от него ждут.
-            if (EditorIcons::MenuItem("refresh", T("Reset Layout"))) {
-                m_panelRegistry.Restore();
-                m_rebuildDockLayout = true;
-            }
+            if (EditorIcons::MenuItem("refresh", T("Reset Layout"))) RequestDefaultLayout();
+            DrawLayoutsMenu();
             // Панель ОТДЕЛЬНЫМ ОКНОМ СИСТЕМЫ — меню, а не только перетаскивание
             // мышью: вернуть вытащенное было нечем, кроме сброса раскладки.
             if (EditorIcons::BeginMenu("window", T("Separate Window"))) {
@@ -575,6 +589,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // Layer.h): проверять флаг GLFW прямо здесь бесполезно, цикл выходит
     // раньше, чем этот код выполнится.
     DrawUnsavedPrompt();
+    DrawLayoutDialog();
     m_settingsPanel.Draw(*this, m_panels[EditorPanel::Settings]);
     m_assets.Tick(*this);           // пакетная конвертация идёт по кадрам, а не одним куском
     // Анимация, Tween и профилировщик рисуются вместе с остальными панелями —

@@ -134,6 +134,23 @@ void AttachAll() {
     for (const Default& d : kDefaults) SetDetached(d.Id, false);
 }
 
+std::map<std::string, bool> Snapshot() {
+    std::map<std::string, bool> out;
+    for (const Default& d : kDefaults) out[d.Id] = Get(d.Id).Detached;
+    return out;
+}
+
+void Apply(const std::map<std::string, bool>& detached) {
+    for (const Default& d : kDefaults) {
+        auto it = detached.find(d.Id);
+        if (it == detached.end()) continue;
+        State& s = Get(d.Id);
+        s.Detached = it->second;
+        s.Applied = it->second;
+        Remember(d.Id, it->second);
+    }
+}
+
 void ResetToDefaults() {
     for (const Default& d : kDefaults) SetDetached(d.Id, d.Detached);
 }

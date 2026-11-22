@@ -239,6 +239,19 @@ bool PanelRegistry::AnyVisible() const {
     return false;
 }
 
+std::map<std::string, bool> PanelRegistry::VisibilitySnapshot() const {
+    std::map<std::string, bool> out;
+    for (const auto& e : m_entries) out[e->Spec.Id] = *e->Flag();
+    return out;
+}
+
+void PanelRegistry::ApplyVisibility(const std::map<std::string, bool>& visible) {
+    for (auto& e : m_entries) {
+        auto it = visible.find(e->Spec.Id);
+        if (it != visible.end()) *e->Flag() = it->second;
+    }
+}
+
 void PanelRegistry::CloseAll() {
     for (auto& e : m_entries) *e->Flag() = false;
 }
