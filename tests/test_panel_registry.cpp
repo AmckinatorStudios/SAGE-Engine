@@ -154,5 +154,5 @@ TEST(PanelRegistry_visibility_snapshot_roundtrip) {
 // окно иначе (инструмент со своим Begin/End, окно плагина).
 TEST(PanelRegistry_detachable_is_opt_in) {
     pe::PanelSpec s;
-    CHECK(!s.Detachable);
+    CHECK_EQ(s.Detachable, false);
 }
