@@ -250,3 +250,33 @@ TEST(Profiler_builds_a_nested_breakdown_without_gpu_timers) {
     sage::profile::SetEnabled(false);
     sage::rhi::GraphicsDevice::SetCurrent(nullptr);
 }
+
+// Снос вложенного контекста останавливает ЕГО воркеры и не трогает пул
+// внешнего; выключенный после остановки пул не поднимается заново ленивой
+// инициализацией ParallelFor (так Application гасит пул до сноса подсистем).
+#include "sage/core/EngineContext.h"
+
+TEST(JobSystem_context_teardown_stops_own_workers_only) {
+    JobSystem& outer = JobSystem::Get();
+    outer.Initialize(2);
+    {
+        sage::ScopedEngineContext inner;
+        JobSystem& js = JobSystem::Get();
+        CHECK_TRUE(&js != &outer);
+        js.Initialize(3);
+        std::atomic<int> sum{0};
+        js.ParallelFor(1000, [&](std::size_t b, std::size_t e) { sum += (int)(e - b); }, 10);
+        CHECK_EQ(sum.load(), 1000);
+    }
+    CHECK_TRUE(&JobSystem::Get() == &outer);
+    CHECK_EQ(outer.WorkerCount(), 2);
+
+    JobSystem standalone;
+    standalone.Initialize(2);
+    standalone.Shutdown();
+    standalone.SetEnabled(false);
+    int calls = 0;
+    standalone.ParallelFor(100, [&](std::size_t b, std::size_t e) { calls += (int)(e - b); }, 1);
+    CHECK_EQ(calls, 100);
+    CHECK_EQ(standalone.WorkerCount(), 0);
+}

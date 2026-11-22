@@ -1,4 +1,5 @@
 #include "SceneSerializer.h"
+#include "sage/core/AtomicFile.h"
 #include "sage/scene/SceneSerializerDetail.h"
 #include "sage/audio/AudioComponents.h"
 #include "sage/assets/Pack.h"
@@ -507,11 +508,17 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
 // --- Публичные обёртки: файл и строка используют одну и ту же сборку JSON ---
 
 void Save(const Scene& scene, const std::string& path) {
-    std::ofstream file(path);
-    if (!file.is_open()) {
-        throw std::runtime_error("Не удалось открыть файл для записи сцены: " + path);
+    // Сначала ВЕСЬ текст в памяти, и только потом — диск. Раньше файл
+    // открывался (и обнулялся) до сборки JSON: исключение в компоненте игры
+    // или битая строка (dump бросает на не-UTF-8) оставляли на месте сцены
+    // пустой или обрезанный файл. Теперь любая ошибка сборки вылетает до
+    // записи, а запись идёт через временный файл с подменой — прежняя сцена
+    // остаётся целой при любом исходе.
+    const std::string text = BuildSceneJson(scene).dump(2);
+    std::string err;
+    if (!sage::WriteFileAtomic(path, text, err)) {
+        throw std::runtime_error("Не удалось записать сцену: " + err);
     }
-    file << BuildSceneJson(scene).dump(2);
     // Страницы атласа лайтмап — HDR-файлами рядом со сценой (в JSON им не место).
     if (scene.GI && scene.GI->Baked) sage::gi::SavePages(*scene.GI, path);
 }

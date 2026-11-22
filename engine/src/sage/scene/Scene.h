@@ -1,5 +1,6 @@
 #pragma once
 #include <algorithm>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <stdexcept>
@@ -32,12 +33,33 @@
 namespace sage::gi { struct GIState; } // запечённое GI сцены (см. sage/gi/GI.h)
 
 
+// Метка жизни сцены. Лежит в контексте реестра сцены (ctx) и держит слабую
+// ссылку на «сцена жива». Дескриптор GameObject хранит СЫРОЙ указатель на
+// реестр, и после уничтожения сцены Valid() звал бы valid() у освобождённой
+// памяти — неопределённое поведение, которое «работает», пока память не
+// переиспользована. Слабая ссылка гаснет раньше, чем реестр разрушается, и
+// Valid() отвечает false, не трогая реестр.
+struct SceneLifetime {
+    std::weak_ptr<const void> Alive;
+};
+
 class GameObject {
 public:
     GameObject() = default;
-    GameObject(entt::registry* reg, entt::entity e) : m_reg(reg), m_entity(e) {}
+    // Метку жизни дескриптор берёт сам из контекста реестра: так защищены и
+    // дескрипторы, собранные как GameObject(&scene.Registry(), e). У реестра
+    // не от сцены (голый entt::registry в тестах) метки нет — тогда проверка
+    // прежняя, и за время жизни реестра отвечает его владелец.
+    GameObject(entt::registry* reg, entt::entity e) : m_reg(reg), m_entity(e) {
+        if (reg) {
+            if (const SceneLifetime* life = reg->ctx().find<SceneLifetime>()) {
+                m_life = life->Alive;
+                m_tracked = true;
+            }
+        }
+    }
 
-    bool Valid() const { return m_reg && m_reg->valid(m_entity); }
+    bool Valid() const { return m_reg && (!m_tracked || !m_life.expired()) && m_reg->valid(m_entity); }
     entt::entity Entity() const { return m_entity; }
     entt::registry* Registry() const { return m_reg; }
 
@@ -91,11 +113,15 @@ private:
 
     entt::registry* m_reg = nullptr;
     entt::entity m_entity = entt::null;
+    std::weak_ptr<const void> m_life;
+    bool m_tracked = false;
 };
 
 class Scene {
 public:
-    explicit Scene(std::string name = "Untitled") : m_name(std::move(name)) {}
+    explicit Scene(std::string name = "Untitled") : m_name(std::move(name)) {
+        m_registry.ctx().emplace<SceneLifetime>(SceneLifetime{m_alive});
+    }
 
     // Дескрипторы GameObject хранят СЫРОЙ указатель на m_registry — поэтому
     // саму сцену нельзя перемещать/копировать (адрес registry должен быть
@@ -491,4 +517,7 @@ private:
     entt::registry m_registry;
     std::unordered_map<int, entt::entity> m_idToEntity;
     int m_nextId = 1;
+    // Объявлена ПОСЛЕ реестра — значит, разрушается раньше него: дескрипторы
+    // видят «сцены нет» до того, как память реестра освобождена.
+    std::shared_ptr<const bool> m_alive = std::make_shared<const bool>(true);
 };

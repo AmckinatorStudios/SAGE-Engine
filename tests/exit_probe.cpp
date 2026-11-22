@@ -25,10 +25,13 @@
 //  ПОЧЕМУ КУБ ИЗ КЭША. Нужен любой объект, который переживёт контекст. Примитив
 //  из общего кэша — самый честный случай: его берут все и всегда.
 // ============================================================================
+#include <atomic>
 #include <memory>
 
 #include "sage/app/Application.h"
 #include "sage/app/GameModule.h"
+#include "sage/core/EngineContext.h"
+#include "sage/core/JobSystem.h"
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
 
@@ -50,6 +53,14 @@ public:
     void OnUpdate(float) override {
         // Несколько кадров — чтобы приложение успело пожить как настоящее, а не
         // выйти из конструктора.
+        // Пул задач в работе до самого выхода: Application обязан остановить
+        // воркеры ДО того, как снесёт кэш ресурсов и устройство (порядок
+        // сноса — в ~Application и ~EngineContext).
+        sage::JobSystem& jobs = sage::EngineContext::Current().Jobs();
+        jobs.SetEnabled(true);
+        std::atomic<int> touched{0};
+        jobs.ParallelFor(256, [&](std::size_t b, std::size_t e) { touched += (int)(e - b); }, 16);
+        if (touched.load() != 256) LOG_ERROR("ExitProbe") << "пул задач потерял работу";
         if (++m_frames >= 3) sage::Application::Get().Close();
     }
 

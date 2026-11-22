@@ -1,5 +1,6 @@
 #pragma once
 #include <memory>
+#include <optional>
 
 // ---------------------------------------------------------------------------
 // EngineContext — ЯВНЫЙ владелец подсистем, живущих «одна на процесс».
@@ -103,24 +104,38 @@ private:
 
 // Контекст на время области видимости — для тестов и утилит, у которых нет
 // Application. Предыдущий контекст восстанавливается, даже если проверка упала
-// с исключением.
+// с исключением (деструктор отрабатывает при раскрутке стека).
+//
+// Контекст хранится в optional и разрушается ЯВНО в теле деструктора, а не
+// после него. Иначе (обычное поле) тело деструктора сначала вернуло бы
+// предыдущий контекст, и только потом поле разрушилось бы — подсистемы,
+// спрашивающие EngineContext::Current() при своём сносе (кэш ресурсов,
+// воркеры), видели бы ЧУЖОЙ контекст и чистили бы его.
 class ScopedEngineContext {
 public:
-    ScopedEngineContext() : m_previous(EngineContext::SetCurrent(&m_context)) {}
-    // Контекст разрушается ДО восстановления предыдущего: он же освобождает
-    // свои GPU-объекты, и делать это надо, пока текущим считается он.
-    ~ScopedEngineContext() { EngineContext::SetCurrent(m_previous); }
+    ScopedEngineContext() : m_previous(EngineContext::CurrentOrNull()) {
+        // Создание может бросить — тогда текущий контекст не тронут.
+        m_context.emplace();
+        EngineContext::SetCurrent(&*m_context);
+    }
+    ~ScopedEngineContext() {
+        // Сначала полностью разрушить свой (пока он текущий), потом вернуть
+        // предыдущий — порядок, на котором держатся вложенные контексты.
+        m_context.reset();
+        EngineContext::SetCurrent(m_previous);
+    }
 
     ScopedEngineContext(const ScopedEngineContext&) = delete;
     ScopedEngineContext& operator=(const ScopedEngineContext&) = delete;
 
-    EngineContext& operator*() { return m_context; }
-    EngineContext* operator->() { return &m_context; }
-    EngineContext& Get() { return m_context; }
+    EngineContext& operator*() { return *m_context; }
+    EngineContext* operator->() { return &*m_context; }
+    EngineContext& Get() { return *m_context; }
+    EngineContext* Previous() const { return m_previous; }
 
 private:
-    EngineContext m_context;
     EngineContext* m_previous;
+    std::optional<EngineContext> m_context;
 };
 
 } // namespace sage

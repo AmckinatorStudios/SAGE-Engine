@@ -10,10 +10,24 @@
 namespace sage::render {
 namespace {
 
+PipelineInfo BuiltinPbr() {
+    PipelineInfo pbr;
+    pbr.Id = StandardPipeline::kId;
+    pbr.Label = "SAGE PBR";
+    pbr.Description = "Встроенный рендер: тени, PBR-освещение сцены, небо, пост-обработка.";
+    pbr.Create = [] { return std::make_unique<StandardPipeline>(); };
+    return pbr;
+}
+
+// Встроенный PBR кладётся в реестр В КОНСТРУКТОРЕ статика: инициализация
+// локального статика в C++11 потокобезопасна и однократна. Прежняя схема
+// (флаг «встроенные есть» ставился ДО регистрации, сама регистрация — после
+// снятия блокировки) давала два сбоя: второй поток мог увидеть флаг и не
+// найти "sage.pbr", а подмена PBR игрой ДО первого Find затиралась встроенным.
 struct Registry {
     std::mutex Lock;
     std::vector<PipelineInfo> Items;
-    bool Builtins = false;
+    Registry() { Items.push_back(BuiltinPbr()); }
 };
 
 Registry& Reg() {
@@ -21,64 +35,56 @@ Registry& Reg() {
     return r;
 }
 
-void EnsureBuiltins() {
-    bool need = false;
-    {
-        std::lock_guard<std::mutex> lock(Reg().Lock);
-        need = !Reg().Builtins;
-        Reg().Builtins = true;
-    }
-    if (need) RenderPipelineRegistry::RegisterBuiltins();
-}
-
 } // namespace
 
-void RenderPipelineRegistry::Register(PipelineInfo info) {
+bool RenderPipelineRegistry::Register(PipelineInfo info) {
+    if (info.Id.empty() || !info.Create) {
+        LOG_ERROR("Render") << "RenderPipelineRegistry: запись отвергнута — "
+                            << (info.Id.empty() ? "пустой Id" : "нет фабрики у '" + info.Id + "'");
+        return false;
+    }
     Registry& r = Reg();
     std::lock_guard<std::mutex> lock(r.Lock);
     for (PipelineInfo& existing : r.Items) {
         if (existing.Id == info.Id) {
             existing = std::move(info);
-            return;
+            return true;
         }
     }
     r.Items.push_back(std::move(info));
+    return true;
 }
 
-const PipelineInfo* RenderPipelineRegistry::Find(const std::string& id) {
-    EnsureBuiltins();
+std::optional<PipelineInfo> RenderPipelineRegistry::Find(const std::string& id) {
     Registry& r = Reg();
     std::lock_guard<std::mutex> lock(r.Lock);
     for (const PipelineInfo& i : r.Items)
-        if (i.Id == id) return &i;
-    return nullptr;
+        if (i.Id == id) return i;
+    return std::nullopt;
 }
 
 std::vector<PipelineInfo> RenderPipelineRegistry::All() {
-    EnsureBuiltins();
     Registry& r = Reg();
     std::lock_guard<std::mutex> lock(r.Lock);
     return r.Items;
 }
 
 std::unique_ptr<RenderPipeline> RenderPipelineRegistry::Create(const std::string& id) {
-    const PipelineInfo* info = Find(id);
-    if (!info || !info->Create) return nullptr;
-    return info->Create();
+    // Копия фабрики берётся под блокировкой, вызывается — без неё.
+    std::function<std::unique_ptr<RenderPipeline>()> factory;
+    {
+        Registry& r = Reg();
+        std::lock_guard<std::mutex> lock(r.Lock);
+        for (const PipelineInfo& i : r.Items)
+            if (i.Id == id) {
+                factory = i.Create;
+                break;
+            }
+    }
+    return factory ? factory() : nullptr;
 }
 
-void RenderPipelineRegistry::RegisterBuiltins() {
-    {
-        std::lock_guard<std::mutex> lock(Reg().Lock);
-        Reg().Builtins = true;
-    }
-    PipelineInfo pbr;
-    pbr.Id = StandardPipeline::kId;
-    pbr.Label = "SAGE PBR";
-    pbr.Description = "Встроенный рендер: тени, PBR-освещение сцены, небо, пост-обработка.";
-    pbr.Create = [] { return std::make_unique<StandardPipeline>(); };
-    Register(std::move(pbr));
-}
+void RenderPipelineRegistry::RegisterBuiltins() { (void)Reg(); }
 
 // ============================================================================
 //  PipelineRenderer

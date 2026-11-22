@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <nlohmann/json.hpp>
+#include "sage/scene/ComponentRegistry.h"
 
 #include "sage/anim/AnimationComponents.h"
 #include "sage/anim/PropertyAnimator.h"
@@ -277,4 +278,50 @@ TEST(Scene_copied_object_keeps_every_component) {
         if (const auto* au = copy.Registry().try_get<AudioSourceComponent>(c.Entity())) CHECK_EQ((int)au->Handle, 0);
         if (const auto* tw = copy.Registry().try_get<sage::anim::TweenComponent>(c.Entity())) CHECK_TRUE(!tw->Started);
     }
+}
+
+// Компонент игры (реестр) и компонент, которого этот код не знает, переживают
+// загрузку, копию в ДРУГУЮ сцену и повторное сохранение байт в байт; ссылка
+// внутри копированного поддерева ведёт в копию.
+namespace {
+struct LosslessMark {
+    int Level = 0;
+    sage::vars::EntityRef Target;
+};
+} // namespace
+
+TEST(Scene_registered_and_unknown_components_survive_copy_and_resave) {
+    sage::scene::RegisterComponent(sage::scene::MakeComponentType<LosslessMark>(
+        "test_lossless_mark",
+        [](const LosslessMark& m) { return json{{"level", m.Level}, {"target", m.Target.Id}}; },
+        [](const json& j, LosslessMark& m) {
+            m.Level = j.value("level", 0);
+            m.Target.Id = j.value("target", 0);
+        },
+        [](LosslessMark& m, const sage::scene::RefVisit& visit) { visit(m.Target); }));
+    const std::string file = R"({"name": "S", "objects": [
+        {"id": 1, "name": "Root", "components": {"test_lossless_mark": {"level": 3, "target": 2},
+                                                 "other_game": {"deep": {"a": [1, 2]}, "s": "x"}}},
+        {"id": 2, "name": "Child", "parent": 1}
+    ]})";
+    auto scene = SceneSerializer::LoadFromString(SceneSerializer::MigrateSceneJson(file));
+    GameObject root = scene->FindByName("Root");
+    CHECK_TRUE(root.Valid());
+    if (!root.Valid()) return;
+    Scene other("Other");
+    other.CreateObject("Occupant");   // номера в целевой сцене заняты — копия получит другие
+    GameObject copy = sage::scene::CopySubtree(*scene, root.Entity(), other, entt::null);
+    const auto* mark = other.Registry().try_get<LosslessMark>(copy.Entity());
+    const auto* unknown = other.Registry().try_get<sage::scene::UnknownComponents>(copy.Entity());
+    const auto* hier = other.Registry().try_get<HierarchyComponent>(copy.Entity());
+    CHECK_TRUE(mark && unknown && hier && hier->Children.size() == 1);
+    if (mark && hier && hier->Children.size() == 1) {
+        CHECK_EQ(mark->Level, 3);
+        CHECK_EQ(mark->Target.Id, other.Registry().get<IdComponent>(hier->Children[0]).Id);
+    }
+    if (unknown) CHECK_TRUE(unknown->Data["other_game"]["deep"]["a"][1] == 2);
+    const std::string once = SceneSerializer::SaveToString(other);
+    const std::string twice = SceneSerializer::SaveToString(*SceneSerializer::LoadFromString(once));
+    CHECK_TRUE(once == twice);
+    sage::scene::UnregisterComponent("test_lossless_mark");
 }

@@ -1,5 +1,6 @@
 #pragma once
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -48,16 +49,36 @@ struct ComponentType {
     std::function<bool(const entt::registry&, entt::entity)> Has;
     std::function<nlohmann::json(const entt::registry&, entt::entity)> Save;
     std::function<void(entt::registry&, entt::entity, const nlohmann::json&)> Load;
+    // Снять компонент: им реестр убирает недочитанный или недокопированный
+    // компонент, если Load/Copy бросили на полпути. Обязательна.
+    std::function<void(entt::registry&, entt::entity)> Remove;
+    // Необязательна: без неё копия идёт через Save -> Load.
     std::function<void(const entt::registry&, entt::entity, entt::registry&, entt::entity)> Copy;
     // Ссылки на другие объекты внутри компонента (необязательно).
     std::function<void(entt::registry&, entt::entity, const RefVisit&)> VisitRefs;
 };
 
-// Тот же ключ второй раз — замена: игра вправе переопределить свой тип.
-void RegisterComponent(ComponentType type);
+// Описание отдаётся shared_ptr'ом на НЕИЗМЕНЯЕМУЮ запись: замена или снятие
+// типа (в том числе из другого потока) не трогают описание, которое кто-то
+// сейчас держит, — оно живёт, пока жив последний держатель.
+using ComponentTypePtr = std::shared_ptr<const ComponentType>;
+
+// ПОТОКОБЕЗОПАСНОСТЬ. Реестр под mutex'ом, но пользовательские Has/Save/Load/
+// Copy/VisitRefs/Remove вызываются ВНЕ блокировки: обход идёт по снимку
+// списка, снятому под блокировкой. Пользовательский код может сам звать
+// реестр без взаимоблокировки. Встроенные типы движка регистрируются ровно
+// один раз при первом обращении к реестру, из любого потока.
+//
+// Тот же ключ второй раз — ЗАМЕНА на месте (порядок записи сохраняется): игра
+// вправе переопределить свой тип или встроенный. Неполное описание (нет ключа,
+// Has, Save, Load или Remove) отвергается: false и строка в лог.
+//
+// Снятие типа не трогает уже созданные компоненты в сценах: пока тип снят,
+// сохранение их не пишет. Снимать тип, пока его сцены живы, — ошибка игры.
+bool RegisterComponent(ComponentType type);
 bool UnregisterComponent(const std::string& key);
-const std::vector<ComponentType>& ComponentTypes();
-const ComponentType* FindComponentType(const std::string& key);
+std::vector<ComponentTypePtr> ComponentTypes();
+ComponentTypePtr FindComponentType(const std::string& key);
 
 // Компоненты файла, которых нет в реестре: сохраняются как есть.
 struct UnknownComponents {
@@ -66,10 +87,21 @@ struct UnknownComponents {
 
 // Все ссылки сущности: публичные переменные, связи сигналов, компоненты
 // реестра. Тем, кто переписывает ссылки (копирование, вставка), — только
-// через неё.
+// через неё. Ссылки внутри UnknownComponents не видны: их устройство знает
+// только отсутствующий код (такой JSON копируется как есть).
 void VisitEntityRefs(entt::registry& reg, entt::entity e, const RefVisit& visit);
 
 // Для сериализатора и копирования (не для игры).
+//
+// Save: ошибка Save любого компонента — исключение std::runtime_error с
+// ключом компонента; object при этом не меняется. Молча пропустить нельзя:
+// сохранение без компонента стирает его из файла.
+// Load: компонент, чей Load бросил, снимается (не остаётся недочитанным), а
+// его JSON уходит в UnknownComponents — следующее сохранение запишет его как
+// был. Сама функция не бросает из-за чужого компонента.
+// Copy: ошибка — исключение; компонент, на котором упало, снят с de.
+// Откат остального (уже скопированного) — забота вызывающего (CopySubtree
+// уничтожает всё созданное).
 void SaveRegisteredComponents(const entt::registry& reg, entt::entity e, nlohmann::json& object);
 void LoadRegisteredComponents(entt::registry& reg, entt::entity e, const nlohmann::json& object);
 void CopyRegisteredComponents(const entt::registry& src, entt::entity se, entt::registry& dst, entt::entity de);
@@ -86,6 +118,7 @@ ComponentType MakeComponentType(std::string key, SaveFn save, LoadFn load) {
         load(j, value);
         r.emplace_or_replace<T>(e, std::move(value));
     };
+    t.Remove = [](entt::registry& r, entt::entity e) { r.remove<T>(e); };
     t.Copy = [](const entt::registry& s, entt::entity se, entt::registry& d, entt::entity de) {
         d.emplace_or_replace<T>(de, s.get<T>(se));
     };

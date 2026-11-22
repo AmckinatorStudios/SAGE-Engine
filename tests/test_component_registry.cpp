@@ -3,6 +3,9 @@
 // движка. И чужой компонент файла не теряется у программы, которая его не знает.
 #include "TestFramework.h"
 
+#include <filesystem>
+#include <stdexcept>
+
 #include <nlohmann/json.hpp>
 
 #include "sage/scene/ComponentRegistry.h"
@@ -113,4 +116,198 @@ TEST(ComponentRegistry_failed_load_keeps_the_data) {
     const nlohmann::json saved = nlohmann::json::parse(SceneSerializer::SaveToString(*scene));
     CHECK_TRUE(saved["objects"][0]["components"]["strict"]["m"] == 5);
     sage::scene::UnregisterComponent("strict");
+}
+
+// --- Надёжность реестра и операций над компонентами --------------------------
+
+#include <atomic>
+#include <thread>
+#include <vector>
+
+namespace {
+struct Fragile { int N = 0; };
+struct Plain { int N = 0; };
+
+// Тип, описанный «руками»: Load заводит компонент и падает на полпути — так
+// ведёт себя наивная пользовательская загрузка.
+sage::scene::ComponentType HalfLoader() {
+    sage::scene::ComponentType t;
+    t.Key = "test_half";
+    t.Has = [](const entt::registry& r, entt::entity e) { return r.all_of<Plain>(e); };
+    t.Save = [](const entt::registry& r, entt::entity e) { return nlohmann::json{{"n", r.get<Plain>(e).N}}; };
+    t.Load = [](entt::registry& r, entt::entity e, const nlohmann::json& j) {
+        r.emplace_or_replace<Plain>(e);
+        r.get<Plain>(e).N = j.at("n").get<int>();   // нет поля — бросает ПОСЛЕ emplace
+    };
+    t.Remove = [](entt::registry& r, entt::entity e) { r.remove<Plain>(e); };
+    return t;
+}
+} // namespace
+
+TEST(ComponentRegistry_rejects_incomplete_types) {
+    sage::scene::ComponentType t;
+    CHECK_FALSE(sage::scene::RegisterComponent(t));   // нет ключа
+    t = HalfLoader();
+    t.Remove = nullptr;
+    CHECK_FALSE(sage::scene::RegisterComponent(t));   // нет Remove — откатить нечем
+    CHECK_TRUE(sage::scene::FindComponentType("test_half") == nullptr);
+}
+
+// Описание, взятое ДО замены и снятия, остаётся целым: это shared_ptr на
+// неизменяемую запись, а не указатель внутрь вектора реестра.
+TEST(ComponentRegistry_held_type_survives_replace_and_unregister) {
+    CHECK_TRUE(sage::scene::RegisterComponent(HalfLoader()));
+    sage::scene::ComponentTypePtr held = sage::scene::FindComponentType("test_half");
+    CHECK_TRUE(held != nullptr);
+    sage::scene::ComponentType replacement = HalfLoader();
+    replacement.VisitRefs = [](entt::registry&, entt::entity, const sage::scene::RefVisit&) {};
+    CHECK_TRUE(sage::scene::RegisterComponent(replacement));
+    CHECK_TRUE(sage::scene::UnregisterComponent("test_half"));
+    for (int i = 0; i < 64; ++i) sage::scene::RegisterComponent(HalfLoader());   // реестр растёт
+    sage::scene::UnregisterComponent("test_half");
+    CHECK_TRUE(held->Key == "test_half" && !held->VisitRefs);
+    CHECK_TRUE(sage::scene::FindComponentType("test_half") == nullptr);
+    // Ровно одна запись при повторной регистрации.
+    sage::scene::RegisterComponent(HalfLoader());
+    sage::scene::RegisterComponent(HalfLoader());
+    int count = 0;
+    for (const auto& t : sage::scene::ComponentTypes())
+        if (t->Key == "test_half") ++count;
+    CHECK_EQ(count, 1);
+    sage::scene::UnregisterComponent("test_half");
+}
+
+// Load упал после emplace — недочитанного компонента нет, JSON сохранён.
+TEST(ComponentRegistry_failed_load_leaves_no_partial_component) {
+    CHECK_TRUE(sage::scene::RegisterComponent(HalfLoader()));
+    const std::string file = R"({"name": "S", "objects": [{"id": 1, "name": "X", "components": {"test_half": {"m": 7}}}]})";
+    auto scene = SceneSerializer::LoadFromString(SceneSerializer::MigrateSceneJson(file));
+    GameObject x = scene->FindByName("X");
+    CHECK_TRUE(x.Valid());
+    CHECK_FALSE(scene->Registry().all_of<Plain>(x.Entity()));
+    const nlohmann::json saved = nlohmann::json::parse(SceneSerializer::SaveToString(*scene));
+    CHECK_TRUE(saved["objects"][0]["components"]["test_half"]["m"] == 7);
+    sage::scene::UnregisterComponent("test_half");
+}
+
+// Ошибка Save не пропускается молча: SaveToString бросает с ключом компонента.
+TEST(ComponentRegistry_save_error_is_reported_not_skipped) {
+    sage::scene::RegisterComponent(sage::scene::MakeComponentType<Fragile>(
+        "test_fragile", [](const Fragile&) -> nlohmann::json { throw std::runtime_error("нет"); },
+        [](const nlohmann::json&, Fragile&) {}));
+    Scene s("S");
+    GameObject o = s.CreateObject("O");
+    s.Registry().emplace<Fragile>(o.Entity());
+    bool threw = false;
+    try {
+        (void)SceneSerializer::SaveToString(s);
+    } catch (const std::exception& e) {
+        threw = std::string(e.what()).find("test_fragile") != std::string::npos;
+    }
+    CHECK_TRUE(threw);
+    sage::scene::UnregisterComponent("test_fragile");
+}
+
+// Копия поддерева упала на внуке — в сцене ни одного нового объекта, ссылки
+// оригинала не тронуты; префаб с таким компонентом не ставится вовсе (-1).
+TEST(ComponentRegistry_failed_copy_rolls_back_whole_subtree) {
+    auto t = sage::scene::MakeComponentType<Fragile>(
+        "test_fragile", [](const Fragile& f) { return nlohmann::json{{"n", f.N}}; },
+        [](const nlohmann::json& j, Fragile& f) { f.N = j.value("n", 0); });
+    t.Copy = [](const entt::registry&, entt::entity, entt::registry& d, entt::entity de) {
+        d.emplace_or_replace<Fragile>(de);   // завёл — и упал
+        throw std::runtime_error("копия не удалась");
+    };
+    CHECK_TRUE(sage::scene::RegisterComponent(t));
+    RegisterHealth();
+    Scene scene("S");
+    GameObject root = scene.CreateObject("Root");
+    GameObject mid = scene.CreateObject("Mid");
+    GameObject leaf = scene.CreateObject("Leaf");
+    scene.SetParent(mid.Entity(), root.Entity());
+    scene.SetParent(leaf.Entity(), mid.Entity());
+    TestHealth hp;
+    hp.LastHitBy.Id = leaf.Id();
+    scene.Registry().emplace<TestHealth>(root.Entity(), hp);
+    scene.Registry().emplace<Fragile>(leaf.Entity());
+    const size_t before = scene.Count();
+    bool threw = false;
+    try {
+        (void)sage::scene::CopySubtree(scene, root.Entity(), scene, entt::null);
+    } catch (const std::exception&) {
+        threw = true;
+    }
+    CHECK_TRUE(threw);
+    CHECK_EQ(scene.Count(), before);
+    size_t alive = 0;
+    for (auto e : scene.Registry().view<IdComponent>()) { (void)e; ++alive; }
+    CHECK_EQ(alive, before);
+    CHECK_EQ(scene.Registry().get<TestHealth>(root.Entity()).LastHitBy.Id, leaf.Id());
+
+    // Префаб: сохраняется (Save работает), а постановка откатывается целиком.
+    const std::string path = (std::filesystem::temp_directory_path() / "sage_test_fragile.prefab").string();
+    std::string err;
+    sage::scene::ComponentType plain = t;
+    plain.Copy = nullptr;   // для сохранения префаба копия должна пройти
+    sage::scene::RegisterComponent(plain);
+    CHECK_TRUE(sage::scene::SavePrefab(scene, root.Entity(), path, err));
+    sage::scene::RegisterComponent(t);
+    sage::scene::ClearPrefabCache();
+    Scene target("T");
+    target.CreateObject("Existing");
+    CHECK_EQ(sage::scene::InstantiatePrefab(target, path), -1);
+    CHECK_EQ(target.Count(), (size_t)1);
+    std::filesystem::remove(path);
+    sage::scene::ClearPrefabCache();
+    sage::scene::UnregisterComponent("test_fragile");
+    sage::scene::UnregisterComponent("test_health");
+}
+
+// Пользовательские функции зовутся ВНЕ блокировки: Save, сам обращающийся к
+// реестру, не зависает; параллельные регистрация, поиск и обход не гоняются.
+TEST(ComponentRegistry_callbacks_run_unlocked_and_concurrent_use_is_safe) {
+    sage::scene::RegisterComponent(sage::scene::MakeComponentType<Fragile>(
+        "test_reentrant",
+        [](const Fragile& f) {
+            (void)sage::scene::FindComponentType("test_reentrant");
+            sage::scene::RegisterComponent(sage::scene::MakeComponentType<Plain>(
+                "test_from_cb", [](const Plain&) { return nlohmann::json::object(); },
+                [](const nlohmann::json&, Plain&) {}));
+            return nlohmann::json{{"n", f.N}};
+        },
+        [](const nlohmann::json& j, Fragile& f) { f.N = j.value("n", 0); }));
+    Scene s("S");
+    GameObject o = s.CreateObject("O");
+    s.Registry().emplace<Fragile>(o.Entity(), Fragile{5});
+    CHECK_TRUE(SceneSerializer::SaveToString(s).find("test_reentrant") != std::string::npos);
+
+    std::atomic<bool> bad{false};
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 4; ++t) {
+        threads.emplace_back([t, &bad] {
+            for (int i = 0; i < 300; ++i) {
+                const std::string key = "test_mt_" + std::to_string(t) + "_" + std::to_string(i % 5);
+                sage::scene::RegisterComponent(sage::scene::MakeComponentType<Plain>(
+                    key, [](const Plain&) { return nlohmann::json::object(); }, [](const nlohmann::json&, Plain&) {}));
+                auto found = sage::scene::FindComponentType(key);
+                if (!found || found->Key != key) bad = true;
+                for (const auto& type : sage::scene::ComponentTypes())
+                    if (!type || type->Key.empty()) bad = true;
+                if (i % 3 == 0) sage::scene::UnregisterComponent(key);
+            }
+        });
+    }
+    // Сохранение сцены параллельно с правкой реестра.
+    for (int i = 0; i < 50; ++i) (void)SceneSerializer::SaveToString(s);
+    for (std::thread& th : threads) th.join();
+    CHECK_FALSE(bad.load());
+    for (int t = 0; t < 4; ++t)
+        for (int k = 0; k < 5; ++k) sage::scene::UnregisterComponent("test_mt_" + std::to_string(t) + "_" + std::to_string(k));
+    sage::scene::UnregisterComponent("test_reentrant");
+    sage::scene::UnregisterComponent("test_from_cb");
+    // Встроенные на месте и по одному разу.
+    int ai = 0;
+    for (const auto& type : sage::scene::ComponentTypes())
+        if (type->Key == "ai_agent") ++ai;
+    CHECK_EQ(ai, 1);
 }

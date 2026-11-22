@@ -6,5 +6,9 @@ sage_add_game(
         src/main.cpp
         src/TestGameLayer.cpp
         src/GameIcons.cpp
+        src/GameComponents.cpp
     ASSETS ${CMAKE_CURRENT_SOURCE_DIR}/assets
 )
+# nlohmann приватен у движка, а описание компонента для реестра
+# (GameComponents.cpp) пишет JSON — игра подключает его сама.
+target_link_libraries(TestGame PRIVATE nlohmann_json::nlohmann_json)
