@@ -2,6 +2,8 @@
 #include "sage/core/FormatVersion.h"
 
 #include <algorithm>
+#include <cstdint>
+#include <cstdio>
 #include <fstream>
 #include <stdexcept>
 #include <unordered_map>
@@ -194,6 +196,39 @@ std::string ClipFileName(const std::string& modelFileStem, const std::string& cl
     // Пустое или состоящее из одних заменённых символов имя — не имя.
     if (name.find_first_not_of('_') == std::string::npos) name = "clip";
     return modelFileStem + "." + name + ".sageanim";
+}
+
+namespace {
+// Обрезка по байтам, но не посреди символа UTF-8 (кириллица в именах клипов).
+std::string CleanAndCut(const std::string& in, size_t maxBytes) {
+    std::string out;
+    for (unsigned char ch : in) {
+        const bool ok = (ch >= '0' && ch <= '9') || (ch >= 'A' && ch <= 'Z') ||
+                        (ch >= 'a' && ch <= 'z') || ch == '-' || ch == '_' || ch >= 0x80;
+        out.push_back(ok ? (char)ch : '_');
+    }
+    if (out.size() > maxBytes) {
+        size_t cut = maxBytes;
+        while (cut > 0 && ((unsigned char)out[cut] & 0xC0) == 0x80) --cut;
+        out.resize(cut);
+    }
+    if (out.find_first_not_of('_') == std::string::npos) out = "clip";
+    return out;
+}
+} // namespace
+
+std::string ClipImportFileName(const std::string& modelFileStem, const std::string& clipName) {
+    // FNV-1a по полным именам: стабилен между запусками и платформами (std::hash — нет).
+    uint32_t h = 2166136261u;
+    auto mix = [&](const std::string& s) {
+        for (unsigned char c : s) { h ^= c; h *= 16777619u; }
+        h ^= 0xFFu; h *= 16777619u;   // разделитель: «ab»+«c» != «a»+«bc»
+    };
+    mix(modelFileStem);
+    mix(clipName);
+    char hex[16];
+    std::snprintf(hex, sizeof hex, "%08x", (unsigned)h);
+    return CleanAndCut(modelFileStem, 16) + "." + CleanAndCut(clipName, 24) + "_" + hex + ".sageanim";
 }
 
 } // namespace sage::anim

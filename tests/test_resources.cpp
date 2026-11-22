@@ -173,6 +173,42 @@ TEST(ModelImport_character_in_centimetres_is_scaled_to_metres) {
     CHECK_NEAR(ModelLoader::AutoUnitScale(s, true, 180.0f), 1.0f, 1e-6f);
 }
 
+// Один меш в сотнях единиц (Springtrap: «FixedSpringtrapParts_Material.001_0»)
+// не должен превращать метровый персонаж в «сантиметровый».
+TEST(ModelImport_outlier_part_does_not_change_character_units) {
+    using ModelLoader::PartBounds;
+    auto part = [](float size, size_t verts) {
+        PartBounds p;
+        p.Lo = glm::vec3(0.0f);
+        p.Hi = glm::vec3(size, size * 0.5f, size * 0.3f);
+        p.Vertices = verts;
+        return p;
+    };
+    std::vector<PartBounds> parts = {part(2.6f, 20000), part(0.4f, 3000), part(0.3f, 2000),
+                                     part(1500.0f, 800)};
+    glm::vec3 lo, hi;
+    ModelLoader::RobustBounds(parts, lo, hi);
+    const glm::vec3 d = hi - lo;
+    const float extent = glm::max(d.x, glm::max(d.y, d.z));
+    CHECK_NEAR(extent, 2.6f, 1e-4f);
+    ModelLoader::ImportSettings s;
+    CHECK_NEAR(ModelLoader::AutoUnitScale(s, true, extent), 1.0f, 1e-6f);
+
+    // Настоящая модель в сантиметрах: все части крупные, выбросов нет.
+    std::vector<PartBounds> cm = {part(180.0f, 20000), part(40.0f, 3000), part(30.0f, 2000)};
+    ModelLoader::RobustBounds(cm, lo, hi);
+    const glm::vec3 d2 = hi - lo;
+    CHECK_NEAR(glm::max(d2.x, glm::max(d2.y, d2.z)), 180.0f, 1e-3f);
+    CHECK_NEAR(ModelLoader::AutoUnitScale(s, true, 180.0f), 0.01f, 1e-6f);
+
+    // Тело в сантиметрах с мелкими деталями: тело не выбрасывается.
+    std::vector<PartBounds> body = {part(180.0f, 50000), part(5.0f, 100), part(4.0f, 100),
+                                    part(6.0f, 100)};
+    ModelLoader::RobustBounds(body, lo, hi);
+    const glm::vec3 d3 = hi - lo;
+    CHECK_NEAR(glm::max(d3.x, glm::max(d3.y, d3.z)), 180.0f, 1e-3f);
+}
+
 // Матрица импорта скелетной модели делает с точкой ровно то же, что
 // ApplyImportSettings с вершиной статической: иначе один и тот же файл в
 // сцене и в выборе мышью был бы разного размера и места.
