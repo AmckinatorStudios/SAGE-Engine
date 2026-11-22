@@ -168,61 +168,16 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
                 j["materialSlots"] = std::move(slots);
             }
         } // if (mrp)
-        // Папка списка: сама метка и её цвет. Без этого «Декорации» после
-        // перезагрузки сцены становились обычным пустым объектом — и снова
-        // начинали таскать за собой содержимое.
         // Выключенное остаётся выключенным и после перезагрузки, и в собранной
         // игре: иначе «выключил и забыл» означало бы сюрприз ровно в тот
         // момент, когда игру собрали и раздали.
         if (reg.all_of<HiddenComponent>(e)) j["hidden"] = true;
         if (reg.all_of<KeepOnLoadComponent>(e)) j["keepOnLoad"] = true;
-        // Компоненты игры (реестр) и непонятые этим кодом — как есть.
+        // Компоненты — реестром (sage/scene/ComponentRegistry.h, встроенные —
+        // BuiltinComponents.cpp): камера, свет, физика, звук и компоненты игры.
+        // Новый компонент — туда, а не веткой здесь (scripts/check_components.py).
         sage::scene::SaveRegisteredComponents(reg, e, j);
-        // Съёмка в текстуру: только настройки, не картинка — её снимают заново.
-        // Раньше компонент не писался вовсе, и иконка предмета или экран
-        // камеры наблюдения пропадали после сохранения сцены.
-        if (const RenderTextureComponent* rt = reg.try_get<RenderTextureComponent>(e)) {
-            nlohmann::json& o = j["renderTexture"];
-            o["target"] = rt->Target;
-            o["width"] = rt->Width;
-            o["height"] = rt->Height;
-            o["clearColor"] = Vec4ToJson(rt->ClearColor);
-            o["ortho"] = rt->Ortho;
-            o["orthoSize"] = rt->OrthoSize;
-            o["fov"] = rt->Fov;
-            o["near"] = rt->Near;
-            o["far"] = rt->Far;
-            o["lookAt"] = Vec3ToJson(rt->LookAt);
-            o["continuous"] = rt->Continuous;
-            o["update"] = (int)rt->Mode;
-            if (rt->Aspect > 0.0f) o["aspect"] = rt->Aspect;
-            o["studioLight"] = rt->StudioLight;
-            o["lightDir"] = Vec3ToJson(rt->LightDir);
-            o["lightIntensity"] = rt->LightIntensity;
-            o["ambient"] = rt->Ambient;
-        }
-        if (const FolderComponent* fc = reg.try_get<FolderComponent>(e)) {
-            j["folder"]["color"] = Vec3ToJson(fc->Color);
-        }
-        if (const TagComponent* tag = reg.try_get<TagComponent>(e))
-            if (!tag->Tag.empty()) j["tag"] = tag->Tag;
         if (const ScriptComponent* sc = reg.try_get<ScriptComponent>(e)) SaveScripts(j, *sc);
-        if (const DecalComponent* dc = reg.try_get<DecalComponent>(e)) {
-            // Сохраняются ПАРАМЕТРЫ проекции, а не её результат: геометрия
-            // наклейки — производная от сцены, и хранить её значило бы держать
-            // в файле копию соседних мешей, устаревающую от любой их правки.
-            j["decal"]["angleLimit"] = dc->AngleLimitDeg;
-            j["decal"]["offset"] = dc->Offset;
-        }
-        if (reg.all_of<NetReplicatedComponent>(e)) j["netReplicated"] = true;
-        if (const CameraComponent* cam = reg.try_get<CameraComponent>(e)) SaveCamera(j, *cam);
-        if (const LightComponent* light = reg.try_get<LightComponent>(e)) SaveLight(j, *light);
-        if (const sage::render::PostProcessComponent* pc =
-                reg.try_get<sage::render::PostProcessComponent>(e))
-            SavePostProcess(j, *pc);
-        if (const RigidBodyComponent* rb = reg.try_get<RigidBodyComponent>(e)) SaveRigidBody(j, *rb);
-        if (const ColliderComponent* col = reg.try_get<ColliderComponent>(e)) SaveCollider(j, *col);
-        if (const AnimationComponent* am = reg.try_get<AnimationComponent>(e)) SaveAnimation(j, *am);
         if (const VarsComponent* vc = reg.try_get<VarsComponent>(e))
             if (!vc->Values.Empty()) j["vars"] = VarsToJson(vc->Values);
         if (const sage::signals::SignalLinksComponent* sl =
@@ -231,21 +186,6 @@ static json BuildSceneJson(const Scene& scene, bool withProbes = true) {
         // Элемент и его компоненты — общей записью (см. sage/ui/UISerialize.h):
         // тот же формат, каким интерфейс ложится в отдельный ресурс .sageui.
         if (json ui; sage::ui::SaveElement(ui, reg, e)) j["ui"] = std::move(ui);
-        // ИНТЕРФЕЙС — не часть элемента, а его ГРАНИЦА (см.
-        // sage/ui/components/InterfaceComponent.h): отдельным ключом, рядом с
-        // камерой и светом, а не внутри "ui".
-        if (const sage::ui::InterfaceComponent* ic =
-                reg.try_get<sage::ui::InterfaceComponent>(e)) {
-            json ij;
-            SaveAssetRef(ij, "source", ic->Source);
-            ij["visible"] = ic->Visible;
-            ij["sortOrder"] = ic->SortOrder;
-            ij["receivesInput"] = ic->ReceivesInput;
-            ij["canvasMode"] = (int)ic->Canvas.Mode;
-            ij["reference"] = Vec2ToJson(ic->Canvas.Reference);
-            ij["matchWidthOrHeight"] = ic->Canvas.MatchWidthOrHeight;
-            j["interface"] = std::move(ij);
-        }
         objectsJson.push_back(j);
     }
     root["objects"] = objectsJson;
@@ -296,54 +236,10 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             if (j["mesh"].contains("geometry")) mr.Ref.prim = PrimitiveFromJson(j["mesh"]["geometry"]);
         }
 
-        if (j.contains("decal")) {
-            DecalComponent dc;
-            dc.AngleLimitDeg = j["decal"].value("angleLimit", dc.AngleLimitDeg);
-            dc.Offset = j["decal"].value("offset", dc.Offset);
-            dc.Dirty = true; // геометрию строит система после загрузки сцены
-            obj.Registry()->emplace<DecalComponent>(obj.Entity(), dc);
-        }
 
         if (j.value("hidden", false)) obj.Registry()->emplace<HiddenComponent>(obj.Entity());
         if (j.value("keepOnLoad", false)) obj.Registry()->emplace<KeepOnLoadComponent>(obj.Entity());
         sage::scene::LoadRegisteredComponents(*obj.Registry(), obj.Entity(), j);
-        if (j.contains("renderTexture") && j["renderTexture"].is_object()) {
-            const nlohmann::json& o = j["renderTexture"];
-            RenderTextureComponent rt;
-            rt.Target = o.value("target", rt.Target);
-            rt.Width = o.value("width", rt.Width);
-            rt.Height = o.value("height", rt.Height);
-            if (o.contains("clearColor")) rt.ClearColor = Vec4FromJson(o["clearColor"], rt.ClearColor);
-            rt.Ortho = o.value("ortho", rt.Ortho);
-            rt.OrthoSize = o.value("orthoSize", rt.OrthoSize);
-            rt.Fov = o.value("fov", rt.Fov);
-            rt.Near = o.value("near", rt.Near);
-            rt.Far = o.value("far", rt.Far);
-            if (o.contains("lookAt")) rt.LookAt = Vec3FromJson(o["lookAt"]);
-            rt.Continuous = o.value("continuous", rt.Continuous);
-            rt.Mode = (RenderTextureComponent::Update)std::clamp(o.value("update", (int)rt.Mode), 0, 2);
-            // Старая сцена: галка «каждый кадр» и есть режим Continuous.
-            if (rt.Continuous && !o.contains("update")) rt.Mode = RenderTextureComponent::Update::Continuous;
-            rt.Aspect = o.value("aspect", rt.Aspect);
-            rt.StudioLight = o.value("studioLight", rt.StudioLight);
-            if (o.contains("lightDir")) rt.LightDir = Vec3FromJson(o["lightDir"]);
-            rt.LightIntensity = o.value("lightIntensity", rt.LightIntensity);
-            rt.Ambient = o.value("ambient", rt.Ambient);
-            rt.Dirty = true;
-            obj.Registry()->emplace<RenderTextureComponent>(obj.Entity(), rt);
-        }
-        if (j.contains("folder")) {
-            FolderComponent fc;
-            if (j["folder"].contains("color")) fc.Color = Vec3FromJson(j["folder"]["color"]);
-            obj.Registry()->emplace<FolderComponent>(obj.Entity(), fc);
-            // У папки нет положения: сдвиг, оставшийся в старом файле, ни на
-            // что не влиял, а в инспекторе и гизмо выглядел бы рабочим.
-            if (Transform* ft = obj.Registry()->try_get<Transform>(obj.Entity())) *ft = Transform{};
-        }
-        if (j.contains("tag") && j["tag"].is_string()) {
-            const std::string tag = j["tag"].get<std::string>();
-            if (!tag.empty()) obj.Registry()->emplace<TagComponent>(obj.Entity(), TagComponent{tag});
-        }
         if (j.contains("script") || j.contains("scripts")) {
             ScriptComponent sc;
             LoadScripts(j, sc);
@@ -366,27 +262,6 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
             }
         }
 
-        if (j.value("netReplicated", false))
-            obj.Registry()->emplace<NetReplicatedComponent>(obj.Entity());
-        if (j.contains("camera"))
-            obj.Registry()->emplace<CameraComponent>(obj.Entity(), ParseCamera(j["camera"]));
-        if (j.contains("light"))
-            obj.Registry()->emplace<LightComponent>(obj.Entity(), ParseLight(j["light"]));
-        // Ключ "postChain" — имя этого же компонента ДО того, как он стал
-        // «Пост-обработкой». Читается по-прежнему: сцена, сохранённая раньше,
-        // обязана открыться (миграция v11->v12 переводит остальное).
-        if (j.contains("postProcess"))
-            obj.Registry()->emplace<sage::render::PostProcessComponent>(
-                obj.Entity(), ParsePostProcess(j["postProcess"]));
-        else if (j.contains("postChain"))
-            obj.Registry()->emplace<sage::render::PostProcessComponent>(
-                obj.Entity(), ParsePostProcess(j["postChain"]));
-        if (j.contains("rigidBody"))
-            obj.Registry()->emplace<RigidBodyComponent>(obj.Entity(), ParseRigidBody(j["rigidBody"]));
-        if (j.contains("collider"))
-            obj.Registry()->emplace<ColliderComponent>(obj.Entity(), ParseCollider(j["collider"]));
-        if (j.contains("animation"))
-            obj.Registry()->emplace<AnimationComponent>(obj.Entity(), ParseAnimation(j["animation"]));
         if (j.contains("vars")) {
             VarsComponent vc;
             VarsFromJson(j["vars"], vc.Values);
@@ -402,19 +277,6 @@ static std::unique_ptr<Scene> BuildSceneFromJson(const json& root) {
                 auto& sl = obj.Registry()->get_or_emplace<sage::signals::SignalLinksComponent>(obj.Entity());
                 sl.Links.insert(sl.Links.end(), links.begin(), links.end());
             }
-        }
-        if (j.contains("interface")) {
-            const json& ij = j["interface"];
-            sage::ui::InterfaceComponent ic;
-            ic.Source = LoadAssetRef(ij, "source");
-            ic.Visible = ij.value("visible", true);
-            ic.SortOrder = ij.value("sortOrder", 0);
-            ic.ReceivesInput = ij.value("receivesInput", true);
-            ic.Canvas.Mode = (sage::ui::Canvas::Scale)ij.value("canvasMode", 0);
-            if (ij.contains("reference"))
-                ic.Canvas.Reference = Vec2FromJson(ij["reference"], ic.Canvas.Reference);
-            ic.Canvas.MatchWidthOrHeight = ij.value("matchWidthOrHeight", 0.5f);
-            obj.Registry()->emplace<sage::ui::InterfaceComponent>(obj.Entity(), ic);
         }
         if (j.contains("ui")) {
             sage::ui::LoadElement(j["ui"], *obj.Registry(), obj.Entity());

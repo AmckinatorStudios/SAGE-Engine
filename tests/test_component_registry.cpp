@@ -8,6 +8,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "sage/net/NetComponents.h"
+#include "sage/render/PostProcessComponent.h"
 #include "sage/scene/ComponentRegistry.h"
 #include "sage/scene/Prefab.h"
 #include "sage/scene/Scene.h"
@@ -399,7 +401,9 @@ TEST(component_copy_resets_instance_state_of_every_owner) {
 
 TEST(ComponentRegistry_builtin_components_are_registered_top_level) {
     for (const char* key : {"audio", "particles", "tweens", "propertyAnimator", "lod", "ik", "joint",
-                            "character", "reflectionProbe", "shaderParams", "giStatic"}) {
+                            "character", "reflectionProbe", "shaderParams", "giStatic", "camera",
+                            "light", "rigidBody", "collider", "animation", "decal", "renderTexture",
+                            "interface", "postProcess", "tag", "folder", "netReplicated"}) {
         sage::scene::ComponentTypePtr t = sage::scene::FindComponentType(key);
         CHECK_TRUE(t && t->TopLevel);
     }
@@ -474,4 +478,46 @@ TEST(ComponentRegistry_game_key_does_not_replace_builtin) {
     CHECK_TRUE(sage::scene::UnregisterComponent("audio"));   // снимает тип игры
     sage::scene::ComponentTypePtr builtin = sage::scene::FindComponentType("audio");
     CHECK_TRUE(builtin && builtin->TopLevel);
+}
+
+// Особые случаи старого формата, которые ветки сериализатора держали руками:
+// прежний ключ "postChain", "netReplicated": false, пустой тег, сдвиг папки.
+TEST(ComponentRegistry_builtin_legacy_forms_read_as_before) {
+    const std::string file = R"({"name": "S", "objects": [
+        {"id": 1, "name": "Cam", "postChain": {}, "netReplicated": false, "tag": ""},
+        {"id": 2, "name": "Dir", "position": {"x": 1, "y": 2, "z": 3}, "folder": {"color": {"x": 1}}}]})";
+    auto scene = SceneSerializer::LoadFromString(SceneSerializer::MigrateSceneJson(file));
+    entt::registry& r = scene->Registry();
+    GameObject cam = scene->FindByName("Cam");
+    CHECK_TRUE(r.all_of<sage::render::PostProcessComponent>(cam.Entity()));
+    CHECK_FALSE(r.all_of<NetReplicatedComponent>(cam.Entity()));
+    CHECK_FALSE(r.all_of<TagComponent>(cam.Entity()));
+    GameObject dir = scene->FindByName("Dir");
+    CHECK_TRUE(r.all_of<FolderComponent>(dir.Entity()));
+    CHECK_NEAR(dir.GetTransform().Position.x, 0.0f, 1e-6f);
+
+    const nlohmann::json saved = nlohmann::json::parse(SceneSerializer::SaveToString(*scene));
+    CHECK_TRUE(saved["objects"][0].contains("postProcess"));
+    CHECK_FALSE(saved["objects"][0].contains("postChain"));
+    CHECK_FALSE(saved["objects"][0].contains("tag"));
+    CHECK_FALSE(saved["objects"][0].contains("netReplicated"));
+}
+
+// Повреждённая камера (и любой встроенный компонент) не роняет сцену: раньше
+// ParseCamera бросал, и сцена не открывалась вовсе.
+TEST(ComponentRegistry_unreadable_camera_keeps_the_data) {
+    const std::string file =
+        R"({"name": "S", "objects": [{"id": 1, "name": "X", "camera": 5, "light": {"type": "point"}}]})";
+    std::unique_ptr<Scene> scene;
+    try {
+        scene = SceneSerializer::LoadFromString(SceneSerializer::MigrateSceneJson(file));
+    } catch (const std::exception&) {
+    }
+    CHECK_TRUE(scene != nullptr);
+    if (!scene) return;
+    GameObject x = scene->FindByName("X");
+    CHECK_FALSE(scene->Registry().all_of<CameraComponent>(x.Entity()));
+    CHECK_TRUE(scene->Registry().all_of<LightComponent>(x.Entity()));
+    const nlohmann::json saved = nlohmann::json::parse(SceneSerializer::SaveToString(*scene));
+    CHECK_TRUE(saved["objects"][0]["camera"] == 5);
 }

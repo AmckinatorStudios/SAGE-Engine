@@ -23,7 +23,7 @@ description: Выбор и запуск проверок SAGE по изменё�
 | только docs / инструкции | ничего не собирать |
 
 Сторожа по области: C++ движка — `check_layers`, `check_rhi_boundary`,
-`check_paths`, `check_file_size`; редактор — `check_ui_kit`,
+`check_paths`, `check_file_size`, `check_components`; редактор — `check_ui_kit`,
 `check_popup_ids`, `check_menu_style`, `check_imgui_pairs`,
 `check_release_ui`, `check_asset_slots`, `check_localization`. Запуск —
 `python3 scripts/<имя>.py`.

@@ -106,10 +106,14 @@ sage::scene::RegisterComponent(sage::scene::MakeComponentType<Health>(
 (`sage/scene/BuiltinComponents.cpp`, одна строка на компонент). Их ключи
 исторически лежат прямо в объекте (`objects[i].audio`), поэтому запись
 помечена `TopLevel` (`MakeTopLevelComponentType`), и файл сцены не меняется.
-Уже переведены: `audio`, `particles`, `tweens`, `propertyAnimator`, `lod`,
-`ik`, `joint`, `character`, `reflectionProbe`, `shaderParams`, `giStatic`.
-Остальные встроенные пока — ветками в `SceneSerializer.cpp` и строками в
-`Prefab.cpp`; переносить их по одному. Тип игры с ключом встроенного (в
+Переименованный ключ читается по `OldKeys` (`postChain` → `postProcess`);
+где «пусто» в файле значит «компонента нет» (`"tag": ""`,
+`"netReplicated": false`), у записи свой `Load`. В `SceneSerializer.cpp` и
+`Prefab.cpp` остались только части самого объекта (id, имя, иерархия,
+положение, меш, метки `hidden`/`keepOnLoad`) и ещё не переведённые скрипты,
+публичные переменные и связи сигналов. Новый тип там ловит
+`scripts/check_components.py`; его список разрешённых только сокращается.
+Тип игры с ключом встроенного (в
 `components`) встроенный не заменяет: это разные записи файла.
 
 **Компонент, которого программа не знает, не теряется.** Если сцену открыл

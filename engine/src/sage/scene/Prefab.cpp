@@ -74,8 +74,6 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     } else {
         dst.Registry()->remove<MeshRendererComponent>(dst.Entity());
     }
-    // Копия папки — тоже папка: иначе дубликат группы (Ctrl+D) превращался бы
-    // в обычный пустой объект и начинал двигать содержимое.
     // Метка-пустышка: у неё нет полей, и try_get<> для такого типа возвращает
     // void — общий CopyIfPresent на ней не собирается. Копируем фактом наличия.
     if (src.Registry()->all_of<HiddenComponent>(src.Entity())) {
@@ -90,30 +88,18 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
         else dst.Registry()->remove<M>(dst.Entity());
     };
     copyMark(KeepOnLoadComponent{});
-    CopyIfPresent<FolderComponent>(src, dst);
-    // Тег, наклейка, пост-обработка, сеть, съёмка в текстуру (звук, твины,
-    // LOD, частицы и др. — уже в реестре, BuiltinComponents.cpp). Этого списка здесь не было — и копия (Ctrl+D, префаб,
-    // вставка) теряла их молча: сериализатор их писал, а копирование — нет.
-    // Сторожит tests/test_scene_lossless.cpp.
-    CopyIfPresent<TagComponent>(src, dst);
-    CopyIfPresent<DecalComponent>(src, dst);
-    CopyIfPresent<sage::render::PostProcessComponent>(src, dst);
-    CopyIfPresent<sage::ui::InterfaceComponent>(src, dst);
-    CopyIfPresent<NetReplicatedComponent>(src, dst);
-    CopyIfPresent<RenderTextureComponent>(src, dst);
-    CopyIfPresent<ScriptComponent>(src, dst);
-    // Компоненты игры (реестр) и компоненты, которых этот код не знает.
+    // Компоненты — реестром (sage/scene/ComponentRegistry.h; встроенные —
+    // BuiltinComponents.cpp): тот же список, что пишет сериализатор. Свой
+    // список здесь расходился с ним, и копия (Ctrl+D, префаб, вставка) теряла
+    // тег, звук и твины молча. Сторожат tests/test_scene_lossless.cpp и
+    // scripts/check_components.py.
     CopyRegisteredComponents(*src.Registry(), src.Entity(), *dst.Registry(), dst.Entity());
+    CopyIfPresent<ScriptComponent>(src, dst);
     // Публичные переменные едут с объектом: префаб без своих настроек — это
     // объект, который после постановки в сцену надо настраивать заново.
     CopyIfPresent<VarsComponent>(src, dst);
     // Связи сигналов — тоже: кнопка из префаба без своих «On Click» — мёртвая.
     CopyIfPresent<sage::signals::SignalLinksComponent>(src, dst);
-    CopyIfPresent<CameraComponent>(src, dst);
-    CopyIfPresent<LightComponent>(src, dst);
-    CopyIfPresent<RigidBodyComponent>(src, dst);
-    CopyIfPresent<ColliderComponent>(src, dst);
-    CopyIfPresent<AnimationComponent>(src, dst);
     // Интерфейс — ПО РЕЕСТРУ ЧАСТЕЙ, а не списком руками.
     //
     // Список здесь был, и он молча устаревал: часть, зарегистрированную игрой

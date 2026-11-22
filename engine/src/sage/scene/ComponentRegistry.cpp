@@ -208,8 +208,11 @@ void LoadRegisteredComponents(entt::registry& reg, entt::entity e, const nlohman
     // Верхний уровень: ключ ищется в самом объекте; нет ключа — нет компонента.
     for (const ComponentTypePtr& tp : *all) {
         if (!tp->TopLevel) continue;
-        auto f = object.find(tp->Key);
-        if (f != object.end()) LoadOne(*tp, reg, e, tp->Key, *f, unknownTop);
+        std::string key = tp->Key;
+        auto f = object.find(key);
+        for (size_t i = 0; f == object.end() && i < tp->OldKeys.size(); ++i)
+            f = object.find(key = tp->OldKeys[i]);
+        if (f != object.end()) LoadOne(*tp, reg, e, key, *f, unknownTop);
     }
     auto it = object.find("components");
     if (it != object.end() && !it->is_object()) {
