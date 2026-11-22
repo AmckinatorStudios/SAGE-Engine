@@ -48,20 +48,16 @@ void AnimGraphPanel::Open(EditorHost& host, const std::string& path) {
     }
 }
 
+void AnimGraphPanel::DiscardChanges(EditorHost& host) {
+    if (!m_hasGraph || m_path.empty()) return;
+    const std::string keep = m_path;
+    m_hasGraph = false;   // Open не пропустит «тот же путь»
+    Open(host, keep);
+    if (!m_hasGraph) m_path = keep;   // файл не прочитался — документ остаётся за своим путём
+}
+
 bool AnimGraphPanel::Save(EditorHost& host) {
-    if (!m_hasGraph) return false;
-    if (m_path.empty()) {
-        m_browse = Browse::SaveAs;
-        FileBrowser::Config c;
-        c.Title = T("Save animation graph");
-        c.Mode = FileBrowser::PickMode::SaveFile;
-        c.DefaultName = "NewAnimGraph.sageanimgraph";
-        c.Filters = assetslot::Extensions(assetslot::Kind::AnimGraph);
-        c.FilterLabel = T("Animation graph");
-        c.StartDir = c.Root = assetslot::ProjectRoot(host);
-        m_browser.Open(c);
-        return false;
-    }
+    if (!m_hasGraph || m_path.empty()) return false;
     return SaveTo(host, m_path);
 }
 
@@ -223,7 +219,7 @@ void AnimGraphPanel::Draw(EditorHost& host, bool* open, const std::string& windo
             if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload(assetslot::kPayload)) {
                 std::string dropped((const char*)p->Data, (size_t)p->DataSize);
                 if (!dropped.empty() && dropped.back() == '\0') dropped.pop_back();
-                if (assetslot::KindOf(sage::PathFromUtf8(dropped)) == assetslot::Kind::AnimGraph) Open(host, dropped);
+                if (assetslot::KindOf(sage::PathFromUtf8(dropped)) == assetslot::Kind::AnimGraph) host.OpenAnimGraph(dropped);
             }
             ImGui::EndDragDropTarget();
         }
@@ -232,27 +228,20 @@ void AnimGraphPanel::Draw(EditorHost& host, bool* open, const std::string& windo
 }
 
 void AnimGraphPanel::DrawToolbar(EditorHost& host) {
-    if (EditorIcons::Button("plus", T("New"), T("A new graph with only the Output node"))) {
-        m_graph = NewAnimGraph();
-        m_hasGraph = true;
-        m_path.clear();
-        m_dirty = true;
-        m_undo.clear();
-        m_redo.clear();
-        m_selected = 0;
-        m_inspectNode = false;
-        m_rebind = true;
-        m_frameRequest = true;
-    }
-    ImGui::SameLine();
     ImGui::BeginDisabled(!m_hasGraph);
     if (EditorIcons::Button("save", T("Save"), T("Ctrl+S"))) Save(host);
     ImGui::SameLine();
     if (EditorIcons::Button("save", T("Save as..."))) {
-        const std::string keep = m_path;
-        m_path.clear();
-        Save(host);
-        m_path = keep;
+        m_browse = Browse::SaveAs;
+        FileBrowser::Config c;
+        c.Title = T("Save animation graph");
+        c.Mode = FileBrowser::PickMode::SaveFile;
+        c.DefaultName = m_path.empty() ? std::string("NewAnimGraph.sageanimgraph")
+                                       : sage::PathToUtf8(fs::path(sage::PathFromUtf8(m_path)).filename());
+        c.Filters = assetslot::Extensions(assetslot::Kind::AnimGraph);
+        c.FilterLabel = T("Animation graph");
+        c.StartDir = c.Root = assetslot::ProjectRoot(host);
+        m_browser.Open(c);
     }
     ImGui::SameLine();
     if (EditorIcons::IconOnlyButton("undo", T("Undo (Ctrl+Z)"))) Undo();
@@ -317,8 +306,9 @@ void AnimGraphPanel::DrawEmpty(EditorHost& host) {
     (void)host;
     ImGui::Spacing();
     ImGui::TextDisabled("%s", T("No graph is open."));
-    ImGui::TextDisabled("%s", T("Create one with New, in Assets (Create > Animation graph)"));
-    ImGui::TextDisabled("%s", T("or open a .sageanimgraph file by double-clicking it."));
+    ImGui::TextDisabled("%s", T("Open an existing graph: double-click a .sageanimgraph in Assets,"));
+    ImGui::TextDisabled("%s", T("or press Open in Animation Workspace in the Animation component."));
+    ImGui::TextDisabled("%s", T("To create one, use + in the Graph slot of the component or Create > Animation graph in Assets."));
 }
 
 // --- Диалоги ----------------------------------------------------------------

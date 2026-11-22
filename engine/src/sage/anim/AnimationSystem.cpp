@@ -108,9 +108,16 @@ static void EnsureReady(AnimationComponent& am, const std::string& path) {
 // ключей — не работа для каждого кадра.
 static void EnsureClipFile(AnimationComponent& am) {
     if (!am.Model) return;
+    // Выбран граф — клип не загружается и не играет, но и путь не трогаем.
+    if (am.Source == AnimationComponent::SourceKind::Graph) {
+        am.ClipSuspended = true;
+        return;
+    }
+    const bool resume = am.ClipSuspended;
+    am.ClipSuspended = false;
     if (am.ClipPath.empty()) {
         // Вернулись к клипам модели — снимаем свой и переподключаем аниматор.
-        if (!am.ClipResolvedFrom.empty()) {
+        if (!am.ClipResolvedFrom.empty() || resume) {
             am.ClipResolvedFrom.clear();
             am.OwnClips.clear();
             am.MissingBones = 0;
@@ -124,7 +131,7 @@ static void EnsureClipFile(AnimationComponent& am) {
         }
         return;
     }
-    if (am.ClipResolvedFrom == am.ClipPath) return;
+    if (!resume && am.ClipResolvedFrom == am.ClipPath) return;
     am.ClipResolvedFrom = am.ClipPath;
     am.OwnClips.clear();
     am.MissingBones = 0;
@@ -159,22 +166,47 @@ static void EnsureClipFile(AnimationComponent& am) {
 // Граф анимации: файл читается при смене пути и после сохранения любого графа
 // (AnimGraphRevision), привязка к скелету — при смене графа или модели.
 static void EnsureGraph(AnimationComponent& am) {
-    if (!am.GraphPath.empty()) {
+    const bool wantGraph = am.Source == AnimationComponent::SourceKind::Graph;
+    if (wantGraph && am.GraphInMemory) {
+        am.GraphProblem.clear();   // граф подан редактором как есть
+    } else if (wantGraph && !am.GraphPath.empty()) {
         const uint64_t rev = AnimGraphRevision();
         if (am.GraphResolvedFrom != am.GraphPath || am.GraphRevision != rev) {
             am.GraphResolvedFrom = am.GraphPath;
             am.GraphRevision = rev;
+            am.GraphProblem.clear();
             try {
                 am.GraphAsset = std::make_shared<const AnimGraph>(
                     LoadAnimGraph(sage::AssetDatabase::Instance().LocatePath(am.GraphPath)));
             } catch (const std::exception& e) {
+                am.GraphProblem = std::string("Граф анимации не прочитан: ") + e.what();
                 LOG_ERROR("Anim") << "Граф анимации не прочитан '" << am.GraphPath << "': " << e.what();
                 am.GraphAsset = nullptr;
             }
+            // Граф без подключённого выхода не даёт позы: считать его работающей
+            // анимацией значило бы молча показывать позу покоя.
+            if (am.GraphAsset && am.GraphProblem.empty()) {
+                const AnimGraphNode* out = nullptr;
+                for (const AnimGraphNode& n : am.GraphAsset->Nodes)
+                    if (n.Kind == AnimNodeKind::Output) { out = &n; break; }
+                bool fed = false;
+                if (out)
+                    for (const AnimGraphLink& l : am.GraphAsset->Links)
+                        if (l.To == out->Id) { fed = true; break; }
+                if (!fed) {
+                    am.GraphProblem = out ? "Граф пуст: к узлу Output ничего не подключено"
+                                          : "В графе нет узла Output";
+                    LOG_WARN("Anim") << "Граф анимации '" << am.GraphPath << "': " << am.GraphProblem;
+                    am.GraphAsset = nullptr;
+                }
+            }
         }
-    } else if (!am.GraphResolvedFrom.empty()) {
-        am.GraphResolvedFrom.clear();
-        am.GraphAsset = nullptr;
+    } else {
+        if (!am.GraphResolvedFrom.empty() || am.GraphAsset) {
+            am.GraphResolvedFrom.clear();
+            am.GraphAsset = nullptr;
+        }
+        am.GraphProblem = wantGraph ? "Граф не назначен" : std::string();
     }
     if (!am.Model || !am.GraphAsset) {
         if (am.Graph.Bound()) am.Graph.Unbind();
@@ -422,6 +454,16 @@ void UpdateAnimators(Scene& scene, float dt) {
         if (!am.Model) continue;
         am.Anim.SetSpeed(am.Speed);
         const bool graph = am.Graph.Bound();
+        const bool graphSource = am.Source == AnimationComponent::SourceKind::Graph;
+        // Граф выбран, но играть нечему: клип НЕ подставляется. Стоим в позе
+        // покоя, причина — в am.GraphProblem (инспектор показывает её).
+        if (graphSource && !graph) {
+            am.Anim.SetExternalPose(nullptr);
+            am.Anim.Stop();
+            am.Anim.SetPoseOverride(am.PoseOverrides.empty() ? nullptr : &am.PoseOverrides);
+            am.Anim.Update(0.0f);
+            continue;
+        }
         // Смена Clip в компоненте (редактор/скрипт) -> плавный кросс-фейд к нему
         // (или мгновенно, если BlendTime<=0). Anim.CurrentClip() сразу становится
         // новым, поэтому переход не перезапускается каждый кадр.

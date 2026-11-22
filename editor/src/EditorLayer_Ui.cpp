@@ -576,6 +576,7 @@ void EditorLayer::DrawDockspaceAndMenu() {
     // Layer.h): проверять флаг GLFW прямо здесь бесполезно, цикл выходит
     // раньше, чем этот код выполнится.
     DrawUnsavedPrompt();
+    DrawAnimOpenPrompt();
     DrawLayoutDialog();
     m_settingsPanel.Draw(*this, m_panels[EditorPanel::Settings]);
     m_assets.Tick(*this);           // пакетная конвертация идёт по кадрам, а не одним куском
