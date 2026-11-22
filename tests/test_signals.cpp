@@ -720,6 +720,21 @@ end
     CHECK_EQ(s[1], std::string("opened"));
 }
 
+// Объявление события: `self:define_event("Died")` видно по тексту, без запуска
+// игры; emit без объявления в список объявленных не попадает.
+TEST(Signals_defined_events_are_found_in_script_text) {
+    const std::vector<std::string> s = sage::scripting::ParseDefinedEvents(R"(
+self:define_event("Died")
+self : define_event ( 'Healed' )
+self:define_event("Died")
+self:define_event(name_from_var)
+self:emit("only_emitted")
+)");
+    CHECK_EQ(s.size(), (size_t)2);
+    CHECK_EQ(s[0], std::string("Died"));
+    CHECK_EQ(s[1], std::string("Healed"));
+}
+
 // Список подсказок не прячет ничего, а поднимает похожее на набранное: точное
 // имя, затем начало, затем вхождение, затем остальные в своём порядке.
 TEST(SuggestInput_ranks_matches_first_and_keeps_everything) {

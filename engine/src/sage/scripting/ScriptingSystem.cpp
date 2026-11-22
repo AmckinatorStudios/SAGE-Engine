@@ -107,6 +107,9 @@ int ScriptingSystem::InstallLinksOf(Scene& scene, entt::entity e) {
         }
         std::string targetName;
         if (link.Broadcast.empty()) {
+            // Пустая строка — событие, добавленное в инспекторе, но ещё без
+            // метода: не ошибка, молча пропускаем.
+            if (!link.Target.Valid() && link.Method.empty()) continue;
             if (!link.Target.Valid()) {
                 LOG_WARN("Signals") << "Связь «" << title << "» объекта '" << ownerName
                                     << "': не выбран объект-получатель — связь пропущена";

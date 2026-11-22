@@ -33,6 +33,10 @@ std::vector<std::string> ParseMethods(const std::string& path, const std::string
 // SAGE Lua пишут вызов одинаково.
 std::vector<std::string> ParseEmittedSignals(const std::string& source);
 
+// События, которые скрипт ОБЪЯВЛЯЕТ (`self:define_event("Died")`), — по тексту,
+// как и методы: инспектор показывает их до запуска игры и без вызова emit.
+std::vector<std::string> ParseDefinedEvents(const std::string& source);
+
 // Методы Lua-файла по тексту — инструмент языка Lua в реестре языков.
 std::vector<std::string> ParseLuaMethods(const std::string& source);
 

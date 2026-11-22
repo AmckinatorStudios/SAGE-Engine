@@ -236,6 +236,14 @@ void RegisterObjectSignals(Backend& backend, sol::usertype<ObjectRef>& ot) {
         const SignalRef s = signalOf(o, NameArg(name, "once"));
         return self->ConnectLua(s, fn, true, o.Name() + ":once('" + s.Name + "')");
     };
+    // Объявление своего события. Источник правды для инспектора — текст
+    // скрипта (ParseDefinedEvents), поэтому в игре вызов лишь проверяет имя:
+    // подписка и emit работают и без него (совместимость со старыми скриптами).
+    ot["define_event"] = [](ObjectRef& r, sol::object name) {
+        AliveObject(r, "define_event");
+        const std::string n = NameArg(name, "define_event");
+        if (!sage::signals::IsValidName(n)) throw Fail("define_event: недопустимое имя события '" + n + "'");
+    };
     ot["emit"] = [self](ObjectRef& r, sol::object name, sol::variadic_args rest) {
         const GameObject o = AliveObject(r, "emit");
         const std::string n = NameArg(name, "emit");

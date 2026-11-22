@@ -924,6 +924,8 @@ SAGE Object (свойства / методы / сигналы)
 Свой компонент объявляет свои одной строкой — `sage::signals::Declare("Door",
 has, {{"opened", ...}})`, движок не правится. Своё событие (`player_died`)
 объявлять не нужно: `obj:emit("player_died")` работает с любым именем.
+Чтобы событие появилось в Inspector (Events) до запуска игры, объявите его в
+скрипте: `self:define_event("Died")` — редактор находит вызов по тексту.
 
 **Lua** (`engine/src/sage/scripting/lua/LuaApi_Signals.cpp`):
 
