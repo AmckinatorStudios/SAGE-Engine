@@ -17,6 +17,7 @@
 #include "sage/input/InputSystem.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
+#include "sage/scene/Signals.h"
 #include "sage/scene/ScriptComponent.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/scripting/ScriptFields.h"
@@ -492,4 +493,125 @@ object.define_event("legacy_one")
     const std::vector<std::string> emitted = sage::scripting::ParseEmittedSignals(src);
     CHECK_TRUE(has(emitted, "player_died"));
     CHECK_FALSE(has(emitted, "forest"));
+}
+
+// Встроенные события — теми же events.connect: тот же сигнал, что слушают
+// связи Inspector, и событие несёт те же поля.
+TEST(LuaStandard_builtin_events_use_events_connect) {
+    World w;
+    GameObject b = w.Spawn("Button", "btn", R"(
+clicks = 0
+events.connect(object, "clicked", function(event)
+    clicks = clicks + 1
+    who = event.sender.name
+    ev = event.name
+end)
+events.connect_once(object, "value_changed", function(event) value = event.data end)
+)");
+    w.Start();
+    w.scene.Events.EmitSignal(b.Id(), sage::signals::kClicked, sage::vars::Value());
+    w.scene.Events.EmitSignal(b.Id(), sage::signals::kClicked, sage::vars::Value());
+    w.scene.Events.EmitSignal(b.Id(), sage::signals::kValueChanged, sage::vars::Value(0.5f));
+    w.scene.Events.EmitSignal(b.Id(), sage::signals::kValueChanged, sage::vars::Value(0.9f));
+    CHECK_EQ(w.Global<int>(b, "clicks"), 2);
+    CHECK_EQ(w.Global<std::string>(b, "who"), std::string("Button"));
+    CHECK_EQ(w.Global<std::string>(b, "ev"), std::string("clicked"));
+    CHECK_NEAR(w.Global<float>(b, "value"), 0.5f, 1e-5f);   // connect_once: только первое
+    CHECK_TRUE(w.errors.empty());
+}
+
+// Ввод по именованным действиям: is_action_down, was_pressed, was_released,
+// get_vector, get_axis.
+TEST(LuaStandard_input_actions) {
+    World w;
+    w.input.Register("Jump");
+    w.input.AddBinding("Jump", "SPACE");
+    GameObject o = w.Spawn("P", "inp", R"(
+pressed, released, down = 0, 0, 0
+function update(delta)
+    if input.was_pressed("Jump") then pressed = pressed + 1 end
+    if input.was_released("Jump") then released = released + 1 end
+    if input.is_action_down("Jump") then down = down + 1 end
+    local v = input.get_vector("Move")
+    vec_ok = v ~= nil
+    axis_ok = type(input.get_axis("Turn")) == "number"
+end
+)");
+    w.Start();
+    // Кадр с действиями: как в игре, действия обновляются после опроса ввода.
+    auto frame = [&] {
+        w.input.BeginFrame();
+        w.input.UpdateActions(0.1f);
+        w.sys->Update(0.1f);
+    };
+    w.input.Push(sage::input::InputEvent::KeyDown(sage::input::Key::Space));
+    frame();
+    frame();
+    w.input.Push(sage::input::InputEvent::KeyUp(sage::input::Key::Space));
+    frame();
+    CHECK_EQ(w.Global<int>(o, "pressed"), 1);
+    CHECK_EQ(w.Global<int>(o, "released"), 1);
+    CHECK_EQ(w.Global<int>(o, "down"), 2);
+    CHECK_TRUE(w.Global<bool>(o, "vec_ok"));
+    CHECK_TRUE(w.Global<bool>(o, "axis_ok"));
+    for (const auto& e : w.errors) std::printf("       %s\n", e.Format().c_str());
+    CHECK_TRUE(w.errors.empty());
+}
+
+// Строчные разделы: все они на месте и ведут туда же, куда прежние.
+TEST(LuaStandard_lowercase_modules_present) {
+    World w;
+    GameObject o = w.Spawn("P", "mods", R"(
+function start()
+    local checks = {
+        input.is_key_down, input.is_action_down, time.delta, debug.log, debug.warn, debug.error,
+        scene.find, scene.find_all, scene.create, physics.raycast, audio.play, tween.to,
+        ui.find, ui.get, events.create, events.trigger, events.connect, events.connect_once,
+        events.disconnect, vector3.new, vector3.zero, color,
+    }
+    missing = {}
+    for i = 1, 22 do if checks[i] == nil then missing[#missing + 1] = i end end
+    missing_count = #missing
+    c = color(1, 0.5, 0.25)
+    color_ok = c ~= nil
+    same_events = events.connect == Events.connect
+end
+)");
+    w.Start();
+    for (const auto& e : w.errors) std::printf("       %s\n", e.Format().c_str());
+    CHECK_TRUE(w.errors.empty());
+    CHECK_EQ(w.Global<int>(o, "missing_count"), 0);
+    CHECK_TRUE(w.Global<bool>(o, "color_ok"));
+    CHECK_TRUE(w.Global<bool>(o, "same_events"));
+}
+
+// Совместимость: старый скрипт (self, двоеточия, Start/Update, Events.emit/on,
+// field.*) работает рядом со стандартным.
+TEST(LuaStandard_legacy_script_still_works) {
+    World w;
+    sage::vars::Table fields;
+    GameObject o = w.Spawn("Old", "old", R"(
+health = field.number(100, 0, 200)
+speed = 3.0
+function Start()
+    self:add_component("Camera")
+    cam = self:has_component("Camera")
+    Events.on("old_event", function(event, data) got = data end)
+    self.transform.position = Vector3.new(1, 2, 3)
+end
+function Update(dt)
+    self.transform:Translate(Vector3.new(0, 0, speed * dt))
+    ticked = true
+end
+function OnOldEvent(data) viahook = data end
+)");
+    w.Start();
+    w.Frame(1.0f);
+    w.engine.Lua().script("Events.emit('old_event', 'hi')");
+    CHECK_TRUE(w.Global<bool>(o, "cam"));
+    CHECK_TRUE(w.Global<bool>(o, "ticked"));
+    CHECK_EQ(w.Global<std::string>(o, "got"), std::string("hi"));
+    CHECK_EQ(w.Global<std::string>(o, "viahook"), std::string("hi"));
+    CHECK_NEAR((*o.Registry()).get<Transform>(o.Entity()).Position.z, 6.0f, 1e-4f);
+    CHECK_TRUE(w.errors.empty());
 }
