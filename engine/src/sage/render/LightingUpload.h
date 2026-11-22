@@ -108,14 +108,21 @@ inline void UploadLocalShadowUniforms(Shader& shader, const sage::render::LocalS
 // здесь нет и разойтись двум путям негде.
 inline void UploadShadowUniforms(Shader& shader, const ShadowBinding& shadows) {
     const int count = std::max(1, std::min(shadows.Count, ShadowMap::kMaxCascades));
+    // Имена — готовые строки: заливка идёт на каждый шейдер каждого прохода, и
+    // собирать их конкатенацией значило бы десяток выделений памяти на вызов.
+    static const std::string kMatrix[] = {"uShadowLightSpace[0]", "uShadowLightSpace[1]",
+                                          "uShadowLightSpace[2]"};
+    static const std::string kParams[] = {"uShadowCascade[0]", "uShadowCascade[1]",
+                                          "uShadowCascade[2]"};
+    static const std::string kMap[] = {"uShadowMap", "uShadowMap1", "uShadowMap2"};
+    static_assert(ShadowMap::kMaxCascades == 3, "таблицы имён выше — по числу каскадов");
     for (int i = 0; i < ShadowMap::kMaxCascades; ++i) {
         const int src = std::min(i, count - 1);
-        shader.SetMat4("uShadowLightSpace[" + std::to_string(i) + "]", shadows.Matrices[src]);
-        shader.SetFloat("uShadowTexelWorld[" + std::to_string(i) + "]", shadows.TexelWorld[src]);
-        shader.SetFloat("uShadowDepthBias[" + std::to_string(i) + "]", shadows.DepthBias[src]);
-        shader.SetFloat("uShadowPenumbra[" + std::to_string(i) + "]", shadows.PenumbraTexels[src]);
-        shader.SetInt(i == 0 ? "uShadowMap" : ("uShadowMap" + std::to_string(i)),
-                      ShadowCascadeUnit(i));
+        shader.SetMat4(kMatrix[i], shadows.Matrices[src]);
+        // Параметры каскада одним vec4 (см. uShadowCascade в PbrShaderLighting.h).
+        shader.SetVec4(kParams[i], glm::vec4(shadows.TexelWorld[src], shadows.DepthPerTexel[src],
+                                             shadows.PenumbraTexels[src], shadows.SearchTexels[src]));
+        shader.SetInt(kMap[i], ShadowCascadeUnit(i));
     }
     shader.SetInt("uShadowCascades", count);
     shader.SetInt("uShadowsEnabled", shadows.Enabled ? 1 : 0);

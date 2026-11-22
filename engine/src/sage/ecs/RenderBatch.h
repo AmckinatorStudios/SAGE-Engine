@@ -74,7 +74,14 @@ public:
 
     // Depth-проход для карты теней: отсечение по фрустуму СВЕТА + инстансная
     // отрисовка только глубины (без освещения).
-    void RenderDepth(Scene& scene, const glm::mat4& lightMatrix);
+    //
+    // reuseGather — взять список сущностей прошлого вызова RenderDepth, а не
+    // обходить сцену заново. Для каскадов и плиток атласа одного кадра: между
+    // ними сцена не меняется, и обход реестра с мировыми матрицами (самая
+    // дорогая последовательная часть сбора) повторялся бы по разу на карту.
+    // Отсечение, LOD и раскладка по пачкам всё равно считаются под КАЖДУЮ
+    // матрицу. Без прошлого теневого сбора флаг ничего не меняет.
+    void RenderDepth(Scene& scene, const glm::mat4& lightMatrix, bool reuseGather = false);
 
     // ------------------------------------------------------------------------
     // Проверка перекрытия (occlusion culling).
@@ -336,9 +343,12 @@ private:
     bool m_skipPlanarReflectors = false;
     // Сбор идёт для КАРТЫ ТЕНЕЙ: объекты с CastShadows = false пропускаются.
     bool m_collectingShadows = false;
+    // m_cull собран теневым проходом и годится для reuseGather (см.
+    // RenderDepth). Любой другой сбор его сбрасывает.
+    bool m_shadowGatherValid = false;
     const LayerFilter* m_layerFilter = nullptr;
 
-    void CollectVisible(Scene& scene, const glm::mat4& cullMatrix);
+    void CollectVisible(Scene& scene, const glm::mat4& cullMatrix, bool reuseGather = false);
 
     std::unordered_map<MeshSlotKey, Group, MeshSlotKeyHash> m_groups; // flat-инстансы по части меша
     std::vector<TexturedItem> m_textured;                          // текстурные (индивидуально)

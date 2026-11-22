@@ -110,6 +110,7 @@ void RunFrameChecks(FrameRenderer& r, Scene& scene);        // кадр, пос�
 void RunAnimationChecks(FrameRenderer& r);                  // морфинг и обратная кинематика
 void RunReflectionChecks(FrameRenderer& r);                 // отражения и блик
 void RunShadowChecks(FrameRenderer& r, Scene& scene);       // тени: мягкость, каскады, лампы
+void RunShadowQualityChecks(FrameRenderer& r);              // тени солнца: отрыв, рябь, зерно, цена
 void RunSceneChecks(FrameRenderer& r);                      // уровни детализации, кэш, небо, RHI
 void RunUIPixelChecks();                                    // интерфейс по пикселям: без артефактов
 void RunUIProgressChecks();                                 // Progress: круг, кольцо, путь, своя маска

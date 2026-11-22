@@ -325,7 +325,7 @@ bool CutsByAlpha(const Material* mat) {
 using namespace batch_detail;
 
 
-void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
+void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix, bool reuseGather) {
     SAGE_PROFILE("Отсечение");
     for (auto& kv : m_groups) kv.second.Instances.clear(); // переиспользуем ёмкость
     m_textured.clear();
@@ -333,58 +333,76 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
     for (auto& kv : m_custom) { kv.second.Instances.clear(); kv.second.Entities.clear();
                                 kv.second.Depths.clear();
                                 kv.second.AnyOverrides = false; kv.second.Transparent = false; }
-    m_cull.clear();
     Frustum frustum = Frustum::FromViewProj(cullMatrix);
 
-    // Все мировые матрицы кадра одним O(n)-проходом (мемоизация общих
-    // родительских цепочек) — вместо рекурсивного WorldMatrix per-entity.
-    // Иерархия задаёт зависимость родитель→ребёнок, поэтому этот проход —
-    // последовательный (дёшев: O(n) без тяжёлой математики).
-    scene.ComputeWorldMatrices(m_worldCache);
-
-    // Запечённое GI сцены: у лайтмапнутых сущностей вместо общего меша —
-    // персональный меш с лайтмап-UV (создаётся лениво: GL-контекст здесь есть,
-    // CollectVisible зовётся только из рендера).
-    sage::gi::GIState* gi = scene.GI && scene.GI->Baked ? scene.GI.get() : nullptr;
-
-    // 1) ПОСЛЕДОВАТЕЛЬНЫЙ сбор: итерация реестра (не потокобезопасна на
-    //    структурные правки) в плоский список — только указатели/матрицы/цвет.
-    ForEachRenderableEntity(scene, [&](entt::entity e, Transform&, MeshRendererComponent& mr) {
-        // СКЕЛЕТНЫЕ МОДЕЛИ РИСУЕТ НЕ ЭТОТ ПРОХОД.
-        //
-        // С тех пор как модель принадлежит Mesh, а не отдельному компоненту
-        // «Animated Model», у анимированного персонажа есть и то и другое: Mesh
-        // с путём к .glb и Animation, которая надевает на него скелет. Файл при
-        // этом читается ДВАЖДЫ — статическим загрузчиком (в MeshPtr) и
-        // скелетным, — и без этой проверки персонаж рисовался бы дважды: раз в
-        // позе покоя статикой и раз анимированным поверх. Видно это как
-        // «модель двоится» и как проваленный вдвое счёт треугольников.
-        if (const AnimationComponent* anim = scene.Registry().try_get<AnimationComponent>(e)) {
-            if (anim->Model) return;   // рисует sage::anim::DrawAnimatedModels
+    // Повторный теневой сбор того же кадра: список сущностей и мировые матрицы
+    // уже есть, сбрасываем только то, что меняет отсечение (видимость и меш
+    // уровня детализации — LOD у каждой карты свой).
+    const bool reuse = reuseGather && m_collectingShadows && m_shadowGatherValid;
+    m_shadowGatherValid = m_collectingShadows;
+    if (reuse) {
+        for (CullItem& c : m_cull) {
+            c.Mesh_ = c.BaseMesh;
+            c.Visible = false;
+            c.Occluded = false;
         }
-        // Чужой слой — его рисует другой проход камеры (тени — все слои).
-        if (m_layerFilter && !m_collectingShadows && !m_layerFilter->Accepts(mr.Layer)) return;
-        const glm::mat4* cached = m_worldCache.Find(e);
-        glm::mat4 model = cached ? *cached : scene.WorldMatrix(e);
-        Mesh* mesh = mr.MeshPtr.get();
-        int lmPage = -1;
-        if (gi) {
-            if (const auto* idc = scene.Registry().try_get<IdComponent>(e)) {
-                auto it = gi->Entities.find(idc->Id);
-                if (it != gi->Entities.end()) {
-                    if (Mesh* baked = sage::gi::GetOrCreateGpuMesh(it->second)) {
-                        mesh = baked;
-                        lmPage = it->second.Page;
+    } else {
+        m_cull.clear();
+
+        // Все мировые матрицы кадра одним O(n)-проходом (мемоизация общих
+        // родительских цепочек) — вместо рекурсивного WorldMatrix per-entity.
+        // Иерархия задаёт зависимость родитель→ребёнок, поэтому этот проход —
+        // последовательный (дёшев: O(n) без тяжёлой математики).
+        scene.ComputeWorldMatrices(m_worldCache);
+
+        // Запечённое GI сцены: у лайтмапнутых сущностей вместо общего меша —
+        // персональный меш с лайтмап-UV (создаётся лениво: GL-контекст здесь есть,
+        // CollectVisible зовётся только из рендера).
+        sage::gi::GIState* gi = scene.GI && scene.GI->Baked ? scene.GI.get() : nullptr;
+
+        // 1) ПОСЛЕДОВАТЕЛЬНЫЙ сбор: итерация реестра (не потокобезопасна на
+        //    структурные правки) в плоский список — только указатели/матрицы/цвет.
+        ForEachRenderableEntity(scene, [&](entt::entity e, Transform&, MeshRendererComponent& mr) {
+            // СКЕЛЕТНЫЕ МОДЕЛИ РИСУЕТ НЕ ЭТОТ ПРОХОД.
+            //
+            // С тех пор как модель принадлежит Mesh, а не отдельному компоненту
+            // «Animated Model», у анимированного персонажа есть и то и другое: Mesh
+            // с путём к .glb и Animation, которая надевает на него скелет. Файл при
+            // этом читается ДВАЖДЫ — статическим загрузчиком (в MeshPtr) и
+            // скелетным, — и без этой проверки персонаж рисовался бы дважды: раз в
+            // позе покоя статикой и раз анимированным поверх. Видно это как
+            // «модель двоится» и как проваленный вдвое счёт треугольников.
+            if (const AnimationComponent* anim = scene.Registry().try_get<AnimationComponent>(e)) {
+                if (anim->Model) return;   // рисует sage::anim::DrawAnimatedModels
+            }
+            // Чужой слой — его рисует другой проход камеры (тени — все слои).
+            if (m_layerFilter && !m_collectingShadows && !m_layerFilter->Accepts(mr.Layer)) return;
+            // Предметы «на камере» (рука, оружие) в карту теней не идут (см.
+            // MeshRendererComponent::CastShadows). Отсеиваются ДО отсечения, а не
+            // после раскладки: иначе за них платили бы и матрицей, и сферой, и LOD.
+            if (m_collectingShadows && !mr.CastShadows) return;
+            const glm::mat4* cached = m_worldCache.Find(e);
+            glm::mat4 model = cached ? *cached : scene.WorldMatrix(e);
+            Mesh* mesh = mr.MeshPtr.get();
+            int lmPage = -1;
+            if (gi) {
+                if (const auto* idc = scene.Registry().try_get<IdComponent>(e)) {
+                    auto it = gi->Entities.find(idc->Id);
+                    if (it != gi->Entities.end()) {
+                        if (Mesh* baked = sage::gi::GetOrCreateGpuMesh(it->second)) {
+                            mesh = baked;
+                            lmPage = it->second.Page;
+                        }
                     }
                 }
             }
-        }
-        const sage::render::LodComponent* lod =
-            scene.Registry().try_get<sage::render::LodComponent>(e);
-        bool paramOverride = scene.Registry().all_of<ShaderParamsComponent>(e);
-        m_cull.push_back(CullItem{mesh, model, &mr, paramOverride, lmPage,
-                                  /*visible*/ false, e, lod, mesh});
-    });
+            const sage::render::LodComponent* lod =
+                scene.Registry().try_get<sage::render::LodComponent>(e);
+            bool paramOverride = scene.Registry().all_of<ShaderParamsComponent>(e);
+            m_cull.push_back(CullItem{mesh, model, &mr, paramOverride, lmPage,
+                                      /*visible*/ false, e, lod, mesh});
+        });
+    }
 
     // 2) ПАРАЛЛЕЛЬНОЕ отсечение: каждый элемент независим — поток пишет только
     //    свой Visible, читает общий frustum/bounds меша лишь на чтение. Гонок нет.
@@ -470,10 +488,10 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix) {
         const MeshRendererComponent& mr = *c.MR;
         // Зонд — по центру объекта, один на все его части: одна модель не
         // должна отражать две разные комнаты.
-        const int probeOfItem = m_probes ? m_probes->Pick(c.Center) : -1;
-        // Предметы «на камере» (рука, оружие) в карту теней и в зеркало не
-        // идут: см. MeshRendererComponent::CastShadows / InReflections.
-        if (m_collectingShadows && !mr.CastShadows) continue;
+        // Карте теней зонд ни к чему: она пишет только глубину.
+        const int probeOfItem = (m_probes && !m_collectingShadows) ? m_probes->Pick(c.Center) : -1;
+        // Предметы «на камере» в зеркало не идут (см. InReflections); в карту
+        // теней их не пускает уже сбор выше.
         if (m_skipPlanarReflectors && !mr.InReflections) continue;
         const std::vector<sage::render::Submesh>& subs = c.Mesh_->Submeshes();
         for (unsigned int si = 0; si < (unsigned int)subs.size(); ++si) {
@@ -758,10 +776,10 @@ void RenderBatch::RenderOcclusionProbes(const glm::mat4& viewProj, const glm::ve
     }
 }
 
-void RenderBatch::RenderDepth(Scene& scene, const glm::mat4& lightMatrix) {
+void RenderBatch::RenderDepth(Scene& scene, const glm::mat4& lightMatrix, bool reuseGather) {
     m_stats = {};
     m_collectingShadows = true;
-    CollectVisible(scene, lightMatrix); // отсечение по фрустуму света
+    CollectVisible(scene, lightMatrix, reuseGather); // отсечение по фрустуму света
     m_collectingShadows = false;
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
 

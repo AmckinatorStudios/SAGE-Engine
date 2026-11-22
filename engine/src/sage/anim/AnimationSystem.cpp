@@ -10,6 +10,7 @@
 #include "sage/core/Log.h"
 #include "sage/anim/ClipFile.h"
 #include "sage/assets/AssetDatabase.h"
+#include "sage/render/Frustum.h"
 #include "sage/render/ResourceManager.h"
 #include "sage/anim/IK.h"
 #include "sage/render/SkinnedModel.h"
@@ -568,12 +569,33 @@ void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& pr
 }
 
 void DrawAnimatedModelsDepth(Scene& scene, const glm::mat4& lightMatrix) {
+    const sage::render::Frustum frustum = sage::render::Frustum::FromViewProj(lightMatrix);
     auto v = scene.Registry().view<AnimationComponent, Transform>();
     for (auto e : v) {
         AnimationComponent& am = v.get<AnimationComponent>(e);
         if (!am.Model) continue;
-        am.Model->DrawDepth(scene.WorldMatrix(e), lightMatrix, am.Anim.BoneMatrices(),
-                            &am.MorphWeights);
+        // «Не отбрасывать тень» у персонажа задаётся тем же флагом Mesh, что и у
+        // статики (руки от первого лица — почти всегда скелетная модель). Раньше
+        // этот путь флаг не читал: рука, спрятанная из карты теней у статики,
+        // у скелетной модели продолжала ложиться тенью на пол.
+        if (const auto* mr = scene.Registry().try_get<MeshRendererComponent>(e)) {
+            if (!mr->CastShadows) continue;
+        }
+        const glm::mat4 world = scene.WorldMatrix(e);
+        // Отсечение по каскаду — по сфере ТЕКУЩЕЙ позы (см. PoseBoundingSphere).
+        // Скиннинг — самая дорогая вершинная работа кадра, а без отсечения
+        // каждый персонаж сцены рисовался в каждый каскад, даже за сотню метров
+        // от него. Модель с активными морфами не отсекается: смещения
+        // блендшейпов не входят в габарит, и строгой границы для них нет.
+        bool morphed = false;
+        for (float w : am.MorphWeights) morphed = morphed || w != 0.0f;
+        glm::vec3 center;
+        float radius = 0.0f;
+        if (!morphed && am.Model->PoseBoundingSphere(world, am.Anim.BoneMatrices(), center, radius) &&
+            !frustum.IntersectsSphere(center, radius)) {
+            continue;
+        }
+        am.Model->DrawDepth(world, lightMatrix, am.Anim.BoneMatrices(), &am.MorphWeights);
     }
 }
 

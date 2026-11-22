@@ -15,6 +15,7 @@ add_executable(sage_render_tests
     Checks_Animation.cpp     # морфинг и обратная кинематика
     Checks_Reflections.cpp   # отражения и блик
     Checks_Shadows.cpp       # тени
+    Checks_ShadowQuality.cpp # качество теней солнца: отрыв, рябь, зерно, стабильность
     Checks_Scene.cpp         # детализация, отсечение, кэш, небо, RHI
     Checks_Materials.cpp     # материал: от файла до пикселей
     Checks_UI.cpp            # интерфейс: части не наезжают и не красят друг друга
