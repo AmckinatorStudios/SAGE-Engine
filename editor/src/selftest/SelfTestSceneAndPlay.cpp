@@ -667,6 +667,30 @@ bool EditorLayer::SelfTestSceneAndPlay() {
     // секунду, и без ограничения панель Console за минуту получает три с
     // половиной тысячи одинаковых строк — в ней перестаёт быть видно всё
     // остальное. Считаем по самой панели: именно её читает человек.
+    // --- Play в режиме Window: настоящий SagePlayer в своём процессе. Редактор
+    // остаётся в режиме правки, Stop убирает процесс и временные файлы. ---
+    if (ok) {
+        const bool wasWindow = m_game.WindowMode();
+        m_game.SetWindowMode(true);
+        StartPlay();
+        const bool started = m_externalRunning;
+        if (started) {
+            if (m_play.Active()) {
+                LOG_ERROR("Editor") << "SELFTEST: window play must not enter the editor Play mode";
+                ok = false;
+            }
+            StartPlay(); // повторное нажатие Play не запускает второй процесс
+            StopPlay();
+            if (m_externalRunning || m_external.Running() || fs::exists(m_externalTemp)) {
+                LOG_ERROR("Editor") << "SELFTEST: window play left a process or temp files after Stop";
+                ok = false;
+            }
+        } else {
+            LOG_WARN("Editor") << "SELFTEST: window play skipped (SagePlayer not found next to the editor)";
+        }
+        m_game.SetWindowMode(wasWindow);
+    }
+
     if (ok) {
         {
             std::ofstream f(m_project.Dir() / "assets" / "scripts" / "selftest_boom.lua");

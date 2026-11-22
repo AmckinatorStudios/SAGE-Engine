@@ -136,10 +136,10 @@ void EditorLayer::RegisterCommands() {
                     [this] { return m_history.CanRedo(); }, [this] { Redo(); }});
 
     m_commands.Add({"play.start", T("Play"), scene, "", "play",
-                    [this] { return !m_play.Active(); },
+                    [this] { return !m_play.Active() && !m_externalRunning; },
                     [this] { StartPlay(); }});
     m_commands.Add({"play.stop", T("Stop"), scene, "", "stop",
-                    [this] { return InPlayMode(); }, [this] { StopPlay(); }});
+                    [this] { return InPlayMode() || m_externalRunning; }, [this] { StopPlay(); }});
 
     m_commands.Add({"object.duplicate", T("Duplicate"), object, "Ctrl+D", "cube",
                     hasSelection, [this] { DuplicateSelected(); }});
@@ -195,6 +195,7 @@ void EditorLayer::OnAttach() {
 }
 
 void EditorLayer::OnDetach() {
+    StopExternalGame(); // редактор закрывается — окно игры не должно его пережить
     // Документ интерфейса: вопрос о несохранённом при выходе задаётся про
     // уровень, и правки вёрстки иначе пропали бы молча — сохраняем их туда,
     // откуда документ открыт (новый — в папку интерфейсов проекта).
@@ -246,6 +247,7 @@ void EditorLayer::OnDetach() {
 }
 
 void EditorLayer::OnUpdate(float dt) {
+    PollExternalGame();
     // --- Автосохранение ---
     //
     // Пишет НЕ поверх рабочей сцены, а в отдельный файл рядом. Поверх нельзя:

@@ -315,6 +315,9 @@ public:
     // --- Play-режим ---
     virtual EditorPlayState GetPlayState() const = 0;
     virtual bool InPlayMode() const = 0;
+    // Игра идёт отдельным окном SagePlayer (режим Window панели Game). Это не
+    // Play-режим редактора: сцена и ввод редактора остаются как при правке.
+    virtual bool ExternalGameRunning() const = 0;
     // Физика идущей игры; nullptr вне Play. Инспектору — показать, кто сейчас
     // в зоне триггера.
     virtual PhysicsScene* PlayPhysics() = 0;

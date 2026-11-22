@@ -11,7 +11,27 @@
 #include "sage/core/Config.h"
 #include "../Localization.h"
 #include "EditorIcons.h"
+#include "EditorPrefs.h"
+#include "../EditorTheme.h"
+#include "ui/UI.h"
+#include "../InspectorControls.h"
 #include "sage/ui/UIInteraction.h"
+
+namespace ictl = sage::editor::ictl;
+
+namespace {
+constexpr const char* kModePref = "game.display_window";
+}
+
+bool GamePanel::WindowMode() {
+    if (m_windowMode < 0) m_windowMode = sage::editor::prefs::GetBool(kModePref, false) ? 1 : 0;
+    return m_windowMode == 1;
+}
+
+void GamePanel::SetWindowMode(bool window) {
+    m_windowMode = window ? 1 : 0;
+    sage::editor::prefs::SetBool(kModePref, window);
+}
 
 void GamePanel::Draw(EditorHost& host, bool* open) {
     if (m_focusFrames > 0) {
@@ -28,8 +48,36 @@ void GamePanel::Draw(EditorHost& host, bool* open) {
     m_focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows);
     m_platformWindow = ImGui::GetWindowViewport() ? ImGui::GetWindowViewport()->PlatformHandle : nullptr;
 
+    // ВЕРХНЯЯ ПОЛОСА: куда выводить игру. Окно игры настраивается в Game
+    // Settings, здесь — только выбор «где смотреть». Переключать на ходу нельзя:
+    // идущий запуск остаётся в том режиме, в котором начат.
+    {
+        const Sage::UI::Style& ui = Sage::UI::Get();
+        const bool locked = host.InPlayMode() || host.ExternalGameRunning();
+        const float pad = ui.SpacingSM;
+        ImGui::SetCursorPos(ImVec2(pad, pad));
+        ImGui::BeginDisabled(locked);
+        const ictl::GroupItem modes[2] = {
+            {"layout", T("Embedded"), T("Play inside the editor, in this panel"), !WindowMode(), true},
+            {"window", T("Window"), T("Play in a separate game window (the real player)"), WindowMode(), true},
+        };
+        if (const int hit = ictl::ButtonGroup("##game_mode", modes, 2, ictl::ButtonLook::Standard); hit >= 0)
+            SetWindowMode(hit == 1);
+        ImGui::EndDisabled();
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + pad);
+    }
+
     ImVec2 avail = ImGui::GetContentRegionAvail();
-    if (!host.HasPrimaryCamera()) {
+    if (WindowMode()) {
+        // Кадра здесь нет — игра рисуется своим окном. Фокус панели игре не
+        // нужен: ввод получает её собственное окно.
+        m_mouseInside = false;
+        const char* hint = host.ExternalGameRunning() ? T("The game is running in a separate window")
+                                                      : T("Press Play to run the game in a separate window");
+        ImGui::Dummy(ImVec2(0, avail.y * 0.4f));
+        ImGui::SetCursorPosX((avail.x - ImGui::CalcTextSize(hint).x) * 0.5f);
+        ImGui::TextDisabled("%s", hint);
+    } else if (!host.HasPrimaryCamera()) {
         ImGui::Dummy(ImVec2(0, avail.y * 0.42f));
         const char* hint = "No camera in scene";
         float w = ImGui::CalcTextSize(hint).x;

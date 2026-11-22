@@ -83,6 +83,12 @@ sage::Application* sage::CreateApplication(int argc, char** argv) {
     cfg.LoadFile("sage.cfg");
     cfg.LoadFile(sage::EngineAssetPath("sage.cfg")); // настройки, положенные рядом с самим плеером
     cfg.LoadFile(sage::PathToUtf8(projectDir / "sage.cfg"));
+    // Настройки, которые редактор передал запуску из панели Game (режим Window):
+    // там они могут быть ещё не сохранены в sage.cfg проекта, а окно игры
+    // обязано открыться именно с тем, что человек видит в Game Settings.
+    // Поверх файлов, но под SAGE_* — те по-прежнему главнее всего.
+    if (const fs::path over = sage::EnvPath("SAGE_CONFIG_FILE"); !over.empty())
+        cfg.LoadFile(sage::PathToUtf8(over));
     cfg.ApplyEnvOverrides();
     sage::EngineConfig::Set(cfg);
 

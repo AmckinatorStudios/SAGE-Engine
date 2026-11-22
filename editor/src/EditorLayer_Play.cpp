@@ -24,6 +24,8 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <ctime>
+#include <stdexcept>
 
 #include <GLFW/glfw3.h>
 #include <glm/gtc/matrix_transform.hpp>
@@ -109,7 +111,93 @@ PlayContext EditorLayer::MakePlayContext() {
     return ctx;
 }
 
+// РЕЖИМ WINDOW: игра — настоящий SagePlayer в своём окне.
+//
+// Редактор остаётся в режиме правки (m_play не трогаем): сцена, история и ввод
+// живут как обычно. Плееру отдаём то, что человек видит сейчас: текущую сцену
+// (в том числе несохранённую) и настройки из Game Settings (в том числе ещё не
+// сохранённые в sage.cfg) — файлами во временной папке и через SAGE_PLAY_SCENE /
+// SAGE_CONFIG_FILE. Файлы проекта при этом не меняются.
+bool EditorLayer::StartExternalGame() {
+    if (!m_project.Loaded() || !m_scene) {
+        SetStatusMessage(T("Open a project to run the game"));
+        return false;
+    }
+#if defined(_WIN32)
+    const char* nativeId = "windows-x64";
+#elif defined(__APPLE__)
+    const char* nativeId = "macos-arm64";
+#else
+    const char* nativeId = "linux-x64";
+#endif
+    fs::path player;
+    std::string reason;
+    for (const BuildTargetInfo& t : BuildTargets()) {
+        if (t.Id != nativeId) continue;
+        if (t.Available) player = t.PlayerPath;
+        else reason = t.UnavailableReason;
+    }
+    if (player.empty()) {
+        LOG_ERROR("Editor") << "Play (окно): плеер не найден: " << reason;
+        SetStatusMessage(reason.empty() ? T("SagePlayer not found") : reason);
+        return false;
+    }
+    std::error_code ec;
+    m_externalTemp = fs::temp_directory_path(ec) / ("sage_play_" + std::to_string((unsigned long long)std::time(nullptr)));
+    fs::create_directories(m_externalTemp, ec);
+    const fs::path scene = m_externalTemp / "play.sage";
+    const fs::path cfg = m_externalTemp / "play.cfg";
+    try {
+        std::ofstream f(scene, std::ios::binary);
+        f << SceneSerializer::SaveToString(*m_scene);
+        if (!f) throw std::runtime_error("не записать сцену");
+    } catch (const std::exception& e) {
+        LOG_ERROR("Editor") << "Play (окно): сцена не записана: " << e.what();
+        SetStatusMessage(T("Could not prepare the scene for the game window"));
+        fs::remove_all(m_externalTemp, ec);
+        return false;
+    }
+    if (!m_settings.SaveFile(sage::PathToUtf8(cfg))) {
+        fs::remove_all(m_externalTemp, ec);
+        return false;
+    }
+    std::string err;
+    if (!m_external.Start(player, m_project.Dir(),
+                          {{"SAGE_PLAY_SCENE", sage::PathToUtf8(scene)},
+                           {"SAGE_CONFIG_FILE", sage::PathToUtf8(cfg)}},
+                          err)) {
+        LOG_ERROR("Editor") << "Play (окно): не запустить плеер: " << err;
+        SetStatusMessage(T("Could not start the game window"));
+        fs::remove_all(m_externalTemp, ec);
+        return false;
+    }
+    m_externalRunning = true;
+    LOG_INFO("Editor") << "Play (окно): запущен " << player.string();
+    return true;
+}
+
+void EditorLayer::StopExternalGame() {
+    m_external.Stop();
+    m_externalRunning = false;
+    std::error_code ec;
+    if (!m_externalTemp.empty()) fs::remove_all(m_externalTemp, ec);
+    m_externalTemp.clear();
+}
+
+// Закрыли окно игры — Play считается остановленным, редактор уже в рабочем виде.
+void EditorLayer::PollExternalGame() {
+    if (m_externalRunning && !m_external.Running()) {
+        LOG_INFO("Editor") << "Play (окно): игра завершилась";
+        StopExternalGame();
+    }
+}
+
 void EditorLayer::StartPlay() {
+    if (m_externalRunning) return;
+    if (m_game.WindowMode()) {
+        if (!m_play.Active()) StartExternalGame();
+        return;
+    }
     // Заметка шаблона отвечала на вопрос «почему в сцене пусто»; Play на него
     // и отвечает делом — держать её дальше значит мешать смотреть.
     m_templateNote.clear();
@@ -180,6 +268,7 @@ void EditorLayer::SyncBodyToTransform(GameObject object) {
 }
 
 void EditorLayer::StopPlay() {
+    if (m_externalRunning) StopExternalGame();
     if (!m_play.Active()) return;
     m_scenePtr = m_scene.get();
     PlayContext ctx = MakePlayContext();
