@@ -85,6 +85,11 @@ struct System {
     std::string Label;
     std::string Icon;
     std::string Hint;
+    bool Open = true;     // раскрыт ли раздел по умолчанию
+    // Подпись и подсказка включателя: у неба и тумана он объясняет границу со
+    // сквозными переключателями Game Settings.
+    std::string EnabledLabel = "Enabled";
+    std::string EnabledHint;
     // Включатель системы; выключена — ничего, кроме включателя, не видно.
     FieldFn Enabled;      // bool*; пусто — система всегда включена
     // Выбор типа; пусто — у системы один тип (Variants[0]).

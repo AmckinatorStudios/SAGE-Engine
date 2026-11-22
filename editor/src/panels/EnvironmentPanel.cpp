@@ -6,6 +6,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <vector>
 
@@ -25,45 +26,35 @@
 #include "../Project.h"
 #include "EditorIcons.h"
 #include "ui/ColorPicker.h"
+#include "../InspectorControls.h"
 
 namespace env = sage::env;
 
 namespace {
 
-// Строки свойств — таблицей «подпись | значение»: подписи слева одной
-// колонкой читаются быстрее, чем подписи справа от полей разной ширины, и
-// узкая панель не обрезает их посередине слова.
-// Имя таблицы — со счётчиком: в одной группе таблиц бывает несколько (особый
-// виджет во всю ширину разрезает строки), и одинаковые имена слили бы их
-// ширины колонок в одну. PushID вокруг BeginTable для этого не годится:
-// таблица сама кладёт свой ID в стек до EndTable, и PopID снял бы чужой.
-bool BeginPropTable(int index) {
-    char id[32];
-    std::snprintf(id, sizeof(id), "##props%d", index);
-    if (!ImGui::BeginTable(id, 2, ImGuiTableFlags_SizingStretchProp | ImGuiTableFlags_NoPadOuterX))
-        return false;
-    ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthStretch, 0.42f);
-    ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch, 0.58f);
-    return true;
-}
+// ВСЕ СТРОКИ — КОНТРОЛЫ UI KIT (ictl::): подпись слева в общей колонке,
+// значение справа, одинаковые высоты и состояния Hover/Active/Disabled. Своей
+// системы контролов у панели нет — только то, чего в kit нет по смыслу: слоты
+// ассетов, развёртка куба и вычисленные цвета.
+namespace ictl = sage::editor::ictl;
 
-void Label(const env::Prop& p) {
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(T(p.Label));
-    if (!p.Hint.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(p.Hint));
-}
-
-// Компактный цвет: квадрат-образец и hex рядом. Полная палитра открывается
-// щелчком по образцу — цвета не должны занимать пол-инспектора.
-bool CompactColor(const char* id, glm::vec3& c, Sage::UI::ColorFieldFlags extra = 0) {
-    const bool changed = Sage::UI::ColorField3(id, &c.x, Sage::UI::ColorField_Compact | extra);
-    ImGui::SameLine();
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextDisabled("%s", Sage::UI::color::ToHex(&c.x).c_str());
-    return changed;
+// Подсказка на всю строку, а не только на сам контрол: подпись тоже «горячая».
+// Строку знает только вызывающий (y0 — верх строки до отрисовки контрола).
+void RowTip(float y0, const std::string& hint) {
+    if (hint.empty() || !ImGui::IsWindowHovered(ImGuiHoveredFlags_ChildWindows)) return;
+    const ImVec2 wp = ImGui::GetWindowPos();
+    const ImVec2 a(wp.x, y0);
+    const ImVec2 b(wp.x + ImGui::GetWindowWidth(), y0 + ImGui::GetFrameHeight());
+    if (!ImGui::IsMouseHoveringRect(a, b)) return;
+    ImGui::BeginTooltip();
+    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 26.0f);
+    ImGui::TextUnformatted(T(hint));
+    ImGui::PopTextWrapPos();
+    ImGui::EndTooltip();
 }
 
 } // namespace
+
 
 void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvironment& envData) {
     // СОЛНЦЕ ИЩЕТ ДВИЖОК, а не панель: правило «солнце — направленный свет с
@@ -71,7 +62,7 @@ void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvir
     const entt::entity sunEntity = sage::ecs::FindSunEntity(scene);
     if (sunEntity == entt::null) {
         ImGui::TextWrapped("%s", T("No directional light — no sun and no time of day."));
-        if (ImGui::Button(T("Create a sun"))) {
+        if (ictl::Button("sun", T("Create a sun"))) {
             host.PushUndoSnapshot();
             GameObject sun = sage::ecs::CreateSunEntity(scene);
             host.Selection().SetPrimary(sun.Id());
@@ -86,20 +77,21 @@ void EnvironmentPanel::DrawSunLink(EditorHost& host, Scene& scene, LightingEnvir
     const char* phase = state.DayFactor > 0.85f  ? T("day")
                         : state.DayFactor > 0.15f ? T("twilight")
                                                   : T("night");
+    ImGui::AlignTextToFramePadding();
     ImGui::TextDisabled(T("Now: %s (sun %.0f° above the horizon)"), phase, elevationDeg);
     const NameComponent* name = scene.Registry().try_get<NameComponent>(sunEntity);
     const IdComponent* id = scene.Registry().try_get<IdComponent>(sunEntity);
     // Какой объект — солнце, говорит подсказка кнопки: второй строкой рядом с
     // кнопкой она выталкивала «Выбрать» за край узкой панели.
-    ImGui::SameLine();
-    if (ImGui::Button(T("Select"))) host.Selection().SetPrimary(id ? id->Id : 0);
     char tip[256];
     std::snprintf(tip, sizeof(tip),
                   envData.Cycle.Enabled ? T("The cycle turns the object \"%s\"")
                                         : T("Time of day = rotation of the object \"%s\""),
                   name ? name->Name.c_str() : "?");
-    EditorTheme::Hint(tip);
+    if (ictl::Button(nullptr, T("Select"), tip, ictl::ButtonLook::Compact))
+        host.Selection().SetPrimary(id ? id->Id : 0);
 }
+
 
 // --- Особые виджеты, отмеченные в схеме как Custom ------------------------------
 void EnvironmentPanel::DrawCustom(EditorHost& host, const std::string& key, LightingEnvironment& e) {
@@ -110,7 +102,8 @@ void EnvironmentPanel::DrawCustom(EditorHost& host, const std::string& key, Ligh
     } else if (key == "sky.folder.convert") {
         // Прежний тип неба: перевести одним щелчком, а не собирать шесть
         // граней заново руками. Не вышло — небо остаётся как было.
-        if (ImGui::Button(T("Convert to six files"), ImVec2(-FLT_MIN, 0.0f))) {
+        if (ictl::Button("import", T("Convert to six files"),
+                         T("Each face px/nx/py/ny/pz/nz of the folder goes into its own slot"))) {
             if (env::CubemapFolderToFaces(e.Skybox, host.CurrentProject().Dir())) {
                 host.PushUndoSnapshot();
                 m_convertFailed = false;
@@ -118,8 +111,6 @@ void EnvironmentPanel::DrawCustom(EditorHost& host, const std::string& key, Ligh
                 m_convertFailed = true;
             }
         }
-        if (ImGui::IsItemHovered())
-            ImGui::SetTooltip("%s", T("Each face px/nx/py/ny/pz/nz of the folder goes into its own slot"));
         if (m_convertFailed)
             ImGui::TextColored(EditorTheme::Color(EditorTheme::Role::Danger), "%s",
                                T("Not all six faces px/nx/py/ny/pz/nz are in the folder"));
@@ -127,7 +118,7 @@ void EnvironmentPanel::DrawCustom(EditorHost& host, const std::string& key, Ligh
         // Готовый вид — отправная точка: собрать узнаваемое небо из трёх
         // десятков полей с нуля — полчаса подбора цветов.
         ImGui::SetNextItemWidth(-FLT_MIN);
-        if (ImGui::BeginCombo("##preset", T("Apply a ready-made look…"))) {
+        if (ictl::BeginDropdown("##preset", T("Apply a ready-made look…"))) {
             for (int i = 0; i < (int)sage::render::SkyPreset::Count; ++i) {
                 const auto preset = (sage::render::SkyPreset)i;
                 if (ImGui::Selectable(T(sage::render::SkyPresetLabel(preset)))) {
@@ -135,7 +126,7 @@ void EnvironmentPanel::DrawCustom(EditorHost& host, const std::string& key, Ligh
                     host.PushUndoSnapshot();
                 }
             }
-            ImGui::EndCombo();
+            ictl::EndDropdown();
         }
     } else if (key == "sky.sunlink" || key == "cycle.sunlink") {
         DrawSunLink(host, host.CurrentScene(), e);
@@ -155,19 +146,26 @@ void EnvironmentPanel::DrawCustom(EditorHost& host, const std::string& key, Ligh
         if (!e.Skybox.Enabled) {
             // НЕБА НЕТ — И СВЕТА ОТ НЕГО НЕТ: поля другого режима тут ни при чём.
             ImGui::TextDisabled("%s", T("The sky is off — there is no ambient light"));
-            ImGui::TextDisabled("%s", T("Switch to Custom values for light without a sky"));
+            ImGui::TextDisabled("%s", T("Switch to Custom for light without a sky"));
         } else {
             // РЕЗУЛЬТАТ, а не поля: значения считаются из неба и времени суток.
             glm::vec3 skyC, groundC;
             e.ResolveAmbient(skyC, groundC);
+            // Два образца подписаны словами: «какой из них небо, какой земля»
+            // не должно быть загадкой. Редактировать их нельзя — это результат.
+            const float y0 = ImGui::GetCursorScreenPos().y;
+            ictl::Label(T("Computed"));
+            Sage::UI::ColorField3("##sky", &skyC.x, Sage::UI::ColorField_Compact | Sage::UI::ColorField_ReadOnly);
+            ImGui::SameLine();
             ImGui::AlignTextToFramePadding();
-            ImGui::TextDisabled("%s", T("Computed:"));
+            ImGui::TextDisabled("%s", T("Sky"));
             ImGui::SameLine();
-            CompactColor("##sky", skyC, Sage::UI::ColorField_ReadOnly);
+            Sage::UI::ColorField3("##ground", &groundC.x,
+                                  Sage::UI::ColorField_Compact | Sage::UI::ColorField_ReadOnly);
             ImGui::SameLine();
-            CompactColor("##ground", groundC, Sage::UI::ColorField_ReadOnly);
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", T("Taken from the sky, so it darkens with it"));
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("%s", T("Ground"));
+            RowTip(y0, "Taken from the sky, so it darkens with it");
         }
     }
     ImGui::PopID();
@@ -210,9 +208,10 @@ void EnvironmentPanel::DrawFaceMap(EditorHost& host, LightingEnvironment& e) {
         const bool hovered = ImGui::IsItemHovered();
         ImGui::PopID();
         const std::string& path = e.Skybox.FacePaths[c.Face];
-        dl->AddRectFilled(a, b, path.empty() ? empty : filled, 3.0f);
+        const float round = ImGui::GetStyle().FrameRounding;
+        dl->AddRectFilled(a, b, path.empty() ? empty : filled, round);
         dl->AddRect(a, b, hovered ? ImGui::GetColorU32(EditorTheme::Color(EditorTheme::Role::Accent)) : line,
-                    3.0f);
+                    round);
         const char* name = T(c.Name);   // ключи «… face» — в ru.json
         const ImVec2 ts = ImGui::CalcTextSize(name);
         dl->PushClipRect(a, b, true);
@@ -243,75 +242,60 @@ void EnvironmentPanel::DrawFaceMap(EditorHost& host, LightingEnvironment& e) {
     ImGui::Dummy(ImVec2(4.0f * cellW + 3.0f * gap, 0.0f));
 }
 
-// --- Одно свойство — одна строка таблицы ----------------------------------------
+// --- Одно свойство — одна строка kit ---------------------------------------------
 bool EnvironmentPanel::DrawProp(EditorHost& host, const env::Prop& p, LightingEnvironment& e) {
     void* field = p.Field ? p.Field(e) : nullptr;
     if (!field) return false;
     m_drawn.push_back(p.Key);
-    // Слот картинки или папки — во всю ширину, подписью сверху: у слота обложка
-    // и имя файла, и в колонке значения они сжимались до нечитаемого.
-    const bool slot = p.Kind == env::PropKind::Texture || p.Kind == env::PropKind::Folder;
-    if (slot) {
-        Label(p);
-    } else {
-        ImGui::TableNextRow();
-        ImGui::TableSetColumnIndex(0);
-        Label(p);
-        ImGui::TableSetColumnIndex(1);
-    }
+    const char* label = T(p.Label);
+    const float y0 = ImGui::GetCursorScreenPos().y;
     ImGui::PushID(p.Key.c_str());
-    ImGui::SetNextItemWidth(-FLT_MIN);
     bool changed = false;
+    // Диапазон поля — из схемы; шаг кнопок «−/+» и формат kit подбирает по нему.
+    auto numOpts = [&p] {
+        ictl::NumOpts o = ictl::OptsForRange(p.Min, p.Max);
+        o.Min = p.Min;
+        o.Max = p.Max;
+        o.Format = p.Format.c_str();
+        return o;
+    };
     switch (p.Kind) {
         case env::PropKind::Bool:
-            if (ImGui::Checkbox("##v", static_cast<bool*>(field))) {
+            changed = ictl::Switch(host, label, static_cast<bool*>(field));
+            break;
+        case env::PropKind::Float:
+            changed = ictl::Number(host, label, static_cast<float*>(field), numOpts());
+            break;
+        case env::PropKind::Slider:
+            changed = ictl::SliderNumber(host, label, static_cast<float*>(field), p.Min, p.Max, p.Format.c_str());
+            break;
+        case env::PropKind::Vec2:
+            changed = ictl::Vector2(host, label, static_cast<glm::vec2*>(field), numOpts());
+            break;
+        case env::PropKind::Enum: {
+            int* v = static_cast<int*>(field);
+            std::vector<const char*> items;
+            for (const std::string& o : p.Options) items.push_back(T(o));
+            if (ictl::Dropdown(label, v, items.data(), (int)items.size())) {
                 host.PushUndoSnapshot();
                 changed = true;
             }
             break;
-        case env::PropKind::Float:
-            changed = ImGui::DragFloat("##v", static_cast<float*>(field), p.Step, p.Min, p.Max,
-                                       p.Format.c_str());
-            host.TrackLastImGuiItem();
-            break;
-        case env::PropKind::Slider:
-            changed = ImGui::SliderFloat("##v", static_cast<float*>(field), p.Min, p.Max, p.Format.c_str());
-            host.TrackLastImGuiItem();
-            break;
-        case env::PropKind::Vec2:
-            changed = ImGui::DragFloat2("##v", static_cast<float*>(field), p.Step, p.Min, p.Max,
-                                        p.Format.c_str());
-            host.TrackLastImGuiItem();
-            break;
-        case env::PropKind::Enum: {
-            int* v = static_cast<int*>(field);
-            const char* preview =
-                (*v >= 0 && *v < (int)p.Options.size()) ? T(p.Options[(size_t)*v]) : "?";
-            if (ImGui::BeginCombo("##v", preview)) {
-                for (int i = 0; i < (int)p.Options.size(); ++i) {
-                    if (ImGui::Selectable(T(p.Options[(size_t)i]), i == *v) && i != *v) {
-                        *v = i;
-                        host.PushUndoSnapshot();
-                        changed = true;
-                    }
-                }
-                ImGui::EndCombo();
-            }
-            break;
         }
         case env::PropKind::Color:
-            changed = CompactColor("##v", *static_cast<glm::vec3*>(field));
-            host.TrackLastImGuiItem();
+            changed = ictl::Color3(host, label, static_cast<glm::vec3*>(field));
             break;
         case env::PropKind::Texture:
         case env::PropKind::Folder: {
             // СЛОТ, а не поле с путём: картинку и папку неба перетаскивают из
-            // панели ассетов, как и всё остальное (см. AssetSlot.h).
+            // панели ассетов, как и всё остальное (см. AssetSlot.h). Слот
+            // широкий — подпись над ним, как у групп значений kit.
+            ictl::GroupTitle(label);
             std::string& path = *static_cast<std::string*>(field);
             const bool folder = p.Kind == env::PropKind::Folder;
             assetslot::Result r = assetslot::Draw(host, "slot",
                                                   folder ? assetslot::Kind::Folder : assetslot::Kind::Texture,
-                                                  path, nullptr, T(p.Label));
+                                                  path, nullptr, label);
             if (r.Changed) {
                 path = r.Path;
                 host.PushUndoSnapshot();
@@ -319,7 +303,7 @@ bool EnvironmentPanel::DrawProp(EditorHost& host, const env::Prop& p, LightingEn
             }
             if (r.BrowseRequested) {
                 FileBrowser::Config c;
-                c.Title = T(p.Label);
+                c.Title = label;
                 if (folder) {
                     c.Mode = FileBrowser::PickMode::PickFolder;
                 } else {
@@ -336,35 +320,18 @@ bool EnvironmentPanel::DrawProp(EditorHost& host, const env::Prop& p, LightingEn
         case env::PropKind::Custom: break;
     }
     ImGui::PopID();
+    // Слот выше строки — подсказка только для однострочных контролов.
+    if (p.Kind != env::PropKind::Texture && p.Kind != env::PropKind::Folder) RowTip(y0, p.Hint);
     return changed;
 }
 
 void EnvironmentPanel::DrawProps(EditorHost& host, const std::vector<env::Prop>& props,
                                  LightingEnvironment& e, bool& changed) {
-    // Особые виджеты — во всю ширину, между таблицами: строка «что сейчас на
-    // небе» в колонке значения обрезалась бы на первом же слове.
-    bool table = false;
-    int tables = 0;
     for (const env::Prop& p : props) {
         if (p.Visible && !p.Visible(e)) continue;
-        const bool wide = p.Kind == env::PropKind::Custom || p.Kind == env::PropKind::Texture ||
-                          p.Kind == env::PropKind::Folder;
-        if (wide) {
-            if (table) {
-                ImGui::EndTable();
-                table = false;
-            }
-            if (p.Kind == env::PropKind::Custom) DrawCustom(host, p.Key, e);
-            else if (DrawProp(host, p, e)) changed = true;
-            continue;
-        }
-        if (!table) {
-            table = BeginPropTable(tables++);
-            if (!table) continue;
-        }
-        if (DrawProp(host, p, e)) changed = true;
+        if (p.Kind == env::PropKind::Custom) DrawCustom(host, p.Key, e);
+        else if (DrawProp(host, p, e)) changed = true;
     }
-    if (table) ImGui::EndTable();
 }
 
 void EnvironmentPanel::DrawGroup(EditorHost& host, const env::Group& g, LightingEnvironment& e,
@@ -376,88 +343,76 @@ void EnvironmentPanel::DrawGroup(EditorHost& host, const env::Group& g, Lighting
         ImGui::PopID();
         return;
     }
-    // Группа со своим включателем (облака, луна): галка в заголовке, а поля —
-    // только когда включено. Выключенная группа — одна строка, а не двадцать
-    // серых полей, которые ничего не делают.
+    // Группа со своим включателем (облака, луна) — вложенная группа kit с
+    // состоянием «Вкл/Выкл» справа в заголовке: свёрнутая, она всё равно
+    // говорит, работает ли. Поля — только когда включено, а не двадцать серых
+    // полей, которые ничего не делают.
     bool* toggle = g.Toggle ? static_cast<bool*>(g.Toggle(e)) : nullptr;
-    if (toggle) {
-        if (ImGui::Checkbox("##on", toggle)) {
-            host.PushUndoSnapshot();
-            changed = true;
+    const std::string sub = "env." + m_systemId + "." + g.Id;
+    auto status = [&] {
+        if (!toggle) return;
+        const char* text = *toggle ? T("On") : T("Off");
+        const ImVec2 b = ImGui::GetItemRectMax();
+        const ImVec2 sz = ImGui::CalcTextSize(text);
+        ImGui::GetWindowDrawList()->AddText(
+            ImVec2(b.x - sz.x - ImGui::GetStyle().FramePadding.x, ImGui::GetItemRectMin().y + ImGui::GetStyle().FramePadding.y),
+            EditorTheme::Color32(*toggle ? EditorTheme::Role::Accent : EditorTheme::Role::TextDim), text);
+    };
+    if (ictl::SubSection(sub.c_str(), T(g.Label), g.Open, status)) {
+        if (toggle) {
+            const float y0 = ImGui::GetCursorScreenPos().y;
+            if (ictl::Switch(host, T("Enabled"), toggle)) changed = true;
+            RowTip(y0, g.ToggleHint);
         }
-        if (!g.ToggleHint.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(g.ToggleHint));
-        ImGui::SameLine();
-    }
-    if (toggle && !*toggle) {
-        ImGui::AlignTextToFramePadding();
-        ImGui::TextDisabled("%s", T(g.Label));
-        ImGui::PopID();
-        return;
-    }
-    const ImGuiTreeNodeFlags flags =
-        ImGuiTreeNodeFlags_SpanAvailWidth | (g.Open ? ImGuiTreeNodeFlags_DefaultOpen : 0);
-    const std::string title = std::string(T(g.Label)) + "###grp";
-    if (ImGui::TreeNodeEx(title.c_str(), flags)) {
-        DrawProps(host, g.Props, e, changed);
-        ImGui::TreePop();
+        if (!toggle || *toggle) DrawProps(host, g.Props, e, changed);
+        ictl::EndSubSection();
     }
     ImGui::PopID();
 }
 
 void EnvironmentPanel::DrawSystem(EditorHost& host, const env::System& s, LightingEnvironment& e) {
     const std::string header = std::string(T(s.Label)) + "###" + s.Id;
-    if (!EditorTheme::SectionHeader(s.Icon.c_str(), header.c_str(), ImGuiTreeNodeFlags_DefaultOpen,
-                                    nullptr, s.Hint.empty() ? nullptr : T(s.Hint)))
+    if (!EditorTheme::SectionHeader(s.Icon.c_str(), header.c_str(),
+                                    s.Open ? ImGuiTreeNodeFlags_DefaultOpen : 0, nullptr,
+                                    s.Hint.empty() ? nullptr : T(s.Hint)))
         return;
     ImGui::PushID(s.Id.c_str());
+    m_systemId = s.Id;
     bool changed = false;
 
     // Сначала — включатель и тип: от них зависит, что вообще имеет смысл.
     bool* enabled = s.Enabled ? static_cast<bool*>(s.Enabled(e)) : nullptr;
     const bool pickType = s.GetType && s.Variants.size() > 1;
-    if (enabled || pickType) {
-        if (BeginPropTable(-1)) {
-            if (enabled) {
-                m_drawn.push_back(s.Id + ".enabled");
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextUnformatted(T("Enabled"));
-                ImGui::TableSetColumnIndex(1);
-                if (ImGui::Checkbox("##enabled", enabled)) {
+    if (enabled) {
+        m_drawn.push_back(s.Id + ".enabled");
+        const float y0 = ImGui::GetCursorScreenPos().y;
+        if (ictl::Switch(host, T(s.EnabledLabel), enabled)) changed = true;
+        RowTip(y0, s.EnabledHint);
+    }
+    if (pickType && (!enabled || *enabled)) {
+        m_drawn.push_back(s.Id + ".type");
+        const env::Variant* cur = env::CurrentVariant(s, e);
+        ImGui::PushID("type");
+        ictl::Label(T(s.TypeLabel));
+        ImGui::SetNextItemWidth(-FLT_MIN);
+        if (ictl::BeginDropdown("##type", cur ? T(cur->Label) : "?")) {
+            for (const env::Variant& v : s.Variants) {
+                // Прежний тип не предлагается: на нём остаются только
+                // сцены, которые им уже пользуются (см. Variant::Legacy).
+                if (v.Legacy) continue;
+                // Пути и цвета других типов НЕ стираются при переключении:
+                // вернуться к своему набору неба надо уметь без повторного выбора.
+                if (ImGui::Selectable(T(v.Label), &v == cur) && &v != cur) {
+                    s.SetType(e, v.Value);
                     host.PushUndoSnapshot();
                     changed = true;
                 }
+                if (!v.Hint.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(v.Hint));
             }
-            if (pickType && (!enabled || *enabled)) {
-                m_drawn.push_back(s.Id + ".type");
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::AlignTextToFramePadding();
-                ImGui::TextUnformatted(T(s.TypeLabel));
-                ImGui::TableSetColumnIndex(1);
-                const env::Variant* cur = env::CurrentVariant(s, e);
-                ImGui::SetNextItemWidth(-FLT_MIN);
-                if (ImGui::BeginCombo("##type", cur ? T(cur->Label) : "?")) {
-                    for (const env::Variant& v : s.Variants) {
-                        // Прежний тип не предлагается: на нём остаются только
-                        // сцены, которые им уже пользуются (см. Variant::Legacy).
-                        if (v.Legacy) continue;
-                        // Пути и цвета других типов НЕ стираются при переключении:
-                        // вернуться к своему набору неба надо уметь без повторного выбора.
-                        if (ImGui::Selectable(T(v.Label), &v == cur) && &v != cur) {
-                            s.SetType(e, v.Value);
-                            host.PushUndoSnapshot();
-                            changed = true;
-                        }
-                        if (!v.Hint.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(v.Hint));
-                    }
-                    ImGui::EndCombo();
-                }
-                if (cur && !cur->Hint.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(cur->Hint));
-            }
-            ImGui::EndTable();
+            ictl::EndDropdown();
         }
+        if (cur && !cur->Hint.empty() && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", T(cur->Hint));
+        ImGui::PopID();
     }
 
     if (!enabled || *enabled) {
@@ -471,13 +426,17 @@ void EnvironmentPanel::DrawSystem(EditorHost& host, const env::System& s, Lighti
     if (s.Id == "cycle") sage::ecs::ApplyDayNight(host.CurrentScene());
     (void)changed;
     ImGui::PopID();
+    // Разделитель между системами — общий отступ kit, а не случайный Dummy.
+    ImGui::Dummy(ImVec2(0.0f, EditorTheme::KitMetrics().SectionGap));
 }
+
 
 void EnvironmentPanel::Draw(EditorHost& host, bool* open) {
     Scene& scene = host.CurrentScene();
     LightingEnvironment& e = scene.Lighting;
     m_drawn.clear();
 
+    if (std::getenv("SAGE_EDITOR_SHOW_ENVIRONMENT")) ImGui::SetNextWindowFocus();   // снимок: окно впереди вкладки
     ImGui::Begin(EditorIcons::WindowTitle("sun", T("Environment"), "Lighting").c_str(), open,
                  panelwindows::WindowFlags("Lighting"));
 

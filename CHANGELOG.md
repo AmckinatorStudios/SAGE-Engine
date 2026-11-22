@@ -12,6 +12,21 @@
 
 ## 0.5.0 → 1.0 (в работе)
 
+### 2026-11-22 (Окно Environment: новая структура и Editor UI Kit)
+
+#### Изменено
+- Окно Environment переупорядочено: Sky → Atmosphere (туман) → Day / Night →
+  Ambient Light → Scene Shadow Settings → Baked Lighting. Тени сцены вынесены из
+  «Ambient» в свой раздел (свёрнут при открытии): «Shadow Distance Override»
+  (0 — глобальная дальность из Game Settings) и «Sun Angular Size».
+- Все строки окна — контролы Editor UI Kit (`ictl::`): переключатели, числа,
+  списки, цвета, вложенные группы. Группы неба (Sun, Moon, Stars, Horizon,
+  Clouds) свёрнуты при первом открытии; у групп с включателем в заголовке видно On/Off.
+- Подписи и подсказки уточнены: у дистанций тумана — единицы, «Cloud fade
+  distance» отделена от тумана и теней, «Night palette» — от цикла
+  Day / Night, включатели неба и тумана сцены — от «Skybox»/«Fog» в Game Settings.
+  Ключи схемы, сериализация, Lua и идентификатор окна `Lighting` не менялись.
+
 ### 2026-11-21 (Editor UI Kit: единая геометрия и графитовая тема SAGE Dark)
 
 #### Исправлено
