@@ -171,7 +171,11 @@ void RegisterTweens(Backend& backend) {
     sol::table rt = lua.create_table();
     tweenType[sol::meta_function::index] = [rt](sol::object self, sol::stack_object key) -> sol::object {
         sol::state_view view(key.lua_state());
-        return BindMethod(view, rt[key], self);
+        // Ключ — строкой: стол rt живёт на главном потоке, а скрипт может
+        // идти корутиной (там ключ лежит на чужом стеке).
+        if (!key.is<std::string>()) return sol::lua_nil;
+        const std::string name = key.as<std::string>();
+        return BindMethod(view, rt[name], self);
     };
     auto clipOf = [self](TweenRef& r, const char* who) -> TweenClip& {
         TweenClip* c = PlayerOf(*self).Clip(r.Id);

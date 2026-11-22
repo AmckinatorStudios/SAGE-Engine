@@ -690,3 +690,36 @@ end
     if (!missing.empty()) std::printf("       нет имён: %s\n", missing.c_str());
     CHECK_EQ(missing, std::string(""));
 }
+
+// Методы прокси вызываются и из корутины (тесты на Lua в редакторе идут
+// корутинами): привязка не должна терять метод и держать ссылки на её поток.
+TEST(LuaStandard_bound_methods_work_inside_coroutines) {
+    World w;
+    GameObject o = w.Spawn("Co", "coroutine", R"(
+function start()
+    local co = coroutine.wrap(function()
+        local t = Tween.to(object, "scale", 2.0, 0.5, Ease.Linear)
+        t:on_complete(function() end)
+        t.wait(0.1)
+        t:loop("pingpong")
+        t:pause()
+        t:resume()
+        t.cancel()
+        local c = object.add_component("camera")
+        c_fov = c.fov
+        coroutine.yield()
+        object.transform.translate(vector3.new(1, 0, 0))
+    end)
+    co()
+    co()
+    collectgarbage()
+    collectgarbage()
+    ok = true
+end
+)");
+    w.Start();
+    for (const auto& e : w.errors) std::printf("       %s\n", e.Format().c_str());
+    CHECK_TRUE(w.errors.empty());
+    CHECK_TRUE(w.Global<bool>(o, "ok"));
+    CHECK_NEAR((*o.Registry()).get<Transform>(o.Entity()).Position.x, 1.0f, 1e-5f);
+}

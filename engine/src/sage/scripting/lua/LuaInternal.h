@@ -117,8 +117,24 @@ std::string CanonicalComponent(const std::string& name);
 // Метод, привязанный к своему объекту. `owner` — сам объект Lua (а не копия
 // прокси): у прокси бывает своё состояние (твин помнит, где кончился прошлый
 // шаг), и метод обязан менять именно его.
-inline sol::object BindMethod(sol::state_view lua, const sol::object& fn, const sol::object& owner) {
-    if (fn.get_type() != sol::type::function) return fn;
+//
+// Ссылки привязки берутся на ГЛАВНОМ потоке Lua: скрипты и тесты идут корутинами,
+// а ссылка помнит поток, на котором её взяли, и снимает себя через него же —
+// собранная сборщиком корутина портила бы память (см. LuaHandlerStore.cpp).
+inline sol::object OnMainThread(const sol::object& value) {
+    lua_State* L = value.lua_state();
+    lua_State* main = L ? sol::main_thread(L, L) : nullptr;
+    if (!main || main == L) return value;
+    value.push(main);
+    sol::object onMain(main, -1);
+    lua_pop(main, 1);
+    return onMain;
+}
+
+inline sol::object BindMethod(sol::state_view lua, const sol::object& fnArg, const sol::object& ownerArg) {
+    if (fnArg.get_type() != sol::type::function) return fnArg;
+    const sol::object fn = OnMainThread(fnArg);
+    const sol::object owner = OnMainThread(ownerArg);
     sol::protected_function f = fn.as<sol::protected_function>();
     return sol::make_object(lua, [f, owner](sol::this_state ts, sol::variadic_args va) -> sol::variadic_results {
         lua_State* L = ts;
