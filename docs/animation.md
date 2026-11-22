@@ -675,8 +675,9 @@ Z-up на Y-up, обёртка магазина моделей). Отброси�
 
 **В ECS/редакторе.** Повесь `AnimatedModelComponent` (поле `Path` — файл .glb,
 пустое = процедурное демо; `Clip`/`Speed`/`Loop`/`Playing`). Система
-`sage::anim::UpdateAnimators`/`DrawAnimatedModels` (`sage/anim/AnimationSystem.h`)
-инициализирует, продвигает и рисует все такие сущности — вызывается редактором
+`sage::anim::UpdateAnimators` (`sage/anim/AnimationSystem.h`) инициализирует и
+продвигает все такие сущности, рисует их рендер —
+`sage::render::DrawAnimatedModels` (`sage/render/SkinnedModelPass.h`) — вызывается редактором
 (анимация видна в вьюпорте, секция **Animated Model** в Inspector, меню
 **Entity → Create Animated Model**) и рантаймом `SagePlayer`. Описательные поля
 сериализуются в `.sage`. Живой пример — «тотем» в TestGame (`tests/integration/testgame`) (комната 1).
@@ -767,7 +768,7 @@ SetMaterial(entity, "skin_red")           -- материал сущности �
 материал (инспектор или `SetMaterial`) рисует её вместо материалов из glTF/FBX:
 карта альбедо, цвет, вырез по альфе, две стороны, «без освещения». Так меняется
 скин персонажа — тем же действием, что материал куба. Раньше такой материал
-молча игнорировался (`SkinnedMaterialFromScene`, `sage/anim/AnimationSystem.h`).
+молча игнорировался (`SkinnedMaterialFromScene`, `sage/render/SkinnedModelPass.h`).
 
 Поворот ДОБАВЛЯЕТСЯ к позе покоя, а не заменяет её. Заменять нельзя: у скелета
 кости уже развёрнуты как надо (руки вдоль тела, ступни по земле), и «повернуть

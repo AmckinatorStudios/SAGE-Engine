@@ -20,4 +20,11 @@ struct ParticleEmitterComponent {
     int PendingEmit = 0;          // родить столько частиц немедленно
     bool RestartRequested = false;  // начать цикл заново (залпы, задержка)
     bool ClearRequested = false;    // убрать живые частицы
+
+    // Копия объекта (см. sage::scene::CopyComponent): настройки едут, а
+    // команды на ближайший кадр — нет: их давали оригиналу.
+    void ResetInstanceState() {
+        PendingEmit = 0;
+        RestartRequested = ClearRequested = false;
+    }
 };

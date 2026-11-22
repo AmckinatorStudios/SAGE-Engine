@@ -373,7 +373,7 @@ void RenderBatch::CollectVisible(Scene& scene, const glm::mat4& cullMatrix, bool
             // позе покоя статикой и раз анимированным поверх. Видно это как
             // «модель двоится» и как проваленный вдвое счёт треугольников.
             if (const AnimationComponent* anim = scene.Registry().try_get<AnimationComponent>(e)) {
-                if (anim->Model) return;   // рисует sage::anim::DrawAnimatedModels
+                if (anim->Model) return;   // рисует sage::render::DrawAnimatedModels
             }
             // Чужой слой — его рисует другой проход камеры (тени — все слои).
             if (m_layerFilter && !m_collectingShadows && !m_layerFilter->Accepts(mr.Layer)) return;

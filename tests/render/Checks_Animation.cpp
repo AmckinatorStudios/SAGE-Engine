@@ -25,6 +25,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "sage/anim/AnimationSystem.h"
+#include "sage/render/SkinnedModelPass.h"
 #include "sage/assets/AssetCache.h"
 #include "sage/ecs/DecalSystem.h"
 #include "sage/ecs/LightSystem.h"
@@ -362,7 +363,7 @@ void TestSkinnedDebugView(FrameRenderer& r) {
         sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
         device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
         device.Clear(true, true);
-        sage::anim::DrawAnimatedModels(*scene, TestView(), PerspectiveProj(), kEye, env,
+        sage::render::DrawAnimatedModels(*scene, TestView(), PerspectiveProj(), kEye, env,
                                        ShadowBinding(), nullptr, shadingMode);
         Image img = Capture(kW, kH);
         device.BindDefaultFramebuffer();

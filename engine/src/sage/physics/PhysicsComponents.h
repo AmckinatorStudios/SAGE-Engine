@@ -60,6 +60,11 @@ struct RigidBodyComponent {
     sage::physics::LayerMask TriggerMask = sage::physics::kAllLayers;
 
     sage::physics::BodyHandle RuntimeBody = sage::physics::kInvalidBody; // не сериализуется
+
+    // Копия объекта (см. sage::scene::CopyComponent): настройки едут, а
+    // дескриптор тела — нет: две сущности делили бы одно тело, и удаление
+    // одной уносило бы физику другой.
+    void ResetInstanceState() { RuntimeBody = sage::physics::kInvalidBody; }
 };
 
 // Контроллер персонажа — УНИВЕРСАЛЬНОЕ ФИЗИЧЕСКОЕ ТЕЛО, которым можно
@@ -165,6 +170,13 @@ struct CharacterControllerComponent {
     // Кого персонаж касался на прошлом шаге: разница с нынешним — это и есть
     // OnCollisionEnter/Exit. Рантайм, не сериализуется.
     std::vector<entt::entity> Touching;
+
+    // Копия объекта (см. sage::scene::CopyComponent): настройки едут, а
+    // дескриптор контроллера и касание земли — нет.
+    void ResetInstanceState() {
+        Runtime = sage::physics::kInvalidCharacter;
+        Grounded = false;
+    }
 };
 
 // Форма коллайдера. Размеры — ЛОКАЛЬНЫЕ (для единичной сущности); при создании
@@ -228,4 +240,8 @@ struct JointComponent {
     float MaxDistance = 1.0f;
     float ConeHalfAngle = 45.0f;        // Cone °
     sage::physics::JointHandle RuntimeJoint = sage::physics::kInvalidJoint; // не сериализуется
+
+    // Копия объекта (см. sage::scene::CopyComponent): настройки едут, а
+    // дескриптор соединения — нет.
+    void ResetInstanceState() { RuntimeJoint = sage::physics::kInvalidJoint; }
 };

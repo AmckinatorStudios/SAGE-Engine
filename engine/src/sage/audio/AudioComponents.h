@@ -97,4 +97,13 @@ struct AudioSourceComponent {
     void Stop() { Request = AudioRequest::Stop; }
     void Pause() { Request = AudioRequest::Pause; }
     void Resume() { Request = AudioRequest::Resume; }
+
+    // Копия объекта (см. sage::scene::CopyComponent): настройки едут, а
+    // голос — нет: копия с его номером глушила бы чужой звук и считала бы
+    // себя уже играющей (AutoPlay не сработал бы).
+    void ResetInstanceState() {
+        Handle = 0;
+        Playing = Paused = false;
+        Request = AudioRequest::None;
+    }
 };

@@ -211,6 +211,32 @@ struct AnimationComponent {
     // нужную. Сменившееся поколение означает «разбери заново», и именно так
     // переэкспорт персонажа из 3D-редактора доезжает до сцены без перезапуска.
     uint64_t ResourceGen = 0;
+
+    // Копия объекта (см. sage::scene::CopyComponent): настройки едут, а
+    // всё, что система собрала из модели, клипа и графа, — нет: копия
+    // разбирает их заново. Сброс ПОЛНЫЙ: оставленный ClipResolvedFrom (или
+    // GraphResolvedFrom) совпал бы с путём копии, и система сочла бы свой клип
+    // (граф) уже подключённым — копия играла бы клип модели вместо своего.
+    // Params (значения, заданные скриптом) — настройки объекта, едут с ним.
+    void ResetInstanceState() {
+        GraphProblem.clear();
+        ClipSuspended = false;
+        GraphInMemory = false;
+        Model.reset();
+        OwnClips.clear();
+        ClipResolvedFrom.clear();
+        MissingBones = 0;
+        Anim = sage::anim::Animator{};
+        LayerStates.clear();
+        LayerPoses.clear();
+        GraphAsset.reset();
+        Graph = sage::anim::AnimGraphInstance{};
+        GraphResolvedFrom.clear();
+        GraphRevision = 0;
+        Ready = false;
+        ResolvedFrom.clear();
+        ResourceGen = 0;
+    }
 };
 
 // Одна цель обратной кинематики: «поставь ЭТУ кость СЮДА».
@@ -274,4 +300,14 @@ struct IKComponent {
     // поворот в позе навсегда — снять IK было бы нечем.
     std::vector<int> Touched;
     std::vector<sage::anim::JointPose> Saved;
+
+    // Копия объекта (см. sage::scene::CopyComponent): настройки едут, а
+    // индексы костей и залипшая опора — нет: у копии модель загрузится заново,
+    // и цели разрешаются по именам с нуля.
+    void ResetInstanceState() {
+        for (IKGoal& g : Goals) {
+            g.Resolved = false;
+            g.Locked = false;
+        }
+    }
 };

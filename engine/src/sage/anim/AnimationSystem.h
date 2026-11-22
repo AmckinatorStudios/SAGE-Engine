@@ -1,52 +1,18 @@
 #pragma once
-#include "sage/ecs/RenderLayers.h"
-#include <glm/glm.hpp>
-
-#include "sage/render/ShadowMap.h"
-#include "sage/render/Reflection.h"
-
 class Scene;
-struct LightingEnvironment;
-namespace sage::render { class LightClusters; struct SkinnedMaterial; }
-struct Material;
 
 // ---------------------------------------------------------------------------
-// Система скелетной анимации — связывает ECS со скелетным пайплайном (аналог
-// того, как RenderSystem связывает ECS с отрисовкой мешей). Две операции над
-// сущностями с AnimationComponent:
-//   • UpdateAnimators — ленивая инициализация (загрузка модели/демо + rig +
-//     старт клипа) и продвижение времени/палитры костей каждый кадр;
-//   • DrawAnimatedModels — отрисовка скиннинг-шейдером в текущий буфер, с
-//     трансформом сущности и общим освещением сцены.
-// Вызывается и редактором (в Play-режиме и для превью), и рантаймом SagePlayer.
+// Система скелетной анимации: над сущностями с AnimationComponent —
+// UpdateAnimators — ленивая инициализация (загрузка модели + rig + старт
+// клипа) и продвижение времени/палитры костей каждый кадр.
+// Рисует модели рендер (sage/render/SkinnedModelPass.h): анимация отдаёт позу,
+// а не кадр. Вызывается и редактором (в Play-режиме и для превью), и
+// рантаймом SagePlayer.
 // ---------------------------------------------------------------------------
 namespace sage::anim {
-
-// Материал сцены в материал модели со скелетом (им сущность перекрашивает
-// модель вместо материалов файла).
-sage::render::SkinnedMaterial SkinnedMaterialFromScene(const Material& mat);
 
 // Инициализирует (при первом вызове) и продвигает анимации всех сущностей с
 // AnimationComponent. Безопасно вызывать каждый кадр.
 void UpdateAnimators(Scene& scene, float dt);
-
-// Рисует все анимированные модели сцены в текущий фреймбуфер (после основного
-// прохода сцены — тест глубины включён). Освещение ПОЛНОЕ и совпадает со
-// статическими мешами: передаются позиция камеры, окружение и карты теней
-// солнца (каскады — см. ShadowMap.h), как в статическом lit-проходе.
-// shadingMode — номер отладочного вида кадра (render/DebugView.h), 0 — обычная
-// отрисовка. Передаётся насквозь в SkinnedModel::Draw: разбор кадра по
-// слагаемым обязан касаться и персонажей.
-void DrawAnimatedModels(Scene& scene, const glm::mat4& view, const glm::mat4& proj,
-                        const glm::vec3& viewPos, const LightingEnvironment& env,
-                        const ShadowBinding& shadows,
-                        const sage::render::ReflectionBinding* reflections = nullptr,
-                        int shadingMode = 0,
-                        const sage::render::LightClusters* clusters = nullptr,
-                        const sage::ecs::LayerFilter* layers = nullptr);
-
-// Рисует анимированные модели ТОЛЬКО в глубину (со скиннингом) — вызывается
-// внутри depth-прохода карты теней солнца, чтобы они отбрасывали тень.
-void DrawAnimatedModelsDepth(Scene& scene, const glm::mat4& lightMatrix);
 
 } // namespace sage::anim

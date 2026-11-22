@@ -45,6 +45,14 @@ struct PropertyAnimatorComponent {
     // никто не правит.
     std::shared_ptr<sage::anim::PropertyClip> Clip;
     bool Ready = false;     // попытка загрузки уже была (в том числе неудачная)
+
+    // Копия объекта (см. sage::scene::CopyComponent): настройки едут, а
+    // загруженный клип и позиция в нём — нет: копия загружает и играет свой.
+    void ResetInstanceState() {
+        Clip.reset();
+        Ready = false;
+        Time = 0.0f;
+    }
 };
 
 namespace sage::anim {
