@@ -1,1 +1,15 @@
-{}
+{
+  "anim <-> ecs": 3,
+  "anim <-> render": 3,
+  "anim <-> scene": 3,
+  "anim <-> ui": 2,
+  "audio <-> scene": 2,
+  "ecs <-> gi": 1,
+  "ecs <-> render": 10,
+  "ecs <-> scene": 3,
+  "gi <-> render": 2,
+  "gi <-> scene": 3,
+  "net <-> scene": 1,
+  "render <-> scene": 19,
+  "scene <-> ui": 16
+}
