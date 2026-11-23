@@ -91,15 +91,10 @@ void CopyAllComponents(GameObject& src, GameObject& dst) {
     // Компоненты — реестром (sage/scene/ComponentRegistry.h; встроенные —
     // BuiltinComponents.cpp): тот же список, что пишет сериализатор. Свой
     // список здесь расходился с ним, и копия (Ctrl+D, префаб, вставка) теряла
-    // тег, звук и твины молча. Сторожат tests/test_scene_lossless.cpp и
+    // тег, звук и твины молча. Скрипты, публичные переменные и связи сигналов —
+    // тоже здесь: префаб без своих настроек и «On Click» — мёртвый. Сторожат tests/test_scene_lossless.cpp и
     // scripts/check_components.py.
     CopyRegisteredComponents(*src.Registry(), src.Entity(), *dst.Registry(), dst.Entity());
-    CopyIfPresent<ScriptComponent>(src, dst);
-    // Публичные переменные едут с объектом: префаб без своих настроек — это
-    // объект, который после постановки в сцену надо настраивать заново.
-    CopyIfPresent<VarsComponent>(src, dst);
-    // Связи сигналов — тоже: кнопка из префаба без своих «On Click» — мёртвая.
-    CopyIfPresent<sage::signals::SignalLinksComponent>(src, dst);
     // Интерфейс — ПО РЕЕСТРУ ЧАСТЕЙ, а не списком руками.
     //
     // Список здесь был, и он молча устаревал: часть, зарегистрированную игрой

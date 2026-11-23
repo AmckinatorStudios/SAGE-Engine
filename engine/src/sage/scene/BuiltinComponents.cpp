@@ -143,6 +143,42 @@ sage::ui::InterfaceComponent ParseInterface(const json& ij) {
     return ic;
 }
 
+// Скрипты пишутся несколькими ключами — Save задаётся отдельно (Fields).
+void SaveScriptsTo(json& j, const ScriptComponent& sc) { SaveScripts(j, sc); }
+
+ScriptComponent ParseScripts(const json& part) {
+    if (!part.is_object()) throw std::runtime_error("скрипты — не объект");
+    // Переменные или группы без самих скриптов — не компонент; ключи
+    // сохранятся как есть (раньше они молча пропадали при сохранении).
+    if (!part.contains("script") && !part.contains("scripts"))
+        throw std::runtime_error("scriptVars/scriptGroups без script/scripts");
+    if (part.contains("scripts") && !part["scripts"].is_array())
+        throw std::runtime_error("scripts — не список");
+    ScriptComponent sc;
+    LoadScripts(part, sc);
+    return sc;
+}
+
+void SaveVars(json& j, const VarsComponent& vc) {
+    if (!vc.Values.Empty()) j["vars"] = VarsToJson(vc.Values);
+}
+
+VarsComponent ParseVars(const json& v) {
+    VarsComponent vc;
+    VarsFromJson(v, vc.Values);
+    return vc;
+}
+
+void SaveLinks(json& j, const sage::signals::SignalLinksComponent& sl) {
+    if (!sl.Links.empty()) j["signalLinks"] = LinksToJson(sl.Links);
+}
+
+sage::signals::SignalLinksComponent ParseLinks(const json& v) {
+    sage::signals::SignalLinksComponent sl;
+    LinksFromJson(v, sl.Links);
+    return sl;
+}
+
 } // namespace
 
 void RegisterBuiltinSceneComponents() {
@@ -191,6 +227,38 @@ void RegisterBuiltinSceneComponents() {
         if (Transform* t = r.try_get<Transform>(e)) *t = Transform{};
     };
     RegisterComponent(std::move(folder));
+
+    // Скрипты: один без групп — прежними ключами "script"/"scriptVars", иначе
+    // списком "scripts" и группами "scriptGroups" (SaveScripts/LoadScripts).
+    ComponentType scripts = Make<ScriptComponent>("scripts", &SaveScriptsTo, &ParseScripts);
+    scripts.Fields = {"script", "scriptVars", "scripts", "scriptGroups"};
+    scripts.Save = [](const entt::registry& r, entt::entity e) {
+        json part = json::object();
+        SaveScripts(part, r.get<ScriptComponent>(e));
+        return part;
+    };
+    RegisterComponent(std::move(scripts));
+
+    // Публичные переменные: пустая таблица не пишется и не создаёт компонент.
+    // Ссылки в них обходит sage::vars::VisitEntityRefs (ComponentRegistry.cpp).
+    ComponentType vars = Make<VarsComponent>("vars", &SaveVars, &ParseVars);
+    vars.Load = [](entt::registry& r, entt::entity e, const json& j) {
+        VarsComponent vc = ParseVars(j);
+        if (!vc.Values.Empty()) r.emplace_or_replace<VarsComponent>(e, std::move(vc));
+    };
+    RegisterComponent(std::move(vars));
+
+    // Связи сигналов — ДОБАВЛЕНИЕМ, а не заменой: связи, переведённые из
+    // старого формата при чтении "ui", не должны пропасть, в каком бы порядке
+    // ни читались ключи. Цели связей обходит VisitEntityRefs.
+    ComponentType links = Make<sage::signals::SignalLinksComponent>("signalLinks", &SaveLinks, &ParseLinks);
+    links.Load = [](entt::registry& r, entt::entity e, const json& j) {
+        sage::signals::SignalLinksComponent read = ParseLinks(j);
+        if (read.Links.empty()) return;
+        auto& sl = r.get_or_emplace<sage::signals::SignalLinksComponent>(e);
+        sl.Links.insert(sl.Links.end(), read.Links.begin(), read.Links.end());
+    };
+    RegisterComponent(std::move(links));
 
     ComponentType net = Make<NetReplicatedComponent>("netReplicated", &SaveNetReplicated, &ParseNetReplicated);
     net.Load = &LoadNetReplicated;

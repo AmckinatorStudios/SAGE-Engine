@@ -403,7 +403,8 @@ TEST(ComponentRegistry_builtin_components_are_registered_top_level) {
     for (const char* key : {"audio", "particles", "tweens", "propertyAnimator", "lod", "ik", "joint",
                             "character", "reflectionProbe", "shaderParams", "giStatic", "camera",
                             "light", "rigidBody", "collider", "animation", "decal", "renderTexture",
-                            "interface", "postProcess", "tag", "folder", "netReplicated"}) {
+                            "interface", "postProcess", "tag", "folder", "netReplicated", "scripts",
+                            "vars", "signalLinks"}) {
         sage::scene::ComponentTypePtr t = sage::scene::FindComponentType(key);
         CHECK_TRUE(t && t->TopLevel);
     }
@@ -520,4 +521,31 @@ TEST(ComponentRegistry_unreadable_camera_keeps_the_data) {
     CHECK_TRUE(scene->Registry().all_of<LightComponent>(x.Entity()));
     const nlohmann::json saved = nlohmann::json::parse(SceneSerializer::SaveToString(*scene));
     CHECK_TRUE(saved["objects"][0]["camera"] == 5);
+}
+
+// Скрипты занимают несколько ключей объекта (Fields): оба вида записи
+// переживают чтение, сохранение и копию, а непонятные — сохраняются как были.
+TEST(ComponentRegistry_scripts_keep_both_forms_and_broken_data) {
+    const std::string file = R"({"name": "S", "objects": [
+        {"id": 1, "name": "One", "script": "a.lua"},
+        {"id": 2, "name": "Many", "scripts": [{"path": "a.lua"}, {"path": "b.lua", "group": "g"}],
+         "scriptGroups": ["g"]},
+        {"id": 3, "name": "Bad", "scripts": 5, "scriptGroups": ["g"]}]})";
+    auto scene = SceneSerializer::LoadFromString(SceneSerializer::MigrateSceneJson(file));
+    entt::registry& r = scene->Registry();
+    const auto* many = r.try_get<ScriptComponent>(scene->FindByName("Many").Entity());
+    CHECK_TRUE(many && many->Scripts.size() == 2 && many->Groups.size() == 1);
+    CHECK_FALSE(r.all_of<ScriptComponent>(scene->FindByName("Bad").Entity()));
+
+    GameObject copy = sage::scene::CopySubtree(*scene, scene->FindByName("Many").Entity(), *scene, entt::null);
+    const auto* cs = r.try_get<ScriptComponent>(copy.Entity());
+    CHECK_TRUE(cs && cs->Scripts.size() == 2);
+
+    const nlohmann::json saved = nlohmann::json::parse(SceneSerializer::SaveToString(*scene));
+    CHECK_TRUE(saved["objects"][0]["script"] == "a.lua");
+    CHECK_FALSE(saved["objects"][0].contains("scripts"));
+    CHECK_TRUE(saved["objects"][1]["scripts"].size() == 2);
+    CHECK_TRUE(saved["objects"][1]["scriptGroups"][0] == "g");
+    CHECK_TRUE(saved["objects"][2]["scripts"] == 5);
+    CHECK_TRUE(saved["objects"][2]["scriptGroups"][0] == "g");
 }

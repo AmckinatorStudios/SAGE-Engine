@@ -604,6 +604,7 @@
     "GPU objects: %s": "GPU-объекты: %s",
     "GPU, ms": "GPU, мс",
     "Game": "Игра",
+    "Component registered by the game or a plugin": "Компонент, зарегистрированный игрой или плагином",
     "Game (view from the game camera)": "Игра (вид из игровой камеры)",
     "Game Settings": "Настройки игры",
     "Game Settings...": "Настройки игры...",

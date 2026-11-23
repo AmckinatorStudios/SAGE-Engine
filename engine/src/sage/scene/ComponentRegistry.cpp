@@ -176,6 +176,10 @@ void SaveRegisteredComponents(const entt::registry& reg, entt::entity e, nlohman
         // прежнего файла, стёрла бы его данные. Сохранение целиком отменяется.
         nlohmann::json data = CallUser(t, "сохранение", [&] { return t.Save(reg, e); });
         if (!t.TopLevel) comps[t.Key] = std::move(data);
+        else if (!t.Fields.empty() && data.is_object())
+            for (auto it = data.begin(); it != data.end(); ++it) object[it.key()] = it.value();
+        else if (!t.Fields.empty() && !data.is_null())
+            throw std::runtime_error("компонент «" + t.Key + "»: сохранение вернуло не объект");
         else if (!data.is_null()) object[t.Key] = std::move(data);
     }
     if (!comps.empty()) object["components"] = std::move(comps);
@@ -195,7 +199,9 @@ void LoadOne(const ComponentType& t, entt::registry& reg, entt::entity e, const 
     } catch (const std::exception& ex) {
         if (!had) RemovePartial(t, reg, e);
         LOG_ERROR("Scene") << ex.what() << " — сохранён как есть";
-        unknown[key] = data;
+        if (t.Fields.empty()) unknown[key] = data;
+        else   // составной: каждый ключ — на своё место в объекте
+            for (auto it = data.begin(); it != data.end(); ++it) unknown[it.key()] = it.value();
     }
 }
 
@@ -208,6 +214,13 @@ void LoadRegisteredComponents(entt::registry& reg, entt::entity e, const nlohman
     // Верхний уровень: ключ ищется в самом объекте; нет ключа — нет компонента.
     for (const ComponentTypePtr& tp : *all) {
         if (!tp->TopLevel) continue;
+        if (!tp->Fields.empty()) {
+            nlohmann::json part = nlohmann::json::object();
+            for (const std::string& k : tp->Fields)
+                if (auto f = object.find(k); f != object.end()) part[k] = *f;
+            if (!part.empty()) LoadOne(*tp, reg, e, tp->Key, part, unknownTop);
+            continue;
+        }
         std::string key = tp->Key;
         auto f = object.find(key);
         for (size_t i = 0; f == object.end() && i < tp->OldKeys.size(); ++i)
