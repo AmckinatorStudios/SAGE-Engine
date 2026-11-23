@@ -1,0 +1,326 @@
+# Граница API движка: что из engine/src/sage обещано, а что нет.
+#
+# ЗАЧЕМ. Игре был доступен любой заголовок движка, и всё внутреннее
+# фактически становилось обещанием: убрать или переделать внутренний класс
+# значило сломать неизвестно чью игру. Здесь обещание записано явно, а
+# scripts/check_api.py сторожит, чтобы игра и редактор не включали лишнего.
+#
+# УРОВНИ (пути — от engine/src/sage, включаются как "sage/<путь>"):
+#   [public] — API игр: то, что включает код игры (её Layer, компоненты, свой
+#              кадр). С 1.0 ломается только со сменой мажорной версии.
+#              Скриптам обещан не C++, а скриптовый API — editor/assets/api/sage.lua
+#              (генерируется из Bind(...), свежесть: gen_script_api.py --check).
+#   [tools]  — для приложений самого движка: редактор, плеер (runtime/),
+#              sage_build, sage_api. Играм НЕ обещано, меняется без
+#              предупреждения.
+#   всё прочее — ВНУТРЕННЕЕ: включает только engine/src (и модульные тесты).
+#              Сюда же реализации вне sage/ (engine/src/rhi, engine/src/physics).
+#
+# ПРАВИЛА (их проверяет сторож):
+#   - Публичный заголовок включает только публичные, инструментальный — только
+#     публичные и инструментальные: иначе внутреннее протекает транзитивно и
+#     становится обещанием само.
+#   - Новый заголовок по умолчанию внутренний. Обещание — отдельное решение:
+#     добавить строку сюда. Перевод tools -> public ничего не ломает, обратный
+#     перевод ломает игры — поэтому сомнительное держим в [tools].
+#   - Убрать заголовок из [public] до 1.0 можно, оставив на старом пути мост
+#     SAGE_FORWARD_HEADER (docs/architecture.md, «Переезд файла не ломает игры»).
+
+[public]
+
+# ai
+ai/Blackboard.h
+ai/Graph.h
+ai/Nodes.h
+ai/Task.h
+ai/Types.h
+ai/World.h
+
+# anim
+anim/AnimGraph.h
+anim/AnimProperty.h
+anim/AnimationComponents.h
+anim/AnimationSystem.h
+anim/Animator.h
+anim/ClipFile.h
+anim/PropertyAnimator.h
+anim/PropertyClip.h
+anim/Skeleton.h
+anim/Tween.h
+
+# app
+app/Application.h
+app/CoreSystems.h
+app/GameModule.h
+
+# assets
+assets/AssetDatabase.h
+assets/GameInfo.h
+assets/MeshData.h
+assets/Pack.h
+assets/SaveGame.h
+assets/SkeletonData.h
+assets/UserContent.h
+assets/import/ImportSettings.h
+assets/import/Importer.h
+
+# audio
+audio/AudioComponents.h
+audio/AudioEngine.h
+audio/AudioSystem.h
+
+# core
+core/Application.h
+core/Config.h
+core/Cpu.h
+core/EngineContext.h
+core/GameModule.h
+core/Layer.h
+core/Log.h
+core/Paths.h
+core/Problems.h
+core/SaveGame.h
+core/SystemScheduler.h
+core/TextureFiltering.h
+core/Window.h
+
+# ecs
+ecs/CameraLightComponents.h
+ecs/CameraView.h
+ecs/DecalSystem.h
+ecs/LightSystem.h
+ecs/RenderBatch.h
+ecs/RenderComponents.h
+ecs/RenderLayers.h
+ecs/RenderSystem.h
+
+# events
+events/Events.h
+
+# gi
+gi/GIComponents.h
+
+# input
+input/Action.h
+input/ActionEvent.h
+input/Binding.h
+input/Context.h
+input/CursorMotion.h
+input/Devices.h
+input/GlfwBridge.h
+input/InputEvent.h
+input/InputSystem.h
+input/Keys.h
+
+# lang
+lang/ApiRegistry.h
+
+# net
+net/NetAddress.h
+net/NetComponents.h
+net/NetConnection.h
+net/NetHost.h
+net/NetworkSystem.h
+net/UdpSocket.h
+
+# physics
+physics/CharacterMotor.h
+physics/PhysicsComponents.h
+physics/PhysicsScene.h
+physics/PhysicsTypes.h
+physics/PhysicsWorld.h
+physics/Ragdoll.h
+
+# render
+render/BillboardSystem.h
+render/Camera.h
+render/DebugDraw.h
+render/DebugLines.h
+render/DebugView.h
+render/Font.h
+render/FrameGraph.h
+render/Framebuffer.h
+render/LensFlare.h
+render/LightClusters.h
+render/LightCookies.h
+render/LightingUpload.h
+render/LodGroup.h
+render/LodSelect.h
+render/Material.h
+render/Mesh.h
+render/MeshData.h
+render/Model.h
+render/ModelLoader.h
+render/ObjectEffects.h
+render/ParticleComponents.h
+render/ParticleCurves.h
+render/ParticleECS.h
+render/ParticleEffect.h
+render/ParticleSim.h
+render/ParticleSystem.h
+render/PostEffect.h
+render/PostFX.h
+render/PostProcessComponent.h
+render/PrimitiveParams.h
+render/Reflection.h
+render/ReflectionComponents.h
+render/ResourceManager.h
+render/ScenePasses.h
+render/Screenshot.h
+render/Shader.h
+render/ShadowAtlas.h
+render/ShadowMap.h
+render/SkyDraw.h
+render/SkyModel.h
+render/SkyRenderer.h
+render/Skybox.h
+render/Texture.h
+render/TextureFiltering.h
+render/Volumetrics.h
+
+# rhi
+rhi/GraphicsDevice.h
+rhi/ResourceLedger.h
+rhi/Resources.h
+
+# scene
+scene/ComponentRegistry.h
+scene/Components.h
+scene/Light.h
+scene/Prefab.h
+scene/Scene.h
+scene/SceneComponents.h
+scene/SceneFlow.h
+scene/SceneManager.h
+scene/SceneSerializer.h
+scene/ScriptComponent.h
+scene/Signals.h
+scene/Transform.h
+scene/WorldMatrices.h
+
+# scripting
+scripting/LanguageBackend.h
+scripting/Languages.h
+scripting/LuaHandlerStore.h
+scripting/Plugins.h
+scripting/ScriptApi.h
+scripting/ScriptComponent.h
+scripting/ScriptEngine.h
+scripting/ScriptFields.h
+scripting/ScriptLint.h
+scripting/ScriptRuntime.h
+scripting/ScriptTasks.h
+scripting/ScriptTests.h
+scripting/ScriptTypes.h
+scripting/ScriptingSystem.h
+scripting/lua/LuaBackend.h
+
+# ui
+ui/Element.h
+ui/NineSlice.h
+ui/SpriteSheet.h
+ui/UI.h
+ui/UIAnchor.h
+ui/UIBlend.h
+ui/UIElement.h
+ui/UIIcons.h
+ui/UIInteraction.h
+ui/UIRenderer.h
+ui/UISceneSystem.h
+ui/UIShowcase.h
+ui/Widgets.h
+ui/components/Interact.h
+ui/components/InterfaceComponent.h
+ui/components/Layout.h
+ui/components/Visual.h
+
+# vars
+vars/Refs.h
+vars/Table.h
+vars/Value.h
+vars/VarsComponent.h
+
+[tools]
+
+# ai
+ai/GraphDebug.h
+ai/GraphRuntime.h
+ai/GraphValidate.h
+
+# assets
+assets/GameBuild.h
+assets/ModelData.h
+assets/Quarantine.h
+assets/SkinnedModelData.h
+assets/Zip.h
+assets/format/Blob.h
+assets/format/MeshFormat.h
+assets/format/TextureFormat.h
+assets/import/Convert.h
+assets/import/ModelProbe.h
+
+# audio
+audio/AudioScrub.h
+
+# core
+core/CrashHandler.h
+core/Display.h
+core/FormatVersion.h
+core/Profiler.h
+core/Systems.h
+
+# ecs
+ecs/DayNightCycle.h
+
+# gi
+gi/GI.h
+
+# lang
+lang/SageAst.h
+lang/SageCheck.h
+lang/SageCompiler.h
+lang/SageDiagnostics.h
+lang/SageLexer.h
+
+# render
+render/AlphaBleed.h
+render/Frustum.h
+render/GridRenderer.h
+render/MeshRaycast.h
+render/ModelData.h
+render/ModelMaterial.h
+render/ParticleEffectIO.h
+render/PostChainIO.h
+render/RenderTexture.h
+render/ShaderParams.h
+render/SkinnedModel.h
+render/SkyPresets.h
+
+# scene
+scene/AiAgentComponent.h
+scene/CharacterFit.h
+scene/CopyName.h
+scene/EnvironmentSchema.h
+scene/ScaleLock.h
+scene/SceneLayer.h
+scene/VisualScriptComponent.h
+
+# scripting
+scripting/ProcessLanguage.h
+
+# ui
+ui/ImageFit.h
+ui/Interface.h
+ui/InterfaceSource.h
+ui/ShapePath.h
+ui/UIButton.h
+ui/UIDemos.h
+ui/UILayoutTools.h
+ui/UIPart.h
+ui/UIPresets.h
+ui/UISerialize.h
+ui/UIStyle.h
+
+# vars
+vars/ScriptVars.h
+vars/ValueJson.h

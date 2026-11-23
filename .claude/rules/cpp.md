@@ -28,6 +28,10 @@ paths:
   `docs/architecture.md`, «Слои движка»). Нужное нижнему — объявить в нём
   (интерфейс, крючок), реализацию держать наверху. Переехавший заголовок
   оставляет мост с пометкой `SAGE_FORWARD_HEADER`.
+- Граница API — `engine/api.txt` (`scripts/check_api.py`): игра включает
+  только `[public]`, редактор и плеер — ещё `[tools]`. Новый заголовок
+  внутренний; нужен снаружи — решить уровень и добавить строку. Публичный
+  заголовок не включает непубличный.
 - `gl*` — только в `engine/src/rhi/`.
 - Окружение → путь только через `sage::EnvPath`/`EnvString`
   (`sage/core/Paths.h`), не `std::getenv`: путь из байтов ANSI падает на
@@ -61,5 +65,5 @@ paths:
 - Отрисовка кадра не ходит на диск — через `FsCache`.
 - Новый файл редактора — в `editor/CMakeLists.txt`.
 
-Сторожа: `check_layers`, `check_rhi_boundary`, `check_paths`,
+Сторожа: `check_layers`, `check_api`, `check_rhi_boundary`, `check_paths`,
 `check_file_size`, `check_components`.

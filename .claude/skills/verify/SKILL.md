@@ -22,7 +22,7 @@ description: Выбор и запуск проверок SAGE по изменё�
 | рантайм, упаковка, сборка | + smoke |
 | только docs / инструкции | ничего не собирать |
 
-Сторожа по области: C++ движка — `check_layers`, `check_rhi_boundary`,
+Сторожа по области: C++ движка — `check_layers`, `check_api`, `check_rhi_boundary`,
 `check_paths`, `check_file_size`, `check_components`; редактор — `check_ui_kit`,
 `check_popup_ids`, `check_menu_style`, `check_imgui_pairs`,
 `check_release_ui`, `check_asset_slots`, `check_localization`. Запуск —
@@ -61,7 +61,7 @@ cmake --build build-windows -j"$(nproc)"
 
 | # | Этап | Команда |
 |---|---|---|
-| 1 | сторожа (как в `ci.yml`) | `python3 scripts/check_<имя>.py` для rhi_boundary, layers, localization, paths, asset_slots, popup_ids, menu_style, release_ui, imgui_pairs, ui_kit, file_size |
+| 1 | сторожа (как в `ci.yml`) | `python3 scripts/check_<имя>.py` для rhi_boundary, layers, api, localization, paths, asset_slots, popup_ids, menu_style, release_ui, imgui_pairs, ui_kit, file_size |
 | 2 | сборка Linux | `cmake --build build -j"$(nproc)"` |
 | 3 | подсказки API | `python3 scripts/gen_script_api.py --check` |
 | 4 | модульные тесты | `./build/tests/sage_tests` |
