@@ -1,5 +1,6 @@
 #pragma once
 #include "sage/gi/GI.h"
+#include "sage/render/GIBinding.h"
 #include "sage/render/Mesh.h"
 #include "sage/render/Shader.h"
 #include "sage/rhi/GraphicsDevice.h"
@@ -10,13 +11,13 @@
 // требует активного GL-контекста и зовётся ТОЛЬКО из кода рендера (RenderBatch
 // и пр.); сам бейк и сериализация к GPU не прикасаются.
 //
-// Юниты текстур GI фиксированы и не пересекаются с материальными (0..5 у
-// текстурного PBR-пути): 6 — 3D-объём проб (три канала слоями), 9 — лайтмапа.
+// Юниты текстур GI — раскладка шейдера, живут в sage/render/GIBinding.h;
+// здесь прежние имена ради совместимости.
 // ---------------------------------------------------------------------------
 namespace sage::gi {
 
-constexpr int kGIVolumeUnit = 6;
-constexpr int kLightmapUnit = 9;
+using sage::render::kGIVolumeUnit;
+using sage::render::kLightmapUnit;
 
 // GPU-меш сущности с лайтмап-UV (создаётся при первом рендере после бейка).
 inline ::Mesh* GetOrCreateGpuMesh(EntityBake& eb) {
@@ -60,14 +61,7 @@ inline void EnsureVolumeGpu(ProbeVolume& v) {
     v.Gpu = sage::rhi::GraphicsDevice::Get().CreateTexture3D(d, (const float*)rgb.data());
 }
 
-// Назначает шейдеру юниты сэмплеров GI. ОБЯЗАТЕЛЬНО для каждого шейдера с
-// kPbrSharedGlsl, даже когда GI нет: иначе sampler3D-униформы остаются на
-// юните 0 вместе с sampler2D материала — конфликт типов на одном юните
-// (GL_INVALID_OPERATION на части драйверов).
-inline void SetGISamplerUnits(Shader& sh) {
-    sh.SetInt("uGIVol", kGIVolumeUnit);
-    sh.SetInt("uLightmap", kLightmapUnit);
-}
+using sage::render::SetGISamplerUnits; // см. sage/render/GIBinding.h
 
 // Заливает объём проб (или выключает его) + назначает юниты. Зовётся на
 // настройке шейдера кадра. gi может быть nullptr.

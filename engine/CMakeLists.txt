@@ -28,6 +28,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ecs/RenderBatch_Color.cpp
     src/sage/gi/BVH.cpp
     src/sage/gi/GI.cpp
+    src/sage/gi/GIUpload.cpp
     src/sage/gi/LightBaker.cpp
     src/sage/gi/LightmapUV.cpp
     src/sage/ecs/CameraView.cpp
@@ -186,6 +187,7 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/ResourceManager_Memory.cpp
     src/sage/render/AlphaBleed.cpp
     src/sage/render/Screenshot.cpp
+    src/sage/render/GIBinding.cpp
     src/sage/render/Shader.cpp
     src/sage/render/SkinnedModel.cpp
     src/sage/render/SkinnedModelBounds.cpp

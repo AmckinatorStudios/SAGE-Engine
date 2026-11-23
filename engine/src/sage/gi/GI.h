@@ -98,7 +98,16 @@ struct ProbeVolume {
 
 // Полное состояние GI сцены. Живёт в Scene::GI (shared_ptr — переезжает между
 // снапшотами сцены редактора без повторного запекания, см. Transplant).
+// Подставляет рендеру заливку GI (sage/render/GIBinding.h) при создании
+// любого GIState. Членом, а не вызовом из бейка: GIState рождается и в бейке,
+// и при чтении сцены, и в тестах — и в каждом случае скин обязан освещаться
+// объёмом проб. Пока GIState нет, заливать нечего, и слот может быть пуст.
+struct GIRenderHook {
+    GIRenderHook();
+};
+
 struct GIState {
+    GIRenderHook RenderHook;
     GISettings Settings;
     uint64_t GeometryHash = 0; // отпечаток статичной геометрии на момент бейка
     bool Baked = false;        // есть валидные лайтмапы (страницы + UV)

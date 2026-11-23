@@ -18,7 +18,6 @@
 #include "sage/assets/import/FbxSkin.h"
 #include "sage/render/ModelData.h"
 #include "sage/anim/Retarget.h"
-#include "sage/gi/GIUpload.h"
 #include "sage/render/LightClusters.h"
 
 #include <algorithm>

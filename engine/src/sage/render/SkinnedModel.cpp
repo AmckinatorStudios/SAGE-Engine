@@ -19,7 +19,7 @@
 #include "sage/assets/import/FbxSkin.h"
 #include "sage/render/ModelData.h"
 #include "sage/anim/Retarget.h"
-#include "sage/gi/GIUpload.h"
+#include "sage/render/GIBinding.h"
 #include "sage/render/LightClusters.h"
 
 #include <algorithm>
@@ -310,7 +310,7 @@ namespace {
 // стоит по выборке из текстуры на каждую. Если активных больше восьми — берём
 // восемь САМЫХ ВЕСОМЫХ: тихо потерять сильную цель хуже, чем слабую.
 // Единицы текстур 10 и 11. Числа не случайные: 0 — albedo, 1 — карта теней,
-// 6..8 — GI-объём, 9 — лайтмапа (см. sage/gi/GIUpload.h). Совпадение юнита
+// 6..8 — GI-объём, 9 — лайтмапа (см. sage/render/GIBinding.h). Совпадение юнита
 // молча ломает морфинг — выборка идёт из чужой текстуры и даёт нули, — поэтому
 // берём заведомо свободные и держим их рядом с этим списком.
 constexpr int kMaxActiveMorphs = 8;
@@ -420,7 +420,7 @@ void SkinnedModel::Draw(const glm::mat4& entityModel, const glm::mat4& view, con
     // тёмную комнату с красными стенами, обязан потемнеть и покраснеть вместе
     // с ящиком рядом. Раньше объём сюда не проброшен был вовсе, и скелетная
     // модель светилась полусферическим ambient, как будто запекания нет.
-    sage::gi::UploadGIVolume(shader, gi);
+    sage::render::UploadGIVolume(shader, gi);
     // Лайтмапы у скина нет по смыслу: она печётся на неподвижную геометрию, а
     // персонаж двигается. Флаг выставляем ЯВНО — общий фрагмент его читает.
     shader.SetInt("uLightmapEnabled", 0);
