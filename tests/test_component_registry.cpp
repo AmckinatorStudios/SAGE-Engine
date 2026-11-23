@@ -8,6 +8,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include "sage/net/NetComponents.h"
+#include "sage/render/PostProcessComponent.h"
 #include "sage/scene/ComponentRegistry.h"
 #include "sage/scene/Prefab.h"
 #include "sage/scene/Scene.h"
@@ -387,4 +389,163 @@ TEST(component_copy_resets_instance_state_of_every_owner) {
     CHECK_EQ(reg.get<AnimationComponent>(hero.Entity()).ClipResolvedFrom, std::string("walk.sageanim"));
     CHECK_EQ(reg.get<RigidBodyComponent>(hero.Entity()).RuntimeBody, (sage::physics::BodyHandle)7);
     sage::scene::UnregisterComponent("test_timer");
+}
+
+// ---------------------------------------------------------------------------
+// ВСТРОЕННЫЕ КОМПОНЕНТЫ В РЕЕСТРЕ (sage/scene/BuiltinComponents.cpp). Раньше
+// каждый был веткой в сохранении, в чтении и строкой в копировании; теперь —
+// одной записью реестра с ключом верхнего уровня (TopLevel), и файл сцены
+// остаётся прежним.
+// ---------------------------------------------------------------------------
+#include "sage/audio/AudioComponents.h"
+
+TEST(ComponentRegistry_builtin_components_are_registered_top_level) {
+    for (const char* key : {"audio", "particles", "tweens", "propertyAnimator", "lod", "ik", "joint",
+                            "character", "reflectionProbe", "shaderParams", "giStatic", "camera",
+                            "light", "rigidBody", "collider", "animation", "decal", "renderTexture",
+                            "interface", "postProcess", "tag", "folder", "netReplicated", "scripts",
+                            "vars", "signalLinks"}) {
+        sage::scene::ComponentTypePtr t = sage::scene::FindComponentType(key);
+        CHECK_TRUE(t && t->TopLevel);
+    }
+}
+
+TEST(ComponentRegistry_builtin_keeps_file_format_and_copies) {
+    Scene scene("S");
+    GameObject speaker = scene.CreateObject("Speaker");
+    AudioSourceComponent a;
+    a.Clip = "sfx/door.wav";
+    a.Volume = 0.25f;
+    scene.Registry().emplace<AudioSourceComponent>(speaker.Entity(), a);
+
+    // Ключ — прямо в объекте, как до реестра; в components его нет.
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::SaveToString(scene));
+    bool top = false, inComponents = false;
+    for (const auto& o : j["objects"]) {
+        if (o.contains("audio") && o["audio"].value("clip", "") == "sfx/door.wav") top = true;
+        if (o.contains("components") && o["components"].contains("audio")) inComponents = true;
+    }
+    CHECK_TRUE(top);
+    CHECK_FALSE(inComponents);
+
+    auto loaded = SceneSerializer::LoadFromString(j.dump());
+    GameObject s2 = loaded->FindByName("Speaker");
+    const auto* la = s2.Valid() ? loaded->Registry().try_get<AudioSourceComponent>(s2.Entity()) : nullptr;
+    CHECK_TRUE(la && la->Clip == "sfx/door.wav");
+    if (la) CHECK_NEAR(la->Volume, 0.25f, 1e-5f);
+
+    GameObject copy = sage::scene::CopySubtree(scene, speaker.Entity(), scene, entt::null);
+    const auto* ca = scene.Registry().try_get<AudioSourceComponent>(copy.Entity());
+    CHECK_TRUE(ca && ca->Clip == "sfx/door.wav");
+}
+
+// Непрочитанный встроенный компонент (файл от другой версии, правка руками)
+// не роняет сцену и не стирается: пишется обратно в объект как был. Ручная
+// ветка сериализатора бросала исключение — сцена не открывалась вовсе.
+TEST(ComponentRegistry_unreadable_builtin_keeps_the_data) {
+    const std::string file =
+        R"({"name": "S", "objects": [{"id": 1, "name": "X", "audio": "не объект"}]})";
+    std::unique_ptr<Scene> scene;
+    try {
+        scene = SceneSerializer::LoadFromString(SceneSerializer::MigrateSceneJson(file));
+    } catch (const std::exception&) {
+    }
+    CHECK_TRUE(scene != nullptr);
+    if (!scene) return;
+    GameObject x = scene->FindByName("X");
+    CHECK_TRUE(x.Valid() && !scene->Registry().all_of<AudioSourceComponent>(x.Entity()));
+    const nlohmann::json saved = nlohmann::json::parse(SceneSerializer::SaveToString(*scene));
+    CHECK_TRUE(saved["objects"][0]["audio"] == "не объект");
+    CHECK_FALSE(saved["objects"][0].contains("components"));
+}
+
+// Компонент игры с ключом встроенного живёт в components и встроенный не
+// заменяет: раньше эти две записи файла не пересекались, и не должны.
+TEST(ComponentRegistry_game_key_does_not_replace_builtin) {
+    struct GameAudio { int N = 0; };
+    CHECK_TRUE(sage::scene::RegisterComponent(sage::scene::MakeComponentType<GameAudio>(
+        "audio", [](const GameAudio& g) { return nlohmann::json{{"n", g.N}}; },
+        [](const nlohmann::json& j, GameAudio& g) { g.N = j.value("n", 0); })));
+    Scene scene("S");
+    GameObject o = scene.CreateObject("O");
+    scene.Registry().emplace<GameAudio>(o.Entity(), GameAudio{7});
+    AudioSourceComponent a;
+    a.Clip = "x.wav";
+    scene.Registry().emplace<AudioSourceComponent>(o.Entity(), a);
+    const nlohmann::json j = nlohmann::json::parse(SceneSerializer::SaveToString(scene));
+    const auto& obj = j["objects"][0];
+    CHECK_TRUE(obj.contains("audio") && obj["audio"].value("clip", "") == "x.wav");
+    CHECK_TRUE(obj.contains("components") && obj["components"]["audio"].value("n", 0) == 7);
+    CHECK_TRUE(sage::scene::UnregisterComponent("audio"));   // снимает тип игры
+    sage::scene::ComponentTypePtr builtin = sage::scene::FindComponentType("audio");
+    CHECK_TRUE(builtin && builtin->TopLevel);
+}
+
+// Особые случаи старого формата, которые ветки сериализатора держали руками:
+// прежний ключ "postChain", "netReplicated": false, пустой тег, сдвиг папки.
+TEST(ComponentRegistry_builtin_legacy_forms_read_as_before) {
+    const std::string file = R"({"name": "S", "objects": [
+        {"id": 1, "name": "Cam", "postChain": {}, "netReplicated": false, "tag": ""},
+        {"id": 2, "name": "Dir", "position": {"x": 1, "y": 2, "z": 3}, "folder": {"color": {"x": 1}}}]})";
+    auto scene = SceneSerializer::LoadFromString(SceneSerializer::MigrateSceneJson(file));
+    entt::registry& r = scene->Registry();
+    GameObject cam = scene->FindByName("Cam");
+    CHECK_TRUE(r.all_of<sage::render::PostProcessComponent>(cam.Entity()));
+    CHECK_FALSE(r.all_of<NetReplicatedComponent>(cam.Entity()));
+    CHECK_FALSE(r.all_of<TagComponent>(cam.Entity()));
+    GameObject dir = scene->FindByName("Dir");
+    CHECK_TRUE(r.all_of<FolderComponent>(dir.Entity()));
+    CHECK_NEAR(dir.GetTransform().Position.x, 0.0f, 1e-6f);
+
+    const nlohmann::json saved = nlohmann::json::parse(SceneSerializer::SaveToString(*scene));
+    CHECK_TRUE(saved["objects"][0].contains("postProcess"));
+    CHECK_FALSE(saved["objects"][0].contains("postChain"));
+    CHECK_FALSE(saved["objects"][0].contains("tag"));
+    CHECK_FALSE(saved["objects"][0].contains("netReplicated"));
+}
+
+// Повреждённая камера (и любой встроенный компонент) не роняет сцену: раньше
+// ParseCamera бросал, и сцена не открывалась вовсе.
+TEST(ComponentRegistry_unreadable_camera_keeps_the_data) {
+    const std::string file =
+        R"({"name": "S", "objects": [{"id": 1, "name": "X", "camera": 5, "light": {"type": "point"}}]})";
+    std::unique_ptr<Scene> scene;
+    try {
+        scene = SceneSerializer::LoadFromString(SceneSerializer::MigrateSceneJson(file));
+    } catch (const std::exception&) {
+    }
+    CHECK_TRUE(scene != nullptr);
+    if (!scene) return;
+    GameObject x = scene->FindByName("X");
+    CHECK_FALSE(scene->Registry().all_of<CameraComponent>(x.Entity()));
+    CHECK_TRUE(scene->Registry().all_of<LightComponent>(x.Entity()));
+    const nlohmann::json saved = nlohmann::json::parse(SceneSerializer::SaveToString(*scene));
+    CHECK_TRUE(saved["objects"][0]["camera"] == 5);
+}
+
+// Скрипты занимают несколько ключей объекта (Fields): оба вида записи
+// переживают чтение, сохранение и копию, а непонятные — сохраняются как были.
+TEST(ComponentRegistry_scripts_keep_both_forms_and_broken_data) {
+    const std::string file = R"({"name": "S", "objects": [
+        {"id": 1, "name": "One", "script": "a.lua"},
+        {"id": 2, "name": "Many", "scripts": [{"path": "a.lua"}, {"path": "b.lua", "group": "g"}],
+         "scriptGroups": ["g"]},
+        {"id": 3, "name": "Bad", "scripts": 5, "scriptGroups": ["g"]}]})";
+    auto scene = SceneSerializer::LoadFromString(SceneSerializer::MigrateSceneJson(file));
+    entt::registry& r = scene->Registry();
+    const auto* many = r.try_get<ScriptComponent>(scene->FindByName("Many").Entity());
+    CHECK_TRUE(many && many->Scripts.size() == 2 && many->Groups.size() == 1);
+    CHECK_FALSE(r.all_of<ScriptComponent>(scene->FindByName("Bad").Entity()));
+
+    GameObject copy = sage::scene::CopySubtree(*scene, scene->FindByName("Many").Entity(), *scene, entt::null);
+    const auto* cs = r.try_get<ScriptComponent>(copy.Entity());
+    CHECK_TRUE(cs && cs->Scripts.size() == 2);
+
+    const nlohmann::json saved = nlohmann::json::parse(SceneSerializer::SaveToString(*scene));
+    CHECK_TRUE(saved["objects"][0]["script"] == "a.lua");
+    CHECK_FALSE(saved["objects"][0].contains("scripts"));
+    CHECK_TRUE(saved["objects"][1]["scripts"].size() == 2);
+    CHECK_TRUE(saved["objects"][1]["scriptGroups"][0] == "g");
+    CHECK_TRUE(saved["objects"][2]["scripts"] == 5);
+    CHECK_TRUE(saved["objects"][2]["scriptGroups"][0] == "g");
 }

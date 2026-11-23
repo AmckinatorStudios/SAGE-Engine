@@ -43,6 +43,8 @@
 #include "sage/ecs/LightSystem.h"
 #include "sage/physics/PhysicsScene.h"
 #include <algorithm>
+#include <functional>
+#include <set>
 
 #include "AssetSlot.h"
 #include "ObjectSlot.h"
@@ -60,6 +62,7 @@
 #include "sage/render/SkinnedModel.h"
 #include "sage/scene/AiAgentComponent.h"
 #include "sage/scene/VisualScriptComponent.h"
+#include "sage/scene/ComponentRegistry.h"
 #include "sage/scene/Components.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIIcons.h"
@@ -88,13 +91,33 @@ using namespace sage::editor::inspectordetail;
 // плоском списке стоят рядом только потому, что их так написали.
 namespace {
 
+// Key — ключ реестра компонентов сцены (sage/scene/ComponentRegistry.h);
+// nullptr — не компонент реестра (меш — часть объекта, элемент — часть UI).
+// По ключам меню сверяется с реестром: компонент игры или плагина попадает в
+// меню сам (раздел Game), а встроенный без строки здесь и без причины в
+// kNotInMenu ловит самопроверка редактора.
 struct ComponentEntry {
-    const char* Name;
-    const char* Category;
-    const char* Icon;
-    const char* Hint;
-    bool (*Has)(entt::registry&, entt::entity);
-    void (*Add)(entt::registry&, entt::entity);
+    const char* Key;
+    std::string Name;
+    std::string Category;
+    std::string Icon;
+    std::string Hint;
+    std::function<bool(entt::registry&, entt::entity)> Has;
+    std::function<void(entt::registry&, entt::entity)> Add;
+};
+
+// Компоненты реестра, которых в меню нет НАМЕРЕННО: у каждого своё место.
+const std::set<std::string> kNotInMenu = {
+    "decal",         // предмет сцены: Объект > Эффекты > Наклейка (см. ниже)
+    "giStatic",      // размечает вся сцена разом: панель Environment
+    "ik",            // добавляется скриптом (см. ниже)
+    "tag",           // поле тега в шапке инспектора
+    "folder",        // папка создаётся в иерархии
+    "vars",          // публичные переменные — в секции скрипта
+    "signalLinks",   // связи сигналов — в секции элемента и скрипта
+    "lod",           // секции в инспекторе нет: добавленный нечем настроить
+    "shaderParams",  // параметры объекта для шейдера — из скрипта (ScriptApi_Scene)
+    "scene_layer",   // слой — полем в шапке инспектора
 };
 
 template <typename T>
@@ -122,14 +145,14 @@ void AddTween(entt::registry& reg, entt::entity e) {
     reg.emplace<sage::anim::TweenComponent>(e).Tweens.push_back(c);
 }
 
-const std::vector<ComponentEntry>& ComponentRegistry() {
+const std::vector<ComponentEntry>& BuiltinEntries() {
     static const std::vector<ComponentEntry> kEntries = {
         // ПРОСТО «Mesh»: это то, КАК ОБЪЕКТ ВЫГЛЯДИТ — модель, её материалы и
         // настройки отрисовки. Слово «Renderer» в названии описывало не предмет
         // сцены, а внутреннее устройство движка, и делило объекты на «модель» и
         // «модель с рендерером» там, где деления нет. Скелетная модель — тот же
         // Mesh: анимацию к ней добавляет отдельный компонент Animation.
-        {"Mesh", "Render", "cube",
+        {nullptr, "Mesh", "Render", "cube",
          "Model, materials and how it is drawn", HasComp<MeshRendererComponent>,
          AddComp<MeshRendererComponent>},
         // НАКЛЕЙКИ И «GI STATIC» В СПИСКЕ НЕТ — НАМЕРЕННО, и не потому, что их
@@ -148,38 +171,38 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         // кнопка «Пометить статичную геометрию» в панели Environment, рядом с
         // самой выпечкой, — она размечает всю сцену разом и по понятному
         // правилу.
-        {"Particle Emitter", "Render", "particles",
+        {"particles", "Particle Emitter", "Render", "particles",
          "Rain, snow, smoke, fire, magic: any effect", HasComp<ParticleEmitterComponent>,
          [](entt::registry& reg, entt::entity e) {
              reg.emplace<ParticleEmitterComponent>(e);
          }},
-        {"Reflection Probe", "Render", "probe",
+        {"reflectionProbe", "Reflection Probe", "Render", "probe",
          "Captures the surroundings for reflections", HasComp<ReflectionProbeComponent>,
          AddComp<ReflectionProbeComponent>},
 
-        {"Camera", "View", "camera",
+        {"camera", "Camera", "View", "camera",
          "The game looks through this object", HasComp<CameraComponent>, AddComp<CameraComponent>},
-        {"Post Processing", "View", "camera",
+        {"postProcess", "Post Processing", "View", "camera",
          "What is done to this camera's frame before it is shown",
          HasComp<sage::render::PostProcessComponent>,
          AddComp<sage::render::PostProcessComponent>},
-        {"Object Effects", "View", "particles",
+        {"object_effects", "Object Effects", "View", "particles",
          "Invert, glow, blur, dissolve… on this object only",
          HasComp<sage::render::ObjectEffectsComponent>,
          AddComp<sage::render::ObjectEffectsComponent>},
-        {"Render Texture", "View", "camera",
+        {"renderTexture", "Render Texture", "View", "camera",
          "Films the scene into a picture for the interface: a character preview, an item icon",
          HasComp<RenderTextureComponent>, AddComp<RenderTextureComponent>},
-        {"Light", "View", "light",
+        {"light", "Light", "View", "light",
          "Point, spot or directional light", HasComp<LightComponent>, AddComp<LightComponent>},
 
-        {"Rigid Body", "Physics", "physics",
+        {"rigidBody", "Rigid Body", "Physics", "physics",
          "The object falls and collides", HasComp<RigidBodyComponent>, AddComp<RigidBodyComponent>},
-        {"Collider", "Physics", "physics",
+        {"collider", "Collider", "Physics", "physics",
          "The shape physics uses for collisions", HasComp<ColliderComponent>, AddComp<ColliderComponent>},
-        {"Joint", "Physics", "ik",
+        {"joint", "Joint", "Physics", "ik",
          "Ties this body to another one", HasComp<JointComponent>, AddComp<JointComponent>},
-        {"Character Controller", "Physics", "physics",
+        {"character", "Character Controller", "Physics", "physics",
          "Walking, jumping, stairs", HasComp<CharacterControllerComponent>,
          AddCharacter},
 
@@ -187,7 +210,7 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         // на два сорта — «модель» и «анимированная модель», — хотя анимация
         // это характеристика предмета, а не отдельный вид предмета. Скелет
         // берётся из модели, заданной в Mesh.
-        {"Animation", "Animation", "anim",
+        {"animation", "Animation", "Animation", "anim",
          "Plays clips on the skeleton of the Mesh model", HasComp<AnimationComponent>,
          AddComp<AnimationComponent>},
         // АНИМАЦИЯ СВОЙСТВ — ДЛЯ ТЕХ, У КОГО НЕТ СКЕЛЕТА, то есть для
@@ -195,12 +218,12 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         // компонент можно было завести только руками в .sage, и инструмент
         // анимации оставался единственным местом, где движение «существует», —
         // до закрытия редактора.
-        {"Property Animation", "Animation", "clock",
+        {"propertyAnimator", "Property Animation", "Animation", "clock",
          "Plays a .sageclip: properties of this object and its children",
          HasComp<PropertyAnimatorComponent>, AddComp<PropertyAnimatorComponent>},
         // ТВИН — «из A в B за секунду» без клипа: кнопка вздувается, дверь
         // отъезжает, свет гаснет. Добавленный сразу получает первый твин.
-        {"Tween", "Animation", "clock",
+        {"tweens", "Tween", "Animation", "clock",
          "Quick change of a property over time — no clip needed",
          HasComp<sage::anim::TweenComponent>, AddTween},
         // IK В СПИСКЕ НЕТ — НАМЕРЕННО.
@@ -228,44 +251,78 @@ const std::vector<ComponentEntry>& ComponentRegistry() {
         // дотянуться до неё можно было ровно из скрипта. То есть чтобы у двери
         // появился скрип, дверь обязана была обзавестись программистом, — и
         // поэтому звука в сценах не было вовсе.
-        {"Audio", "Audio", "audio",
+        {"audio", "Audio", "Audio", "audio",
          "Sound of this object: ambience, hum, one-shot", HasComp<AudioSourceComponent>,
          AddComp<AudioSourceComponent>},
 
         // ИИ — AI Graph поведения и начальная память персонажа.
-        {"AI", "Logic", "wire",
+        {"ai_agent", "AI", "Logic", "wire",
          "AI Graph of the character's behavior and the memory it starts with",
          HasComp<AiAgentComponent>, AddComp<AiAgentComponent>},
         // Script Graph — игровая логика объекта графом.
-        {"Script Graph", "Logic", "wire",
+        {"visual_script", "Script Graph", "Logic", "wire",
          "Game logic of this object made of nodes: On Start, On Update, events",
          HasComp<VisualScriptComponent>, AddComp<VisualScriptComponent>},
-        {"Script", "Logic", "script",
+        {"scripts", "Script", "Logic", "script",
          "Behaviour written in a script file, with its public variables", HasComp<ScriptComponent>,
          AddComp<ScriptComponent>},
-        {"Net Replicated", "Logic", "network",
+        {"netReplicated", "Net Replicated", "Logic", "network",
          "The server replicates this object to clients", HasComp<NetReplicatedComponent>,
          AddComp<NetReplicatedComponent>},
         // Интерфейс добавляется ОБЯЗАТЕЛЬНОЙ частью — прямоугольником; из чего
         // элемент состоит дальше, выбирается в самом инспекторе (или заготовкой).
         // ГРАНИЦА интерфейса — отдельным компонентом и ПЕРВЫМ в разделе:
         // элементы живут внутри интерфейса, а не сами по себе.
-        {"Interface", "Interface", "layout",
+        {"interface", "Interface", "Interface", "layout",
          "A screen of its own: its elements live inside it and are edited apart",
          HasComp<sage::ui::InterfaceComponent>, AddComp<sage::ui::InterfaceComponent>},
-        {"UI Element", "Interface", "rect",
+        {nullptr, "UI Element", "Interface", "rect",
          "Panel, label, image or bar on screen", HasComp<sage::ui::Element>,
          AddComp<sage::ui::Element>},
     };
     return kEntries;
 }
 
+bool InMenuTable(const std::string& key) {
+    for (const ComponentEntry& c : BuiltinEntries())
+        if (c.Key && key == c.Key) return true;
+    return false;
+}
+
+// Меню целиком: таблица выше и, последним разделом, компоненты игры и
+// плагинов из реестра — их ключ и есть имя. Добавляется такой компонент
+// чтением пустого описания: значения по умолчанию даёт сам тип.
+std::vector<ComponentEntry> MenuEntries() {
+    std::vector<ComponentEntry> out = BuiltinEntries();
+    for (const sage::scene::ComponentTypePtr& t : sage::scene::ComponentTypes()) {
+        if (t->TopLevel || InMenuTable(t->Key) || kNotInMenu.count(t->Key)) continue;
+        ComponentEntry c{nullptr, t->Key, "Game", "script", "Component registered by the game or a plugin",
+                         [t](entt::registry& r, entt::entity e) { return t->Has(r, e); },
+                         [t](entt::registry& r, entt::entity e) {
+                             try {
+                                 t->Load(r, e, nlohmann::json::object());
+                             } catch (const std::exception& ex) {
+                                 LOG_ERROR("Editor") << "компонент «" << t->Key << "» не добавлен: " << ex.what();
+                             }
+                         }};
+        out.push_back(std::move(c));
+    }
+    return out;
+}
+
 } // namespace
+
+std::vector<std::string> InspectorPanel::ComponentsMissingFromMenu() {
+    std::vector<std::string> out;
+    for (const sage::scene::ComponentTypePtr& t : sage::scene::ComponentTypes())
+        if (t->TopLevel && !InMenuTable(t->Key) && !kNotInMenu.count(t->Key)) out.push_back(t->Key);
+    return out;
+}
 
 std::vector<std::pair<std::string, std::vector<std::string>>>
 InspectorPanel::AddComponentMenuContents() {
     std::vector<std::pair<std::string, std::vector<std::string>>> out;
-    for (const ComponentEntry& c : ComponentRegistry()) {
+    for (const ComponentEntry& c : MenuEntries()) {
         if (out.empty() || out.back().first != c.Category) out.push_back({c.Category, {}});
         out.back().second.push_back(c.Name);
     }
@@ -342,14 +399,15 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
 
     // Сколько подходящих в категории — числом рядом с названием: свёрнутая
     // категория иначе не отвечает на вопрос «а есть ли там что-нибудь».
-    auto countIn = [&](const char* category) {
+    const std::vector<ComponentEntry> entries = MenuEntries();
+    auto countIn = [&](const std::string& category) {
         int n = 0;
-        for (const ComponentEntry& c : ComponentRegistry())
-            if (std::strcmp(c.Category, category) == 0 && !c.Has(reg, e) && matches(c)) ++n;
+        for (const ComponentEntry& c : entries)
+            if (c.Category == category && !c.Has(reg, e) && matches(c)) ++n;
         return n;
     };
 
-    const char* lastCategory = nullptr;
+    const std::string* lastCategory = nullptr;
     bool categoryOpen = false;
     // ПОДХОДЯЩИЕ, а не НАРИСОВАННЫЕ. Считать нарисованные значило бы писать
     // «все компоненты уже добавлены» всякий раз, когда категории свёрнуты, —
@@ -359,21 +417,21 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
         if (categoryOpen) ImGui::TreePop();
         categoryOpen = false;
     };
-    for (const ComponentEntry& c : ComponentRegistry()) {
+    for (const ComponentEntry& c : entries) {
         if (c.Has(reg, e) || !matches(c)) continue;
         ++shown;
-        if (!lastCategory || std::strcmp(lastCategory, c.Category) != 0) {
+        if (!lastCategory || *lastCategory != c.Category) {
             closeCategory();
-            lastCategory = c.Category;
+            lastCategory = &c.Category;
             char label[128];
             std::snprintf(label, sizeof(label), "%s (%d)###cat_%s", T(c.Category), countIn(c.Category),
-                          c.Category);
+                          c.Category.c_str());
             if (searching) ImGui::SetNextItemOpen(true, ImGuiCond_Always);
             categoryOpen = ImGui::TreeNodeEx(label, ImGuiTreeNodeFlags_SpanAvailWidth |
                                                         ImGuiTreeNodeFlags_FramePadding);
         }
         if (!categoryOpen) continue;
-        ImGui::PushID(c.Name);
+        ImGui::PushID(c.Name.c_str());
         const ImVec2 rowPos = ImGui::GetCursorScreenPos();
         const float iconSize = ImGui::GetTextLineHeight();
         // Строка — один Selectable на две строки текста: имя и что оно делает.
@@ -381,7 +439,7 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
         // знает, что такое «GI Static».
         const bool picked = ImGui::Selectable("##row", false, ImGuiSelectableFlags_None,
                                               ImVec2(300.0f, iconSize * 2.0f + 4.0f));
-        EditorIcons::Overlay(rowPos.x + 2.0f, rowPos.y + iconSize * 0.5f - 1.0f, iconSize, c.Icon,
+        EditorIcons::Overlay(rowPos.x + 2.0f, rowPos.y + iconSize * 0.5f - 1.0f, iconSize, c.Icon.c_str(),
                              glm::vec3(0.62f, 0.72f, 0.85f));
         ImDrawList* dl = ImGui::GetWindowDrawList();
         dl->AddText(ImVec2(rowPos.x + iconSize + 10.0f, rowPos.y + 1.0f),
@@ -393,7 +451,7 @@ void InspectorPanel::DrawAddComponentMenu(EditorHost& host, GameObject obj) {
             c.Add(reg, e);
             ImGui::CloseCurrentPopup();
             // Пустой твин ни на что не годен: сразу — выбрать свойство.
-            if (c.Add == AddTween) host.OpenTween(obj.Id(), 0, EditorHost::TweenOpen::AddProperty);
+            if (c.Key && std::strcmp(c.Key, "tweens") == 0) host.OpenTween(obj.Id(), 0, EditorHost::TweenOpen::AddProperty);
         }
         ImGui::PopID();
     }

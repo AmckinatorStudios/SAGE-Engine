@@ -32,8 +32,26 @@ paths:
 - Окружение → путь только через `sage::EnvPath`/`EnvString`
   (`sage/core/Paths.h`), не `std::getenv`: путь из байтов ANSI падает на
   кириллице в Windows.
-- Компонент — `sage::scene::RegisterComponent`
-  (`sage/scene/ComponentRegistry.h`), не ветки в сериализаторе и копировании.
+
+## Компоненты сцены
+
+- Компонент описывается ОДИН раз — `sage::scene::RegisterComponent`
+  (`sage/scene/ComponentRegistry.h`); встроенный — строкой в
+  `sage/scene/BuiltinComponents.cpp` (`TopLevel`, ключ прямо в объекте).
+  Сохранение, чтение и копия идут по этому описанию.
+- В `SceneSerializer.cpp` и `Prefab.cpp` веток и строк копирования под
+  компонент не добавлять — `check_components` падает. Его список разрешённых
+  только сокращается.
+- Рантайм-поля (дескрипторы, голоса, «уже запущено») сбрасывает
+  `ResetInstanceState()` самого компонента, не копирование.
+- Формат файла не меняется: переименованный ключ — в `OldKeys`, несколько
+  ключей — `Fields` (`scripts`), «пусто» в файле — свой `Load` (`tag`,
+  `netReplicated`).
+- Встроенный компонент — строка в меню «Добавить компонент»
+  (`InspectorPanel_AddComponent.cpp`, поле `Key`) или причина в `kNotInMenu`;
+  иначе падает самопроверка редактора.
+- Тест нового компонента: запись → чтение → копия, и битые данные не роняют
+  сцену (`tests/test_component_registry.cpp`).
 
 ## Файлы
 
@@ -44,4 +62,4 @@ paths:
 - Новый файл редактора — в `editor/CMakeLists.txt`.
 
 Сторожа: `check_layers`, `check_rhi_boundary`, `check_paths`,
-`check_file_size`.
+`check_file_size`, `check_components`.

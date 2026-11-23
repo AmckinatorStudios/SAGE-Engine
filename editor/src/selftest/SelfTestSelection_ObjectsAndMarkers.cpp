@@ -677,6 +677,12 @@ bool EditorLayer::SelfTestObjectsAndMarkers() {
             LOG_ERROR("Editor") << "SELFTEST: наклейка или GI Static остались в списке компонентов";
             ok = false;
         }
+        // Каждый встроенный компонент реестра — в меню или с причиной в
+        // kNotInMenu: новый компонент без строки меню не пройдёт незамеченным.
+        for (const std::string& key : InspectorPanel::ComponentsMissingFromMenu()) {
+            LOG_ERROR("Editor") << "SELFTEST: компонента «" << key << "» нет в меню «Добавить компонент»";
+            ok = false;
+        }
         // И то, ради чего список вообще нужен, на месте.
         if (ok && (!names.count("Mesh") || !names.count("Light") || !names.count("Script"))) {
             LOG_ERROR("Editor") << "SELFTEST: из списка компонентов пропало основное";
