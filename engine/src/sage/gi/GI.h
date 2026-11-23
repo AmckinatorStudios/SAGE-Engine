@@ -131,7 +131,12 @@ using ProgressFn = std::function<void(float, const char*)>;
 // Собирает вход бейкера из сцены: сущности с GIStaticComponent (+ Transform +
 // MeshRenderer). Геометрия примитивов — те же Build*-генераторы, что у рендера;
 // модели — .obj через ModelLoader (CPU-стадия). Без GL.
-BakeInput CollectBakeInput(Scene& scene, const GISettings& settings);
+// Освещение (env) передаёт вызывающий — обычно sage::ecs::CollectLighting(scene),
+// то же, что видит realtime-рендер. GI его сам не собирает: света-сущности
+// живут в ecs, а ecs (пакеты отрисовки) уже включает GI — сбор здесь замыкал
+// модули в цикл. Параметр обязательный, а не по умолчанию: бейк без света
+// молча дал бы чёрные лайтмапы.
+BakeInput CollectBakeInput(Scene& scene, const GISettings& settings, const LightingEnvironment& env);
 
 // Запекает лайтмапы + GI-объём. Чистый CPU (параллелится JobSystem'ом),
 // безопасно звать из фонового потока. progress может быть пустым.

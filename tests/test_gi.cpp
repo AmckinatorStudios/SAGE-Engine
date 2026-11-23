@@ -6,6 +6,7 @@
 #include <glm/glm.hpp>
 
 #include "sage/gi/BVH.h"
+#include "sage/ecs/LightSystem.h"
 #include "sage/gi/GI.h"
 #include "sage/gi/LightmapUV.h"
 #include "sage/render/MeshData.h"
@@ -205,7 +206,7 @@ TEST(gi_pack_charts_no_overlap) {
 TEST(gi_bake_scene_light_and_shadow) {
     Scene scene("bake");
     BuildBakeScene(scene);
-    BakeInput input = CollectBakeInput(scene, FastSettings());
+    BakeInput input = CollectBakeInput(scene, FastSettings(), sage::ecs::CollectLighting(scene));
     CHECK_EQ(input.Items.size(), (size_t)2);
 
     auto state = Bake(input);
@@ -241,7 +242,7 @@ TEST(gi_bake_deterministic) {
     BuildBakeScene(scene);
     GISettings s = FastSettings();
     s.SampleCount = 8; // быстрее — детерминизму количество сэмплов безразлично
-    BakeInput input = CollectBakeInput(scene, s);
+    BakeInput input = CollectBakeInput(scene, s, sage::ecs::CollectLighting(scene));
     auto a = Bake(input);
     auto b = Bake(input);
     CHECK_EQ(a->Pages.size(), b->Pages.size());
@@ -291,7 +292,7 @@ TEST(gi_bake_occlusion_darkens) {
         s.SampleCount = 32;
         s.Bounces = 1;
         s.MaxProbeAxis = 4;
-        auto state = Bake(CollectBakeInput(scene, s));
+        auto state = Bake(CollectBakeInput(scene, s, sage::ecs::CollectLighting(scene)));
 
         // Средний тексель ЦЕНТРА страницы пола (края могут видеть небо сбоку).
         const LightmapPage& p = state->Pages[0];
@@ -321,7 +322,7 @@ TEST(gi_rebuild_after_load_restores_pages) {
     BuildBakeScene(scene);
     GISettings s = FastSettings();
     s.SampleCount = 8;
-    auto baked = Bake(CollectBakeInput(scene, s));
+    auto baked = Bake(CollectBakeInput(scene, s, sage::ecs::CollectLighting(scene)));
     CHECK_TRUE(baked->Baked);
     SavePages(*baked, scenePath);
 
@@ -367,7 +368,7 @@ TEST(gi_transplant_matches_hash) {
     BuildBakeScene(a);
     GISettings s = FastSettings();
     s.SampleCount = 8;
-    a.GI = Bake(CollectBakeInput(a, s));
+    a.GI = Bake(CollectBakeInput(a, s, sage::ecs::CollectLighting(a)));
     CHECK_TRUE(a.GI->Baked);
 
     // Идентичная сцена — бейк переезжает.
@@ -466,7 +467,7 @@ TEST(gi_lightmap_uv_follows_the_face) {
     GISettings s = FastSettings();
     s.TexelsPerUnit = 4;
     s.SampleCount = 4;
-    auto st = Bake(CollectBakeInput(ws.scene, s));
+    auto st = Bake(CollectBakeInput(ws.scene, s, sage::ecs::CollectLighting(ws.scene)));
     auto it = st->Entities.find(ws.FloorId);
     CHECK_TRUE(it != st->Entities.end());
     if (it == st->Entities.end()) return;
@@ -488,7 +489,7 @@ TEST(gi_lightmap_lights_the_right_place) {
     WallScene ws;
     GISettings s;
     s.SampleCount = 64;
-    auto st = Bake(CollectBakeInput(ws.scene, s));
+    auto st = Bake(CollectBakeInput(ws.scene, s, sage::ecs::CollectLighting(ws.scene)));
     glm::vec3 nearWall, open, openFar;
     CHECK_TRUE(SampleFloor(*st, ws.FloorId, 1.0f, 0.0f, nearWall));
     CHECK_TRUE(SampleFloor(*st, ws.FloorId, -3.0f, 0.0f, open));
@@ -580,7 +581,7 @@ TEST(gi_bake_gltf_model_occludes_like_a_primitive) {
         s.SampleCount = 32;
         s.Bounces = 1;
         s.MaxProbeAxis = 4;
-        BakeInput in = CollectBakeInput(scene, s);
+        BakeInput in = CollectBakeInput(scene, s, sage::ecs::CollectLighting(scene));
         if (roofed) CHECK_EQ((int)in.Items.size(), 2);   // модель вошла в бейк
         auto state = Bake(in);
         const LightmapPage& p = state->Pages[0];

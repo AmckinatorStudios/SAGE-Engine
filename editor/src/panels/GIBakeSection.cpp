@@ -7,6 +7,7 @@
 #include "../Localization.h"
 #include "sage/anim/Tween.h"
 #include "sage/core/Log.h"
+#include "sage/ecs/LightSystem.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 
@@ -75,7 +76,8 @@ bool GIBakeSection::Start(EditorHost& host) {
     job->Hash = sage::gi::ComputeGeometryHash(scene, job->Settings);
     // Вход собирается ЗДЕСЬ, на главном потоке: сцену правят из интерфейса, и
     // читать её из фонового потока нельзя. Дальше — чистая математика.
-    auto input = std::make_shared<sage::gi::BakeInput>(sage::gi::CollectBakeInput(scene, job->Settings));
+    auto input = std::make_shared<sage::gi::BakeInput>(
+        sage::gi::CollectBakeInput(scene, job->Settings, sage::ecs::CollectLighting(scene)));
     Job* raw = job.get();
     job->Thread = std::thread([raw, input] {
         raw->Result = sage::gi::Bake(*input, [raw](float p, const char* phase) {
