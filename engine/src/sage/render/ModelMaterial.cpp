@@ -27,7 +27,7 @@
 #include <system_error>
 
 #include <stb_image.h>
-#include <stb_image_write.h>   // реализация развёрнута в render/Screenshot.cpp
+#include <stb_image_write.h>   // реализация — в sage/core/StbImage.cpp
 #include <tiny_obj_loader.h>
 
 #include "sage/core/Log.h"

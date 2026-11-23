@@ -64,6 +64,8 @@ set(SAGE_ENGINE_SOURCES
     src/sage/app/EngineContext.cpp
     src/sage/app/FatalReport.cpp
     src/sage/core/Config.cpp
+    src/sage/core/EngineContext.cpp
+    src/sage/core/StbImage.cpp
     src/sage/core/JobSystem.cpp
     src/sage/core/Log.cpp
     src/sage/core/Paths.cpp
@@ -320,20 +322,87 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/UIShowcase.cpp
 )
 
-add_library(sage_engine STATIC ${SAGE_ENGINE_SOURCES})
+# ----------------------------------------------------------------------------
+# СЛОИ — отдельные библиотеки.
+#
+# ЗАЧЕМ. Пока движок был одной библиотекой, порядок слоёв держал только
+# сторож включений (scripts/check_layers.py), а компоновщик видел всё сразу:
+# нижний модуль мог объявить функцию верхнего без #include и позвать её —
+# сторож этого не видит, сборка проходит. Теперь каждый слой — своя
+# статическая библиотека, которая линкует только слой под собой: вызов вверх
+# не соберётся (неразрешённый символ), какую бы обходную дорогу он ни нашёл.
+#
+# Модули раскладываются по папке, список исходников выше остаётся одним:
+# новый .cpp сам попадает в слой своего модуля. Состав слоёв ОБЯЗАН совпадать
+# с LAYERS в scripts/check_layers.py — сторож сверяет их и падает при
+# расхождении. Реализации вне sage/ (IMPLS там же): rhi — основа, physics — мир.
+#
+# sage_engine (sage::engine) остался целью для игр, редактора и тестов —
+# теперь это зонтик над верхним слоем, тянущий все остальные.
+# ----------------------------------------------------------------------------
+set(SAGE_LAYERS base services resources world language scripts program)
+set(SAGE_LAYER_base      rhi core)
+set(SAGE_LAYER_services  events vars input physics ai)
+set(SAGE_LAYER_resources assets)
+set(SAGE_LAYER_world     render ecs scene anim audio gi ui net)
+set(SAGE_LAYER_language  lang)
+set(SAGE_LAYER_scripts   scripting)
+set(SAGE_LAYER_program   app)
+set(SAGE_IMPL_base  rhi)
+set(SAGE_IMPL_world physics)
+
+set(_sage_rest ${SAGE_ENGINE_SOURCES})
+set(_sage_below "")
+foreach(layer IN LISTS SAGE_LAYERS)
+    set(_src "")
+    foreach(mod IN LISTS SAGE_LAYER_${layer})
+        set(_m ${_sage_rest})
+        list(FILTER _m INCLUDE REGEX "^src/sage/${mod}/")
+        list(APPEND _src ${_m})
+    endforeach()
+    foreach(impl IN LISTS SAGE_IMPL_${layer})
+        set(_m ${_sage_rest})
+        list(FILTER _m INCLUDE REGEX "^src/${impl}/")
+        list(APPEND _src ${_m})
+    endforeach()
+    if (_src)
+        list(REMOVE_ITEM _sage_rest ${_src})
+    endif()
+    add_library(sage_${layer} STATIC ${_src})
+    # Слой видит только слой под собой (и, транзитивно, всё ниже).
+    if (_sage_below)
+        target_link_libraries(sage_${layer} PUBLIC ${_sage_below})
+    endif()
+    # PRIVATE — используется только в .cpp движка (загрузка моделей,
+    # сериализация, аудио), в публичных заголовках не появляется.
+    target_link_libraries(sage_${layer} PRIVATE
+        tinyobjloader
+        tinygltf
+        nlohmann_json::nlohmann_json
+        miniaudio
+        miniz
+    )
+    set(_sage_below sage_${layer})
+endforeach()
+if (_sage_rest)
+    message(FATAL_ERROR "Исходники движка вне слоёв (добавьте модуль в SAGE_LAYER_*): ${_sage_rest}")
+endif()
+
+add_library(sage_engine INTERFACE)
+target_link_libraries(sage_engine INTERFACE sage_program)
 add_library(sage::engine ALIAS sage_engine)
 
 # src — публичный include root движка: заголовки видны как "sage/<module>/...".
 # generated — для сгенерированного sage/core/Version.h. Оба PUBLIC: цели,
 # линкующие движок (игры, редактор), наследуют эти пути автоматически и не
 # могут включить ничего движкового мимо префикса sage/.
-target_include_directories(sage_engine PUBLIC
+target_include_directories(sage_base PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_BINARY_DIR}/generated
 )
 
 # В Debug включаем GL_CHECK (см. sage/core/GLDebug.h); в Release макрос пуст.
-target_compile_definitions(sage_engine PUBLIC $<$<CONFIG:Debug>:SAGE_DEBUG>)
+target_compile_definitions(sage_base PUBLIC $<$<CONFIG:Debug>:SAGE_DEBUG>)
 
 # NOMINMAX — PUBLIC, а не «уже задано сверху»: заголовки движка тянут <windows.h>
 # (через glad), поэтому от макросов min/max ломается не только сам движок, но и
@@ -341,12 +410,12 @@ target_compile_definitions(sage_engine PUBLIC $<$<CONFIG:Debug>:SAGE_DEBUG>)
 # действует только на свой каталог и ниже — при подключении движка через
 # add_subdirectory в чужой проект исходники ИГРЫ остались бы без него.
 if (WIN32)
-    target_compile_definitions(sage_engine PUBLIC NOMINMAX)
+    target_compile_definitions(sage_base PUBLIC NOMINMAX)
 endif()
 
 # PUBLIC — то, что торчит в публичных заголовках движка (окно/ввод/математика/
 # ECS/скриптинг/текстуры): линкующая цель должна видеть их транзитивно.
-target_link_libraries(sage_engine PUBLIC
+target_link_libraries(sage_base PUBLIC
     glfw
     glad
     glm::glm
@@ -354,24 +423,15 @@ target_link_libraries(sage_engine PUBLIC
     stb
     EnTT::EnTT
 )
-# PRIVATE — используется только в .cpp движка (загрузка моделей/сериализация/
-# аудио), в публичных заголовках не появляется.
-target_link_libraries(sage_engine PRIVATE
-    tinyobjloader
-    tinygltf
-    nlohmann_json::nlohmann_json
-    miniaudio
-    miniz
-)
 
 # Физический бэкенд Jolt (основной) — подключается, только если верхний уровень
 # создал цель Jolt (option SAGE_PHYSICS_JOLT, вкл. по умолчанию). SAGE_HAS_JOLT
 # включает jolt-ветки в PhysicsWorld.cpp/JoltWorld.cpp; всё под Jolt изолировано
 # в src/physics/jolt/ (как opengl-бэкенд изолирован в rhi/opengl/).
 if (TARGET Jolt)
-    target_sources(sage_engine PRIVATE src/physics/jolt/JoltWorld.cpp src/physics/jolt/JoltWorld_Bodies.cpp)
-    target_compile_definitions(sage_engine PRIVATE SAGE_HAS_JOLT)
-    target_link_libraries(sage_engine PRIVATE Jolt)
+    target_sources(sage_world PRIVATE src/physics/jolt/JoltWorld.cpp src/physics/jolt/JoltWorld_Bodies.cpp)
+    target_compile_definitions(sage_world PRIVATE SAGE_HAS_JOLT)
+    target_link_libraries(sage_world PRIVATE Jolt)
 endif()
 
 # Графический бэкенд Vulkan (второй, рядом с OpenGL) — по той же схеме, что и
@@ -383,7 +443,7 @@ endif()
 # редактор. Внешний мир видит только rhi::Backend::Vulkan — перечисление без
 # единого типа из vulkan.h.
 if (TARGET volk)
-    target_sources(sage_engine PRIVATE
+    target_sources(sage_base PRIVATE
         src/rhi/vulkan/VulkanCommon.cpp
         src/rhi/vulkan/VulkanDevice.cpp
         src/rhi/vulkan/VulkanImage.cpp
@@ -392,8 +452,8 @@ if (TARGET volk)
         src/rhi/vulkan/VulkanPipeline.cpp
         src/rhi/vulkan/VulkanShader.cpp
     )
-    target_compile_definitions(sage_engine PRIVATE SAGE_HAS_VULKAN)
-    target_link_libraries(sage_engine PRIVATE volk vma
+    target_compile_definitions(sage_base PRIVATE SAGE_HAS_VULKAN)
+    target_link_libraries(sage_base PRIVATE volk vma
         glslang glslang-default-resource-limits SPIRV)
 endif()
 
@@ -402,17 +462,17 @@ if (WIN32)
     # ws2_32 — Winsock: UDP-сокеты сетевого модуля (sage/net/UdpSocket).
     # shell32 — ShellExecuteW: открыть пользовательскую папку игры в проводнике.
     # ole32, uuid — панель задач (ITaskbarList2): безрамочное окно игры.
-    target_link_libraries(sage_engine PUBLIC opengl32 dbghelp ws2_32 shell32 ole32 uuid)
+    target_link_libraries(sage_base PUBLIC opengl32 dbghelp ws2_32 shell32 ole32 uuid)
 elseif (APPLE)
     # macOS: OpenGL — системный фреймворк (3.3 core есть на любом Mac с
     # 10.9); Cocoa/IOKit/CoreVideo — окно GLFW; CoreAudio/AudioToolbox —
     # miniaudio. X11 на Mac нет вовсе.
-    target_link_libraries(sage_engine PUBLIC
+    target_link_libraries(sage_base PUBLIC
         "-framework OpenGL" "-framework Cocoa" "-framework IOKit" "-framework CoreVideo"
         "-framework CoreAudio" "-framework AudioToolbox" "-framework CoreFoundation"
         ${CMAKE_DL_LIBS} pthread m)
 elseif (UNIX)
     # m — miniaudio (математика микшера); dl/pthread — GLFW и miniaudio
     # (последняя грузит ALSA/PulseAudio через dlopen в рантайме).
-    target_link_libraries(sage_engine PUBLIC GL dl pthread m X11)
+    target_link_libraries(sage_base PUBLIC GL dl pthread m X11)
 endif()

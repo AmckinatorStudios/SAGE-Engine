@@ -162,7 +162,7 @@ Windows. Код возврата: 0 — собрано, 1 — ошибка, 2 �
 
 ## Как собрать вручную (без скриптов, для разработки)
 
-Таргеты: `sage_engine` (библиотека), `SageEditor` (редактор), `SagePlayer`
+Таргеты: `sage_engine` (зонтик над библиотеками слоёв `sage_<слой>`, см. architecture.md), `SageEditor` (редактор), `SagePlayer`
 (плеер), `sage_build`, `sage_tests`, `sage_render_tests`, `TestGame`
 (интеграционный тест).
 

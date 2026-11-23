@@ -9,8 +9,7 @@
 #include <cstdio>
 #include <filesystem>
 
-#define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "stb_image_write.h"
+#include "stb_image_write.h" // реализация — в sage/core/StbImage.cpp
 
 bool SaveScreenshot(const std::string& path, int width, int height) {
     if (width < 1 || height < 1) return false;

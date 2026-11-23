@@ -1,6 +1,5 @@
-#define STB_IMAGE_IMPLEMENTATION
 #include "sage/assets/Pack.h"
-#include <stb_image.h>
+#include <stb_image.h> // реализация — в sage/core/StbImage.cpp
 #include "Texture.h"
 #include "sage/core/Log.h"
 #include "sage/rhi/GraphicsDevice.h"

@@ -7,8 +7,8 @@
 #include <sstream>
 
 #include <nlohmann/json.hpp>
-#include <stb_image.h>        // реализация — в render/Texture.cpp
-#include <stb_image_write.h>  // реализация — в render/Screenshot.cpp
+#include <stb_image.h>        // реализация — в sage/core/StbImage.cpp
+#include <stb_image_write.h>  // реализация — в sage/core/StbImage.cpp
 
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/EngineContext.h"

@@ -12,7 +12,7 @@
 #include "sage/gi/LightmapUV.h"
 #include "sage/scene/Scene.h"
 
-// Реализации stb живут в Texture.cpp (image) и Screenshot.cpp (image_write) —
+// Реализации stb (image и image_write) живут в sage/core/StbImage.cpp —
 // здесь только заголовки: чтение/запись HDR-страниц атласа лайтмап.
 #include <stb_image.h>
 #include <stb_image_write.h>

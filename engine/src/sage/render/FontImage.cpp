@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <vector>
 
-#include <stb_image.h>   // реализация — в render/Texture.cpp
+#include <stb_image.h>   // реализация — в sage/core/StbImage.cpp
 
 #include "sage/assets/Pack.h"
 #include "sage/core/Log.h"

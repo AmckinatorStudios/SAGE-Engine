@@ -8,11 +8,7 @@
 #include "sage/render/RenderTexture.h"
 #include "sage/render/ResourceManager.h"
 
-#include <stdexcept>
-
 namespace sage {
-
-EngineContext* EngineContext::s_current = nullptr;
 
 // Порядок создания — это и есть объявленный порядок зависимостей: настройки и
 // пул задач ни от кого не зависят, кэш ресурсов и наборы GPU-объектов идут
@@ -66,20 +62,6 @@ EngineContext::~EngineContext() {
     m_device = nullptr;
 
     s_current = (previous == this) ? nullptr : previous;
-}
-
-EngineContext& EngineContext::Current() {
-    if (!s_current)
-        throw std::runtime_error(
-            "EngineContext::Current: подсистема запрошена вне контекста движка "
-            "(нет активного Application или ScopedEngineContext)");
-    return *s_current;
-}
-
-EngineContext* EngineContext::SetCurrent(EngineContext* context) {
-    EngineContext* previous = s_current;
-    s_current = context;
-    return previous;
 }
 
 } // namespace sage

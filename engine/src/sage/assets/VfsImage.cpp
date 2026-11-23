@@ -1,6 +1,6 @@
 #include "sage/assets/Pack.h"
 
-#include <stb_image.h>   // реализация — в render/Texture.cpp
+#include <stb_image.h>   // реализация — в sage/core/StbImage.cpp
 
 // Картинки через vfs — отдельным файлом, а не в Pack.cpp: сам пакет декодера
 // картинок не требует, и Pack.cpp не тянет stb_image.

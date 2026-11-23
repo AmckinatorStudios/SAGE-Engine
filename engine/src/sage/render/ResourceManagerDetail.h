@@ -9,7 +9,7 @@
 #include "sage/assets/import/ModelProbe.h"
 #include "sage/render/AlphaBleed.h"
 #include "sage/render/SkinnedModel.h"
-#include <stb_image.h> // реализация STB_IMAGE_IMPLEMENTATION живёт в Texture.cpp
+#include <stb_image.h> // реализация — в sage/core/StbImage.cpp
 #include <algorithm>
 #include <cstdlib>
 #include <atomic>

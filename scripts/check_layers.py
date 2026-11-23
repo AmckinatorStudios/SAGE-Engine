@@ -28,6 +28,11 @@ OpenGL и т. п.) тоже сканируются, у каждой свой с�
 включает только сборка программы (app), редактор и плеер: модуль движка,
 который знает конкретный бэкенд, делает этот бэкенд незаменимым.
 
+СБОРКА. Каждый слой — своя библиотека sage_<слой> (engine/CMakeLists.txt),
+она линкует только слой под собой: вызов вверх без #include не соберётся.
+Состав слоёв там (SAGE_LAYER_*, SAGE_IMPL_*) обязан совпадать с LAYERS и IMPLS
+здесь — сторож сверяет.
+
 Переходные заголовки-мосты (пометка SAGE_FORWARD_HEADER в файле) не
 считаются: они указывают на НОВОЕ место переехавшего файла ради
 совместимости игр и сами ничего не делают.
@@ -134,6 +139,29 @@ def scan():
     return unknown, edges, where
 
 
+def cmake_layers():
+    """Слои из engine/CMakeLists.txt: [(модули, реализации)] по порядку.
+
+    Сборка держит слои библиотеками (sage_<слой>), сторож — включениями. Если
+    списки разойдутся, один из них станет врать: модуль окажется в одном слое
+    для компоновщика и в другом для сторожа. Поэтому сверяем.
+    """
+    path = os.path.join(ROOT, "engine", "CMakeLists.txt")
+    with open(path, encoding="utf-8") as fh:
+        text = fh.read()
+    sets = dict(re.findall(r"^set\((SAGE_\w+)\s+([^)]*)\)", text, re.M))
+    order = sets.get("SAGE_LAYERS", "").split()
+    return [(sets.get(f"SAGE_LAYER_{n}", "").split(), sets.get(f"SAGE_IMPL_{n}", "").split()) for n in order]
+
+
+def cmake_mismatch():
+    want = [(mods, sorted(d for d, l in IMPLS.items() if l == name)) for name, mods in LAYERS]
+    got = cmake_layers()
+    if [(sorted(m), sorted(i)) for m, i in got] == [(sorted(m), i) for m, i in want]:
+        return None
+    return want, got
+
+
 def main():
     unknown, edges, where = scan()
     if "--update" in sys.argv:
@@ -147,6 +175,12 @@ def main():
         with open(BASELINE, encoding="utf-8") as fh:
             baseline = json.load(fh)
     failed = False
+    mismatch = cmake_mismatch()
+    if mismatch:
+        failed = True
+        print("СЛОИ В СБОРКЕ НЕ СОВПАДАЮТ С LAYERS (engine/CMakeLists.txt, SAGE_LAYER_*/SAGE_IMPL_*):")
+        print(f"    сторож: {mismatch[0]}")
+        print(f"    сборка: {mismatch[1]}")
     if unknown:
         failed = True
         print("МОДУЛИ БЕЗ СЛОЯ (впишите их в LAYERS в scripts/check_layers.py):")
