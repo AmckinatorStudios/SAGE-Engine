@@ -26,24 +26,13 @@ namespace sage {
 // ответ на вопрос «почему именно здесь», и ответы разные:
 
 void RegisterCoreSystems(SystemScheduler& scheduler, const CoreSystems& systems) {
-    // Скрипты — ДО физики. Они задают намерение (скорость, импульс, спавн), а
-    // физика его исполняет в этом же кадре. Наоборот — и заданная скриптом
-    // скорость применяется на кадр позже: управление «чуть залипает», и найти
-    // это по симптому почти невозможно.
-    if (systems.Scripts) {
-        ScriptEngine* scripts = systems.Scripts;
-        scheduler.Add(Stage::Update, "scripts", [scripts](Scene&, float dt) {
-            // События кадра — перед OnUpdate: реакция на удар обязана попасть в
-            // тот же кадр, что и удар. Контакты берутся с прошлого шага физики.
-            scripts->DispatchFrameEvents();
-            scripts->UpdateFixed(dt);
-            scripts->UpdateAll(dt);
-        });
-    }
-
     // Скрипты объектов — рядом с уровневыми и по той же причине: намерение
     // задаётся до физики. Порядок внутри кадра записан ЗДЕСЬ целиком:
     // столкновения прошлого шага, постоянный шаг, обычный Update.
+    //
+    // ScriptEngine ушёл: его UpdateAll/UpdateFixed/DispatchFrameEvents заменила
+    // система скриптинга (ScriptingSystem) — ей же достались и таймеры, и
+    // корутины, и SendMessage/Broadcast, и sage.events.
     if (systems.Scripting) {
         sage::scripting::ScriptingSystem* scripting = systems.Scripting;
         PhysicsScene* physics = systems.Physics;

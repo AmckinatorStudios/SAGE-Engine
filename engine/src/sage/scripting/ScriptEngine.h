@@ -1,19 +1,25 @@
 #pragma once
-#include "sage/scene/Scene.h"
-#include "sage/input/InputSystem.h"
-#include "sage/render/Camera.h"
-#include "sage/render/ParticleSystem.h"
-#include "sage/render/BillboardSystem.h"
-#include "sage/render/Texture.h"
-#include "sage/audio/AudioEngine.h"
-#include "sage/physics/PhysicsScene.h"
-#include "sage/ai/World.h"
-#include "sage/scripting/LuaHandlerStore.h"
-#include "sage/scripting/ScriptApi.h"
-#include "sage/scripting/ScriptTasks.h"
-
-namespace sage::net { class NetworkSystem; }
+// FORWARD DECLARATIONS — убираем циклическую зависимость Scene ↔ ScriptEngine
+class Scene;
+class GameObject;
 class Window;
+class Camera;
+class ParticleSystem;
+class BillboardSystem;
+class Texture;
+class AudioEngine;
+class PhysicsScene;
+namespace sage::input { class InputSystem; }
+namespace sage::net { class NetworkSystem; }
+namespace sage::ai { class World; }
+namespace sage::scripting { 
+    class LuaHandlerStore;
+    class ScriptTasks;
+    struct ApiBindings;
+}
+namespace sage::events { class Bus; }
+
+#include "sage/vars/Value.h"
 
 #include <sol/sol.hpp>
 #include <functional>
