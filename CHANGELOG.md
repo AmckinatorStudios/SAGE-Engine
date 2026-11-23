@@ -16,14 +16,28 @@
 
 **Добавлено**
 - `engine/api.txt` — явный список того, что движок обещает: `[public]` —
-  заголовки для кода игр (174), `[tools]` — для редактора, плеера и
-  `sage_build`/`sage_api`, играм не обещаны (59). Остальные 76 — внутренние.
+  заголовки для кода игр (167), `[tools]` — для редактора, плеера и
+  `sage_build`/`sage_api`, играм не обещаны (72). Остальные 70 — внутренние.
   Скриптам обещан скриптовый API (`editor/assets/api/sage.lua`).
 - Сторож `scripts/check_api.py`: игра включает только `[public]`, редактор и
   плеер — не внутреннее; публичный заголовок не тянет непубличный. Игру из
   своего репозитория можно проверить: `check_api.py --game <каталог>`.
+- `StandardPipeline::RenderScale` (масштаб внутреннего разрешения сцены) и
+  `StandardPipeline::OcclusionCulling` — настройки, ради которых игре
+  приходилось собирать кадр самой.
+- Сторож границы API — в CI.
 
 **Изменено**
+- TestGame рисует кадр стандартным конвейером (`PipelineRenderer` +
+  `StandardPipeline`), частицы — расширением после «Сцена». Монумент комнаты 2
+  теперь сущность ECS и виден в кадре (раньше рисовалась только его тень).
+- Сборка кадра из проходов (`ScenePasses`, `LightingUpload`, `PostFX`,
+  `SkyDraw`, `SkyRenderer`, `Volumetrics`, `LensFlare`, `ObjectEffects`,
+  `DebugView`, `ecs/CameraView`, `LightSystem`, `DecalSystem`) и
+  `scripting/lua/LuaBackend` — уровень `[tools]`: играм не обещаны. Свой кадр
+  игра собирает через `RenderPipeline`/`StandardPipeline`/`RenderGraph`, свои
+  шейдеры — через `ShaderLibrary`/`ShaderMaterial`/`EffectChain` (теперь
+  `[public]`).
 - Игре больше не обещан любой заголовок `sage/...` — только из `[public]`.
   Включение остального пока собирается, но с 1.0 может сломаться без смены
   мажорной версии.

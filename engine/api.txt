@@ -86,9 +86,6 @@ core/Window.h
 
 # ecs
 ecs/CameraLightComponents.h
-ecs/CameraView.h
-ecs/DecalSystem.h
-ecs/LightSystem.h
 ecs/RenderBatch.h
 ecs/RenderComponents.h
 ecs/RenderLayers.h
@@ -136,14 +133,12 @@ render/BillboardSystem.h
 render/Camera.h
 render/DebugDraw.h
 render/DebugLines.h
-render/DebugView.h
+render/EffectChain.h
 render/Font.h
 render/FrameGraph.h
 render/Framebuffer.h
-render/LensFlare.h
 render/LightClusters.h
 render/LightCookies.h
-render/LightingUpload.h
 render/LodGroup.h
 render/LodSelect.h
 render/Material.h
@@ -151,7 +146,6 @@ render/Mesh.h
 render/MeshData.h
 render/Model.h
 render/ModelLoader.h
-render/ObjectEffects.h
 render/ParticleComponents.h
 render/ParticleCurves.h
 render/ParticleECS.h
@@ -159,24 +153,24 @@ render/ParticleEffect.h
 render/ParticleSim.h
 render/ParticleSystem.h
 render/PostEffect.h
-render/PostFX.h
 render/PostProcessComponent.h
 render/PrimitiveParams.h
 render/Reflection.h
 render/ReflectionComponents.h
+render/RenderGraph.h
+render/RenderPipeline.h
 render/ResourceManager.h
-render/ScenePasses.h
 render/Screenshot.h
 render/Shader.h
+render/ShaderLibrary.h
+render/ShaderMaterial.h
 render/ShadowAtlas.h
 render/ShadowMap.h
-render/SkyDraw.h
 render/SkyModel.h
-render/SkyRenderer.h
 render/Skybox.h
+render/StandardPipeline.h
 render/Texture.h
 render/TextureFiltering.h
-render/Volumetrics.h
 
 # rhi
 rhi/GraphicsDevice.h
@@ -213,7 +207,6 @@ scripting/ScriptTasks.h
 scripting/ScriptTests.h
 scripting/ScriptTypes.h
 scripting/ScriptingSystem.h
-scripting/lua/LuaBackend.h
 
 # ui
 ui/Element.h
@@ -270,7 +263,10 @@ core/Profiler.h
 core/Systems.h
 
 # ecs
+ecs/CameraView.h
 ecs/DayNightCycle.h
+ecs/DecalSystem.h
+ecs/LightSystem.h
 
 # gi
 gi/GI.h
@@ -284,17 +280,26 @@ lang/SageLexer.h
 
 # render
 render/AlphaBleed.h
+render/DebugView.h
 render/Frustum.h
 render/GridRenderer.h
+render/LensFlare.h
+render/LightingUpload.h
 render/MeshRaycast.h
 render/ModelData.h
 render/ModelMaterial.h
+render/ObjectEffects.h
 render/ParticleEffectIO.h
 render/PostChainIO.h
+render/PostFX.h
 render/RenderTexture.h
+render/ScenePasses.h
 render/ShaderParams.h
 render/SkinnedModel.h
+render/SkyDraw.h
 render/SkyPresets.h
+render/SkyRenderer.h
+render/Volumetrics.h
 
 # scene
 scene/AiAgentComponent.h
@@ -307,6 +312,7 @@ scene/VisualScriptComponent.h
 
 # scripting
 scripting/ProcessLanguage.h
+scripting/lua/LuaBackend.h
 
 # ui
 ui/ImageFit.h

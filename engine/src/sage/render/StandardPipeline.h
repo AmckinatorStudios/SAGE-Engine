@@ -58,6 +58,12 @@ public:
     int ShadowResolution = 2048;
     int ShadowCascades = 3;
     float ShadowDistance = 80.0f;
+    // Доля разрешения выхода, в которой рисуется сцена (HDR); пост растягивает
+    // её до выхода. Игре нужна для «масштаба разрешения» в настройках — без
+    // параметра ей пришлось бы собирать кадр самой из внутренних проходов.
+    float RenderScale = 1.0f;
+    // Отсечение перекрытых объектов по прошлому кадру (RenderBatch).
+    bool OcclusionCulling = false;
 
 protected:
     virtual void AddShadowPasses(RenderGraph& graph, const RenderView& view);

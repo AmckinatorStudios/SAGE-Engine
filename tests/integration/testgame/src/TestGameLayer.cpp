@@ -20,10 +20,9 @@
 #include "sage/ecs/RenderSystem.h"
 #include "sage/anim/AnimationSystem.h"
 #include "sage/render/ParticleECS.h"
-#include "sage/render/LightingUpload.h"
 #include "sage/render/Material.h"
 #include "sage/render/ResourceManager.h"
-#include "sage/render/ScenePasses.h"
+#include "sage/render/StandardPipeline.h"
 #include "sage/physics/Ragdoll.h"
 #include "sage/ui/UIShowcase.h"
 #include "sage/ui/UISceneSystem.h"
@@ -432,6 +431,15 @@ void TestGameLayer::BuildRoomTwo(Scene& scene) {
     torchB.Position = {10.0f, 2.0f, 0.0f};
     scene.Lighting.PointLights.push_back(torchB);
 
+    // Монумент — та же модель через ECS: кадр рисует стандартный конвейер,
+    // своя отрисовка в обход него потребовала бы внутренних проходов.
+    GameObject monument = scene.CreateObject("Monument");
+    monument.GetTransform().Scale = {1.4f, 1.4f, 1.4f};
+    MeshRendererComponent& monumentMr = monument.Renderer();
+    monumentMr.Ref = MeshRef{MeshRef::Type::Model, "assets/models/monument.obj"};
+    monumentMr.MeshPtr = ResourceManager::Instance().GetModel(monumentMr.Ref.path);
+    monumentMr.Color = {0.75f, 0.72f, 0.65f};
+
     SpawnBox(scene, "Floor", {0, -0.25f, 0}, {30, 0.5f, 14}, {0.42f, 0.36f, 0.32f}, false);
     SpawnBox(scene, "Wall N", {0, 1.5f, -7}, {30, 3, 0.6f}, {0.52f, 0.45f, 0.4f}, true);
     SpawnBox(scene, "Wall S", {0, 1.5f, 7}, {30, 3, 0.6f}, {0.52f, 0.45f, 0.4f}, true);
@@ -624,12 +632,6 @@ void TestGameLayer::OnAttach() {
     // Качество графики — из гибкого конфига (файл sage.cfg + env-оверрайды,
     // включая обратно-совместимый SAGE_NO_SHADOWS).
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
-    m_shadowsEnabled = cfg.Shadows;
-    m_postEnabled = true;
-    // Тракт пост-обработки — начальный тракт компонента камеры. У витрины
-    // своей камеры-сущности нет (она ведёт камеру кодом), поэтому она берёт то
-    // же умолчание, что человек получает, добавив камере «Пост-обработку».
-    m_postfxChain = sage::render::PostChain::Default();
     m_autopilot = (std::getenv("SAGE_TESTGAME_AUTOPILOT") != nullptr);
 
     // --- аудио (первым: скрипты сцен биндят его при привязке) ---
@@ -637,13 +639,33 @@ void TestGameLayer::OnAttach() {
     LOG_INFO("TestGame") << "Аудио: " << (m_audio->IsAvailable() ? "доступно" : "нет устройства (немой режим)");
 
     // --- рендер ---
-    m_sceneShader.emplace("assets/shaders/scene.vert", "assets/shaders/scene.frag");
-    m_shadowShader.emplace("assets/shaders/shadow_depth.vert", "assets/shaders/shadow_depth.frag");
-    m_shadows.emplace(cfg.Shadows ? cfg.ShadowResolution : 512, cfg.ShadowCascades);
-    m_sceneFbo.emplace(window.Width(), window.Height());
-    m_postfx.emplace(); // SSAO + Bloom + виньетка (полная цепочка пост-обработки)
-    m_monument = Model::Load("assets/models/monument.obj"); // прямой путь Model::Load
+    // Стандартный конвейер движка с настройками качества из конфига. Тракт
+    // пост-обработки — умолчание конвейера (PostChain::Default), то же, что
+    // человек получает, добавив камере «Пост-обработку».
+    {
+        auto pbr = std::make_unique<sage::render::StandardPipeline>();
+        pbr->Shadows = cfg.Shadows;
+        pbr->ShadowResolution = cfg.Shadows ? cfg.ShadowResolution : 512;
+        pbr->ShadowCascades = cfg.ShadowCascades;
+        pbr->ShadowDistance = cfg.ShadowDistance;
+        pbr->OcclusionCulling = cfg.OcclusionCulling;
+        if (!m_renderer.SetPipeline(std::move(pbr)))
+            LOG_ERROR("TestGame") << "конвейер не поднялся: " << m_renderer.LastError();
+    }
     m_particles.emplace(); // пул частиц (эмиттеры-факелы в комнатах)
+    // Частицы — своё расширение стандартного кадра: после «Сцена», в тот же
+    // HDR (с глубиной сцены), до поста — так они проходят тон-маппинг и bloom.
+    m_renderer.AddExtension("Частицы", [this](sage::render::RenderGraph& g,
+                                              const sage::render::RenderView& v) {
+        if (!m_particles) return;
+        sage::render::RGPass p;
+        p.Name = "Частицы";
+        p.Writes = {g.Find(sage::render::StandardPipeline::kHdr)};
+        p.Execute = [this, v](sage::render::RenderGraphContext&) {
+            m_particles->DrawFromView(v.View, v.Proj);
+        };
+        g.AddPassAfter(sage::render::StandardPipeline::kScenePass, std::move(p));
+    });
 
     // --- HUD ---
     SetupHud();
@@ -984,25 +1006,6 @@ void TestGameLayer::OnUpdate(float dt) {
 //  Рендер: тени -> HDR-сцена -> пост-процесс -> HUD
 // ============================================================================
 
-// Рисует НЕ-ECS геометрию, привязанную к переданному шейдеру: сейчас это только
-// монумент комнаты 2 (текстурная модель). ECS-меши сцены идут отдельно через
-// m_batch (отсечение по фрустуму + инстансинг), см. OnRender.
-void TestGameLayer::DrawSceneGeometry(Shader& shader, bool colorPass) {
-    // Монумент комнаты 2 — прямой Model::Draw (сам ставит uUseTexture/
-    // uObjectColor по своим submesh'ам в цветном проходе).
-    if (m_activeName == "room2" && m_monument) {
-        Transform monumentTr;
-        monumentTr.Position = {0.0f, 0.0f, 0.0f};
-        monumentTr.Scale = {1.4f, 1.4f, 1.4f};
-        shader.SetMat4("uModel", monumentTr.GetMatrix());
-        if (colorPass) {
-            m_monument->Draw(shader);
-        } else {
-            for (const SubMesh& sub : m_monument->SubMeshes()) sub.MeshData->Draw();
-        }
-    }
-}
-
 void TestGameLayer::OnRender() {
     sage::Application& app = sage::Application::Get();
     Window& window = app.GetWindow();
@@ -1013,47 +1016,6 @@ void TestGameLayer::OnRender() {
     const sage::EngineConfig& cfg = sage::EngineConfig::Get();
     int vpX, vpY, vpW, vpH;
     cfg.LetterboxViewport(window.Width(), window.Height(), vpX, vpY, vpW, vpH);
-    int renderW, renderH;
-    cfg.ScaledResolution(vpW, vpH, renderW, renderH); // внутреннее разрешение (RenderScale)
-
-    glm::mat4 view = m_camera.GetViewMatrix();
-    glm::mat4 proj = m_camera.GetProjectionMatrix((float)vpW / (float)std::max(vpH, 1));
-
-    // Копия освещения сцены с учётом флага тумана из настроек.
-    LightingEnvironment lighting = scene->Lighting;
-    if (!cfg.Fog) lighting.Fog.Enabled = false;
-
-    // --- 1. Проход теней (глубина из точки зрения солнца) ---
-    if (m_shadowsEnabled) {
-        if (m_shadows->CascadeCount() > 1) {
-            // Улица: каскады привязаны к камере, а не к игроку. Тени нужны
-            // там, куда смотрят, — привязка к игроку оставляла бы полкадра
-            // без теней, стоило отвести взгляд.
-            ShadowMap::CameraView v;
-            v.Position = m_camera.Position;
-            v.Forward = m_camera.Front;
-            v.Up = m_camera.Up;
-            v.FovY = glm::radians(m_camera.Fov);
-            v.Aspect = (float)vpW / (float)std::max(vpH, 1);
-            v.Near = m_camera.NearClip;
-            v.ShadowDistance = cfg.ShadowDistance;
-            m_shadows->SetCascades(scene->Lighting.Sun.Direction, v);
-        } else {
-            m_shadows->SetLightMatrix(scene->Lighting.Sun.Direction, m_playerPos, 20.0f);
-        }
-        // Проход глубины — по одному на каскад: каждая карта видит свой кусок
-        // дальности, и геометрию для неё надо нарисовать отдельно. Это и есть
-        // цена каскадов, о которой сказано в ShadowMap.h.
-        // Монумент рисуется вручную (он не в ECS) — отдаём его обработчиком,
-        // а не копируем весь проход ради одной строки.
-        sage::render::RenderShadowDepth(
-            *m_shadows, *scene, m_batch, window.Width(), window.Height(),
-            [this](const glm::mat4& light) {
-                m_shadowShader->Use();
-                m_shadowShader->SetMat4("uLightSpace", light);
-                DrawSceneGeometry(*m_shadowShader, /*colorPass=*/false);
-            });
-    }
 
     // Чёрные полосы letterbox — очищаем всё окно перед рендером в центр.
     device.BindDefaultFramebuffer();
@@ -1061,50 +1023,26 @@ void TestGameLayer::OnRender() {
     device.SetClearColor(0.0f, 0.0f, 0.0f, 1.0f);
     device.Clear();
 
-    // --- 2. Основной проход: в HDR-буфер (RenderScale) или сразу на экран ---
-    if (m_postEnabled) {
-        m_sceneFbo->Resize(renderW, renderH); // внутреннее разрешение с учётом масштаба
-        m_sceneFbo->Bind();
-    } else {
-        device.SetViewport(vpX, vpY, vpW, vpH); // без поста — сразу в letterbox-viewport
-        // Гамму делал композит пост-процесса — без него включаем аппаратное
-        // sRGB-кодирование, иначе прямой вывод линейного цвета выглядит тёмным.
-        device.SetSRGBWrite(true);
-    }
-    device.SetClearColor(0.09f, 0.09f, 0.12f, 1.0f);
-    device.Clear();
-
-    m_sceneShader->Use();
-    m_sceneShader->SetMat4("uView", view);
-    m_sceneShader->SetMat4("uProjection", proj);
-    m_sceneShader->SetVec3("uViewPos", m_camera.Position);
-    UploadLighting(*m_sceneShader, lighting);
-    const ShadowBinding shadowBinding(*m_shadows, m_shadowsEnabled);
-    BindAndUploadShadows(*m_sceneShader, shadowBinding);
-
-    sage::render::SceneColorInput color;
-    color.View = view;
-    color.Proj = proj;
-    color.ViewPos = m_camera.Position;
-    color.Env = &lighting;
-    color.Shadows = shadowBinding;
-    color.OcclusionCulling = cfg.OcclusionCulling;
-    sage::render::RenderSceneColor(*scene, m_batch, color);
-    // Частицы (billboard) — camRight/Up из матрицы вида.
-    if (m_particles) m_particles->DrawFromView(view, proj);
-
-    // --- 3. Пост-процесс: HDR -> экран (тон-маппинг ACES и т.д.), апскейл до
-    //        letterbox-viewport (внутреннее разрешение могло быть меньше) ---
-    if (m_postEnabled) {
-        // Полная цепочка PostFX: SSAO (из глубины сцены) + Bloom + тон-маппинг/
-        // виньетка. Пишет в экран, letterbox-viewport (vpX..).
-        m_postfx->Render(m_sceneFbo->ColorTexture(), m_sceneFbo->DepthTexture(),
-                         m_sceneFbo->Width(), m_sceneFbo->Height(), proj, view,
-                         m_postfxChain,
-                         /*output=*/nullptr, vpX, vpY, vpW, vpH);
-    } else {
-        device.SetSRGBWrite(false); // HUD ниже — его цвета уже в sRGB
-    }
+    // --- 1-3. Тени, сцена, частицы, пост — стандартный конвейер ---
+    // Туман выключается настройкой игрока: правим копию освещения на время
+    // кадра, сцена (и её сохранение) остаются как есть.
+    const LightingEnvironment saved = scene->Lighting;
+    if (!cfg.Fog) scene->Lighting.Fog.Enabled = false;
+    if (auto* pbr = static_cast<sage::render::StandardPipeline*>(m_renderer.Pipeline()))
+        pbr->RenderScale = cfg.RenderScale;
+    sage::render::RenderView view;
+    view.View = m_camera.GetViewMatrix();
+    view.Proj = m_camera.GetProjectionMatrix((float)vpW / (float)std::max(vpH, 1));
+    view.Position = m_camera.Position;
+    view.ViewportX = vpX;
+    view.ViewportY = vpY;
+    view.Width = vpW;
+    view.Height = vpH;
+    view.Time = (float)glfwGetTime();
+    view.Frame = m_frameCounter;
+    view.World = scene;
+    m_renderer.Render(view);
+    scene->Lighting = saved;
 
     // --- 4. HUD поверх всего (движковый UIRenderer, не ImGui) — во весь экран,
     //        поверх возможных чёрных полос letterbox ---

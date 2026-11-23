@@ -215,6 +215,29 @@ void TestStandardPipelineWithExtension(Scene& scene) {
     if (!(rgb[0] > 90 && rgb[0] > rgb[1] + 60 && rgb[0] > rgb[2] + 60))
         std::printf("    цвет %d %d %d\n%s", rgb[0], rgb[1], rgb[2], renderer.Graph().Describe().c_str());
     Check(rgb[0] > 90 && rgb[0] > rgb[1] + 60 && rgb[0] > rgb[2] + 60, "проход расширения попал в кадр между сценой и постом");
+
+    // Масштаб разрешения: сцена рисуется в HDR меньшего размера, пост
+    // растягивает её до выхода. Игра берёт его из настроек вместо своего кадра.
+    auto* pbr = static_cast<StandardPipeline*>(renderer.Pipeline());
+    pbr->RenderScale = 0.5f;
+    int hdrW = 0, hdrH = 0;
+    renderer.AddExtension("red", [&](RenderGraph& g, const RenderView&) {
+        RGPass p;
+        p.Name = "Размер HDR";
+        const RGHandle hdr = g.Find(StandardPipeline::kHdr);
+        p.Writes = {hdr};
+        p.Execute = [&, hdr](RenderGraphContext& ctx) {
+            if (rhi::RenderTarget* t = ctx.Target(hdr)) {
+                hdrW = t->Width();
+                hdrH = t->Height();
+            }
+        };
+        g.AddPassAfter(StandardPipeline::kScenePass, std::move(p));
+    });
+    Check(renderer.Render(view), "кадр с масштабом разрешения собирается");
+    Check(hdrW == kW / 2 && hdrH == kH / 2, "RenderScale = 0.5 — сцена в HDR вдвое меньше выхода");
+    ReadCenter(out, rgb);
+    Check(rgb[0] + rgb[1] + rgb[2] > 30, "уменьшенная сцена растянута постом на весь выход");
 }
 
 } // namespace

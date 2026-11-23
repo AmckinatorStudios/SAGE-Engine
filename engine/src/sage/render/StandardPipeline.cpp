@@ -32,7 +32,9 @@ void StandardPipeline::Shutdown() {
 }
 
 void StandardPipeline::Build(RenderGraph& graph, const RenderView& view) {
-    m_hdr = graph.CreateTexture(kHdr, RGTextureDesc{});
+    RGTextureDesc hdr;
+    hdr.Scale = RenderScale > 0.0f ? RenderScale : 1.0f;
+    m_hdr = graph.CreateTexture(kHdr, hdr);
     m_shadowRes = graph.DeclareVirtual(kShadows);
     AddShadowPasses(graph, view);
     AddScenePasses(graph, view);
@@ -94,6 +96,7 @@ void StandardPipeline::AddScenePasses(RenderGraph& graph, const RenderView& view
         in.Env = &view.World->Lighting;
         in.Shadows = ShadowBinding(*m_shadowMap, Shadows);
         in.Time = view.Time;
+        in.OcclusionCulling = OcclusionCulling;
         RenderSceneColor(*view.World, m_batch, in);
     };
     graph.AddPass(std::move(scene));

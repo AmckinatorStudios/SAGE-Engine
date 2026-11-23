@@ -10,14 +10,9 @@
 #include "sage/core/Layer.h"
 #include "sage/input/GlfwBridge.h"
 #include "sage/input/InputSystem.h"
-#include "sage/render/Shader.h"
 #include "sage/render/Camera.h"
-#include "sage/render/Framebuffer.h"
-#include "sage/render/ShadowMap.h"
-#include "sage/render/PostFX.h"
-#include "sage/render/Model.h"
 #include "sage/render/ParticleSystem.h"
-#include "sage/ecs/RenderBatch.h"
+#include "sage/render/RenderPipeline.h"
 #include "sage/scene/SceneManager.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/ui/UIRenderer.h"
@@ -42,10 +37,10 @@ class AudioEngine;
 //   • HUD движковым UIRenderer/Widgets (health bar + счёт + подсказки).
 //   • Аудио: эмбиент-луп + 2D-эффекты подбора/урона/портала (AudioEngine,
 //     в headless CI тихо деградирует — IsAvailable()=false, Play* — no-op).
-//   • Модель .obj двумя путями: ECS-энтити через ResourceManager::GetModel и
-//     прямой Model::Load + Model::Draw (мульти-submesh путь).
-//   • Тени (ShadowMap + shadow_depth.*) и пост-обработка (Framebuffer HDR +
-//     PostFX) — первый реальный рендер-прогон после RHI-миграции.
+//   • Модель .obj через ECS (ResourceManager::GetModel) в обеих комнатах.
+//   • Кадр — стандартный конвейер движка (PipelineRenderer + StandardPipeline:
+//     тени, сцена, пост) и своё расширение (частицы после прохода «Сцена»).
+//     Игра не собирает кадр из внутренних проходов — только публичный API.
 //
 // Env-хуки (паттерн движка): SAGE_SCREENSHOT_AT_FRAME/SAGE_SCREENSHOT_PATH,
 // SAGE_NO_SHADOWS, SAGE_NO_POST, SAGE_TESTGAME_AUTOPILOT=1 (бот сам собирает
@@ -89,11 +84,6 @@ private:
     void SwitchRoom(const std::string& target, glm::vec3 spawnPos);
     void DamagePlayer(float amount, glm::vec3 knockFrom);
 
-    // --- рендер ---
-    // Общая геометрия кадра для обоих проходов: colorPass=false — только
-    // uModel+Draw (глубина для теней), true — цвет/текстуры/модель целиком.
-    void DrawSceneGeometry(Shader& shader, bool colorPass);
-
     // --- мир ---
     SceneManager m_scenes;
     std::string m_activeName;
@@ -120,17 +110,8 @@ private:
     bool m_cursorCaptured = false;
 
     // --- рендер ---
-    std::optional<Shader> m_sceneShader;
-    std::optional<Shader> m_shadowShader;
-    std::optional<ShadowMap> m_shadows;
-    std::optional<Framebuffer> m_sceneFbo;
-    std::optional<sage::render::PostFX> m_postfx;      // исполнитель тракта
-    sage::render::PostChain m_postfxChain;             // что именно он делает
-    bool m_shadowsEnabled = true;
-    bool m_postEnabled = true;
-    std::unique_ptr<Model> m_monument; // прямой Model::Load путь (комната 2)
+    sage::render::PipelineRenderer m_renderer; // стандартный конвейер движка (sage.pbr)
     std::optional<ParticleSystem> m_particles; // пул частиц (эмиттеры ECS)
-    sage::ecs::RenderBatch m_batch;            // отсечение по фрустуму + инстансинг статики
 
     // --- HUD ---
     std::optional<UIRenderer> m_ui;

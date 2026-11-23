@@ -87,6 +87,12 @@ renderer.Render(view);
 как у `FrameGraph`, см. `FrameGraph.h`). Вставить в чужой кадр —
 `AddPassBefore/AddPassAfter(имя, проход)`, выключить штатный — `DisablePass`.
 
+Настройки встроенного PBR — поля `StandardPipeline`, меняются между кадрами:
+`Shadows`, `ShadowResolution`, `ShadowCascades`, `ShadowDistance`, `Post`,
+`Chain` (тракт пост-обработки), `RenderScale` (доля разрешения выхода для
+сцены, пост растягивает её до выхода), `OcclusionCulling`. Так собирает кадр
+TestGame: игре не нужно складывать его из внутренних проходов.
+
 Имена проходов встроенного PBR — константы `StandardPipeline::kShadowPass`
 («Тени»), `kSkyPass` («Небо»), `kScenePass` («Сцена»), `kPostPass` («Пост»),
 ресурс `kHdr` («HDR»). Пример: своя вода после штатной сцены —
