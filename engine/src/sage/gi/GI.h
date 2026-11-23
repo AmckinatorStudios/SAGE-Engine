@@ -98,7 +98,16 @@ struct ProbeVolume {
 
 // Полное состояние GI сцены. Живёт в Scene::GI (shared_ptr — переезжает между
 // снапшотами сцены редактора без повторного запекания, см. Transplant).
+// Подставляет рендеру заливку GI (sage/render/GIBinding.h) при создании
+// любого GIState. Членом, а не вызовом из бейка: GIState рождается и в бейке,
+// и при чтении сцены, и в тестах — и в каждом случае скин обязан освещаться
+// объёмом проб. Пока GIState нет, заливать нечего, и слот может быть пуст.
+struct GIRenderHook {
+    GIRenderHook();
+};
+
 struct GIState {
+    GIRenderHook RenderHook;
     GISettings Settings;
     uint64_t GeometryHash = 0; // отпечаток статичной геометрии на момент бейка
     bool Baked = false;        // есть валидные лайтмапы (страницы + UV)
@@ -131,7 +140,12 @@ using ProgressFn = std::function<void(float, const char*)>;
 // Собирает вход бейкера из сцены: сущности с GIStaticComponent (+ Transform +
 // MeshRenderer). Геометрия примитивов — те же Build*-генераторы, что у рендера;
 // модели — .obj через ModelLoader (CPU-стадия). Без GL.
-BakeInput CollectBakeInput(Scene& scene, const GISettings& settings);
+// Освещение (env) передаёт вызывающий — обычно sage::ecs::CollectLighting(scene),
+// то же, что видит realtime-рендер. GI его сам не собирает: света-сущности
+// живут в ecs, а ecs (пакеты отрисовки) уже включает GI — сбор здесь замыкал
+// модули в цикл. Параметр обязательный, а не по умолчанию: бейк без света
+// молча дал бы чёрные лайтмапы.
+BakeInput CollectBakeInput(Scene& scene, const GISettings& settings, const LightingEnvironment& env);
 
 // Запекает лайтмапы + GI-объём. Чистый CPU (параллелится JobSystem'ом),
 // безопасно звать из фонового потока. progress может быть пустым.

@@ -5,7 +5,6 @@
 
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Log.h"
-#include "sage/ecs/LightSystem.h"
 #include "sage/render/ModelLoader.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
@@ -110,12 +109,10 @@ uint64_t ComputeGeometryHash(Scene& scene, const GISettings& s) {
     return f.H;
 }
 
-BakeInput CollectBakeInput(Scene& scene, const GISettings& settings) {
+BakeInput CollectBakeInput(Scene& scene, const GISettings& settings, const LightingEnvironment& env) {
     BakeInput in;
     in.Settings = settings;
-    // Полное освещение кадра: окружение сцены + света-сущности (LightComponent),
-    // как его видит realtime-рендер — бейк и рантайм считают один и тот же свет.
-    in.Env = sage::ecs::CollectLighting(scene);
+    in.Env = env;
 
     for (const CollectedItem& c : CollectStatics(scene)) {
         StaticItem item;

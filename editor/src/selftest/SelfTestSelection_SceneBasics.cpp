@@ -444,7 +444,8 @@ bool EditorLayer::SelfTestSceneBasics() {
         giSettings.Bounces = 2;
         giSettings.ProbeCellSize = 3.0f;
         giSettings.MaxProbeAxis = 8;
-        sage::gi::BakeInput giInput = sage::gi::CollectBakeInput(*m_scene, giSettings);
+        sage::gi::BakeInput giInput =
+            sage::gi::CollectBakeInput(*m_scene, giSettings, sage::ecs::CollectLighting(*m_scene));
         std::shared_ptr<sage::gi::GIState> giState = sage::gi::Bake(giInput);
         bool giBaked = giState->Baked && giState->Entities.size() == 2 &&
                        !giState->Pages.empty() && giState->Probes.Valid();

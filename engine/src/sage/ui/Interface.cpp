@@ -12,9 +12,7 @@
 #include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
 #include "sage/ui/UISerialize.h"
-#include "sage/anim/PropertyAnimator.h"
-#include "sage/anim/Tween.h"
-#include "sage/scene/SceneSerializerDetail.h"
+#include "sage/scene/ComponentRegistry.h"
 
 using json = nlohmann::json;
 
@@ -69,6 +67,12 @@ InterfaceNode NodeFromJson(const json& j) {
     return n;
 }
 
+// Анимация элемента в .sageui: клип и твины. Через реестр компонентов по
+// ключу, а не функциями сериализатора: ui не включает anim (anim сам знает
+// поля элемента, и встречное включение замыкало модули в цикл). Формат тот
+// же — реестр пишет и читает эти ключи теми же функциями.
+constexpr const char* kElementAnimKeys[] = {"propertyAnimator", "tweens"};
+
 // isRoot — узел верхнего уровня ресурса. Отдельным признаком, а не «parent ==
 // null»: корни ресурса теперь кладутся ВНУТРЬ объекта-интерфейса, то есть
 // родитель у них есть, а корнями они быть не перестали.
@@ -82,12 +86,11 @@ void Build(Scene& scene, const InterfaceNode& node, entt::entity parent,
     // АНИМАЦИЯ ЭЛЕМЕНТА — в самом интерфейсе: клип (ссылкой на .sageclip) и
     // твины. Без этого анимация, настроенная в пространстве «Интерфейс»,
     // исчезала при сохранении: .sageui писал только части элемента.
-    if (node.Data.contains("propertyAnimator"))
-        scene.Registry().emplace_or_replace<PropertyAnimatorComponent>(
-            obj.Entity(), scene_serial::ParsePropertyAnimator(node.Data["propertyAnimator"]));
-    if (node.Data.contains("tweens"))
-        scene.Registry().emplace_or_replace<sage::anim::TweenComponent>(
-            obj.Entity(), scene_serial::ParseTweens(node.Data["tweens"]));
+    for (const char* key : kElementAnimKeys) {
+        auto it = node.Data.find(key);
+        if (it == node.Data.end()) continue;
+        if (auto type = sage::scene::FindComponentType(key)) type->Load(scene.Registry(), obj.Entity(), *it);
+    }
     if (parent != entt::null) scene.SetParent(obj.Entity(), parent);
     if (isRoot) roots.push_back(obj.Entity());
     for (const InterfaceNode& c : node.Children)
@@ -99,10 +102,12 @@ InterfaceNode Snap(const Scene& scene, entt::entity e) {
     InterfaceNode n;
     if (const NameComponent* nc = reg.try_get<NameComponent>(e)) n.Name = nc->Name;
     SaveElement(n.Data, reg, e);
-    if (const PropertyAnimatorComponent* pa = reg.try_get<PropertyAnimatorComponent>(e))
-        scene_serial::SavePropertyAnimator(n.Data, *pa);
-    if (const sage::anim::TweenComponent* tc = reg.try_get<sage::anim::TweenComponent>(e))
-        scene_serial::SaveTweens(n.Data, *tc);
+    for (const char* key : kElementAnimKeys) {
+        auto type = sage::scene::FindComponentType(key);
+        if (!type || !type->Has(reg, e)) continue;
+        nlohmann::json value = type->Save(reg, e);
+        if (!value.is_null()) n.Data[key] = std::move(value);
+    }
     if (const HierarchyComponent* h = reg.try_get<HierarchyComponent>(e)) {
         for (entt::entity c : h->Children) {
             // Только элементы: 3D-объект, случайно оказавшийся внутри поддерева

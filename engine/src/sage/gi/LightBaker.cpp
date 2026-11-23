@@ -644,7 +644,8 @@ void RebuildAfterLoad(Scene& scene, const std::string& scenePath) {
     }
 
     // Развёртка детерминирована — пересчитываем UV под сохранённые страницы.
-    BakeInput input = CollectBakeInput(scene, st.Settings);
+    // Свет не нужен: здесь только развёртка, освещение уже лежит в страницах.
+    BakeInput input = CollectBakeInput(scene, st.Settings, LightingEnvironment{});
     const int pageSize = std::max(64, st.Settings.AtlasSize);
     std::vector<ItemBake> bakes;
     int pageCount = BuildLayout(input, pageSize, bakes);
