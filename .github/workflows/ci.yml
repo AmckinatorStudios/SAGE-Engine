@@ -33,6 +33,11 @@ jobs:
       - name: Module layer check (no include upward)
         run: python3 scripts/check_layers.py
 
+      # Граница API: игра включает только [public] из engine/api.txt, редактор
+      # и плеер — не внутреннее, публичный заголовок не тянет непубличный.
+      - name: Public API boundary check
+        run: python3 scripts/check_api.py
+
       # Локализация редактора: каждая подпись обёрнута в T(), каждой есть
       # перевод, спецификаторы формата у ключа и перевода совпадают. Тоже до
       # сборки: проверка читает исходники и падает за секунду.
