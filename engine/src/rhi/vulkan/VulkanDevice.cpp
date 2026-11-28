@@ -250,6 +250,7 @@ bool VulkanDevice::PickGpu() {
     m_queueFamily = FindGraphicsFamily(m_gpu);
     vkGetPhysicalDeviceMemoryProperties(m_gpu, &m_memProps);
     m_maxAnisotropy = bestProps.limits.maxSamplerAnisotropy;
+    m_maxTexture2DSize = static_cast<int>(bestProps.limits.maxImageDimension2D);
 
     char buf[256];
     std::snprintf(buf, sizeof(buf), "Vulkan %u.%u.%u — %s (%s)",

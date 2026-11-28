@@ -272,9 +272,13 @@ bool PlayerLayer::SwitchScene(const std::string& sceneName) {
     m_systems.Clear();
     if (m_scripting) m_scripting->Shutdown();
     m_scripting.reset();
-    if (m_particles) m_particles->SetCollisionQuery({});   // запрос держит физику
+    if (m_particles) {
+        m_particles->SetCollisionQuery({}); // запрос держит физику
+        m_particles->Clear();
+    }
     m_physics.reset();
     m_scripts.reset();   // вместе с ним уходит всё состояние скриптов уровня
+    if (m_billboards) m_billboards->Clear();
     // Шина событий принадлежит сцене — снимаем ссылку ДО того, как старая
     // сцена уйдёт из-под ног. BuildSceneRuntime ниже поставит новую.
     m_input.SetEventBus(nullptr);

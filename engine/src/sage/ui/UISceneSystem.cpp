@@ -3,6 +3,7 @@
 #include "sage/ui/UIStyle.h"
 #include "sage/ui/InterfaceSource.h"
 #include "sage/ui/UIPart.h"
+#include "sage/ui/UIPartsDetail.h"
 
 #include "sage/ui/UI.h"
 #include "sage/core/Profiler.h"
@@ -696,6 +697,19 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
     result.Size = glm::vec2((float)screenW, (float)screenH);
     SyncInterfaceSources(scene);   // ввод раньше отрисовки: кнопки должны уже быть
     entt::registry& reg = scene.Registry();
+    if (std::isfinite(input.DeltaTime) && input.DeltaTime > 0.0f) {
+        auto* clock = reg.ctx().find<parts::SpriteClock>();
+        if (!clock) clock = &reg.ctx().emplace<parts::SpriteClock>();
+        clock->Seconds += input.DeltaTime;
+        const auto animated = [](const assets::SpriteRef& ref) {
+            return ref.Valid() && ref.Type == assets::SpriteRef::Kind::Sequence;
+        };
+        reg.view<Image>().each([&](Image& image) {
+            if (!image.Sequence.empty() || animated(image.SpriteRef) ||
+                animated(image.HoverSpriteRef) || animated(image.PressedSpriteRef))
+                image.SequenceTime += input.DeltaTime;
+        });
+    }
     std::vector<Solved> items =
         SolveScene(scene, nullptr, screenW, screenH, /*includeHidden=*/false, scope);
     // Спрятанный не ловит ввод по той же причине, что и не ловит точку.
@@ -879,7 +893,7 @@ UIInputResult UpdateSceneUI(Scene& scene, const UIInputState& input, int screenW
 
     // Шкалы: показанное значение едет к цели, неопределённые бегут.
     UpdateProgress(reg, items, input.DeltaTime);
-    UpdateImageSequences(reg, items, input.DeltaTime);
+
 
     if (scrolled.Dragging)
         for (const Solved& it : items)

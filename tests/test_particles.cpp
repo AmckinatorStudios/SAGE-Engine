@@ -649,3 +649,85 @@ TEST(Particles_stream_spawn_and_world_collision) {
     CHECK_TRUE(queries > 0);
     CHECK_EQ((int)askedMask, 4);   // запрос идёт по слоям эффекта
 }
+
+TEST(Particles_sprite_refs_round_trip_in_effects_and_scenes) {
+    using sage::assets::SpriteRef;
+    ParticleEffect source;
+    source.SpriteRef = {sage::AssetGuid::Generate(), sage::AssetGuid::Generate(), SpriteRef::Kind::Sequence};
+    source.Texture = "old_atlas.png";
+    source.Frames = {"old_1.png", "old_2.png"};
+    source.TilesX = 2;
+    source.Flipbook = FlipbookMode::Speed;
+    ParticleEffect copy;
+    std::string error;
+    CHECK_TRUE(EffectFromJson(EffectToJson(source), copy, &error));
+    CHECK_TRUE(copy.SpriteRef.Asset == source.SpriteRef.Asset);
+    CHECK_TRUE(copy.SpriteRef.Item == source.SpriteRef.Item);
+    CHECK_TRUE(copy.SpriteRef.Type == SpriteRef::Kind::Sequence);
+    CHECK_TRUE(copy.Frames == source.Frames && copy.Texture == source.Texture);
+
+    Scene scene("SpriteRef particles");
+    auto object = scene.CreateEmptyObject("Emitter");
+    scene.Registry().emplace<ParticleEmitterComponent>(object.Entity()).Effect = source;
+    auto loaded = SceneSerializer::LoadFromString(SceneSerializer::SaveToString(scene));
+    CHECK_TRUE(loaded != nullptr);
+    if (loaded) {
+        const auto saved = loaded->FindByName("Emitter");
+        CHECK_TRUE(saved.Valid());
+        if (saved.Valid())
+            CHECK_TRUE(loaded->Registry().get<ParticleEmitterComponent>(saved.Entity()).Effect.SpriteRef.Item ==
+                       source.SpriteRef.Item);
+    }
+
+    const auto json = nlohmann::json::parse(EffectToJson(source));
+    auto invalid = json;
+    invalid["spriteRef"]["asset"] = "missing-id";
+    CHECK_FALSE(EffectFromJson(invalid.dump(), copy, &error));
+    CHECK_TRUE(copy.SpriteRef.Item == source.SpriteRef.Item);
+    invalid = json;
+    invalid["spriteRef"]["kind"] = true;
+    CHECK_FALSE(EffectFromJson(invalid.dump(), copy, &error));
+    invalid.erase("spriteRef");
+    CHECK_TRUE(EffectFromJson(invalid.dump(), copy, &error));
+    CHECK_FALSE(copy.SpriteRef.Valid());
+    CHECK_TRUE(copy.Frames == source.Frames);
+}
+
+TEST(Particles_sprite_sequence_uses_existing_playback_modes_and_explicit_frames) {
+    using sage::assets::SpriteRef;
+    auto effect = Quiet();
+    effect.SpriteRef = {sage::AssetGuid::Generate(), sage::AssetGuid::Generate(), SpriteRef::Kind::Sequence};
+    effect.StartFrame = 1;
+    effect.FrameRate = 4.0f;
+    Particle particle;
+    particle.Age = 0.5f;
+    particle.Lifetime = 1.0f;
+
+    effect.Flipbook = FlipbookMode::OverLifetime;
+    CHECK_EQ(ParticleEmitter::FrameOf(effect, particle, 6), 4);
+    effect.Flipbook = FlipbookMode::Speed;
+    CHECK_EQ(ParticleEmitter::FrameOf(effect, particle, 6), 3);
+    effect.Flipbook = FlipbookMode::Fixed;
+    CHECK_EQ(ParticleEmitter::FrameOf(effect, particle, 6), 1);
+    effect.Flipbook = FlipbookMode::Random;
+    ParticleEmitter emitter;
+    emitter.Stop();
+    ParticleInit init;
+    init.Frame = 4;
+    emitter.EmitExplicit(effect, kIdentity, init);
+    CHECK_EQ(ParticleEmitter::FrameOf(effect, emitter.Particles().back(), 6), 4);
+    init.Frame = -1;
+    std::set<int> frames;
+    for (int i = 0; i < 64; ++i) {
+        emitter.EmitExplicit(effect, kIdentity, init);
+        const auto& spawned = emitter.Particles().back();
+        const auto frame = ParticleEmitter::FrameOf(effect, spawned, 6);
+        frames.insert(frame);
+        auto older = spawned;
+        older.Age += 0.5f;
+        CHECK_EQ(ParticleEmitter::FrameOf(effect, older, 6), frame);
+        CHECK_EQ(ParticleEmitter::FrameOf(effect, older, 12) / 2, frame);
+    }
+    CHECK_EQ(frames.size(), size_t(6));
+    CHECK_EQ(ParticleEmitter::FrameOf(effect, particle, 1), 0);
+}

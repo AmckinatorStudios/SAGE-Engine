@@ -70,6 +70,11 @@ public:
     void Init(ProcLoader loader) override;
     const char* BackendName() const override { return "Vulkan"; }
     std::string ApiVersion() const override { return m_apiVersion; }
+    Caps Capabilities() const override {
+        Caps caps;
+        caps.MaxTexture2DSize = m_maxTexture2DSize;
+        return caps;
+    }
 
     // --- Состояние конвейера: складывается, а не применяется ---------------
     void SetViewport(int x, int y, int width, int height) override;
@@ -227,6 +232,7 @@ private:
 
     VkInstance m_instance = VK_NULL_HANDLE;
     VkPhysicalDevice m_gpu = VK_NULL_HANDLE;
+    int m_maxTexture2DSize = 0;
     VkDevice m_device = VK_NULL_HANDLE;
     VkQueue m_queue = VK_NULL_HANDLE;
     uint32_t m_queueFamily = 0;

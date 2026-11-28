@@ -16,6 +16,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <chrono>
+#include <cstdlib>
 #include <cstdio>
 #include <filesystem>
 #include <functional>
@@ -27,7 +29,11 @@
 
 #include "stb_image_write.h"
 
+#include "sage/core/EngineContext.h"
 #include "sage/core/Paths.h"
+#include "sage/render/BillboardSystem.h"
+#include "sage/render/ResourceManager.h"
+#include "sage/scripting/ScriptEngine.h"
 #include "sage/render/Framebuffer.h"
 #include "sage/render/ParticleEffect.h"
 #include "sage/render/ParticleSystem.h"
@@ -63,7 +69,7 @@ std::string WriteRgba(const fs::path& dir, const std::string& name, int w, int h
 
 // Кадр с частицами на тёмном фоне.
 Image Shoot(ParticleSystem& sys, const glm::vec3& bg = glm::vec3(0.05f, 0.06f, 0.08f),
-            const glm::mat4& view = ParticleView()) {
+            const glm::mat4& view = ParticleView(), BillboardSystem* billboards = nullptr) {
     Framebuffer out(W, H);
     out.Bind();
     sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();
@@ -71,6 +77,7 @@ Image Shoot(ParticleSystem& sys, const glm::vec3& bg = glm::vec3(0.05f, 0.06f, 0
     device.SetClearColor(bg.r, bg.g, bg.b, 1.0f);
     device.Clear(true, true);
     sys.DrawFromView(view, ParticleProj());
+    if (billboards) billboards->DrawFromView(view, ParticleProj());
     Image img = Capture(W, H);
     device.BindDefaultFramebuffer();
     return img;
@@ -138,6 +145,26 @@ void TestTextureAndFlipbookFrames(const fs::path& dir) {
         std::printf("       кадр %d: (%d,%d,%d)\n", k, got.r, got.g, got.b);
         Check(ok, "кадр раскадровки из отдельных файлов — своего цвета");
     }
+
+    const auto grid = WriteRgba(dir, "legacy_grid.png", 16, 16, [&](int x, int y) {
+        return colors[(y / 8) * 2 + x / 8];
+    });
+    ParticleSystem gridSystem;
+    ParticleEffect gridEffect = Still(2.0f);
+    gridEffect.Texture = grid;
+    gridEffect.TilesX = gridEffect.TilesY = 2;
+    gridEffect.Filtering = sage::TextureFiltering::Nearest;
+    gridEffect.Flipbook = FlipbookMode::Fixed;
+    gridEffect.StartFrame = 2;
+    gridSystem.Burst(gridEffect, glm::vec3(0), 1);
+    const auto blue = At(Shoot(gridSystem), W / 2, H / 2);
+    Check(blue.b > 220 && blue.r < 30 && blue.g < 30, "legacy texture grid samples the bottom-left frame");
+
+    auto& resources = ResourceManager::Instance();
+    const auto first = resources.ResolveSpriteFrames(frames, TextureFilter::Nearest);
+    const auto second = resources.ResolveSpriteFrames(frames, TextureFilter::Nearest);
+    Check(first && second && first.Image == second.Image && first.Data.Resource == second.Data.Resource,
+          "standalone frame lists use the common CPU and GPU cache");
 }
 
 // --- 2. Смешивание: сложение светится, прозрачность — нет --------------------
@@ -393,6 +420,123 @@ void ShootPack(const fs::path& pack, const fs::path& shots) {
     }
 }
 
+void MeasureSpriteDraw(const std::string& path, sage::assets::SpriteRef ref) {
+    if (!std::getenv("SAGE_PARTICLE_SPRITE_BENCH")) return;
+    constexpr int count = 32768;
+    auto legacyFx = Still(0.03f);
+    legacyFx.MaxParticles = count;
+    legacyFx.Texture = path;
+    legacyFx.Filtering = sage::TextureFiltering::Nearest;
+    auto sharedFx = legacyFx;
+    sharedFx.SpriteRef = ref;
+    ParticleSystem legacy, linked;
+    legacy.Burst(legacyFx, glm::vec3(0), count);
+    linked.Burst(sharedFx, glm::vec3(0), count);
+    Framebuffer out(W, H);
+    out.Bind();
+    auto& device = sage::rhi::GraphicsDevice::Get();
+    device.SetClearColor(0, 0, 0, 1);
+    const auto view = ParticleView(), proj = ParticleProj();
+    auto time = [&](ParticleSystem& sys, int runs) {
+        const auto start = std::chrono::steady_clock::now();
+        for (int i = 0; i < runs; ++i) {
+            device.Clear(true, true);
+            sys.DrawFromView(view, proj);
+        }
+        (void)Capture(W, H);
+        return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() / runs;
+    };
+    time(legacy, 4);
+    time(linked, 4);
+    for (int i = 0; i < 3; ++i) {
+        const double legacyMs = time(legacy, 25), linkedMs = time(linked, 25);
+        std::printf("      %d particles: legacy %.3f ms/frame, SpriteRef %.3f ms/frame\n", count, legacyMs, linkedMs);
+    }
+    device.BindDefaultFramebuffer();
+}
+
+void TestSharedSprites(const fs::path& dir) {
+    using namespace sage::assets;
+    sage::ScopedEngineContext context;
+    const auto path = WriteRgba(dir, "effect_atlas.png", 16, 16, [](int x, int y) {
+        if (x < 6 && y < 4) return glm::u8vec4(255, 0, 0, 255);
+        if (x < 6 && y < 8) return glm::u8vec4(0, 255, 0, 255);
+        if (x >= 10 && y >= 9) return glm::u8vec4(0, 0, 255, 255);
+        return glm::u8vec4(255, 255, 0, 255);
+    });
+    SpriteSheet sheet;
+    sheet.Set(SpriteRegion("frame_1", {0, 0, 6, 8}));
+    sheet.Set(SpriteRegion("frame_2", {10, 9, 6, 7}));
+    sheet.SetPivot(0, {1.0f, 0.5f});
+    sheet.SequenceFromPrefix("cycle", "frame_", 2.0f);
+    std::string error;
+    Check(sheet.SaveFile(SpriteSheet::SidecarPath(path), error), "save the shared effect atlas");
+    auto& assets = sage::AssetDatabase::Instance();
+    assets.ScanProject(dir.string());
+    const auto asset = assets.GuidOf("effect_atlas.png.sagesheet");
+    const SpriteRef region{asset, sheet.Find("frame_1")->Id()};
+    const SpriteRef sequence{asset, sheet.FindSequence("cycle")->Id(), SpriteRef::Kind::Sequence};
+    ParticleSystem particles;
+    auto effect = Still(1.0f);
+    effect.SpriteRef = sequence;
+    effect.Flipbook = FlipbookMode::Fixed;
+    effect.Filtering = sage::TextureFiltering::Nearest;
+    particles.Burst(effect, {-0.4f, 0, 0}, 1);
+    BillboardSystem billboards;
+    ScriptEngine script;
+    script.BindBillboards(billboards);
+    script.BindParticles(particles);
+    script.Lua()["ASSET"] = asset.ToString();
+    script.Lua()["REGION"] = region.Item.ToString();
+    script.Lua()["SEQUENCE"] = sequence.Item.ToString();
+    auto lua = script.Lua().safe_script(R"(
+        local old = AddBillboard(Vec3(0, 0, 0), Vec2(1, 1), "effect_atlas.png")
+        RemoveBillboard(old)
+        local board = sage.fx.AddBillboard(Vec3(1.5, 0, 0), Vec2(1, 1), "effect_atlas.png", "cycle", "sequence")
+        sage.fx.SetBillboardSpriteRef(board, ASSET, SEQUENCE, "sequence")
+        local effect = ParticleEffect.new()
+        effect:SetSpriteRef(ASSET, REGION)
+        effect:SetSpriteRef()
+        effect:SetSpriteNamed("effect_atlas.png.sagesheet", "cycle", "sequence")
+        assert(not pcall(function() effect:SetSpriteRef("bad", REGION) end))
+    )", sol::script_pass_on_error);
+    if (!lua.valid()) {
+        const sol::error e = lua;
+        std::printf("      Lua sprite fixture: %s\n", e.what());
+    }
+    Check(lua.valid() && billboards.Count() == 1, "Lua old billboard calls and new stable sprite methods run");
+    const auto before = Shoot(particles, glm::vec3(0), ParticleView(), &billboards);
+    const auto particleTop = At(before, 92, H / 2 - 10);
+    const auto particleBottom = At(before, 92, H / 2 + 10);
+    const auto billboardTop = At(before, 166, H / 2 - 10);
+    Check(particleTop.r > 220 && particleBottom.g > 220 && billboardTop.r > 220 &&
+          At(before, 122, H / 2 - 10).r < 10, "arbitrary region uses top-first UV and right-edge pivot");
+    script.UpdateAll(0.55f);
+    const auto animated = Shoot(particles, glm::vec3(0), ParticleView(), &billboards);
+    Check(At(animated, 187, H / 2).b > 220 && At(animated, 92, H / 2 - 10).r > 220,
+          "billboards use the authored sequence FPS while particle Fixed keeps its frame");
+
+    auto& resources = ResourceManager::Instance();
+    auto original = resources.ResolveSpriteTexture(sequence, TextureFilter::Nearest, false, false, true);
+    const auto table = resources.SpriteFrameTable(original, 2);
+    std::weak_ptr<const Texture> oldTable = table;
+    Check(oldTable.lock() == resources.SpriteFrameTable(original, 2), "frame table is shared by emitters");
+    Check(sheet.Rename("frame_1", "renamed"), "rename atlas region referenced by both consumers");
+    sheet.SetRect(0, {10, 9, 6, 7});
+    Check(sheet.SaveFile(SpriteSheet::SidecarPath(path), error), "save revised coordinates under the same IDs");
+    resources.NotifySpriteChanged(asset);
+    script.UpdateAll(0.5f); // wraps to the first, now edited frame.
+    const auto after = Shoot(particles, glm::vec3(0), ParticleView(), &billboards);
+    Check(At(after, 92, H / 2 - 10).b > 220 && At(after, 166, H / 2 - 10).b > 220,
+          "already live particles and billboards use revised coordinates after save");
+    MeasureSpriteDraw(path, sequence);
+    const auto published = resources.ResolveSpriteTexture(sequence, TextureFilter::Nearest, false, false, true);
+    std::weak_ptr<const Texture> newTable = resources.SpriteFrameTable(published, 2);
+    Check(!newTable.expired() && newTable.lock() != table, "metadata revision builds a new frame table");
+    resources.Clear();
+    Check(newTable.expired(), "resource teardown releases frame tables while consumers retain IDs");
+}
+
 } // namespace
 
 void RunParticleChecks() {
@@ -401,6 +545,7 @@ void RunParticleChecks() {
     const fs::path dir = fs::temp_directory_path(ec) / "sage_particle_render";
     fs::create_directories(dir, ec);
     TestTextureAndFlipbookFrames(dir);
+    TestSharedSprites(dir);
     TestBlendModes();
     TestStretchedAlongMotion();
     TestMeshParticles();

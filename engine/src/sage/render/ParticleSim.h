@@ -33,7 +33,7 @@ struct Particle {
     float Rotation = 0.0f;     // радианы
     float AngularVelocity = 0.0f;  // рад/с
     float Seed = 0.0f;         // 0..1, постоянный на жизнь (случайный кадр, ось меша)
-    int Frame = 0;             // кадр для FlipbookMode::Random
+    int Frame = 0;             // index, or a negative encoded sample for a SpriteRef sequence
     // След: xyz — точка, w — время рождения точки (время эмиттера).
     std::vector<glm::vec4> Trail;
 

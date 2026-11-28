@@ -66,6 +66,7 @@ public:
     // (единственный с GL-контекстом) вызывает это, ЗАМЕНЯЯ картинку прямо в
     // существующем объекте Texture — все держатели shared_ptr<Texture>
     // (материалы, UI) видят подгруженное изображение без повторного запроса.
+    // При ошибке загрузки бросает исключение и сохраняет прежнюю текстуру.
     void ReplacePixels(const unsigned char* pixelsRGBA, int width, int height,
                        TextureFilter filter = TextureFilter::Trilinear, bool generateMipmaps = true);
 
@@ -75,7 +76,8 @@ public:
         size_t base = (size_t)width * (size_t)height * 4u;
         return mipmaps ? base + base / 3u : base;
     }
-    size_t GpuBytes() const { return EstimateBytes(m_width, m_height, m_hasMipmaps); }
+    size_t GpuBytes() const { return EstimateBytes(m_width, m_height, m_hasMipmaps) * (m_float32 ? 4u : 1u); }
+    static std::shared_ptr<Texture> CreateFloat32Data(const float* rgba, int width, int height);
 
     // С какой фильтрацией картинка реально создана. Не «какую просили»: запрос
     // Anisotropic на карте без расширения честно опускается до трилинейной, и
@@ -120,6 +122,7 @@ private:
     int m_width = 0, m_height = 0, m_channels = 0;
     bool m_hasMipmaps = true;
     bool m_srgb = false;
+    bool m_float32 = false;
     bool m_flippedRows = true;
     TextureFilter m_filter = TextureFilter::Trilinear;
 };

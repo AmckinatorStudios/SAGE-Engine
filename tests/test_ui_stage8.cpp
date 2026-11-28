@@ -11,6 +11,7 @@
 #include "sage/anim/PropertyAnimator.h"
 #include "sage/anim/Tween.h"
 #include "sage/render/ScenePasses.h"
+#include "sage/render/ResourceManager.h"
 #include "sage/scene/Components.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/SceneSerializer.h"
@@ -38,7 +39,9 @@ TEST(SpriteSheet_pivot_and_sequences_survive_the_file) {
         r.Rect = {0, 0, 8, 8};
         sheet.Set(r);
     }
-    sheet.Find("run_1")->Pivot = {0.25f, 1.0f};
+    auto run = *sheet.Find("run_1");
+    run.Pivot = {0.25f, 1.0f};
+    sheet.Set(run);
     CHECK_EQ(sheet.SequenceFromPrefix("run", "run_", 10.0f), 3);
     // Порядок — по числу в конце имени, а не по алфавиту (run_10 после run_2).
     const auto* q = sheet.FindSequence("run");
@@ -74,10 +77,10 @@ TEST(SpriteSheet_atlas_packs_without_overlap) {
     SpriteSheet sheet;
     std::string err;
     CHECK_TRUE(SpriteSheet::PackAtlas(in, 2, 1024, atlas, w, h, sheet, err));
-    CHECK_EQ((int)sheet.Regions.size(), 4);
-    for (size_t a = 0; a < sheet.Regions.size(); ++a)
-        for (size_t b = a + 1; b < sheet.Regions.size(); ++b) {
-            const glm::ivec4 ra = sheet.Regions[a].Rect, rb = sheet.Regions[b].Rect;
+    CHECK_EQ((int)sheet.Regions().size(), 4);
+    for (size_t a = 0; a < sheet.Regions().size(); ++a)
+        for (size_t b = a + 1; b < sheet.Regions().size(); ++b) {
+            const glm::ivec4 ra = sheet.Regions()[a].Rect, rb = sheet.Regions()[b].Rect;
             const bool apart = ra.x + ra.z <= rb.x || rb.x + rb.z <= ra.x || ra.y + ra.w <= rb.y || rb.y + rb.w <= ra.y;
             CHECK_TRUE(apart);
         }
@@ -115,13 +118,74 @@ TEST(UIImage_sequence_plays_frames) {
     sage::ui::UIInputState step;
     step.DeltaTime = 0.05f;
     sage::ui::UpdateSceneUI(scene, step, 800, 600);
-    CHECK_NEAR(im.Sprite.x, 0.0f, 1e-4f);
+    const auto savedSprite = im.Sprite;
     step.DeltaTime = 0.2f;   // ещё два кадра
     sage::ui::UpdateSceneUI(scene, step, 800, 600);
-    CHECK_NEAR(im.Sprite.x, 16.0f, 1e-4f);
-    CHECK_NEAR(im.Sprite.z, 8.0f, 1e-4f);
+    auto resolved = ResourceManager::Instance().ResolveSpriteImage(im.Path);
+    CHECK_TRUE(bool(resolved));
+    if (resolved) {
+        resolved.Ref = {{}, resolved.Resource->Sheet.FindSequence(im.Sequence)->Id(), sage::assets::SpriteRef::Kind::Sequence};
+        CHECK_NEAR(im.SequenceTime, 0.25f, 1e-4f);
+        CHECK_EQ(resolved.Region(im.SequenceTime)->Rect, glm::ivec4(16, 0, 8, 8));
+    }
+    CHECK_EQ(im.Sprite, savedSprite);
     std::error_code ec;
     fs::remove_all(dir, ec);
+}
+
+TEST(UISprite_reference_round_trips_with_legacy_rectangles_and_nested_looks) {
+    using namespace sage::ui;
+    using sage::AssetGuid;
+    using sage::assets::SpriteRef;
+    const SpriteRef frame{AssetGuid::Generate(), AssetGuid::Generate(), SpriteRef::Kind::Region};
+    const SpriteRef cycle{frame.Asset, AssetGuid::Generate(), SpriteRef::Kind::Sequence};
+    Scene scene("refs");
+    auto e = scene.CreateEmptyObject("UI").Entity();
+    auto& registry = scene.Registry();
+    auto& element = registry.emplace<Element>(e);
+    element.Style = "example.sageuistyle";
+    element.StyleOverrides = {"fill.spriteRef", "interactable.pressedLook.spriteRef"};
+    auto& image = registry.emplace<Image>(e);
+    image.SpriteRef = frame;
+    image.HoverSpriteRef = cycle;
+    image.PressedSpriteRef = frame;
+    image.Sprite = {2, 3, 4, 5};
+    image.OverrideSpriteSlice = true;
+    image.SliceBorder = {1, 0, 0, 0};
+    image.UseSpritePivot = false;
+    registry.emplace<Fill>(e).SpriteRef = frame;
+    registry.emplace<Mask>(e).SpriteRef = cycle;
+    registry.emplace<Bar>(e).MaskSpriteRef = frame;
+    auto& button = registry.emplace<Interactable>(e);
+    button.UsePressedLook = true;
+    button.PressedLook.SpriteRef = cycle;
+    const auto style = CaptureStyle(registry, e);
+    auto local = style;
+    local["parts"]["fill"]["spriteRef"] = nullptr;
+    local["parts"]["interactable"]["pressedLook"]["spriteRef"] = nullptr;
+    local["parts"]["interactable"]["pressedLook"]["rounding"] = 8;
+    ApplyStyle(local, registry, e);
+    CHECK_EQ(registry.get<Fill>(e).SpriteRef.Item, frame.Item);
+    CHECK_EQ(button.PressedLook.SpriteRef.Item, cycle.Item);
+    CHECK_EQ(button.PressedLook.Rounding, 8.0f);
+
+    nlohmann::json serialized;
+    CHECK_TRUE(SaveElement(serialized, registry, e));
+    const auto copy = scene.CreateEmptyObject("UI copy").Entity();
+    LoadElement(serialized, registry, copy);
+    const auto& restored = registry.get<Image>(copy);
+    CHECK_EQ(restored.SpriteRef.Asset, frame.Asset);
+    CHECK_EQ(restored.SpriteRef.Item, frame.Item);
+    CHECK_EQ(restored.HoverSpriteRef.Type, SpriteRef::Kind::Sequence);
+    CHECK_EQ(restored.PressedSpriteRef.Item, frame.Item);
+    CHECK_EQ(restored.Sprite, glm::vec4(2, 3, 4, 5));
+    CHECK_TRUE(restored.OverrideSpriteSlice);
+    CHECK_EQ(restored.SliceBorder, glm::vec4(1, 0, 0, 0));
+    CHECK_FALSE(restored.UseSpritePivot);
+    CHECK_EQ(registry.get<Fill>(copy).SpriteRef.Item, frame.Item);
+    CHECK_EQ(registry.get<Mask>(copy).SpriteRef.Item, cycle.Item);
+    CHECK_EQ(registry.get<Bar>(copy).MaskSpriteRef.Item, frame.Item);
+    CHECK_EQ(registry.get<Interactable>(copy).PressedLook.SpriteRef.Item, cycle.Item);
 }
 
 TEST(UIStyle_inherits_from_base_and_keeps_overrides) {

@@ -3,13 +3,11 @@
 #include <string>
 
 #include "sage/scene/Signals.h"
-#include "sage/render/RenderTexture.h"
-#include "sage/render/ResourceManager.h"
-#include "sage/render/Texture.h"
 #include "sage/scene/SceneJson.h"
 #include "sage/scene/SceneValueJson.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPart.h"
+#include "sage/ui/UIPartsDetail.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/vars/ScriptVars.h"
 
@@ -44,6 +42,13 @@ void SaveField(json& out, const void* data, const sage::ui::PartField& f) {
         case K::Enum: out[f.Key] = sage::ui::FieldAs<int>(data, f); break;
         // Вид — вложенным объектом по своей таблице: дорожка, ручка, вид при
         // наведении пишутся одними и теми же ключами.
+        case K::SpriteRef: {
+            const auto& ref = FieldAs<assets::SpriteRef>(data, f);
+            out[f.Key] = ref.Valid() ? json{{"asset", ref.Asset.ToString()}, {"item", ref.Item.ToString()},
+                                          {"kind", ref.Type == assets::SpriteRef::Kind::Sequence ? "sequence" : "region"}}
+                                     : json(nullptr);
+            break;
+        }
         case K::Look: {
             json lj = json::object();
             const sage::ui::Look& look = sage::ui::FieldAs<sage::ui::Look>(data, f);
@@ -90,6 +95,20 @@ void LoadField(const json& in, void* data, const sage::ui::PartField& f) {
                     sage::ui::FieldAs<int>(data, f) = n;
             }
             break;
+        case K::SpriteRef: {
+            auto& ref = FieldAs<assets::SpriteRef>(data, f);
+            if (v.is_null()) ref = {};
+            else if (v.is_object() && v.contains("asset") && v["asset"].is_string() &&
+                     v.contains("item") && v["item"].is_string() && v.contains("kind") && v["kind"].is_string()) {
+                const auto kind = v["kind"].get<std::string>();
+                if (kind == "region" || kind == "sequence") {
+                    ref = {AssetGuid::FromString(v["asset"].get<std::string>()),
+                           AssetGuid::FromString(v["item"].get<std::string>()),
+                           kind == "sequence" ? assets::SpriteRef::Kind::Sequence : assets::SpriteRef::Kind::Region};
+                }
+            }
+            break;
+        }
         case K::Look:
             if (v.is_object()) {
                 sage::ui::Look& look = sage::ui::FieldAs<sage::ui::Look>(data, f);
@@ -150,33 +169,13 @@ void SaveUIComponents(json& j, const entt::registry& reg, entt::entity e) {
 void ResolveImageTextureImpl(sage::ui::Image& im) {
     // Путь стёрли — картинки нет. Оставить прежний указатель значит показывать
     // файл, который больше не назначен.
-    if (im.Path.empty()) {
+    if (im.SpriteRef.Valid() || !im.NamedSprite.empty() || im.Path.empty()) {
         im.Tex.reset();
         im.TexPath.clear();
         return;
     }
-    // Пиксель-арт грузится ближайшим соседом и без мипмапов — иначе набор
-    // спрайтов размывается, а мипмапы ЛИСТА подмешивают в края соседний спрайт.
-    // Резкая фильтрация грузится ближайшим соседом и без мипмапов — иначе
-    // набор спрайтов размывается, а мипмапы ЛИСТА подмешивают в края соседний
-    // спрайт.
-    // "rt:<имя>" — картинка, которую рисует сам движок (съёмка в текстуру).
-    // Её нет на диске: без этой ветки пересинхронизация картинки заменяла
-    // уже найденную съёмку белой заглушкой «файл не найден».
-    if (auto rt = sage::render::RenderTextureRegistry::Resolve(im.Path)) {
-        im.Tex = rt;
-    } else if (im.Path.rfind("rt:", 0) == 0) {
-        // Съёмки ещё нет (камера не сняла первый кадр): ждём её, а не ищем
-        // на диске файл «rt:…» с ошибкой в журнал на каждый кадр. TexPath не
-        // ставится — в следующем кадре спросим снова.
-        im.Tex.reset();
-        return;
-    } else {
-        im.Tex = im.Sharp() ? ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Nearest,
-                                                                     /*mipmaps=*/false)
-                            : ResourceManager::Instance().GetTexture(im.Path, TextureFilter::Trilinear,
-                                                                     /*mipmaps=*/true, /*bleed=*/true);   // без каймы
-    }
+    im.Tex = parts::PictureTexture(im.Path, im.Filtering);
+    if (!im.Tex && im.Path.rfind("rt:", 0) == 0) return;
     im.TexPath = im.Path;
     im.TexFiltering = im.Filtering;
 }
@@ -272,7 +271,7 @@ void ResolveImageTexture(Image& image) { ResolveImageTextureImpl(image); }
 bool ImageTextureStale(const Image& image) {
     // Путь стёрли, а указатель остался — старая картинка продолжала бы
     // рисоваться на элементе, которому её больше не назначали.
-    if (image.Path.empty()) return image.Tex != nullptr;
+    if (image.SpriteRef.Valid() || !image.NamedSprite.empty() || image.Path.empty()) return image.Tex != nullptr;
     // Путь есть, а указателя нет — ещё не грузили (или не загрузилось).
     if (!image.Tex) return true;
     // Загружено НЕ ТО: путь сменили, или переключили фильтрацию, а она меняет

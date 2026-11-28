@@ -254,7 +254,7 @@ void SpriteEditor::HandleSheetMouse(ImVec2 a, ImVec2 size) {
     const ImVec2 mouse = io.MousePos;
     const glm::vec2 px = ToPixel(mouse);
     m_cursorPx = hovered ? px : glm::vec2(-1.0f);
-    auto& regions = m_doc.Sheet.Regions;
+    auto& regions = m_doc.Sheet.Regions();
 
     // Колесо — масштаб вокруг курсора: точка под мышью остаётся на месте.
     if (hovered && io.MouseWheel != 0.0f) {
@@ -342,7 +342,7 @@ void SpriteEditor::HandleSheetMouse(ImVec2 a, ImVec2 size) {
         switch (m_drag) {
         case Drag::Resize:
             if (primary >= 0 && primary < (int)regions.size())
-                regions[(size_t)primary].Rect = sp::ResizeRect(m_dragOrig[0], m_dragHandle, d, m_w, m_h);
+                m_doc.Sheet.SetRect((size_t)primary, sp::ResizeRect(m_dragOrig[0], m_dragHandle, d, m_w, m_h));
             ImGui::SetMouseCursor(HandleCursor(m_dragHandle));
             m_touched = true;
             break;
@@ -355,7 +355,7 @@ void SpriteEditor::HandleSheetMouse(ImVec2 a, ImVec2 size) {
                 // центру» ставится точно, а не 0.49.
                 for (int i = 0; i < 9; ++i)
                     if (glm::length(pv - sp::PivotPreset(i)) < 0.04f) pv = sp::PivotPreset(i);
-                regions[(size_t)primary].Pivot = pv;
+                m_doc.Sheet.SetPivot((size_t)primary, pv);
                 m_touched = true;
             }
             break;
@@ -371,7 +371,7 @@ void SpriteEditor::HandleSheetMouse(ImVec2 a, ImVec2 size) {
                     for (int i : m_sel) m_dragOrig.push_back(regions[(size_t)i].Rect);
                 }
                 for (size_t k = 0; k < m_sel.size() && k < m_dragOrig.size(); ++k)
-                    regions[(size_t)m_sel[k]].Rect = sp::MoveRect(m_dragOrig[k], d, m_w, m_h);
+                    m_doc.Sheet.SetRect((size_t)m_sel[k], sp::MoveRect(m_dragOrig[k], d, m_w, m_h));
                 ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
                 m_touched = true;
             }
@@ -386,7 +386,7 @@ void SpriteEditor::HandleSheetMouse(ImVec2 a, ImVec2 size) {
             reg.Name = m_doc.Sheet.FreeName(m_doc.Sheet.Slicing.Grid.Prefix.empty() ? "sprite"
                                                                                     : m_doc.Sheet.Slicing.Grid.Prefix);
             reg.Rect = m_dragRect;
-            regions.push_back(reg);
+            m_doc.Sheet.Set(reg);
             SelectOnly((int)regions.size() - 1);
         } else if (m_drag == Drag::Marquee && m_dragRect.z > 0 && m_dragRect.w > 0) {
             for (int i : sp::HitRect(m_doc.Sheet, m_dragRect))
@@ -406,7 +406,7 @@ void SpriteEditor::DrawSheetCanvas(ImVec2 a, ImVec2 size) {
                  ImVec2(std::min(i1.x, a.x + size.x), std::min(i1.y, a.y + size.y)), 10.0f);
     // V перевёрнута: у текстуры движка начало координат внизу.
     sp::Nearest(dl);
-    dl->AddImage((ImTextureID)(std::intptr_t)m_tex->NativeHandle(), i0, i1, ImVec2(0, 1), ImVec2(1, 0));
+    dl->AddImage((ImTextureID)(std::intptr_t)m_tex->NativeHandle(), i0, i1, ImVec2(0, 0), ImVec2(1, 1));
     sp::Linear(dl);
     // Сетка пикселей — с крупного масштаба, только видимая часть.
     if (m_pixelGrid && m_zoom >= 8.0f) {
@@ -423,7 +423,7 @@ void SpriteEditor::DrawSheetCanvas(ImVec2 a, ImVec2 size) {
 
     DrawSlicingPreview(dl);
 
-    const auto& regions = m_doc.Sheet.Regions;
+    const auto& regions = m_doc.Sheet.Regions();
     // Сначала обычные рамки — тонко, затем наведённая и выбранные поверх.
     for (int i = 0; i < (int)regions.size(); ++i) {
         if (Selected(i) || i == m_hover) continue;
@@ -482,7 +482,7 @@ void SpriteEditor::DrawSlicingPreview(ImDrawList* dl) {
     const sage::ui::SpriteSlicing& s = m_doc.Sheet.Slicing;
     if (s.Method == Method::Manual) return;
     auto same = [&](const glm::ivec4& r) {
-        for (const auto& reg : m_doc.Sheet.Regions)
+        for (const auto& reg : m_doc.Sheet.Regions())
             if (reg.Rect == r) return true;
         return false;
     };
@@ -544,7 +544,7 @@ void SpriteEditor::DrawStatusBar() {
         n += std::snprintf(buf + n, sizeof(buf) - (size_t)n, "     %s %d\xc3\x97%d", T("Image:"), m_w, m_h);
     if (m_tex && m_mode == Mode::Sheet) {
         n += std::snprintf(buf + n, sizeof(buf) - (size_t)n, "     %s %d", T("Sprites:"),
-                           (int)m_doc.Sheet.Regions.size());
+                           (int)m_doc.Sheet.Regions().size());
         if (!m_sel.empty())
             std::snprintf(buf + n, sizeof(buf) - (size_t)n, "     %s %d", T("Selected:"), (int)m_sel.size());
     }

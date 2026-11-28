@@ -79,6 +79,7 @@ public:
 
     size_t Count() const { return m_entries.size(); }
     bool Has(const std::string& virtualPath) const;
+    std::vector<std::string> Paths() const;
     // Почему не записалось — строкой для человека.
     const std::string& LastError() const { return m_error; }
 
@@ -103,6 +104,8 @@ public:
     bool Contains(const std::string& virtualPath) const;
     // Читает файл целиком. false — нет такого или пакет повреждён.
     bool Read(const std::string& virtualPath, std::vector<uint8_t>& out) const;
+    // Both stored and expanded entry sizes are checked before allocation.
+    bool Read(const std::string& virtualPath, std::vector<uint8_t>& out, size_t maxBytes) const;
 
     size_t Count() const { return m_index.size(); }
     // Все пути в пакете — нужно редактору («что попало в сборку») и тестам.
@@ -152,6 +155,7 @@ namespace vfs {
 bool Mount(const std::filesystem::path& packFile);
 void Unmount();
 bool Mounted();
+uint64_t MountGeneration();
 
 // Есть ли такой файл — в пакете или на диске.
 bool Exists(const std::string& path);
@@ -168,6 +172,7 @@ std::vector<std::string> ListDirs(const std::string& directory);
 
 // Читает файл целиком. Сначала пакет, потом диск.
 bool ReadFile(const std::string& path, std::vector<uint8_t>& out);
+bool ReadFile(const std::string& path, std::vector<uint8_t>& out, size_t maxBytes);
 // То же строкой — для текстовых форматов (.sage, .lua, .sagemat).
 bool ReadText(const std::string& path, std::string& out);
 

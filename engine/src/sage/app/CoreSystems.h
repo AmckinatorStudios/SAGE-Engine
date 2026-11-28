@@ -26,7 +26,9 @@ namespace sage {
 // режиме правки нет ни скриптов, ни физики, и это нормальный случай, а не
 // ошибка.
 struct CoreSystems {
-    // Прежний движок Lua: уровневые скрипты, таймеры, корутины, старый API.
+    // [DEPRECATED] Прежний движок Lua: уровневые скрипты, таймеры, корутины.
+    // Больше не регистрируется в SystemScheduler — его API доступен через
+    // LuaBackend, а Update/FixedUpdate выполняет ScriptingSystem.
     ScriptEngine* Scripts = nullptr;
     // Система скриптинга объектов (Start/Update/FixedUpdate/LateUpdate и
     // события столкновений). Язык ей неизвестен — см.

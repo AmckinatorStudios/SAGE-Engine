@@ -2,6 +2,7 @@
 #include "Shader.h"
 #include "Texture.h"
 #include "Camera.h"
+#include "sage/assets/SpriteSheet.h"
 #include "sage/rhi/GraphicsDevice.h"
 #include <memory>
 #include <glm/glm.hpp>
@@ -47,6 +48,9 @@ struct BillboardSprite {
     float Rotation = 0.0f;            // поворот вокруг оси взгляда, радианы
     BillboardPivot Pivot = BillboardPivot::Center;
     bool Visible = true;
+    sage::assets::SpriteRef SpriteRef;
+    std::string TexturePath;  // Legacy Lua texture source, resolved through ResourceManager.
+    double SpriteTime = 0.0;
 };
 
 class BillboardSystem {
@@ -65,6 +69,8 @@ public:
 
     void Remove(int id) { m_sprites.erase(id); }
     void Clear() { m_sprites.clear(); }
+    void Update(float dt);
+    void SetSprite(int id, sage::assets::SpriteRef ref);
 
     bool Has(int id) const { return m_sprites.find(id) != m_sprites.end(); }
 
@@ -145,23 +151,7 @@ private:
         shader.SetVec3("uCameraUp", camera.Up);
     }
 
-    void DrawOne(Shader& shader, const BillboardSprite& sprite) {
-        shader.SetVec3("uWorldPos", sprite.WorldPos);
-        shader.SetVec2("uSize", sprite.Size);
-        shader.SetVec2("uPivot", sprite.Pivot == BillboardPivot::Bottom ? glm::vec2(0.0f, 0.5f) : glm::vec2(0.0f, 0.0f));
-        shader.SetFloat("uRotation", sprite.Rotation);
-        shader.SetVec4("uTint", sprite.Tint);
-
-        if (sprite.SpriteTexture) {
-            sprite.SpriteTexture->Bind(0);
-            shader.SetInt("uTexture", 0);
-            shader.SetInt("uUseTexture", 1);
-        } else {
-            shader.SetInt("uUseTexture", 0);
-        }
-
-        m_geometry->DrawArrays(6);
-    }
+    void DrawOne(Shader& shader, const BillboardSprite& sprite);
 
     void EndBatch() {
         sage::rhi::GraphicsDevice& device = sage::rhi::GraphicsDevice::Get();

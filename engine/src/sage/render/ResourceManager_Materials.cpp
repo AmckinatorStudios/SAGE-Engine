@@ -152,10 +152,18 @@ Material::ResolvedFrom ResourceManager::PathsOf(const Material& m) {
 }
 
 bool ResourceManager::RefreshMaterialTextures(Material& m) {
+    // nullptr from bounded async admission means retry, even with unchanged paths.
+    const bool deferred = m_streamMaterialTextures &&
+        ((!m.TexturePath.empty() && !m.AlbedoTex) ||
+         (!m.NormalMapPath.empty() && !m.NormalTex) ||
+         (!m.MetallicMapPath.empty() && !m.MetallicTex) ||
+         (!m.RoughnessMapPath.empty() && !m.RoughnessTex) ||
+         (!m.AOMapPath.empty() && !m.AOTex) ||
+         (!m.EmissiveMap.empty() && !m.EmissiveTex));
     // Включили или сняли вырез — карта альбедо нужна другая (с цветом под
     // прозрачностью или без), хотя пути не менялись.
     if (m.TexturesFrom == PathsOf(m) && m.TexturesCutout == (m.Render.AlphaCutoff > 0.0f) &&
-        m.TexturesFilter == m.Render.Filter)
+        m.TexturesFilter == m.Render.Filter && !deferred)
         return false;
     ResolveMaterialTextures(m);
     return true;

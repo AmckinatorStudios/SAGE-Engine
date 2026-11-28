@@ -182,6 +182,10 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/PostFXShaders_Light.cpp
     src/sage/render/RenderTexture.cpp
     src/sage/render/Volumetrics.cpp
+    src/sage/render/PrimitiveGenerator.cpp
+    src/sage/render/ResourceCache.cpp
+    src/sage/render/TextureStreamer.cpp
+    src/sage/render/VRAMBudgetManager.cpp
     src/sage/render/ResourceManager.cpp
     src/sage/render/ResourceManager_Materials.cpp
     src/sage/render/ResourceManager_Memory.cpp
@@ -296,8 +300,9 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/UIControls.cpp
     src/sage/ui/UIParts_Look.cpp
     src/sage/ui/UIParts_Visual.cpp
-    src/sage/ui/NineSlice.cpp
-    src/sage/ui/SpriteSheet.cpp
+    src/sage/assets/NineSlice.cpp
+    src/sage/assets/SpriteResolver.cpp
+    src/sage/assets/SpriteSheet.cpp
     src/sage/ui/UISerialize.cpp
     src/sage/ui/Interface.cpp
     src/sage/ui/InterfaceSource.cpp

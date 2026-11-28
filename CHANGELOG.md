@@ -12,6 +12,16 @@
 
 ## 0.5.0 → 1.0 (в работе)
 
+### 2026-11-23 (Фаза 1: завершение миграции scripting, разрыв цикла Scene ↔ ScriptEngine)
+
+#### Изменено
+- **ScriptEngine** больше не включает заголовки подсистем (Scene, Input, Camera, ParticleSystem, BillboardSystem, Audio, Physics, AI) напрямую — только forward declarations. Полные включения в `ScriptEngine.cpp`. Это устраняет циклическую зависимость `Scene → Events → LuaHandlerStore → ScriptEngine → Scene`.
+- **CoreSystems** (sage/app/CoreSystems.cpp) больше не регистрирует Update для старого `ScriptEngine` в SystemScheduler. Система скриптинга объектов (`ScriptingSystem`) обеспечивает весь жизненный цикл (Start/Update/FixedUpdate/LateUpdate/OnDestroy) и события столкновений. Старый API (sage.*, глобальные функции уровневых скриптов, таймеры, корутины) доступен через LuaBackend как Legacy-совместимость.
+- `CoreSystems::Scripts` помечена как **[DEPRECATED]** в комментарии — существует только для соответствия, но не регистрируется.
+
+#### Почему
+Прежняя архитектура ScriptEngine имела одного на всё — язык, рантайм, API. При попытке добавить второй язык (C#, Python) потребовалась бы полная переделка. Новая архитектура разделяет роли: `ScriptingSystem` — рантайм скриптов (язык-агностичный), `LanguageBackend` — исполнение конкретного языка через `ScriptServices` (Dependency Injection), `LuaBackend` — реализация для Lua. ScriptEngine теперь только Legacy API, а обновления выполняет ScriptingSystem.
+
 ### 2026-11-23 (Разрыв циклов модулей ecs ↔ gi, gi ↔ render, anim ↔ ui)
 
 #### Изменено

@@ -272,6 +272,7 @@ void CopyField(const PartField& f, const void* src, void* dst) {
         case PartField::Kind::Vec2:   *reinterpret_cast<glm::vec2*>(d) = *reinterpret_cast<const glm::vec2*>(s); break;
         case PartField::Kind::Color:
         case PartField::Kind::Vec4:   *reinterpret_cast<glm::vec4*>(d) = *reinterpret_cast<const glm::vec4*>(s); break;
+        case PartField::Kind::SpriteRef: *reinterpret_cast<assets::SpriteRef*>(d) = *reinterpret_cast<const assets::SpriteRef*>(s); break;
         case PartField::Kind::Look:
             *reinterpret_cast<Look*>(d) = *reinterpret_cast<const Look*>(s);
             break;

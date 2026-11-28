@@ -23,6 +23,7 @@
 #include "sage/render/SkyRenderer.h"
 #include "sage/render/Reflection.h"
 #include "sage/render/ParticleSystem.h"
+#include "sage/render/BillboardSystem.h"
 #include "sage/ui/UIRenderer.h"
 #include "sage/scene/Scene.h"
 #include "sage/ui/UISceneSystem.h"
@@ -256,6 +257,7 @@ public:
     bool HasGameFrame() const { return m_gameFrameValid; }
 
     const sage::ecs::RenderStats& LastStats() const { return m_lastStats; }
+    BillboardSystem& Billboards() { return *m_billboards; }
     ParticleSystem& Particles() { return *m_particles; } // UpdateEmitters + self-test
 
     // Для self-test редактора: прогнать инстансный батч с заданной камерой.
@@ -341,6 +343,7 @@ private:
     // снимается из точки и принадлежит виду.
     sage::render::ReflectionSystem m_reflections;
     std::optional<ParticleSystem> m_particles;
+    std::optional<BillboardSystem> m_billboards;
     sage::ecs::RenderBatch m_batch;
     sage::ecs::RenderStats m_lastStats;
 

@@ -1,3 +1,7 @@
+#include "sage/core/ImageDecodeBudget.h"
+#define STBI_MALLOC(sz) sage::image_memory::Allocate(sz)
+#define STBI_REALLOC(p, sz) sage::image_memory::Reallocate(p, sz)
+#define STBI_FREE(p) sage::image_memory::Free(p)
 #define STB_IMAGE_IMPLEMENTATION
 #include "sage/assets/Pack.h"
 #include <stb_image.h>
@@ -47,8 +51,9 @@ Texture::Texture(const std::string& path, TextureFilter filter, bool generateMip
 
     // Через vfs: stbi_load(путь) открывает файл сам и о пакете не знает — в
     // собранной игре не грузилась ни одна текстура.
-    unsigned char* data =
-        sage::assets::vfs::LoadImage(path, &m_width, &m_height, &m_channels, 0);
+    std::unique_ptr<unsigned char, decltype(&stbi_image_free)> data(
+        sage::assets::vfs::LoadImage(path, &m_width, &m_height, &m_channels, 0),
+        stbi_image_free);
     if (!data) {
         // Причины может не быть: файла нет — stb его и не открывал. nullptr в
         // поток и в строку — падение процесса вместо понятной ошибки.
@@ -56,6 +61,20 @@ Texture::Texture(const std::string& path, TextureFilter filter, bool generateMip
         const std::string reason = why ? why : "файл не найден или не читается";
         LOG_ERROR("Texture") << "Не удалось загрузить текстуру: " << path << " (" << reason << ")";
         throw std::runtime_error("Не удалось загрузить текстуру: " + path + " (" + reason + ")");
+    }
+
+    const unsigned char* pixels = data.get();
+    std::vector<unsigned char> rgba;
+    if (m_channels == 2) {
+        // STB допускает grayscale + alpha, а RHI принимает 1, 3 или 4 канала.
+        const size_t count = static_cast<size_t>(m_width) * m_height;
+        rgba.resize(count * 4);
+        for (size_t i = 0; i < count; ++i) {
+            std::fill_n(&rgba[i * 4], 3, pixels[i * 2]);
+            rgba[i * 4 + 3] = pixels[i * 2 + 1];
+        }
+        m_channels = 4;
+        pixels = rgba.data();
     }
 
     Texture2DDesc desc;
@@ -68,9 +87,8 @@ Texture::Texture(const std::string& path, TextureFilter filter, bool generateMip
     m_filter = filter;
     desc.GenerateMipmaps = generateMipmaps;
     m_hasMipmaps = generateMipmaps;
-    m_texture = GraphicsDevice::Get().CreateTexture2D(desc, data);
-
-    stbi_image_free(data);
+    m_texture = GraphicsDevice::Get().CreateTexture2D(desc, pixels);
+    if (!m_texture) throw std::runtime_error("GPU texture upload failed: " + path);
 
     LOG_INFO("Texture") << "Текстура загружена: " << path << " (" << m_width << "x" << m_height << ")";
 }
@@ -115,6 +133,7 @@ bool Texture::LoadFromNative(const std::string& path, TextureFilter filter) {
     desc.FilterMode = filter;
     m_filter = filter;
     m_texture = GraphicsDevice::Get().CreateTexture2D(desc, rgba.data());
+    if (!m_texture) return false;
     LOG_INFO("Texture") << "Текстура загружена: " << path << " (" << w << "x" << h
                         << ", свой формат, уровней " << tex.Levels.size() << ")";
     return true;
@@ -163,14 +182,30 @@ Texture::Texture(const unsigned char* pixelsRGBA, int width, int height, Texture
     desc.GenerateMipmaps = generateMipmaps;
     m_hasMipmaps = generateMipmaps;
     m_texture = GraphicsDevice::Get().CreateTexture2D(desc, pixelsRGBA);
+    if (!m_texture) throw std::runtime_error("GPU texture upload failed");
+}
+
+std::shared_ptr<Texture> Texture::CreateFloat32Data(const float* rgba, int width, int height) {
+    auto texture = std::shared_ptr<Texture>(new Texture());
+    texture->m_width = width;
+    texture->m_height = height;
+    texture->m_channels = 4;
+    texture->m_hasMipmaps = false;
+    texture->m_float32 = true;
+    texture->m_filter = TextureFilter::Nearest;
+    Texture2DDesc desc;
+    desc.Width = width;
+    desc.Height = height;
+    desc.Float32 = true;
+    desc.GenerateMipmaps = false;
+    desc.FilterMode = TextureFilter::Nearest;
+    texture->m_texture = GraphicsDevice::Get().CreateTexture2D(desc, rgba);
+    if (!texture->m_texture) throw std::runtime_error("GPU data texture upload failed");
+    return texture;
 }
 
 void Texture::ReplacePixels(const unsigned char* pixelsRGBA, int width, int height,
                             TextureFilter filter, bool generateMipmaps) {
-    m_width = width;
-    m_height = height;
-    m_channels = 4;
-    m_hasMipmaps = generateMipmaps;
 
     Texture2DDesc desc;
     desc.Width = width;
@@ -179,9 +214,16 @@ void Texture::ReplacePixels(const unsigned char* pixelsRGBA, int width, int heig
     desc.Srgb = m_srgb;   // цветовое пространство — свойство картинки, не заливки
     filter = EffectiveFilter(filter, generateMipmaps);
     desc.FilterMode = filter;
-    m_filter = filter;
     desc.GenerateMipmaps = generateMipmaps;
     // Пересоздание: старый rhi::Texture2D освобождается (unique_ptr), новый
     // занимает его место — GL-хендл заменяется на главном потоке.
-    m_texture = GraphicsDevice::Get().CreateTexture2D(desc, pixelsRGBA);
+    auto replacement = GraphicsDevice::Get().CreateTexture2D(desc, pixelsRGBA);
+    if (!replacement) throw std::runtime_error("Texture::ReplacePixels: GPU allocation/upload failed");
+    m_texture = std::move(replacement);
+    m_float32 = false;
+    m_width = width;
+    m_height = height;
+    m_channels = 4;
+    m_hasMipmaps = generateMipmaps;
+    m_filter = filter;
 }

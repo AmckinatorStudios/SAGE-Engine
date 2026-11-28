@@ -18,6 +18,7 @@
 
 class Scene;
 class ParticleSystem;
+class BillboardSystem;
 
 // ---------------------------------------------------------------------------
 // EditorPlaySession — ИГРА, ЗАПУЩЕННАЯ ВНУТРИ РЕДАКТОРА.
@@ -47,6 +48,7 @@ struct PlayContext {
     Scene** ScenePtr = nullptr;            // сцену заменяет Stop — отсюда двойной указатель
     sage::SystemScheduler* Systems = nullptr;
     ParticleSystem* Particles = nullptr;
+    BillboardSystem* Billboards = nullptr;
     std::filesystem::path ProjectDir;      // корень проекта: модули Lua и пути скриптов
 
     // Восстановить сцену из снимка. Знание о сериализаторе и переносе

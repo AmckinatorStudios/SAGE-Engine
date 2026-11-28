@@ -249,12 +249,16 @@ public:
     // (видно там, где у неё альфа), мягкий край, инверсия (видно всё, кроме
     // окна). Режется в шейдере по пикселям. Вложенная маска заменяет внешнюю
     // форму (ножницы при этом по-прежнему пересекаются).
+    // Keep borrowed cache textures alive until queued draw segments are submitted.
+    const Texture* HoldTexture(std::shared_ptr<const Texture> texture);
+    glm::vec2 SetRotationCenter(glm::vec2 center);
     struct Mask {
         glm::vec4 Rect{0.0f};            // окно маски: x, y, w, h (экранные)
         float Radius = 0.0f;             // скругление углов окна
         float Feather = 0.0f;            // мягкий край, пикселей
         bool Invert = false;
         const Texture* Image = nullptr;  // маска-картинка (альфа)
+        std::shared_ptr<const Texture> TextureOwner;
         glm::vec4 UV{0.0f, 1.0f, 1.0f, 0.0f}; // её кусок: u0, v0, u1, v1
         // КАРТИНКА ПОРЯДКА: красный канал — когда пиксель заполняется (0 —
         // первым, 1 — последним), альфа — где картинка вообще есть. Видно то,
@@ -399,6 +403,7 @@ private:
 
     std::vector<UIVertex> m_vertices; // все квады кадра (прямоугольники, картинки, глифы)
     std::vector<Segment> m_segments;
+    std::unordered_map<const Texture*, std::shared_ptr<const Texture>> m_frameTextures;
     std::vector<glm::vec4> m_clipStack; // текущие маски (уже пересечённые)
     std::vector<Mask> m_maskStack;      // маски по форме (действует верхняя)
     size_t m_quadCount = 0;

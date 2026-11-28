@@ -5,6 +5,7 @@
 #include <cmath>
 #include <initializer_list>
 #include <list>
+#include <optional>
 #include <string_view>
 #include <string>
 #include <vector>
@@ -39,6 +40,7 @@ namespace sage::ui::parts {
 struct PictureParams {
     const Texture* Tex = nullptr;
     UIRenderer::Sprite Src;
+    std::optional<glm::vec2> Pivot;
     int Fit = 0;                  // как Image::Mode
     NineSlice Slice;              // для девятины
     float PixelScale = 0.0f;
@@ -80,7 +82,14 @@ float AlphaOf(const PartDrawContext& c, float channelAlpha);
 glm::vec3 StateTint(const PartDrawContext& c, glm::vec3 base);
 float RoundingOf(const PartDrawContext& c);
 void DrawPicture(UIRenderer& ui, const PictureParams& p, const UIRect& r, float canvasScale, glm::vec3 rgb, float alpha);
-const Texture* LookTexture(const Look& look);
+struct SpriteClock { float Seconds = 0.0f; };
+float SpriteTime(const entt::registry& reg);
+ResourceManager::SpriteTexture SpritePicture(assets::SpriteRef ref, TextureFiltering filtering,
+                                             const std::string& path = {}, const std::string& name = {},
+                                             bool sequence = false);
+std::shared_ptr<Texture> PictureTexture(const std::string& path, TextureFiltering filtering);
+void ApplySpriteFrame(PictureParams& picture, const assets::SpriteRegion& region,
+                      bool overrideSlice, bool useFit, bool usePivot);
 float LookRounding(const Look& look, const UIRect& r, float scale);
 void DrawLookShadow(const PartDrawContext& c, const Look& look, const UIRect& r, float alpha);
 void DrawLookBody(const PartDrawContext& c, const Look& look, const UIRect& r, glm::vec3 rgb, float opacity);

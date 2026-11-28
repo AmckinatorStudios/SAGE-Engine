@@ -1,3 +1,5 @@
+#include "sage/assets/SpriteSheet.h"
+#include "sage/core/Paths.h"
 #include "../AssetOpen.h"
 #include "../CreateAssetDialog.h"
 #include "../DragSet.h"
@@ -138,6 +140,99 @@ const char* AssetsPanel::FolderIcon(const fs::path& dir) {
 }
 
 
+namespace {
+using FileMove = std::pair<fs::path, fs::path>;
+
+bool CollectAssetFiles(const fs::path& source, std::vector<fs::path>& files, std::string& err) {
+    const auto path = sage::PathToUtf8(source);
+    const auto leaf = sage::PathToUtf8(source.filename());
+    if (source.extension() == ".sagesheet" || source.extension() == ".sage9" ||
+        leaf.rfind(".sage-atlas-", 0) == 0) {
+        err = "Operate on the sprite's image to move or delete its metadata";
+        return false;
+    }
+    files.push_back(source);
+    std::error_code ec;
+    auto add = [&](const std::string& candidate) {
+        const auto file = sage::PathFromUtf8(candidate);
+        if (fs::exists(file, ec)) files.push_back(file);
+        if (ec) err = ec.message();
+        return !ec;
+    };
+    for (const char* suffix : {".meta", ".sageimport", ".sage9", ".sagesheet", ".sagesheet.meta", ".sage9.meta"})
+        if (!add(path + suffix)) return false;
+
+    const auto sheetPath = sage::assets::SpriteSheet::SidecarPath(path);
+    if (!fs::exists(sage::PathFromUtf8(sheetPath), ec)) {
+        if (ec) err = ec.message();
+        return !ec;
+    }
+    sage::assets::SpriteSheet sheet;
+    if (!sage::assets::SpriteSheet::LoadFile(sheetPath, sheet, err)) return false;
+    if (sheet.ImageFile().rfind(".sage-atlas-", 0) == 0) {
+        const auto revision = sheet.ImagePath(path);
+        if (!add(revision) || !add(revision + ".meta")) return false;
+    } else if (!sheet.ImageFile().empty()) {
+        err = "Move the containing folder to keep the sprite and its referenced image together";
+        return false;
+    }
+    return true;
+}
+
+bool MoveFiles(const std::vector<FileMove>& moves, std::string& err) {
+    std::error_code ec;
+    for (const auto& [from, to] : moves) {
+        if (from == to) continue;
+        const bool exists = fs::exists(to, ec);
+        if (ec || (exists && (!fs::equivalent(from, to, ec) || ec))) {
+            err = "Asset destination conflict: " + sage::PathToUtf8(to);
+            return false;
+        }
+    }
+    for (size_t i = 0; i < moves.size(); ++i) {
+        const auto& [from, to] = moves[i];
+        if (from == to) continue;
+        fs::rename(from, to, ec);
+        if (!ec) continue;
+        err = ec.message();
+        while (i > 0) {
+            const auto& [restore, moved] = moves[--i];
+            if (restore == moved) continue;
+            fs::rename(moved, restore, ec);
+            if (ec) err += "; rollback failed for " + sage::PathToUtf8(moved) + ": " + ec.message();
+        }
+        return false;
+    }
+    return true;
+}
+
+bool MoveAssetFiles(const fs::path& source, const fs::path& target, std::string& err) {
+    const auto from = sage::PathToUtf8(source);
+    const auto to = sage::PathToUtf8(target);
+    std::vector<fs::path> files;
+    if (!CollectAssetFiles(source, files, err)) return false;
+    std::vector<FileMove> moves;
+    for (const auto& file : files) {
+        const auto path = sage::PathToUtf8(file);
+        if (path.rfind(from, 0) == 0)
+            moves.emplace_back(file, sage::PathFromUtf8(to + path.substr(from.size())));
+        else
+            moves.emplace_back(file, target.parent_path() / file.filename());
+    }
+    for (const char* suffix : {".sagesheet", ".sagesheet.meta", ".sage9", ".sage9.meta", ".meta", ".sageimport"}) {
+        const auto sidecar = sage::PathFromUtf8(to + suffix);
+        std::error_code ec;
+        if (fs::exists(sidecar, ec) &&
+            std::none_of(moves.begin(), moves.end(), [&](const auto& move) { return move.second == sidecar; })) {
+            err = "Asset destination conflict: " + sage::PathToUtf8(sidecar);
+            return false;
+        }
+        if (ec) { err = ec.message(); return false; }
+    }
+    return MoveFiles(moves, err);
+}
+} // namespace
+
 bool AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const fs::path& folder,
                                  bool rescan) {
     std::error_code ec;
@@ -163,16 +258,10 @@ bool AssetsPanel::MoveIntoFolder(EditorHost& host, const fs::path& source, const
         return false;
     }
 
-    fs::rename(source, target, ec);
-    if (ec) {
-        host.SetStatusMessage(T("Moving failed: ") + ec.message());
-        LOG_ERROR("Editor") << "Перенос ассета не удался: " << ec.message();
+    std::string moveError;
+    if (!MoveAssetFiles(source, target, moveError)) {
+        host.SetStatusMessage(T("Moving failed: ") + moveError);
         return false;
-    }
-    for (const char* sidecar : {".meta", ".sageimport"}) {
-        const fs::path from = source.string() + sidecar;
-        std::error_code sec;
-        if (fs::exists(from, sec)) fs::rename(from, target.string() + sidecar, sec);
     }
 
     if (m_selected == source) m_selected = target;
@@ -247,16 +336,7 @@ bool AssetsPanel::RenameAsset(const fs::path& path, const std::string& newName,
         err = T("A file with this name already exists");
         return false;
     }
-    fs::rename(path, target, ec);
-    if (ec) {
-        err = "Rename failed: " + ec.message();
-        return false;
-    }
-    for (const char* sidecar : {".meta", ".sageimport"}) {
-        const fs::path from = path.string() + sidecar;
-        std::error_code sec;
-        if (fs::exists(from, sec)) fs::rename(from, target.string() + sidecar, sec);
-    }
+    if (!MoveAssetFiles(path, target, err)) return false;
     outRenamed = target;
     return true;
 }
@@ -264,23 +344,27 @@ bool AssetsPanel::RenameAsset(const fs::path& path, const std::string& newName,
 
 // Удаление ассета вместе с сайдкарами: иначе от него остаётся невидимая запись
 // .meta, которую база ассетов честно считает существующим ассетом.
-void AssetsPanel::DeleteAsset(const fs::path& path) {
+bool AssetsPanel::DeleteAsset(const fs::path& path, std::string& err) {
+    std::vector<fs::path> files;
+    if (!CollectAssetFiles(path, files, err)) return false;
+    const auto staging = path.parent_path() / (".sage-delete-" + sage::AssetGuid::Generate().ToString());
     std::error_code ec;
-    fs::remove_all(path, ec);
-    // Файл остался (занят другой программой, нет прав) — сайдкар НЕ трогаем:
-    // .meta — это GUID ассета, и без него уцелевший файл стал бы для проекта
-    // новым, а ссылки сцен на него — битыми.
-    std::error_code still;
-    if (ec || fs::exists(path, still)) {
-        LOG_ERROR("Editor") << "Asset delete failed: " << (ec ? ec.message() : path.string());
-        return;
+    if (!fs::create_directory(staging, ec)) {
+        err = "Cannot prepare asset deletion: " + ec.message();
+        return false;
     }
-    for (const char* sidecar : {".meta", ".sageimport"}) {
-        std::error_code sec;
-        fs::remove(path.string() + sidecar, sec);
+    std::vector<FileMove> moves;
+    // Keeping the original names here adds the entire staging directory to
+    // each path. Short names leave room for long sprite sidecars on Windows.
+    for (const auto& file : files) moves.emplace_back(file, staging / std::to_string(moves.size()));
+    if (!MoveFiles(moves, err)) {
+        fs::remove(staging, ec); // Empty after rollback; preserve files if rollback failed.
+        return false;
     }
+    fs::remove_all(staging, ec);
+    if (ec) LOG_WARN("Editor") << "Could not clean staged deletion: " << sage::PathToUtf8(staging);
+    return true;
 }
-
 
 // Копирование БЕЗ базы ассетов (см. AssetsPanel.h): всё, что здесь делается, —
 // работа файловой системы, и её ведёт фоновый поток.

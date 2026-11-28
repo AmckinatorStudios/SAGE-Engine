@@ -1,6 +1,5 @@
 #include "ScriptEngine.h"
 
-#include "sage/render/RenderTexture.h"
 
 #include "sage/core/Log.h"
 #include "sage/render/ResourceManager.h"
@@ -11,9 +10,10 @@
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPresets.h"
 #include "sage/ui/SpriteSheet.h"
+#include "sage/ui/UISerialize.h"
+#include "sage/core/Paths.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Pack.h"
-#include <stb_image.h>
 
 #include <algorithm>
 #include <cmath>
@@ -236,16 +236,45 @@ struct SheetRef {
 std::string SheetSidecar(const std::string& path) {
     return sage::ui::SpriteSheet::SidecarPath(sage::AssetDatabase::Instance().LocatePath(path));
 }
-// Пиксели картинки листа (строки сверху вниз) — для нарезки.
-std::vector<unsigned char> SheetPixels(const std::string& path, int& w, int& h) {
-    int ch = 0;
-    stbi_set_flip_vertically_on_load_thread(false);
-    unsigned char* data =
-        sage::assets::vfs::LoadImage(sage::AssetDatabase::Instance().LocatePath(path), &w, &h, &ch, 4);
-    if (!data) throw std::runtime_error("sprite_sheet: не удалось прочитать картинку '" + path + "'");
-    std::vector<unsigned char> px(data, data + (size_t)w * h * 4);
-    stbi_image_free(data);
-    return px;
+sage::assets::ResolvedSprite ImageSprite(const sage::ui::Image& image) {
+    auto& resources = ResourceManager::Instance();
+    if (image.SpriteRef.Valid()) return resources.ResolveSprite(image.SpriteRef);
+    auto resolved = resources.ResolveSpriteImage(image.Path);
+    if (!resolved) return {};
+    if (!image.Sequence.empty()) {
+        const auto* sequence = resolved.Resource->Sheet.FindSequence(image.Sequence);
+        if (!sequence) return {};
+        resolved.Ref.Item = sequence->Id();
+        resolved.Ref.Type = sage::assets::SpriteRef::Kind::Sequence;
+    } else if (!image.NamedSprite.empty()) {
+        const auto* region = resolved.Resource->Sheet.Find(image.NamedSprite);
+        if (!region) return {};
+        resolved.Ref.Item = region->Id();
+    }
+    return resolved;
+}
+
+void SetRawSprite(sage::ui::Image& image, glm::vec4 rect) {
+    image.SpriteRef = {};
+    image.NamedSprite.clear();
+    image.Sequence.clear();
+    image.Sprite = rect;
+}
+
+void OverrideSlice(sage::ui::Image& image) {
+    if (image.OverrideSpriteSlice) return;
+    if (image.SpriteRef.Valid() || !image.NamedSprite.empty()) {
+        const auto resolved = ImageSprite(image);
+        if (const auto* frame = resolved.Region(image.SequenceTime)) image.SetSlice(frame->NineSliceOf());
+    }
+    image.OverrideSpriteSlice = true;
+}
+
+std::shared_ptr<const sage::assets::SpriteImage> SheetPixels(const std::string& path) {
+    auto source = ResourceManager::Instance().ResolveSpriteImage(path, true);
+    if (!source || !source.Resource->Image)
+        throw std::runtime_error("sprite_sheet: " + source.Diagnostic);
+    return source.Resource->Image;
 }
 } // namespace
 
@@ -454,11 +483,61 @@ void ScriptEngine::RegisterUIApi() {
         "TextOutline", UI_FIELD(sage::ui::Label, OutlineWidth),
         "TextOutlineColor", UI_FIELD(sage::ui::Label, OutlineColor),
         // Картинка.
-        "TexturePath", UI_FIELD(sage::ui::Image, Path),
-        "Sprite", UI_FIELD(sage::ui::Image, Sprite),
-        "SpriteHover", UI_FIELD(sage::ui::Image, SpriteHover),
-        "SpritePressed", UI_FIELD(sage::ui::Image, SpritePressed),
-        "SliceBorder", UI_FIELD(sage::ui::Image, SliceBorder),
+        "TexturePath", sol::property([](UIRef& r) {
+            const auto* image = r.Peek<sage::ui::Image>();
+            return image ? image->Path : std::string{};
+        }, [](UIRef& r, const std::string& path) {
+            if (!r.Alive()) return;
+            auto& image = r.Part<sage::ui::Image>();
+            if (image.Path != path) {
+                image.SpriteRef = {};
+                image.NamedSprite.clear();
+            }
+            image.Path = path;
+        }),
+        "Sprite", sol::property([](UIRef& r) {
+            const auto* image = r.Peek<sage::ui::Image>();
+            if (!image) return glm::vec4(0);
+            if (image->SpriteRef.Valid() || !image->NamedSprite.empty() || !image->Sequence.empty()) {
+                const auto resolved = ImageSprite(*image);
+                if (const auto* frame = resolved.Region(image->SequenceTime)) return glm::vec4(frame->Rect);
+            }
+            return image->Sprite;
+        }, [](UIRef& r, glm::vec4 rect) {
+            if (r.Alive()) SetRawSprite(r.Part<sage::ui::Image>(), rect);
+        }),
+        "SpriteHover", sol::property([](UIRef& r) {
+            const auto* image = r.Peek<sage::ui::Image>();
+            return image ? image->SpriteHover : glm::vec4(0);
+        }, [](UIRef& r, glm::vec4 rect) {
+            if (!r.Alive()) return;
+            auto& image = r.Part<sage::ui::Image>();
+            image.HoverSpriteRef = {};
+            image.SpriteHover = rect;
+        }),
+        "SpritePressed", sol::property([](UIRef& r) {
+            const auto* image = r.Peek<sage::ui::Image>();
+            return image ? image->SpritePressed : glm::vec4(0);
+        }, [](UIRef& r, glm::vec4 rect) {
+            if (!r.Alive()) return;
+            auto& image = r.Part<sage::ui::Image>();
+            image.PressedSpriteRef = {};
+            image.SpritePressed = rect;
+        }),
+        "SliceBorder", sol::property([](UIRef& r) {
+            const auto* image = r.Peek<sage::ui::Image>();
+            if (!image) return glm::vec4(0);
+            if (!image->OverrideSpriteSlice && (image->SpriteRef.Valid() || !image->NamedSprite.empty())) {
+                const auto resolved = ImageSprite(*image);
+                if (const auto* frame = resolved.Region(image->SequenceTime)) return frame->Slice;
+            }
+            return image->SliceBorder;
+        }, [](UIRef& r, glm::vec4 border) {
+            if (!r.Alive()) return;
+            auto& image = r.Part<sage::ui::Image>();
+            OverrideSlice(image);
+            image.SliceBorder = border;
+        }),
         "PixelScale", UI_FIELD(sage::ui::Image, PixelScale),
         // Замощение: копий по ширине и высоте (vec2; 0 по оси — своим размером).
         "Repeat", UI_FIELD(sage::ui::Image, Repeat),
@@ -480,12 +559,25 @@ void ScriptEngine::RegisterUIApi() {
         "Fit", sol::property(
                    [](UIRef& r) {
                        const sage::ui::Image* im = r.Peek<sage::ui::Image>();
-                       return std::string(kFitNames[(int)(im ? im->Fit : sage::ui::Image::Mode::Normal)]);
+                       if (!im) return std::string(kFitNames[0]);
+                       if (im->UseSpriteFit && im->Fit == sage::ui::Image::Mode::Normal &&
+                           (im->SpriteRef.Valid() || !im->NamedSprite.empty())) {
+                           const auto resolved = ImageSprite(*im);
+                           if (const auto* frame = resolved.Region(im->SequenceTime)) {
+                               const auto border = im->OverrideSpriteSlice ? im->SliceBorder : frame->Slice;
+                               if (border != glm::vec4(0)) return std::string(kFitNames[1]);
+                           }
+                       }
+                       return std::string(kFitNames[int(im->Fit)]);
                    },
                    [](UIRef& r, const std::string& name) {
                        for (int i = 0; i < 5; ++i) {
                            if (name == kFitNames[i]) {
-                               if (r.Alive()) r.Part<sage::ui::Image>().Fit = (sage::ui::Image::Mode)i;
+                               if (r.Alive()) {
+                                   auto& image = r.Part<sage::ui::Image>();
+                                   image.Fit = (sage::ui::Image::Mode)i;
+                                   image.UseSpriteFit = false;
+                               }
                                return;
                            }
                        }
@@ -628,22 +720,14 @@ void ScriptEngine::RegisterUIApi() {
                                         sol::optional<bool> sharp) {
         if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return;
         sage::ui::Image& im = obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity());
+        if (im.Path != path || path.empty()) {
+            im.SpriteRef = {};
+            im.NamedSprite.clear();
+        }
         im.Path = path;
-        // Второй аргумент — РЕЗКАЯ ли фильтрация (ближайший пиксель).
         im.Filtering = sharp.value_or(false) ? sage::ui::TextureFiltering::Nearest
                                              : sage::ui::TextureFiltering::Smooth;
-        // "rt:<имя>" — картинка, которую движок рисует сам (см. render/
-        // RenderTexture.h). Проверяется ПЕРЕД диском: иначе объёмная иконка
-        // искалась бы файлом, не находилась и молча становилась заглушкой.
-        if (auto rt = sage::render::RenderTextureRegistry::Resolve(path)) {
-            im.Tex = rt;
-        } else {
-            im.Tex = path.empty() ? nullptr
-                     : im.Sharp()
-                         ? ResourceManager::Instance().GetTexture(path, TextureFilter::Nearest, false)
-                         : ResourceManager::Instance().GetTexture(path, TextureFilter::Trilinear, true,
-                                                                  /*bleed=*/true);   // без каймы у прозрачности
-        }
+        sage::ui::EnsureImageTexture(im);
     });
 
     // Убрать картинку с элемента СОВСЕМ. Не то же, что пустой путь: пока
@@ -658,7 +742,7 @@ void ScriptEngine::RegisterUIApi() {
     // описывается ровно теми числами, что напечатаны в его документации.
     Bind("ui", "SetSprite", "SetUISprite", [](GameObject& obj, float x, float y, float w, float h) {
         if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return;
-        obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity()).Sprite = glm::vec4(x, y, w, h);
+        SetRawSprite(obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity()), glm::vec4(x, y, w, h));
     });
 
     // Девятина: неподвижные углы в пикселях исходника (лево, верх, право, низ).
@@ -666,6 +750,7 @@ void ScriptEngine::RegisterUIApi() {
                                         sol::optional<float> scale) {
         if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return;
         sage::ui::Image& im = obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity());
+        OverrideSlice(im);
         im.SliceBorder = glm::vec4(l, t, r, b);
         im.PixelScale = scale.value_or(0.0f);
     });
@@ -680,11 +765,13 @@ void ScriptEngine::RegisterUIApi() {
         if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return false;
         sage::ui::Image* im = obj.Registry()->try_get<sage::ui::Image>(obj.Entity());
         if (!im || im->Path.empty()) return false;
-        sage::ui::NineSlice slice;
-        std::string err;
-        if (!sage::ui::NineSlice::LoadFile(sage::ui::NineSlice::SidecarPath(im->Path), slice, err))
+        using sage::assets::vfs::Exists;
+        const auto path = sage::AssetDatabase::Instance().LocatePath(im->Path);
+        if (!Exists(sage::ui::SpriteSheet::SidecarPath(path)) && !Exists(sage::ui::NineSlice::SidecarPath(path)))
             return false;
-        im->SetSlice(slice);
+        const auto source = ResourceManager::Instance().ResolveSpriteImage(im->Path, true);
+        if (!source) return false;
+        im->SetSlice(source.Resource->Sheet.TextureSlice);
         return true;
     });
 
@@ -700,10 +787,10 @@ void ScriptEngine::RegisterUIApi() {
             sol::state_view L(ts);
             sol::table out = L.create_table();
             int i = 1;
-            for (const auto& reg : r.Sheet.Regions) out[i++] = reg.Name;
+            for (const auto& reg : r.Sheet.Regions()) out[i++] = reg.Name;
             return out;
         },
-        "Count", [](const SheetRef& r) { return (int)r.Sheet.Regions.size(); },
+        "Count", [](const SheetRef& r) { return (int)r.Sheet.Regions().size(); },
         "Rect", [](const SheetRef& r, const std::string& name, sol::this_state ts) {
             sol::state_view L(ts);
             const sage::ui::SpriteRegion* reg = r.Sheet.Find(name);
@@ -726,8 +813,7 @@ void ScriptEngine::RegisterUIApi() {
         "Rename", [](SheetRef& r, const std::string& a, const std::string& b) { return r.Sheet.Rename(a, b); },
         "Remove", [](SheetRef& r, const std::string& a) { return r.Sheet.Remove(a); },
         "Grid", [](SheetRef& r, sol::table o) {
-            int w = 0, h = 0;
-            const std::vector<unsigned char> px = SheetPixels(r.Path, w, h);
+            const auto px = SheetPixels(r.Path);
             sage::ui::SpriteGrid g;
             g.CellW = o.get_or("w", g.CellW);
             g.CellH = o.get_or("h", g.CellW);
@@ -737,27 +823,33 @@ void ScriptEngine::RegisterUIApi() {
             g.OffY = o.get_or("y", 0);
             g.Prefix = o.get_or("prefix", g.Prefix);
             g.SkipEmpty = o.get_or("skip_empty", true);
-            return r.Sheet.SliceGrid(w, h, g, px.data(), false);
+            return r.Sheet.SliceGrid(px->Width, px->Height, g, px->Pixels.data(), false);
         },
         "Auto", [](SheetRef& r, sol::optional<sol::table> o) {
-            int w = 0, h = 0;
-            const std::vector<unsigned char> px = SheetPixels(r.Path, w, h);
+            const auto px = SheetPixels(r.Path);
             const float cut = o ? o->get_or("cutoff", 0.05f) : 0.05f;
             const int minSize = o ? o->get_or("min", 2) : 2;
             const std::string prefix = o ? o->get_or("prefix", std::string("sprite")) : std::string("sprite");
-            return r.Sheet.SliceAuto(px.data(), w, h, false, cut, minSize, prefix);
+            return r.Sheet.SliceAuto(px->Pixels.data(), px->Width, px->Height, false, cut, minSize, prefix);
         },
         "Save", [](const SheetRef& r) {
             std::string e;
             if (!r.Sheet.SaveFile(SheetSidecar(r.Path), e))
                 throw std::runtime_error("sprite_sheet.save: " + e);
+            auto& database = sage::AssetDatabase::Instance();
+            const auto sidecar = sage::ui::SpriteSheet::SidecarPath(r.Path);
+            if (!database.ProjectDir().empty() && !sage::PathFromUtf8(sidecar).is_absolute()) {
+                const auto guid = database.Register(sidecar);
+                if (guid.Valid()) ResourceManager::Instance().NotifySpriteChanged(guid);
+            }
             return true;
         });
     Bind("ui", "Sheet", nullptr, [](const std::string& path) {
         SheetRef r;
         r.Path = path;
-        std::string err;
-        sage::ui::SpriteSheet::LoadFile(SheetSidecar(path), r.Sheet, err);
+        const auto source = ResourceManager::Instance().ResolveSpriteImage(path, true);
+        if (source) r.Sheet = source.Resource->Sheet;
+        else throw std::runtime_error("sprite_sheet: " + source.Diagnostic);
         return r;
     });
     // Стиль SAGE — методы через точку: тонкая обёртка над объектом C++.
@@ -783,28 +875,26 @@ end
     Bind("ui", "SetSpriteNamed", "SetUISpriteNamed", [](GameObject& obj, const std::string& path,
                                                        const std::string& name, sol::optional<bool> sharp) {
         if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return false;
-        sage::ui::SpriteSheet sheet;
-        std::string err;
-        if (!sage::ui::SpriteSheet::LoadFile(SheetSidecar(path), sheet, err)) return false;
-        const sage::ui::SpriteRegion* r = sheet.Find(name);
-        if (!r) return false;
-        sage::ui::Image& im = obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity());
-        if (im.Path != path) {
-            im.Path = path;
-            im.Filtering = sharp.value_or(true) ? sage::ui::TextureFiltering::Nearest
-                                                : sage::ui::TextureFiltering::Smooth;
-            im.Tex = im.Sharp() ? ResourceManager::Instance().GetTexture(path, TextureFilter::Nearest, false)
-                                : ResourceManager::Instance().GetTexture(path, TextureFilter::Trilinear, true,
-                                                                         /*bleed=*/true);
-        }
-        im.Sprite = glm::vec4(r->Rect);
-        if (r->Slice != glm::vec4(0.0f)) {
-            // Девятина — СВОЯ у куска: поля, заливки и середина из листа.
-            im.SetSlice(r->NineSliceOf());
-            im.Fit = sage::ui::Image::Mode::NineSlice;   // кусок-рамка тянется девятиной
-        } else if (im.Fit == sage::ui::Image::Mode::NineSlice) {
-            im.Fit = sage::ui::Image::Mode::Normal;      // прежняя рамка не держит новый кусок
-        }
+        const auto sheet = ResourceManager::Instance().ResolveSpriteImage(path);
+        const auto* region = sheet ? sheet.Resource->Sheet.Find(name) : nullptr;
+        const auto* sequence = sheet && !region ? sheet.Resource->Sheet.FindSequence(name) : nullptr;
+        if (!region && !sequence) return false;
+        auto& im = obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity());
+        if (im.Path != path || sharp)
+            im.Filtering = sharp.value_or(true) ? sage::ui::TextureFiltering::Nearest : sage::ui::TextureFiltering::Smooth;
+        const sage::assets::SpriteRef ref{sheet.Ref.Asset, region ? region->Id() : sequence->Id(),
+            region ? sage::assets::SpriteRef::Kind::Region : sage::assets::SpriteRef::Kind::Sequence};
+        if (im.SpriteRef.Item != ref.Item || im.SpriteRef.Asset != ref.Asset || im.Path != path)
+            im.SequenceTime = 0.0f;
+        im.Path = path;
+        im.SpriteRef = ref;
+        im.NamedSprite = !ref.Valid() && region ? name : std::string{};
+        im.Sequence = !ref.Valid() && sequence ? name : std::string{};
+        im.Sprite = glm::vec4(0);
+        im.OverrideSpriteSlice = false;
+        im.UseSpriteFit = true;
+        if (im.Fit == sage::ui::Image::Mode::NineSlice) im.Fit = sage::ui::Image::Mode::Normal;
+        im.Tex.reset();
         return true;
     });
 
@@ -814,6 +904,7 @@ end
     Bind("ui", "SetSliceTiled", "SetUISliceTiled", [](GameObject& obj, bool tiled) {
         if (!obj.Valid() || !sage::ui::IsElement(*obj.Registry(), obj.Entity())) return;
         sage::ui::Image& im = obj.Registry()->get_or_emplace<sage::ui::Image>(obj.Entity());
+        OverrideSlice(im);
         const auto fill = tiled ? sage::ui::SliceFill::Tile : sage::ui::SliceFill::Stretch;
         im.SliceCenterFill = fill;
         im.SliceEdgeFill = fill;

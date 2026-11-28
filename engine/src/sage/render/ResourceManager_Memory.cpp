@@ -74,7 +74,7 @@ void ResourceManager::EvictToBudget() {
         d.Bytes = rec.Bytes;
         d.Tick = rec.Tick;
         d.Side = std::max(rec.Tex->Width(), rec.Tex->Height());
-        d.Streamable = !rec.Pending && !rec.Generated;
+        d.Streamable = !rec.Pending && !rec.Generated && !rec.SpriteSnapshot;
         dcands.push_back(d);
     }
     for (size_t idx : SelectDowngrades(dcands, m_textureBytes, m_textureBudget)) {
@@ -168,7 +168,7 @@ ResourceManager::Stats ResourceManager::GetStats() const {
     s.Materials = m_materials.size();
     s.TextureBytes = m_textureBytes;
     s.TextureBudget = m_textureBudget;
-    s.PendingAsync = m_async ? (size_t)std::max(0, m_async->Pending.load()) : 0;
+    s.PendingAsync = (size_t)std::max(0, m_streamer.Pending());
     s.Evictions = m_evictions;
     return s;
 }

@@ -400,5 +400,9 @@ void EditorLayer::AssetsDeleted(const std::vector<fs::path>& paths) {
         std::string err;
         if (!m_project.SetStartScene("", err)) LOG_WARN("Editor") << "Стартовая сцена не снята: " << err;
     }
-    if (m_project.Loaded()) sage::AssetDatabase::Instance().ScanProject(m_project.Dir().string());
+    if (m_project.Loaded()) {
+        auto& database = sage::AssetDatabase::Instance();
+        database.ScanProject(m_project.Dir().string());
+        database.ForgetMissingProjectFiles();
+    }
 }

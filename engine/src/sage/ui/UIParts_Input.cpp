@@ -414,6 +414,9 @@ const std::vector<PartField>& MaskFields() {
             v[i].ShowIfValue = 2;
         }
         v[8].Hidden = true;
+        v.push_back({"spriteRef", SAGE_UI_TEXT("Sprite"), PartField::Kind::SpriteRef, offsetof(Mask, SpriteRef)});
+        v.back().ShowIfKey = "form";
+        v.back().ShowIfValue = 2;
         return v;
     }();
     return f;

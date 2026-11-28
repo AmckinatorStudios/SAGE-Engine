@@ -1,19 +1,25 @@
 #pragma once
-#include "sage/scene/Scene.h"
-#include "sage/input/InputSystem.h"
-#include "sage/render/Camera.h"
-#include "sage/render/ParticleSystem.h"
-#include "sage/render/BillboardSystem.h"
-#include "sage/render/Texture.h"
-#include "sage/audio/AudioEngine.h"
-#include "sage/physics/PhysicsScene.h"
-#include "sage/ai/World.h"
-#include "sage/scripting/LuaHandlerStore.h"
-#include "sage/scripting/ScriptApi.h"
-#include "sage/scripting/ScriptTasks.h"
-
-namespace sage::net { class NetworkSystem; }
+// FORWARD DECLARATIONS — убираем циклическую зависимость Scene ↔ ScriptEngine
+class Scene;
+class GameObject;
 class Window;
+class Camera;
+class ParticleSystem;
+class BillboardSystem;
+class Texture;
+class AudioEngine;
+class PhysicsScene;
+namespace sage::input { class InputSystem; }
+namespace sage::net { class NetworkSystem; }
+namespace sage::ai { class World; struct GraphDoc; }
+namespace sage::scripting { 
+    class LuaHandlerStore;
+    class ScriptTasks;
+}
+namespace sage::events { class Bus; }
+
+#include "sage/vars/Value.h"
+#include "sage/scripting/ScriptApi.h"
 
 #include <sol/sol.hpp>
 #include <functional>
@@ -79,6 +85,7 @@ class Window;
 class ScriptEngine {
 public:
     ScriptEngine();
+    ~ScriptEngine();
 
 
     // Даёт скриптам доступ к сцене: SpawnObject/FindObject/DestroyObject
@@ -518,11 +525,6 @@ private:
     bool m_quitDispatched = false; // OnQuit уже разослан (см. DispatchQuit)
 
 
-    // Текстуры для билбордов, заказанных из Lua по пути к файлу, кэшируются
-    // здесь (по пути) и живут, пока жив ScriptEngine — билборды в
-    // BillboardSystem хранят на них НЕвладеющий указатель (см. AddBillboard).
-    const Texture* GetOrLoadBillboardTexture(const std::string& path);
-
     sol::state m_lua;
     sage::scripting::ApiBindings m_api;
     // Переносимые функции (RegisterApiFunction) — в Lua и вызыватели.
@@ -569,7 +571,6 @@ private:
     // Сеть кадра — НЕвладеющий указатель, как и остальные привязки: её создаёт
     // и держит тот, кто ведёт игру (рантайм, тест), а не движок скриптов.
     sage::net::NetworkSystem* m_network = nullptr;
-    std::unordered_map<std::string, std::unique_ptr<Texture>> m_billboardTextures;
 
     // Твины геймплея — тикают в UpdateAll со скриптами (замирают на паузе,
     // умирают вместе с движком скриптов при Stop). Правятся из Lua (Tween*).

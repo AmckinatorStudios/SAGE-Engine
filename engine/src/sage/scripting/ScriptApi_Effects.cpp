@@ -1,9 +1,13 @@
+#include "sage/audio/AudioEngine.h"
+#include "sage/render/ParticleSystem.h"
+#include "sage/render/BillboardSystem.h"
 #include "ScriptEngine.h"
 #include "sage/audio/AudioComponents.h"
 
 #include "sage/core/Log.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/render/ParticleEffectIO.h"
+#include "sage/render/ResourceManager.h"
 
 // ---------------------------------------------------------------------------
 // Частицы, билборды и звук: sage.fx.*, sage.audio.*
@@ -18,6 +22,55 @@
 // ---------------------------------------------------------------------------
 
 namespace {
+
+using sage::assets::SpriteRef;
+
+SpriteRef::Kind SpriteKind(const std::string& kind) {
+    if (kind == "region") return SpriteRef::Kind::Region;
+    if (kind == "sequence") return SpriteRef::Kind::Sequence;
+    throw std::runtime_error("sprite kind must be region or sequence");
+}
+
+SpriteRef SpriteById(const sol::optional<std::string>& asset, const sol::optional<std::string>& item,
+                     const sol::optional<std::string>& kind) {
+    if (!asset && !item && !kind) return {};
+    const SpriteRef ref{sage::AssetGuid::FromString(asset.value_or("")),
+                        sage::AssetGuid::FromString(item.value_or("")),
+                        SpriteKind(kind.value_or("region"))};
+    if (!ref.Valid()) throw std::runtime_error("expected a sprite sheet GUID and an item ID");
+    return ref;
+}
+
+SpriteRef SpriteByName(std::string path, const std::string& name, const sol::optional<std::string>& kind) {
+    const std::string suffix = ".sagesheet";
+    if (path.size() >= suffix.size() && path.compare(path.size() - suffix.size(), suffix.size(), suffix) == 0)
+        path.resize(path.size() - suffix.size());
+    auto& resources = ResourceManager::Instance();
+    const auto sheet = resources.ResolveSpriteImage(path);
+    if (!sheet || !sheet.Ref.Asset.Valid())
+        throw std::runtime_error("sprite sheet is not registered: " + path);
+    const auto type = SpriteKind(kind.value_or("region"));
+    if (type == SpriteRef::Kind::Region) {
+        if (const auto* region = sheet.Resource->Sheet.Find(name))
+            return {sheet.Ref.Asset, region->Id(), SpriteRef::Kind::Region};
+    }
+    if (!kind || type == SpriteRef::Kind::Sequence) {
+        if (const auto* sequence = sheet.Resource->Sheet.FindSequence(name))
+            return {sheet.Ref.Asset, sequence->Id(), SpriteRef::Kind::Sequence};
+    }
+    throw std::runtime_error("sprite item not found: " + name);
+}
+
+int FlipbookAxis(sol::stack_object value) {
+    lua_State* lua = value.lua_state();
+    const int index = value.stack_index();
+    int integer = 0;
+    const lua_Integer tiles = lua_tointegerx(lua, index, &integer);
+    if (lua_type(lua, index) != LUA_TNUMBER || !integer || !sage::fx::ValidFlipbookAxis(tiles))
+        throw std::runtime_error("ParticleEffect.TilesX/TilesY: expected an integer in [1, " +
+                                 std::to_string(sage::fx::kMaxFlipbookAxis) + "]");
+    return static_cast<int>(tiles);
+}
 
 // Перечисления эффекта — СЛОВАМИ, теми же, что в файле .sagefx: скрипт и файл
 // говорят на одном языке, и номер из середины списка ни у кого не сломается.
@@ -136,8 +189,14 @@ void ScriptEngine::RegisterParticleApi() {
         "Friction", &ParticleEffect::Friction,
         "LifetimeLoss", &ParticleEffect::LifetimeLoss,
         "Texture", &ParticleEffect::Texture,
-        "TilesX", &ParticleEffect::TilesX,
-        "TilesY", &ParticleEffect::TilesY,
+        "SetSpriteRef", [](ParticleEffect& f, sol::optional<std::string> asset, sol::optional<std::string> item,
+                            sol::optional<std::string> kind) { f.SpriteRef = SpriteById(asset, item, kind); },
+        "SetSpriteNamed", [](ParticleEffect& f, const std::string& path, const std::string& name,
+                              sol::optional<std::string> kind) { f.SpriteRef = SpriteByName(path, name, kind); },
+        "TilesX", sol::property([](const ParticleEffect& f) { return f.TilesX; },
+            [](ParticleEffect& f, sol::stack_object value) { f.TilesX = FlipbookAxis(value); }),
+        "TilesY", sol::property([](const ParticleEffect& f) { return f.TilesY; },
+            [](ParticleEffect& f, sol::stack_object value) { f.TilesY = FlipbookAxis(value); }),
         "FrameRate", &ParticleEffect::FrameRate,
         // Фильтрация картинки частиц словом: «smooth» или «nearest».
         "Filtering", sol::property(
@@ -182,8 +241,13 @@ void ScriptEngine::RegisterParticleApi() {
             f.UseVelocity = true;
         },
         "SetFrames", [](ParticleEffect& f, sol::table frames) {
-            f.Frames.clear();
-            for (auto& kv : frames) f.Frames.push_back(kv.second.as<std::string>());
+            std::vector<std::string> paths;
+            for (auto& kv : frames) {
+                if (paths.size() >= sage::fx::kMaxFlipbookFrames)
+                    throw std::runtime_error("ParticleEffect.SetFrames: too many flipbook frames");
+                paths.push_back(kv.second.as<std::string>());
+            }
+            f.Frames = std::move(paths);
         },
         "AddBurst", [](ParticleEffect& f, float time, int count, sol::optional<int> cycles,
                        sol::optional<float> interval) {
@@ -197,7 +261,7 @@ void ScriptEngine::RegisterParticleApi() {
         std::string err;
         const std::string real = sage::AssetDatabase::Instance().LocatePath(path);
         if (!sage::fx::LoadEffectFile(real, fx, &err))
-            throw std::runtime_error("LoadEffect: " + err);
+            throw std::runtime_error("LoadEffect: " + path + ": " + err);
         return fx;
     });
 
@@ -298,13 +362,27 @@ void ScriptEngine::RegisterBillboardApi() {
     // --- Билборды: доступно после BindBillboards. Спрайт без texturePath
     // рисуется сплошным цветом Tint (см. BillboardSprite) — удобно для
     // маркеров/индикаторов, для которых не хочется готовить текстуру. ---
-    Bind("fx", "AddBillboard", "AddBillboard", [this](glm::vec3 pos, glm::vec2 size, sol::optional<std::string> texturePath) -> int {
+    Bind("fx", "AddBillboard", "AddBillboard", [this](glm::vec3 pos, glm::vec2 size, sol::optional<std::string> texturePath,
+                                                          sol::optional<std::string> name,
+                                                          sol::optional<std::string> kind) -> int {
         if (!m_billboards) throw std::runtime_error("AddBillboard: система билбордов не привязана (ScriptEngine::BindBillboards не вызван)");
         BillboardSprite sprite;
         sprite.WorldPos = pos;
         sprite.Size = size;
-        if (texturePath) sprite.SpriteTexture = GetOrLoadBillboardTexture(*texturePath);
+        if (name) sprite.SpriteRef = SpriteByName(texturePath.value_or(""), *name, kind);
+        else if (texturePath) sprite.TexturePath = *texturePath;
         return m_billboards->Add(sprite);
+    });
+    Bind("fx", "SetBillboardSpriteRef", "SetBillboardSpriteRef",
+         [this](int id, sol::optional<std::string> asset, sol::optional<std::string> item,
+                sol::optional<std::string> kind) {
+        if (!m_billboards) throw std::runtime_error("SetBillboardSpriteRef: billboard system is not bound");
+        m_billboards->SetSprite(id, SpriteById(asset, item, kind));
+    });
+    Bind("fx", "SetBillboardSpriteNamed", "SetBillboardSpriteNamed",
+         [this](int id, const std::string& path, const std::string& name, sol::optional<std::string> kind) {
+        if (!m_billboards) throw std::runtime_error("SetBillboardSpriteNamed: billboard system is not bound");
+        m_billboards->SetSprite(id, SpriteByName(path, name, kind));
     });
     Bind("fx", "RemoveBillboard", "RemoveBillboard", [this](int id) {
         if (!m_billboards) throw std::runtime_error("RemoveBillboard: система билбордов не привязана (ScriptEngine::BindBillboards не вызван)");

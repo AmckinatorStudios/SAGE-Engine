@@ -104,6 +104,7 @@ PlayContext EditorLayer::MakePlayContext() {
     ctx.ScenePtr = &m_scenePtr;
     ctx.Systems = &m_systems;
     ctx.Particles = &m_renderer.Particles();
+    ctx.Billboards = &m_renderer.Billboards();
     ctx.ProjectDir = m_project.Dir();
     ctx.RestoreScene = [this](const std::string& s) { return RestoreSceneFromString(s); };
     ctx.LoadSceneForPlay = [this](const std::string& name) { return LoadSceneForPlay(name); };

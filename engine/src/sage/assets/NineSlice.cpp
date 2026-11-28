@@ -1,5 +1,7 @@
 #include "sage/assets/Pack.h"
-#include "sage/ui/NineSlice.h"
+#include "sage/assets/NineSlice.h"
+#include "sage/assets/SpriteSheet.h"
+#include <stdexcept>
 
 #include "sage/core/AtomicFile.h"
 
@@ -12,7 +14,7 @@
 
 #include "sage/core/Paths.h"
 
-namespace sage::ui {
+namespace sage::assets {
 namespace {
 
 const char* FillName(SliceFill f) { return f == SliceFill::Tile ? "tile" : "stretch"; }
@@ -179,16 +181,29 @@ std::string NineSlice::ToJsonString() const {
 
 bool NineSlice::FromJsonString(const std::string& text, NineSlice& out, std::string& err) {
     try {
+        NineSlice parsed;
         const nlohmann::json j = nlohmann::json::parse(text);
-        if (j.contains("border") && j["border"].is_array() && j["border"].size() == 4) {
-            out.Left = j["border"][0].get<float>();
-            out.Top = j["border"][1].get<float>();
-            out.Right = j["border"][2].get<float>();
-            out.Bottom = j["border"][3].get<float>();
+        if (!j.is_object()) throw std::runtime_error("invalid nine-slice object");
+        if (j.contains("border")) {
+            const auto& b = j["border"];
+            if (!b.is_array() || b.size() != 4) throw std::runtime_error("invalid nine-slice border");
+            glm::vec4 border;
+            for (int i = 0; i < 4; ++i) {
+                border[i] = b[i].get<float>();
+                if (!std::isfinite(border[i]) || border[i] < 0)
+                    throw std::runtime_error("invalid nine-slice border");
+            }
+            parsed.SetBorder(border);
         }
-        if (j.contains("centerFill")) out.CenterFill = FillFromName(j["centerFill"].get<std::string>());
-        if (j.contains("edgeFill")) out.EdgeFill = FillFromName(j["edgeFill"].get<std::string>());
-        if (j.contains("drawCenter")) out.DrawCenter = j["drawCenter"].get<bool>();
+        const auto fill = [&](const char* key) {
+            const auto name = j.value(key, std::string("stretch"));
+            if (name != "stretch" && name != "tile") throw std::runtime_error("invalid nine-slice fill");
+            return FillFromName(name);
+        };
+        parsed.CenterFill = fill("centerFill");
+        parsed.EdgeFill = fill("edgeFill");
+        parsed.DrawCenter = j.value("drawCenter", true);
+        out = parsed;
         return true;
     } catch (const std::exception& e) {
         err = e.what();
@@ -196,11 +211,39 @@ bool NineSlice::FromJsonString(const std::string& text, NineSlice& out, std::str
     }
 }
 
+namespace {
+std::string SheetBesideNineSlice(const std::string& path) {
+    constexpr char suffix[] = ".sage9";
+    constexpr size_t length = sizeof(suffix) - 1;
+    if (path.size() <= length || path.compare(path.size() - length, length, suffix) != 0) return {};
+    const std::string sheet = SpriteSheet::SidecarPath(path.substr(0, path.size() - length));
+    return vfs::Exists(sheet) ? sheet : std::string{};
+}
+} // namespace
+
 bool NineSlice::SaveFile(const std::string& path, std::string& err) const {
+    if (const auto sheetPath = SheetBesideNineSlice(path); !sheetPath.empty()) {
+        SpriteSheet sheet;
+        if (!SpriteSheet::LoadFile(sheetPath, sheet, err)) return false;
+        sheet.TextureSlice = *this;
+        return sheet.SaveFile(sheetPath, err);
+    }
     return sage::WriteFileAtomic(path, ToJsonString(), err);   // прежний файл цел при обрыве
 }
 
 bool NineSlice::LoadFile(const std::string& path, NineSlice& out, std::string& err) {
+    if (const auto sheetPath = SheetBesideNineSlice(path); !sheetPath.empty()) {
+        SpriteSheet sheet;
+        if (!SpriteSheet::LoadFile(sheetPath, sheet, err)) return false;
+        const auto& slice = sheet.TextureSlice;
+        if (slice.Empty() && slice.CenterFill == SliceFill::Stretch && slice.EdgeFill == SliceFill::Stretch &&
+            slice.DrawCenter && !vfs::Exists(path)) {
+            err = "нет файла: " + path;
+            return false;
+        }
+        out = slice;
+        return true;
+    }
     std::string text;   // через vfs — нарезка едет в пакете рядом с картинкой
     if (!sage::assets::vfs::ReadText(path, text)) {
         err = "нет файла: " + path;
@@ -281,4 +324,4 @@ bool GuessBorderFromFile(const std::string& imagePath, NineSlice& out) {
     return ok;
 }
 
-} // namespace sage::ui
+} // namespace sage::assets

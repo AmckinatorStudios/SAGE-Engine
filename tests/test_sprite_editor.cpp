@@ -1,6 +1,6 @@
 // ===========================================================================
-//  РЕДАКТОР СПРАЙТОВ: формат листа v2, живой предпросмотр сетки, острова,
-//  «добавить/заменить», ручки, точка опоры, история, сохранение двух файлов
+//  РЕДАКТОР СПРАЙТОВ: формат листа, живой предпросмотр сетки, острова,
+//  «добавить/заменить», ручки, точка опоры, история, сохранение документа
 //  (editor/src/sprite/SpriteEditModel.h, sage/ui/SpriteSheet.h).
 // ===========================================================================
 #include "TestFramework.h"
@@ -9,6 +9,7 @@
 #include <fstream>
 #include <sstream>
 #include <vector>
+#include <stb_image_write.h>
 
 #include "../editor/src/sprite/SpriteEditModel.h"
 #include "sage/core/Paths.h"
@@ -115,24 +116,27 @@ TEST(SpriteEditor_islands_respect_min_size_and_padding) {
     CHECK_EQ((int)sage::ui::FindIslands(px.data(), 40, 20, p).size(), 0);
 }
 
-TEST(SpriteEditor_add_keeps_existing_and_skips_twins_replace_clears) {
+TEST(SpriteEditor_slicing_preserves_matching_regions) {
     SpriteSheet s;
     SpriteRegion keep;
     keep.Name = "hero";
     keep.Rect = {0, 0, 16, 16};
     keep.Pivot = {0.5f, 1.0f};
-    s.Regions.push_back(keep);
+    s.Set(keep);
     const std::vector<glm::ivec4> rects = {{0, 0, 16, 16}, {16, 0, 16, 16}};
     // Добавить: кусок на месте «hero» второй раз не заводится, его точка
     // опоры не затирается.
     CHECK_EQ(sp::ApplySlices(s, rects, "cell", sp::SliceApply::Add), 1);
-    CHECK_EQ((int)s.Regions.size(), 2);
+    CHECK_EQ((int)s.Regions().size(), 2);
     CHECK_NEAR(s.Find("hero")->Pivot.y, 1.0f, 1e-6f);
     CHECK_TRUE(s.Find("cell_0") != nullptr);
-    // Заменить: прежние куски уходят целиком.
-    CHECK_EQ(sp::ApplySlices(s, rects, "cell", sp::SliceApply::Replace), 2);
-    CHECK_TRUE(s.Find("hero") == nullptr);
-    CHECK_TRUE(s.Find("cell_1") != nullptr);
+    const auto id = s.Find("hero")->Id();
+    s.SequenceFromPrefix("walk", "hero");
+    // Replace keeps the matching region and prunes references to removed regions.
+    CHECK_EQ(sp::ApplySlices(s, {{0, 0, 16, 16}, {32, 0, 16, 16}}, "cell", sp::SliceApply::Replace), 1);
+    CHECK_TRUE(s.Find("hero")->Id() == id);
+    CHECK_TRUE(s.FindSequence("walk")->FrameIdAt(0) == id);
+    CHECK_TRUE(s.Find("cell_0")->Rect.x == 32);
 }
 
 TEST(SpriteEditor_hit_prefers_the_smallest_and_marquee_hits_overlaps) {
@@ -142,7 +146,7 @@ TEST(SpriteEditor_hit_prefers_the_smallest_and_marquee_hits_overlaps) {
     big.Rect = {0, 0, 64, 64};
     small.Name = "gem";
     small.Rect = {10, 10, 8, 8};
-    s.Regions = {small, big};   // крупная — позже, «сверху»
+    s.Set(small); s.Set(big);   // крупная — позже, «сверху»
     CHECK_EQ(sp::HitTest(s, {12.0f, 12.0f}), 0);
     CHECK_EQ(sp::HitTest(s, {40.0f, 40.0f}), 1);
     CHECK_EQ(sp::HitTest(s, {80.0f, 1.0f}), -1);
@@ -186,7 +190,7 @@ TEST(SpriteEditor_names_unique_and_borders_clamped) {
     SpriteRegion a, b;
     a.Name = "a";
     b.Name = "b";
-    s.Regions = {a, b};
+    s.Set(a); s.Set(b);
     CHECK_TRUE(!sp::NameFree(s, "b", 0));
     CHECK_TRUE(sp::NameFree(s, "b", 1));   // своё имя — не занято
     CHECK_TRUE(!sp::NameFree(s, "", 0));
@@ -202,16 +206,16 @@ TEST(SpriteEditor_history_undo_redo_and_new_edit_clears_redo) {
     sp::SpriteDoc doc;
     sp::SpriteHistory h;
     h.Push(doc);
-    doc.Sheet.Regions.push_back(SpriteRegion{"one"});
+    doc.Sheet.Set(SpriteRegion{"one"});
     h.Push(doc);
-    doc.Sheet.Regions.push_back(SpriteRegion{"two"});
+    doc.Sheet.Set(SpriteRegion{"two"});
     CHECK_TRUE(h.Undo(doc));
-    CHECK_EQ((int)doc.Sheet.Regions.size(), 1);
+    CHECK_EQ((int)doc.Sheet.Regions().size(), 1);
     CHECK_TRUE(h.Redo(doc));
-    CHECK_EQ((int)doc.Sheet.Regions.size(), 2);
+    CHECK_EQ((int)doc.Sheet.Regions().size(), 2);
     CHECK_TRUE(h.Undo(doc));
     CHECK_TRUE(h.Undo(doc));
-    CHECK_EQ((int)doc.Sheet.Regions.size(), 0);
+    CHECK_EQ((int)doc.Sheet.Regions().size(), 0);
     CHECK_TRUE(!h.Undo(doc));
     h.Push(doc);   // новая правка — повторять больше нечего
     CHECK_TRUE(!h.CanRedo());
@@ -220,7 +224,7 @@ TEST(SpriteEditor_history_undo_redo_and_new_edit_clears_redo) {
     CHECK_EQ(sp::Fingerprint(doc), sp::Fingerprint(saved));
 }
 
-TEST(SpriteEditor_sheet_v2_keeps_slicing_pivot_and_per_sprite_nineslice) {
+TEST(SpriteEditor_sheet_v3_keeps_slicing_pivot_and_per_sprite_nineslice) {
     SpriteSheet s;
     s.Slicing.Method = sage::ui::SpriteSlicing::Mode::Automatic;
     s.Slicing.Grid.CellW = 24;
@@ -239,9 +243,9 @@ TEST(SpriteEditor_sheet_v2_keeps_slicing_pivot_and_per_sprite_nineslice) {
     button.Name = "button";
     button.Rect = {32, 0, 32, 16};
     button.Slice = {4, 4, 4, 4};   // своя девятина: заливка не наследуется от frame
-    s.Regions = {frame, button};
+    s.Set(frame); s.Set(button);
     const std::string text = s.ToJsonString();
-    CHECK_TRUE(text.find("\"version\": 2") != std::string::npos);
+    CHECK_TRUE(text.find("\"version\": 3") != std::string::npos);
     SpriteSheet r;
     std::string err;
     CHECK_TRUE(SpriteSheet::FromJsonString(text, r, err));
@@ -269,7 +273,7 @@ TEST(SpriteEditor_old_sheet_loads_with_defaults) {
     SpriteSheet s;
     std::string err;
     CHECK_TRUE(SpriteSheet::FromJsonString(old, s, err));
-    CHECK_EQ((int)s.Regions.size(), 2);
+    CHECK_EQ((int)s.Regions().size(), 2);
     CHECK_NEAR(s.Find("panel")->Slice.x, 8.0f, 1e-6f);
     CHECK_NEAR(s.Find("icon")->Pivot.x, 0.5f, 1e-6f);   // по умолчанию — середина
     CHECK_NEAR(s.Find("icon")->Pivot.y, 0.5f, 1e-6f);
@@ -281,14 +285,17 @@ TEST(SpriteEditor_save_writes_only_what_exists_atomically) {
     const fs::path dir = Scratch("sage_sprite_editor_save");
     const std::string image = sage::PathToUtf8(dir / "panel.png");
     std::string err;
-    // Только девятина картинки — листа рядом не появляется.
+    // Даже без регионов метаданные пишутся в единый документ.
     sp::SpriteDoc doc;
-    doc.Texture.SetBorder({4, 4, 4, 4});
+    doc.Sheet.TextureSlice.SetBorder({4, 4, 4, 4});
     CHECK_TRUE(sp::SaveDoc(image, doc, err));
-    CHECK_TRUE(fs::exists(dir / "panel.png.sage9"));
-    CHECK_TRUE(!fs::exists(dir / "panel.png.sagesheet"));
+    CHECK_FALSE(fs::exists(dir / "panel.png.sage9"));
+    CHECK_TRUE(fs::exists(dir / "panel.png.sagesheet"));
+    NineSlice compat;
+    CHECK_TRUE(NineSlice::LoadFile(sage::PathToUtf8(dir / "panel.png.sage9"), compat, err));
+    CHECK_NEAR(compat.Left, 4.0f, 1e-5f);
     // С кусками — лист есть; временных файлов не остаётся.
-    doc.Sheet.Regions.push_back(SpriteRegion{"a", {0, 0, 8, 8}});
+    doc.Sheet.Set(SpriteRegion{"a", {0, 0, 8, 8}});
     CHECK_TRUE(sp::SaveDoc(image, doc, err));
     CHECK_TRUE(fs::exists(dir / "panel.png.sagesheet"));
     CHECK_TRUE(!fs::exists(dir / "panel.png.sagesheet.tmp"));
@@ -298,15 +305,91 @@ TEST(SpriteEditor_save_writes_only_what_exists_atomically) {
     CHECK_TRUE(sp::LoadDoc(image, back, err));
     CHECK_EQ(sp::Fingerprint(back), sp::Fingerprint(doc));
     // Опустошённый лист сохраняется пустым, а не остаётся старым.
-    doc.Sheet.Regions.clear();
+    doc.Sheet.Remove("a");
     CHECK_TRUE(sp::SaveDoc(image, doc, err));
     CHECK_TRUE(ReadAll(dir / "panel.png.sagesheet").find("\"a\"") == std::string::npos);
     // Запись в несуществующую папку — понятная ошибка, а не тишина.
     std::string err2;
     sp::SpriteDoc full;
-    full.Sheet.Regions.push_back(SpriteRegion{"b", {0, 0, 4, 4}});
+    full.Sheet.Set(SpriteRegion{"b", {0, 0, 4, 4}});
     CHECK_TRUE(!sp::SaveDoc(sage::PathToUtf8(dir / "no" / "such" / "x.png"), full, err2));
     CHECK_TRUE(!err2.empty());
+    const auto blocked = dir / "blocked.png.sagesheet";
+    fs::create_directory(blocked);
+    CHECK_FALSE(sp::SaveDoc(sage::PathToUtf8(dir / "blocked.png"), full, err2));
+    CHECK_TRUE(fs::is_directory(blocked));
+    for (const auto& entry : fs::directory_iterator(dir))
+        CHECK_TRUE(entry.path().filename().string().find(".tmp.") == std::string::npos);
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+TEST(SpriteEditor_merges_legacy_files_and_prefers_unified_metadata) {
+    const fs::path dir = Scratch("sage_sprite_editor_migration");
+    const std::string image = sage::PathToUtf8(dir / "panel.png");
+    const auto legacySheet = dir / "panel.png.sagesheet";
+    const auto legacyNine = dir / "panel.png.sage9";
+    std::ofstream(legacySheet) << R"({"version":2,"sprites":[{"name":"corner","rect":[0,0,4,4]}]})";
+    std::ofstream(legacyNine) << R"({"border":[2,3,4,5],"edgeFill":"tile","drawCenter":false})";
+    const auto oldNine = ReadAll(legacyNine);
+    sp::SpriteDoc doc, reopened;
+    std::string err;
+    CHECK_TRUE(sp::LoadDoc(image, doc, err));
+    CHECK_TRUE(doc.Sheet.TextureSlice.EdgeFill == SliceFill::Tile);
+    CHECK_FALSE(doc.Sheet.TextureSlice.DrawCenter);
+    const auto id = doc.Sheet.Find("corner")->Id();
+    CHECK_TRUE(sp::LoadDoc(image, reopened, err));
+    CHECK_TRUE(reopened.Sheet.Find("corner")->Id() == id);
+    doc.Sheet.TextureSlice.Left = 7;
+    CHECK_TRUE(sp::SaveDoc(image, doc, err));
+    CHECK_EQ(ReadAll(legacyNine), oldNine);
+    CHECK_TRUE(sp::LoadDoc(image, reopened, err));
+    CHECK_TRUE(reopened.Sheet.Find("corner")->Id() == id);
+    CHECK_NEAR(reopened.Sheet.TextureSlice.Left, 7.0f, 1e-5f);
+    NineSlice compat;
+    CHECK_TRUE(NineSlice::LoadFile(sage::PathToUtf8(legacyNine), compat, err));
+    CHECK_NEAR(compat.Left, 7.0f, 1e-5f);
+
+    const auto valid = ReadAll(legacySheet);
+    doc.Sheet.SetPivot(0, {2, 0});
+    CHECK_FALSE(sp::SaveDoc(image, doc, err));
+    CHECK_EQ(ReadAll(legacySheet), valid);
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+TEST(SpriteEditor_atlas_publish_preserves_previous_document_on_failure) {
+    const fs::path dir = Scratch("sage_sprite_atlas_publish");
+    const std::string image = sage::PathToUtf8(dir / "atlas.png");
+    std::string err;
+    SpriteSheet document;
+    document.Set(SpriteRegion("frame", {0, 0, 1, 1}));
+    auto encode = [](unsigned char value) {
+        std::string bytes;
+        const unsigned char rgba[] = {value, 0, 0, 255};
+        const auto write = [](void* context, void* data, int size) {
+            static_cast<std::string*>(context)->append(static_cast<const char*>(data), size);
+        };
+        CHECK_TRUE(stbi_write_png_to_func(write, &bytes, 1, 1, 4, rgba, 4) != 0);
+        return bytes;
+    };
+    const auto firstPng = encode(255);
+    const auto secondPng = encode(32);
+    CHECK_TRUE(sp::PublishAtlas(image, firstPng, document, err));
+    const auto oldName = document.ImageFile();
+    const auto sheetPath = dir / "atlas.png.sagesheet";
+    const auto stored = ReadAll(sheetPath);
+    // Prevent replacement of the document after the new image has been prepared.
+    fs::rename(sheetPath, dir / "saved-sheet");
+    fs::create_directory(sheetPath);
+    CHECK_FALSE(sp::PublishAtlas(image, secondPng, document, err));
+    CHECK_EQ(document.ImageFile(), oldName);
+    CHECK_EQ(ReadAll(dir / oldName), firstPng);
+    CHECK_EQ(ReadAll(dir / "saved-sheet"), stored);
+    size_t revisions = 0;
+    for (const auto& file : fs::directory_iterator(dir))
+        if (file.path().filename().string().rfind(".sage-atlas-", 0) == 0) ++revisions;
+    CHECK_EQ(revisions, size_t(1));
     std::error_code ec;
     fs::remove_all(dir, ec);
 }

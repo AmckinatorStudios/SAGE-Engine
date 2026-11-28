@@ -24,6 +24,7 @@ struct ParticleUiHooks {
     std::function<void()> TrackItem;    // перетаскивание значения (TrackLastImGuiItem)
     // Слот картинки / файла эффекта. true — путь изменился.
     std::function<bool(const char* id, std::string& path)> TextureSlot;
+    std::function<bool(const char* label, assets::SpriteRef& ref)> SpriteSlot;
     std::function<bool(const char* id, std::string& path)> EffectSlot;
     // Существует ли файл по ссылке проекта (для поиска кадров по номерам).
     std::function<bool(const std::string& ref)> FileExists;

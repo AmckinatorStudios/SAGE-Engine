@@ -143,10 +143,16 @@ void ParticleEmitter::SampleShape(const ParticleEffect& fx, glm::vec3& pos, glm:
 
 // --- Рождение ------------------------------------------------------------------
 
+namespace {
+constexpr int kFrameSamples = 1 << 24;
+}
+
 int ParticleEmitter::FrameCount(const ParticleEffect& fx) {
-    if (!fx.Frames.empty()) return (int)fx.Frames.size();
+    if (!fx.Frames.empty())
+        return static_cast<int>(std::min(fx.Frames.size(), size_t(kMaxFlipbookFrames)));
     if (fx.Texture.empty()) return 1;
-    return std::max(1, fx.TilesX) * std::max(1, fx.TilesY);
+    if (!ValidFlipbookAxis(fx.TilesX) || !ValidFlipbookAxis(fx.TilesY)) return 1;
+    return fx.TilesX * fx.TilesY;
 }
 
 void ParticleEmitter::SpawnOne(const ParticleEffect& fx, const glm::mat4& world, float preAge,
@@ -180,7 +186,12 @@ void ParticleEmitter::SpawnOne(const ParticleEffect& fx, const glm::mat4& world,
     p.Rotation = glm::radians(fx.StartRotation.Lerp(Rand()));
     p.AngularVelocity = fx.UseRotation ? glm::radians(fx.AngularVelocity.Lerp(Rand())) : 0.0f;
     p.Seed = Rand();
-    p.Frame = std::min((int)(Rand() * (float)FrameCount(fx)), FrameCount(fx) - 1);
+    const int frameCount = FrameCount(fx);
+    const float frameSample = Rand();
+    // Store a quantile for SpriteRef. Draw knows the current frame count and can
+    // reuse the same quantile after a sequence edit without enlarging Particle.
+    p.Frame = fx.SpriteRef.Valid() ? -1 - std::min(int(frameSample * kFrameSamples), kFrameSamples - 1)
+                                   : std::min(int(frameSample * frameCount), frameCount - 1);
     p.Moved = p.Velocity;
     // Родилась ВНУТРИ шага, а не в его начале: при редком кадре иначе все
     // частицы шага вылетают одним сгустком, и струя становится пунктиром.
@@ -227,7 +238,7 @@ void ParticleEmitter::EmitExplicit(const ParticleEffect& fx, const glm::mat4& em
     if (init.Lifetime > 0.0f) p.Lifetime = init.Lifetime;
     if (init.Size >= 0.0f) p.Size = init.Size;
     if (init.HasColor) p.Color = init.Color;
-    if (init.Frame >= 0) p.Frame = std::min(init.Frame, FrameCount(fx) - 1);
+    if (init.Frame >= 0) p.Frame = fx.SpriteRef.Valid() ? init.Frame : std::min(init.Frame, FrameCount(fx) - 1);
     if (init.HasRotation) p.Rotation = glm::radians(init.Rotation);
 }
 
@@ -503,21 +514,28 @@ glm::vec4 ParticleEmitter::ColorOf(const ParticleEffect& fx, const Particle& p) 
 
 int ParticleEmitter::FrameOf(const ParticleEffect& fx, const Particle& p, int frames) {
     if (frames <= 1) return 0;
-    const int offset = fx.RandomStartFrame ? p.Frame : std::max(fx.StartFrame, 0);
-    int idx = 0;
+    const int randomFrame = p.Frame < 0 ? int((-int64_t(p.Frame) - 1) * frames / kFrameSamples)
+                                       : fx.SpriteRef.Valid() ? std::min(p.Frame, frames - 1) : p.Frame;
+    const int offset = fx.RandomStartFrame ? randomFrame : std::max(fx.StartFrame, 0);
+    int64_t idx = 0;
+    const auto wrapped = [frames](double value) {
+        if (!std::isfinite(value) || value <= 0.0) return 0;
+        if (value <= INT32_MAX) return static_cast<int>(value);
+        return static_cast<int>(std::fmod(std::floor(value), frames));
+    };
     switch (fx.Flipbook) {
         case FlipbookMode::OverLifetime: {
             const float f = p.T() * std::max(fx.Cycles, 0.0f) * (float)frames;
             // Последнее мгновение жизни — последний кадр, а не снова первый.
-            idx = p.T() >= 1.0f && fx.Cycles <= 1.0f ? frames - 1 : std::min((int)f, INT32_MAX / 2);
+            idx = p.T() >= 1.0f && fx.Cycles <= 1.0f ? frames - 1 : wrapped(f);
             idx += offset;
             break;
         }
         case FlipbookMode::Speed:
-            idx = (int)(p.Age * std::max(fx.FrameRate, 0.0f)) + offset;
+            idx = int64_t(wrapped(p.Age * std::max(fx.FrameRate, 0.0f))) + offset;
             break;
         case FlipbookMode::Random:
-            idx = p.Frame;
+            idx = randomFrame;
             break;
         case FlipbookMode::Fixed:
             idx = std::max(fx.StartFrame, 0);

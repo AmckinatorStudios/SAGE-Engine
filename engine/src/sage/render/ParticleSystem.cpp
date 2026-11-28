@@ -49,6 +49,17 @@ uniform int uAlign;          // повернуть по направлению �
 uniform float uStretchLength;
 uniform float uStretchBySpeed;
 uniform vec2 uTiles;
+uniform int uTopFirst;
+uniform int uUseFrames;
+uniform sampler2D uFrameTable;
+
+ivec2 frameTexel(int frame) { return ivec2((frame % 64) * 2, frame / 64); }
+
+vec2 gridUV(float frame, vec2 uv) {
+    float col = mod(frame, uTiles.x), row = floor(frame / uTiles.x);
+    vec2 topUV = vec2((col + uv.x) / uTiles.x, (row + 1.0 - uv.y) / uTiles.y);
+    return vec2(topUV.x, uTopFirst != 0 ? topUV.y : 1.0 - topUV.y);
+}
 
 out vec4 vColor;
 out vec2 vLocal;
@@ -60,6 +71,8 @@ void main() {
     float rot = iRot;
     float sx = iSize, sy = iSize;
     vec2 c = aCorner;
+    if (uUseFrames != 0)
+        c += texelFetch(uFrameTable, frameTexel(int(iFrame)) + ivec2(1, 0), 0).xy;
     vec3 center = iPos;
     if (uMode == 1) {
         // Вытянут вдоль скорости; голова — в точке частицы, хвост позади.
@@ -91,10 +104,13 @@ void main() {
     vColor = iColor;
     vLocal = aCorner * 2.0;
     // Кадр раскадровки: листы считаются сверху вниз, как их рисуют.
-    float f = floor(iFrame + 0.5);
-    float col = mod(f, uTiles.x);
-    float row = floor(f / uTiles.x);
-    vUV = vec2((col + aCorner.x + 0.5) / uTiles.x, (uTiles.y - 1.0 - row + aCorner.y + 0.5) / uTiles.y);
+    vec2 uv = aCorner + 0.5;
+    if (uUseFrames != 0) {
+        vec4 rect = texelFetch(uFrameTable, frameTexel(int(iFrame)), 0);
+        vUV = mix(rect.xy, rect.zw, uv);
+    } else {
+        vUV = gridUV(iFrame, uv);
+    }
 }
 )";
 
@@ -147,6 +163,17 @@ uniform mat4 uProjection;
 uniform vec3 uMeshScale;
 uniform int uAlign;
 uniform vec2 uTiles;
+uniform int uTopFirst;
+uniform int uUseFrames;
+uniform sampler2D uFrameTable;
+
+ivec2 frameTexel(int frame) { return ivec2((frame % 64) * 2, frame / 64); }
+
+vec2 gridUV(float frame, vec2 uv) {
+    float col = mod(frame, uTiles.x), row = floor(frame / uTiles.x);
+    vec2 topUV = vec2((col + uv.x) / uTiles.x, (row + 1.0 - uv.y) / uTiles.y);
+    return vec2(topUV.x, uTopFirst != 0 ? topUV.y : 1.0 - topUV.y);
+}
 
 out vec4 vColor;
 out vec3 vNormal;
@@ -170,14 +197,19 @@ void main() {
         vec3 z = cross(x, y);
         R = mat3(x, y, z) * AxisAngle(vec3(0.0, 1.0, 0.0), iRot);
     }
-    vec3 world = iPos + R * (aPos * uMeshScale) * iSize;
+    vec3 pos = aPos;
+    if (uUseFrames != 0)
+        pos.xy += texelFetch(uFrameTable, frameTexel(int(iFrame)) + ivec2(1, 0), 0).xy;
+    vec3 world = iPos + R * (pos * uMeshScale) * iSize;
     gl_Position = uProjection * uView * vec4(world, 1.0);
     vNormal = R * aNormal;
     vColor = iColor;
-    float f = floor(iFrame + 0.5);
-    float col = mod(f, uTiles.x);
-    float row = floor(f / uTiles.x);
-    vUV = vec2((col + aUV.x) / uTiles.x, (uTiles.y - 1.0 - row + aUV.y) / uTiles.y);
+    if (uUseFrames != 0) {
+        vec4 rect = texelFetch(uFrameTable, frameTexel(int(iFrame)), 0);
+        vUV = mix(rect.xy, rect.zw, aUV);
+    } else {
+        vUV = gridUV(iFrame, aUV);
+    }
 }
 )";
 
@@ -317,6 +349,16 @@ struct ParticleSystemInstance {
     // Дочерние эмиттеры — по одному на запись SubEmitters; пусто, пока не нужен.
     std::vector<std::unique_ptr<ParticleSystemInstance>> Subs;
     std::vector<bool> SubMissing;
+    // A weak lookup hint for legacy file textures. Ownership, negative entries
+    // and reload stay in ResourceManager; emitters never pin project textures.
+    struct LegacyTextureHint {
+        const ResourceManager* Manager = nullptr;
+        uint64_t Generation = 0;
+        std::string Path;
+        TextureFilter Filter = TextureFilter::Nearest;
+        bool Mipmaps = false;
+        std::weak_ptr<const Texture> Image;
+    } LegacyTexture;
 
     explicit ParticleSystemInstance(uint32_t seed) : Sim(seed) {}
 
@@ -335,8 +377,10 @@ struct ParticleSystemInstance {
 };
 
 struct TextureEntry {
-    std::shared_ptr<Texture> Tex;
+    std::shared_ptr<const Texture> Tex, Table;
+    sage::assets::ResolvedSprite Data;
     glm::vec2 Tiles{1.0f, 1.0f};
+    int Frames = 1;
 };
 
 struct ParticleSystem::Impl {
@@ -356,7 +400,6 @@ struct ParticleSystem::Impl {
     std::unique_ptr<sage::rhi::Geometry> Trails;
     std::unique_ptr<sage::rhi::Geometry> Meshes[4];
     size_t MeshIndexCount[4] = {0, 0, 0, 0};
-    std::unordered_map<std::string, TextureEntry> Textures;
     std::vector<InstanceData> Scratch;
     std::vector<TrailVertex> TrailScratch;
     std::vector<uint32_t> Order;
@@ -447,7 +490,7 @@ struct ParticleSystem::Impl {
     }
 
     void EnsureGpu();
-    const TextureEntry* TextureFor(const ParticleEffect& fx);
+    TextureEntry TextureFor(ParticleSystemInstance& inst);
     void DrawInstance(ParticleSystemInstance& inst, const glm::vec3& camRight, const glm::vec3& camUp,
                       const glm::vec3& camPos, const glm::mat4& view, const glm::mat4& proj);
 };
@@ -647,67 +690,39 @@ void ParticleSystem::Impl::EnsureGpu() {
     }
 }
 
-const TextureEntry* ParticleSystem::Impl::TextureFor(const ParticleEffect& fx) {
-    if (fx.Texture.empty() && fx.Frames.empty()) return nullptr;
+TextureEntry ParticleSystem::Impl::TextureFor(ParticleSystemInstance& inst) {
+    const auto& fx = inst.Fx;
+    auto& resources = ResourceManager::Instance();
     const bool nearest = fx.Filtering == sage::TextureFiltering::Nearest;
-    std::string key = nearest ? "px|" : "sm|";
+    const auto filter = nearest ? TextureFilter::Nearest : TextureFilter::Bilinear;
+    if (fx.SpriteRef.Valid()) {
+        auto sprite = resources.ResolveSpriteTexture(fx.SpriteRef, filter, false, false, true, false);
+        if (sprite) {
+            const auto* sequence = sprite.Data.Sequence();
+            const int frames = sequence ? static_cast<int>(sequence->FrameIds().size()) : 1;
+            if (auto table = resources.SpriteFrameTable(sprite, frames))
+                return {std::move(sprite.Image), std::move(table), std::move(sprite.Data), glm::vec2(1), frames};
+        }
+    }
     if (!fx.Frames.empty()) {
-        for (const std::string& f : fx.Frames) key += f + "\n";
-    } else {
-        key += fx.Texture + "|" + std::to_string(fx.TilesX) + "x" + std::to_string(fx.TilesY);
+        auto atlas = resources.ResolveSpriteFrames(fx.Frames, filter);
+        if (atlas)
+            return {std::move(atlas.Image), {}, {}, glm::vec2(atlas.Data.Resource->Grid),
+                    ParticleEmitter::FrameCount(fx)};
+        return {};
     }
-    auto it = Textures.find(key);
-    if (it != Textures.end()) return it->second.Tex ? &it->second : nullptr;
-
-    TextureEntry e;
-    const TextureFilter filter = nearest ? TextureFilter::Nearest : TextureFilter::Bilinear;
-    if (fx.Frames.empty()) {
-        // Лист кадров без мип-уровней: на мелком уровне соседние кадры
-        // смешиваются, и по краю частицы проступает чужой кадр.
-        const bool sheet = fx.TilesX > 1 || fx.TilesY > 1;
-        e.Tex = ResourceManager::Instance().GetTexture(fx.Texture, filter, !sheet && !nearest, false, true);
-        e.Tiles = glm::vec2((float)std::max(fx.TilesX, 1), (float)std::max(fx.TilesY, 1));
-    } else {
-        // КАДРЫ ОТДЕЛЬНЫМИ ФАЙЛАМИ — склеиваем в лист. Наборы часто приходят
-        // именно так (smoke_0.png…smoke_11.png), и резать их руками в лист —
-        // та работа, которую движок обязан делать сам.
-        std::vector<std::vector<unsigned char>> px(fx.Frames.size());
-        std::vector<glm::ivec2> size(fx.Frames.size(), glm::ivec2(0));
-        int fw = 0, fh = 0;
-        for (size_t i = 0; i < fx.Frames.size(); ++i) {
-            const std::string real = sage::AssetDatabase::Instance().LocatePath(fx.Frames[i]);
-            if (!ResourceManager::DecodeImageFile(real, px[i], size[i].x, size[i].y)) {
-                LOG_WARN("Particles") << "кадр не открылся: " << fx.Frames[i];
-                continue;
-            }
-            fw = std::max(fw, size[i].x);
-            fh = std::max(fh, size[i].y);
-        }
-        if (fw > 0 && fh > 0) {
-            const int n = (int)fx.Frames.size();
-            const int cols = (int)std::ceil(std::sqrt((float)n));
-            const int rows = (n + cols - 1) / cols;
-            const int W = cols * fw, H = rows * fh;
-            std::vector<unsigned char> atlas((size_t)W * H * 4, 0);
-            for (int i = 0; i < n; ++i) {
-                if (px[i].empty()) continue;
-                const int col = i % cols, rowTop = i / cols;
-                // Строки картинки уже снизу вверх (DecodeImageFile переворачивает
-                // для GL) — кладём кадр в ячейку, считая листы сверху.
-                const int ox = col * fw, oy = (rows - 1 - rowTop) * fh;
-                for (int y = 0; y < size[i].y; ++y) {
-                    const unsigned char* src = px[i].data() + (size_t)y * size[i].x * 4;
-                    unsigned char* dst = atlas.data() + ((size_t)(oy + y) * W + ox) * 4;
-                    std::copy(src, src + (size_t)size[i].x * 4, dst);
-                }
-            }
-            e.Tex = std::make_shared<Texture>(atlas.data(), W, H, filter, false, true);
-            e.Tiles = glm::vec2((float)cols, (float)rows);
-        }
+    if (fx.Texture.empty() || !ValidFlipbookAxis(fx.TilesX) || !ValidFlipbookAxis(fx.TilesY)) return {};
+    const bool grid = fx.TilesX > 1 || fx.TilesY > 1;
+    const bool mipmaps = !grid && !nearest;
+    auto& hint = inst.LegacyTexture;
+    const auto generation = resources.AssetsGeneration();
+    auto image = hint.Manager == &resources && hint.Generation == generation && hint.Path == fx.Texture &&
+                 hint.Filter == filter && hint.Mipmaps == mipmaps ? hint.Image.lock() : nullptr;
+    if (!image) {
+        image = resources.GetTexture(fx.Texture, filter, mipmaps, false, true);
+        hint = {&resources, generation, fx.Texture, filter, mipmaps, image};
     }
-    auto& slot = Textures[key];
-    slot = e;
-    return slot.Tex ? &slot : nullptr;
+    return {std::move(image), {}, {}, {fx.TilesX, fx.TilesY}, ParticleEmitter::FrameCount(fx)};
 }
 
 void ParticleSystem::Impl::DrawInstance(ParticleSystemInstance& inst, const glm::vec3& camRight,
@@ -725,9 +740,10 @@ void ParticleSystem::Impl::DrawInstance(ParticleSystemInstance& inst, const glm:
         const float len = glm::length(rot[i]);
         if (len > 1e-6f) rot[i] /= len;
     }
-    const TextureEntry* tex = TextureFor(fx);
-    const int frames = tex ? std::max(1, (int)(tex->Tiles.x * tex->Tiles.y)) : 1;
-    const int usedFrames = std::min(ParticleEmitter::FrameCount(fx), frames);
+    const auto visual = TextureFor(inst);
+    const auto& tex = visual.Tex;
+    const int usedFrames = tex ? visual.Frames : 1;
+    const bool topFirst = tex && !tex->FlippedRows();
 
     switch (fx.Blend) {
         case BlendMode::Additive: device.SetBlendMode(sage::rhi::GraphicsDevice::BlendMode::Additive); break;
@@ -735,7 +751,14 @@ void ParticleSystem::Impl::DrawInstance(ParticleSystemInstance& inst, const glm:
         default: device.SetBlendMode(sage::rhi::GraphicsDevice::BlendMode::Alpha); break;
     }
     const int premultiply = fx.Blend == BlendMode::Premultiplied ? 1 : 0;
-    if (tex) tex->Tex->Bind(0);
+    if (tex) tex->Bind(0);
+    if (visual.Table) visual.Table->Bind(1);
+    const auto spriteUniforms = [&](Shader& shader) {
+        shader.SetVec2("uTiles", visual.Tiles);
+        shader.SetInt("uTopFirst", topFirst ? 1 : 0);
+        shader.SetInt("uUseFrames", visual.Table ? 1 : 0);
+        shader.SetInt("uFrameTable", 1);
+    };
 
     // Экземпляры частиц — в мировых координатах, уже со своим видом на сейчас.
     Scratch.clear();
@@ -771,7 +794,7 @@ void ParticleSystem::Impl::DrawInstance(ParticleSystemInstance& inst, const glm:
         s.SetInt("uAlign", fx.AlignToVelocity ? 1 : 0);
         s.SetFloat("uStretchLength", fx.StretchLength);
         s.SetFloat("uStretchBySpeed", fx.StretchBySpeed);
-        s.SetVec2("uTiles", tex ? tex->Tiles : glm::vec2(1.0f));
+        spriteUniforms(s);
         s.SetInt("uTex", 0);
         s.SetInt("uHasTex", tex ? 1 : 0);
         s.SetInt("uSprite", (int)fx.Sprite);
@@ -787,7 +810,7 @@ void ParticleSystem::Impl::DrawInstance(ParticleSystemInstance& inst, const glm:
         s.SetMat4("uProjection", proj);
         s.SetVec3("uMeshScale", fx.MeshScale);
         s.SetInt("uAlign", fx.AlignToVelocity ? 1 : 0);
-        s.SetVec2("uTiles", tex ? tex->Tiles : glm::vec2(1.0f));
+        spriteUniforms(s);
         s.SetInt("uTex", 0);
         s.SetInt("uHasTex", tex ? 1 : 0);
         s.SetInt("uPremultiply", premultiply);
@@ -800,6 +823,9 @@ void ParticleSystem::Impl::DrawInstance(ParticleSystemInstance& inst, const glm:
     if (fx.Render == RenderMode::Trail) {
         // Лента: точки следа от хвоста к голове плюс текущее положение.
         TrailScratch.clear();
+        const ResourceManager::SpriteTexture sprite{visual.Data, tex};
+        const auto* sequence = visual.Data.Sequence();
+        const auto* firstRegion = sequence ? nullptr : visual.Data.Region();
         for (const Particle& p : ps) {
             std::vector<glm::vec3> pts;
             pts.reserve(p.Trail.size() + 1);
@@ -809,6 +835,19 @@ void ParticleSystem::Impl::DrawInstance(ParticleSystemInstance& inst, const glm:
             if (pts.size() < 2) continue;
             const float size = ParticleEmitter::SizeOf(fx, p);
             const glm::vec4 color = ParticleEmitter::ColorOf(fx, p);
+            ResourceManager::SpriteFrame spriteFrame;
+            if (visual.Table) {
+                const auto* region = sequence
+                    ? visual.Data.Resource->Sheet.Find(sequence->FrameIds()[ParticleEmitter::FrameOf(fx, p, usedFrames)])
+                    : firstRegion;
+                if (region) spriteFrame = sprite.Frame(*region);
+            } else if (topFirst) {
+                spriteFrame.UV = {0, 1, 1, 0};
+            }
+            const auto trailUV = [&](float u, float v) {
+                return glm::mix(glm::vec2(spriteFrame.UV), glm::vec2(spriteFrame.UV.z, spriteFrame.UV.w),
+                                glm::vec2(u, v));
+            };
             const size_t n = pts.size();
             glm::vec3 prevL(0.0f), prevR(0.0f);
             glm::vec4 prevC(0.0f);
@@ -823,11 +862,12 @@ void ParticleSystem::Impl::DrawInstance(ParticleSystemInstance& inst, const glm:
                 const float u = 1.0f - (float)k / (float)(n - 1);
                 const float width = size * (fx.TrailWidth.Keys.empty() ? 1.0f : fx.TrailWidth.Evaluate(u));
                 const glm::vec4 c = color * fx.TrailColor.Evaluate(u);
-                const glm::vec3 L = pts[k] - side * (0.5f * width), R = pts[k] + side * (0.5f * width);
+                const glm::vec3 center = pts[k] + side * (spriteFrame.Pivot.y * width);
+                const glm::vec3 L = center - side * (0.5f * width), R = center + side * (0.5f * width);
                 if (k > 0) {
                     const TrailVertex quad[6] = {
-                        {prevL, {prevU, 0.0f}, prevC}, {prevR, {prevU, 1.0f}, prevC}, {R, {u, 1.0f}, c},
-                        {prevL, {prevU, 0.0f}, prevC}, {R, {u, 1.0f}, c},              {L, {u, 0.0f}, c}};
+                        {prevL, trailUV(prevU, 0.0f), prevC}, {prevR, trailUV(prevU, 1.0f), prevC}, {R, trailUV(u, 1.0f), c},
+                        {prevL, trailUV(prevU, 0.0f), prevC}, {R, trailUV(u, 1.0f), c},            {L, trailUV(u, 0.0f), c}};
                     TrailScratch.insert(TrailScratch.end(), quad, quad + 6);
                 }
                 prevL = L;

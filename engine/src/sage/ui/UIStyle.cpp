@@ -41,9 +41,20 @@ void ApplyStyle(const json& style, entt::registry& reg, entt::entity e) {
         if (!p.Fields || !p.Id || !parts.contains(p.Id) || !p.Has || !p.Has(reg, e)) continue;
         // Переопределённые у элемента поля стиль не трогает.
         json pj = parts[p.Id];
-        if (el && !el->StyleOverrides.empty() && pj.is_object())
-            for (const PartField& f : *p.Fields)
-                if (f.Key && el->Overrides(std::string(p.Id) + "." + f.Key)) pj.erase(f.Key);
+        if (el && !el->StyleOverrides.empty() && pj.is_object()) {
+            const std::string prefix = std::string(p.Id) + ".";
+            for (const PartField& f : *p.Fields) {
+                if (!f.Key) continue;
+                const std::string key = prefix + f.Key;
+                if (el->Overrides(key)) pj.erase(f.Key);
+                else if (f.Type == PartField::Kind::Look) {
+                    auto nested = pj.find(f.Key);
+                    if (nested == pj.end() || !nested->is_object()) continue;
+                    for (const auto& field : LookFields())
+                        if (el->Overrides(key + "." + field.Key)) nested->erase(field.Key);
+                }
+            }
+        }
         if (void* data = p.GetMutable(reg, e)) LoadPartFields(pj, data, *p.Fields, /*styleOnly=*/true);
     }
 }

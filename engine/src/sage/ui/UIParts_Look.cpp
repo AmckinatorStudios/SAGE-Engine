@@ -49,6 +49,13 @@ void DrawPicture(UIRenderer& ui, const PictureParams& p, const UIRect& r, float 
                  glm::vec3 rgb, float alpha) {
     if (!p.Tex || alpha <= 0.0f || r.w <= 0.0f || r.h <= 0.0f) return;
     const UIRenderer::Sprite& src = p.Src;
+    struct RestorePivot {
+        UIRenderer& Renderer;
+        std::optional<glm::vec2> Center;
+        ~RestorePivot() { if (Center) Renderer.SetRotationCenter(*Center); }
+    } restore{ui, {}};
+    if (p.Pivot)
+        restore.Center = ui.SetRotationCenter({r.x + r.w * p.Pivot->x, r.y + r.h * p.Pivot->y});
     const auto mode = (Image::Mode)p.Fit;
     // ПИКСЕЛЬНАЯ КАРТИНКА ПОД МАСШТАБИРУЕМЫМ ХОЛСТОМ — ЦЕЛЫМ ШАГОМ. Холст
     // «подгонять под разрешение» даёт дробный масштаб (1366×768 при опорном
@@ -141,39 +148,51 @@ void DrawPicture(UIRenderer& ui, const PictureParams& p, const UIRect& r, float 
 
 // --- Вид (Look) ---------------------------------------------------------------
 
-// Картинка вида — лениво, при отрисовке: путь правят в инспекторе посреди
-// кадра, и повода перечитать файл, кроме отрисовки, нет (так же, как у части
-// «Картинка», см. EnsureImageTexture).
-const Texture* LookTexture(const Look& look) {
-    if (look.Texture.empty()) {
-        look.Tex.reset();
-        look.TexPath.clear();
-        return nullptr;
+float SpriteTime(const entt::registry& reg) {
+    const auto* clock = reg.ctx().find<SpriteClock>();
+    return clock ? clock->Seconds : 0.0f;
+}
+
+ResourceManager::SpriteTexture SpritePicture(assets::SpriteRef ref, TextureFiltering filtering,
+                                             const std::string& path, const std::string& name, bool sequence) {
+    if (!ref.Valid() && name.empty()) return {};
+    const bool sharp = filtering == TextureFiltering::Nearest;
+    auto& resources = ResourceManager::Instance();
+    const auto sampler = sharp ? TextureFilter::Nearest : TextureFilter::Bilinear;
+    // Atlases have no guaranteed padding at lower mip levels.
+    if (ref.Valid()) return resources.ResolveSpriteTexture(ref, sampler, false, !sharp);
+    auto sheet = resources.ResolveSpriteImage(path);
+    if (!sheet) return {};
+    if (sequence) {
+        const auto* animation = sheet.Resource->Sheet.FindSequence(name);
+        if (!animation) return {};
+        sheet.Ref.Item = animation->Id();
+        sheet.Ref.Type = assets::SpriteRef::Kind::Sequence;
+    } else {
+        const auto* region = sheet.Resource->Sheet.Find(name);
+        if (!region) return {};
+        sheet.Ref.Item = region->Id();
     }
-    // "rt:<имя>" — картинка, которую рисует движок (съёмка в текстуру). Её
-    // нет на диске, и раньше вид (подложка, состояние кнопки) рисовал на её
-    // месте плашку «файл не найден» — работала она только у части
-    // «Картинка». Ищется каждый кадр: съёмку пересоздают при смене размера.
-    if (look.Texture.rfind("rt:", 0) == 0) {
-        look.Tex = sage::render::RenderTextureRegistry::Resolve(look.Texture);
-        look.TexPath = look.Texture;
-        return look.Tex.get();
-    }
-    if (!look.Tex || look.TexPath != look.Texture || look.TexFiltering != look.Filtering) {
-        // Резкая фильтрация — ближайшим соседом и без мипмапов: мипмапы ЛИСТА
-        // подмешивают в края куска соседний спрайт.
-        look.Tex = look.Sharp() ? ResourceManager::Instance().GetTexture(
-                                      look.Texture, TextureFilter::Nearest, /*mipmaps=*/false)
-                                // Гладкая — с цветом под прозрачностью от соседей
-                                // (bleed): иначе фильтр подмешивал к краю
-                                // невидимый чёрный или белый, и вокруг картинки
-                                // с прозрачностью шла тёмная или светлая кайма.
-                                : ResourceManager::Instance().GetTexture(look.Texture, TextureFilter::Trilinear,
-                                                                         /*mipmaps=*/true, /*bleed=*/true);
-        look.TexPath = look.Texture;
-        look.TexFiltering = look.Filtering;
-    }
-    return look.Tex.get();
+    return resources.SpriteTextureFor(std::move(sheet), sampler, false, !sharp);
+}
+
+std::shared_ptr<Texture> PictureTexture(const std::string& path, TextureFiltering filtering) {
+    if (path.empty()) return {};
+    if (path.rfind("rt:", 0) == 0) return sage::render::RenderTextureRegistry::Resolve(path);
+    const bool sharp = filtering == TextureFiltering::Nearest;
+    return ResourceManager::Instance().GetTexture(path, sharp ? TextureFilter::Nearest : TextureFilter::Trilinear,
+                                                   !sharp, !sharp);
+}
+
+void ApplySpriteFrame(PictureParams& p, const assets::SpriteRegion& region,
+                      bool overrideSlice, bool useFit, bool usePivot) {
+    p.Src = {float(region.Rect.x), float(region.Rect.y), float(region.Rect.z), float(region.Rect.w)};
+    if (!overrideSlice) p.Slice = region.NineSliceOf();
+    if (useFit && p.Fit == int(Image::Mode::Normal) &&
+        (!p.Slice.Empty() || p.Slice.EdgeFill != SliceFill::Stretch ||
+         p.Slice.CenterFill != SliceFill::Stretch || !p.Slice.DrawCenter))
+        p.Fit = int(Image::Mode::NineSlice);
+    if (usePivot) p.Pivot = region.Pivot;
 }
 
 float LookRounding(const Look& look, const UIRect& r, float scale) {
@@ -202,7 +221,11 @@ void DrawLookBody(const PartDrawContext& c, const Look& look, const UIRect& r, g
     if ((alpha <= 0.0f && !(gradient && bottomAlpha > 0.0f)) || r.w <= 0.0f || r.h <= 0.0f) return;
     UIRenderer& ui = *c.Ui;
     if (look.HasTexture()) {
-        const Texture* tex = LookTexture(look);
+        auto sprite = SpritePicture(look.SpriteRef, look.Filtering, look.Texture, look.NamedSprite);
+        const auto* frame = sprite.Data.Region(c.Reg ? SpriteTime(*c.Reg) : 0.0f);
+        const bool linked = look.SpriteRef.Valid() || !look.NamedSprite.empty();
+        const Texture* tex = ui.HoldTexture(linked ? (frame ? sprite.Image : nullptr)
+                                                   : PictureTexture(look.Texture, look.Filtering));
         if (!tex) {
             // Путь задан, а файла нет: «не загрузилось» должно отличаться от
             // «не назначено» — плашка цветом на месте картинки.
@@ -217,6 +240,7 @@ void DrawLookBody(const PartDrawContext& c, const Look& look, const UIRect& r, g
         p.PixelScale = look.PixelScale;
         p.SnapPixels = look.SnapPixels;
         p.Repeat = look.Repeat;
+        if (frame) ApplySpriteFrame(p, *frame, look.OverrideSpriteSlice, look.UseSpriteFit, look.UseSpritePivot);
         DrawPicture(ui, p, r, c.Scale, rgb, alpha);
         return;
     }
@@ -380,6 +404,12 @@ const std::vector<PartField>& LookFieldTable() {
              "The plate colour. With a picture — the tint it is multiplied by."},
             {"texture", SAGE_UI_TEXT("Picture"), PartField::Kind::String, offsetof(Look, Texture), 0.0f,
              0.0f, "Empty — a plain colour plate.", nullptr, 0, PartField::Widget::Texture},
+            {"spriteRef", SAGE_UI_TEXT("Sprite"), PartField::Kind::SpriteRef, offsetof(Look, SpriteRef)},
+            {"namedSprite", nullptr, PartField::Kind::String, offsetof(Look, NamedSprite)},
+            {"overrideSpriteSlice", SAGE_UI_TEXT("Override sprite nine-slice"), PartField::Kind::Bool,
+             offsetof(Look, OverrideSpriteSlice)},
+            {"useSpriteFit", SAGE_UI_TEXT("Use sprite display mode"), PartField::Kind::Bool, offsetof(Look, UseSpriteFit)},
+            {"useSpritePivot", SAGE_UI_TEXT("Use sprite pivot"), PartField::Kind::Bool, offsetof(Look, UseSpritePivot)},
             {"fit", SAGE_UI_TEXT("How it fits"), PartField::Kind::Enum, offsetof(Look, Fit), 0.0f, 4.0f,
              "Stretch, cut into nine pieces (corners keep their size), repeat at\n"
              "its own size, or keep the aspect ratio.",
@@ -434,7 +464,8 @@ const std::vector<PartField>& LookFieldTable() {
         };
         // Основное у вида — цвет, картинка, как она ложится, нарезка и
         // скругление. Остальное трогают редко.
-        MarkAdvanced(v, {"sprite", "sliceCenterFill", "sliceEdgeFill", "sliceDrawCenter", "pixelScale",
+        for (auto& f : v) if (std::string_view(f.Key) == "namedSprite") f.Hidden = true;
+        MarkAdvanced(v, {"sprite", "useSpriteFit", "useSpritePivot", "overrideSpriteSlice", "sliceCenterFill", "sliceEdgeFill", "sliceDrawCenter", "pixelScale",
                          "snapPixels", "gradient", "borderThickness", "borderColor",
                          "shadowSize", "shadowColor"});
         // В оформлении движка у вида только цвет: форму, рамку, тень и

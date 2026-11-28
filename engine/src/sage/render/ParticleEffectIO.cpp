@@ -2,6 +2,7 @@
 #include "sage/assets/Pack.h"
 
 #include <fstream>
+#include <cmath>
 #include <sstream>
 
 #include <nlohmann/json.hpp>
@@ -187,6 +188,10 @@ json ToJson(const ParticleEffect& f) {
     j["collisionRadius"] = f.CollisionRadius;
     if (f.CollisionMask != 0xFFFFFFFFu) j["collisionMask"] = f.CollisionMask;
 
+    if (f.SpriteRef.Valid()) {
+        j["spriteRef"] = {{"asset", f.SpriteRef.Asset.ToString()}, {"item", f.SpriteRef.Item.ToString()},
+                          {"kind", f.SpriteRef.Type == assets::SpriteRef::Kind::Sequence ? "sequence" : "region"}};
+    }
     j["texture"] = f.Texture;
     j["frames"] = f.Frames;
     j["tilesX"] = f.TilesX;
@@ -366,7 +371,47 @@ bool EffectFromJson(const std::string& text, ParticleEffect& out, std::string* e
         if (err) *err = "не JSON-объект";
         return false;
     }
-    out = FromJson(j);
+    const auto texture = j.find("texture");
+    const auto frames = j.find("frames");
+    const bool usesGrid = texture != j.end() && texture->is_string() &&
+                          !texture->get_ref<const std::string&>().empty() &&
+                          (frames == j.end() || !frames->is_array() || frames->empty());
+    for (const char* key : {"tilesX", "tilesY"}) {
+        const auto value = j.find(key);
+        if (value == j.end()) continue;
+        const double tiles = value->is_number() ? value->get<double>() : 0.0;
+        // Preserve the zero stored by older scenes when the grid is unused.
+        const bool unusedZero = !usesGrid && value->is_number() && tiles == 0;
+        if (!unusedZero && (tiles < 1 || tiles > kMaxFlipbookAxis || tiles != std::floor(tiles))) {
+            if (err) *err = std::string(key) + ": expected an integer in [1, " +
+                            std::to_string(kMaxFlipbookAxis) + "]";
+            return false;
+        }
+    }
+    if (frames != j.end() && frames->is_array() &&
+        frames->size() > kMaxFlipbookFrames) {
+        if (err) *err = "frames: too many flipbook frames";
+        return false;
+    }
+    assets::SpriteRef sprite;
+    const auto ref = j.find("spriteRef");
+    if (ref != j.end() && !ref->is_null()) {
+        const auto stringField = [&](const char* key) {
+            return ref->is_object() && ref->contains(key) && ref->at(key).is_string()
+                ? ref->at(key).get<std::string>() : std::string{};
+        };
+        sprite.Asset = AssetGuid::FromString(stringField("asset"));
+        sprite.Item = AssetGuid::FromString(stringField("item"));
+        const auto kind = stringField("kind");
+        sprite.Type = kind == "sequence" ? assets::SpriteRef::Kind::Sequence : assets::SpriteRef::Kind::Region;
+        if (!sprite.Valid() || (kind != "sequence" && kind != "region")) {
+            if (err) *err = "spriteRef: expected asset GUID, item ID and region or sequence kind";
+            return false;
+        }
+    }
+    auto effect = FromJson(j);
+    effect.SpriteRef = sprite;
+    out = std::move(effect);
     return true;
 }
 
@@ -387,7 +432,9 @@ bool LoadEffectFile(const std::string& path, ParticleEffect& out, std::string* e
         if (err) *err = "не открылся: " + path;
         return false;
     }
-    return EffectFromJson(text, out, err);
+    if (!EffectFromJson(text, out, err)) return false;
+    out.SourcePath = path;
+    return true;
 }
 
 } // namespace sage::fx

@@ -7,6 +7,7 @@
 // полей значило бы разойтись на первой же новой галке.
 // ---------------------------------------------------------------------------
 #include "UIElementProperties.h"
+#include "sprite/SpritePicker.h"
 #include "UIElementPropertiesDetail.h"
 #include "InspectorControls.h"
 
@@ -159,7 +160,7 @@ bool DrawAnchorPicker(UIAnchor& anchor) {
 // оставаться единственным местом, где «тип поля» превращается в «элемент
 // интерфейса редактора». Второе такое место — и части снова начнут
 // расходиться с тем, чем их правят.
-void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
+bool DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                    const ui::PartType& part, const ui::PartField& f, void* data) {
     using K = ui::PartField::Kind;
     using W = ui::PartField::Widget;
@@ -339,6 +340,10 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             break;
         }
 
+        case K::SpriteRef:
+            changed = sage::editor::SpritePicker(host, label, ui::FieldAs<sage::assets::SpriteRef>(data, f));
+            break;
+
         case K::Color:
             changed = ictl::Color(host, label, &ui::FieldAs<glm::vec4>(data, f));
             break;
@@ -360,7 +365,19 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
                 // просто вписывают. Но подбирают её ГЛАЗАМИ, по картинке, и
                 // кнопка рядом ведёт туда, где это видно.
                 ictl::NumOpts so = ictl::OptsForRange(f.Min, f.Max);
-                changed = ictl::Sides(host, DisplayLabel(label).c_str(), &ui::FieldAs<glm::vec4>(data, f), so);
+                const auto fields = ui::EditableFields(*part.Fields);
+                const std::string key = f.Key;
+                const auto prefix = key.substr(0, key.size() - std::strlen("sliceBorder"));
+                const ui::PartField* ref = nullptr;
+                const ui::PartField* local = nullptr;
+                for (const auto& field : fields) {
+                    if (field.Key == prefix + "spriteRef") ref = &field;
+                    if (field.Key == prefix + "overrideSpriteSlice") local = &field;
+                }
+                const bool inherited = ref && local && ui::FieldAs<assets::SpriteRef>(data, *ref).Valid() &&
+                            !ui::FieldAs<bool>(data, *local);
+                if (!inherited)
+                    changed = ictl::Sides(host, DisplayLabel(label).c_str(), &ui::FieldAs<glm::vec4>(data, f), so);
                 if (ImGui::Button(T("Edit on the picture…"))) {
                     // Окно правит ЭТОТ вид этого элемента вживую: какая часть и
                     // какое поле — знает само поле, картинку окно найдёт рядом.
@@ -426,6 +443,7 @@ void DrawPartField(EditorHost& host, GameObject obj, const UIPropsContext& ctx,
             ui::EnsureImageTexture(*im);
         }
     }
+    return changed;
 }
 
 namespace uiprops_detail {
@@ -502,6 +520,38 @@ bool SameTab(const char* a, const char* b) {
     return std::strcmp(a, b) == 0;
 }
 
+// Named pictures share the same inspector controls as plain textures.
+bool PictureFieldVisible(const std::vector<ui::PartField>& fields, const ui::PartField& field, const void* data) {
+    const std::string key = field.Key;
+    const auto dot = key.rfind('.');
+    const auto prefix = dot == std::string::npos ? std::string{} : key.substr(0, dot + 1);
+    const auto find = [&](const char* name) -> const ui::PartField* {
+        const auto full = prefix + name;
+        for (const auto& other : fields) if (other.Key == full) return &other;
+        return nullptr;
+    };
+    const auto* ref = find("spriteRef");
+    const bool linked = ref && ui::FieldAs<assets::SpriteRef>(data, *ref).Valid();
+    const auto name = key.substr(prefix.size());
+    if (name == "useSpriteFit" || name == "useSpritePivot" || name == "overrideSpriteSlice") {
+        const auto* hover = find("hoverSpriteRef");
+        const auto* pressed = find("pressedSpriteRef");
+        if (!linked && !(hover && ui::FieldAs<assets::SpriteRef>(data, *hover).Valid()) &&
+            !(pressed && ui::FieldAs<assets::SpriteRef>(data, *pressed).Valid())) return false;
+    }
+    if (linked && (name == "sprite" || name == "sequence")) return false;
+    if (linked && field.ShowIfKey && prefix + "texture" == field.ShowIfKey)
+        return field.ShowIfValue != 0;
+    if (linked && (name == "sliceBorder" || name == "sliceCenterFill" ||
+                   name == "sliceEdgeFill" || name == "sliceDrawCenter")) {
+        const auto* overrideSlice = find("overrideSpriteSlice");
+        if (overrideSlice && !ui::FieldAs<bool>(data, *overrideSlice))
+            return name == "sliceBorder";
+        return true;
+    }
+    return ui::FieldVisible(fields, field, data);
+}
+
 // Проходит ли поле (не вид) под нынешний показ.
 bool Shows(const std::vector<ui::PartField>& fields, const ui::PartField& f, const void* data,
            const entt::registry& reg, entt::entity e, const FieldView& view) {
@@ -511,15 +561,15 @@ bool Shows(const std::vector<ui::PartField>& fields, const ui::PartField& f, con
     if (view.BySection && !SameTab(f.Section, view.Section)) return false;
     if (f.Advanced != view.Advanced) return false;
     if (!RequirementMet(reg, e, f)) return false;
-    return ui::FieldVisible(fields, f, data);
+    return PictureFieldVisible(fields, f, data);
 }
 
 void DrawOneField(EditorHost& host, GameObject obj, const UIPropsContext& ctx, const ui::PartType& p,
                   const ui::PartField& f, void* data, int selected) {
-    DrawPartField(host, obj, ctx, p, f, data);
+    const bool changed = DrawPartField(host, obj, ctx, p, f, data);
     // Правку разносим по набору ПОСЛЕ каждого поля: который именно виджет её
     // принял, знает только он сам.
-    if (selected > 1 && (ImGui::IsItemDeactivatedAfterEdit() || ImGui::IsItemEdited()))
+    if (selected > 1 && (changed || ImGui::IsItemDeactivatedAfterEdit() || ImGui::IsItemEdited()))
         MirrorFieldToSelection(host, obj, p, f);
 }
 
@@ -530,7 +580,7 @@ void DrawLookGroup(EditorHost& host, GameObject obj, const UIPropsContext& ctx, 
     bool anyAdvanced = false;
     for (size_t k = first; k < end; ++k) {
         const ui::PartField& lf = fields[k];
-        if (lf.Hidden || !ui::FieldVisible(fields, lf, data) || !RequirementMet(reg, e, lf)) continue;
+        if (lf.Hidden || !PictureFieldVisible(fields, lf, data) || !RequirementMet(reg, e, lf)) continue;
         if (lf.Advanced) { anyAdvanced = true; continue; }
         DrawOneField(host, obj, ctx, p, lf, data, selected);
     }
@@ -538,7 +588,7 @@ void DrawLookGroup(EditorHost& host, GameObject obj, const UIPropsContext& ctx, 
                                         T("More settings"))) {
         for (size_t k = first; k < end; ++k) {
             const ui::PartField& lf = fields[k];
-            if (lf.Hidden || !lf.Advanced || !ui::FieldVisible(fields, lf, data) || !RequirementMet(reg, e, lf))
+            if (lf.Hidden || !lf.Advanced || !PictureFieldVisible(fields, lf, data) || !RequirementMet(reg, e, lf))
                 continue;
             DrawOneField(host, obj, ctx, p, lf, data, selected);
         }
@@ -563,14 +613,14 @@ int DrawFieldsOf(EditorHost& host, GameObject obj, const UIPropsContext& ctx, co
             const bool show = !f.Hidden && view.Filter == FieldFilter::Look && SameTab(f.Tab, view.Tab) &&
                               (!view.BySection || SameTab(f.Section, view.Section)) &&
                               f.Advanced == view.Advanced && RequirementMet(reg, e, f) &&
-                              ui::FieldVisible(fields, f, data);
+                              PictureFieldVisible(fields, f, data);
             // Вид, у которого показать нечего, кроме цвета (оформление движка),
             // — одной строкой с подписью вида, а не раскрывашкой ради поля.
             int visibleInside = 0;
             const ui::PartField* only = nullptr;
             for (size_t k = i + 1; k < end; ++k) {
                 const ui::PartField& lf = fields[k];
-                if (lf.Hidden || !ui::FieldVisible(fields, lf, data) || !RequirementMet(reg, e, lf)) continue;
+                if (lf.Hidden || !PictureFieldVisible(fields, lf, data) || !RequirementMet(reg, e, lf)) continue;
                 ++visibleInside;
                 only = &lf;
             }

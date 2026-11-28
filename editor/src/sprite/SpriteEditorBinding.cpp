@@ -4,6 +4,7 @@
 
 #include "../Localization.h"
 #include "sage/scene/Scene.h"
+#include "sage/render/ResourceManager.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UIPart.h"
 
@@ -36,6 +37,8 @@ struct SliceFields {
     const ui::PartField* DrawCenter = nullptr;
     const ui::PartField* Sprite = nullptr;
     const ui::PartField* Path = nullptr;
+    const ui::PartField* Ref = nullptr;
+    const ui::PartField* Override = nullptr;
     const ui::PartField* Fit = nullptr;
     const ui::PartField* LookHeader = nullptr;
 };
@@ -48,6 +51,8 @@ SliceFields Locate(const std::vector<ui::PartField>& fields, const std::string& 
     s.Edge = FindField(fields, pre + "sliceEdgeFill");
     s.DrawCenter = FindField(fields, pre + "sliceDrawCenter");
     s.Sprite = FindField(fields, pre + "sprite");
+    s.Ref = FindField(fields, pre + "spriteRef");
+    s.Override = FindField(fields, pre + "overrideSpriteSlice");
     s.Path = FindField(fields, pre + "texture");
     if (!s.Path) s.Path = FindField(fields, pre + "path");
     s.Fit = FindField(fields, pre + "fit");
@@ -76,6 +81,19 @@ bool ReadBound(EditorHost& host, const EditorHost::NineSliceTarget& target, Boun
     if (f.DrawCenter) out.Slice.DrawCenter = ui::FieldAs<bool>(data, *f.DrawCenter);
     if (f.Sprite) out.Sprite = ui::FieldAs<glm::vec4>(data, *f.Sprite);
     if (f.Path) out.Path = ui::FieldAs<std::string>(data, *f.Path);
+    if (f.Ref) {
+        const auto ref = ui::FieldAs<assets::SpriteRef>(data, *f.Ref);
+        if (ref.Valid()) {
+            const auto resolved = ResourceManager::Instance().ResolveSprite(ref);
+            const auto path = AssetDatabase::Instance().PathOf(ref.Asset);
+            const std::string suffix = ".sagesheet";
+            if (path.size() > suffix.size()) out.Path = path.substr(0, path.size() - suffix.size());
+            if (const auto* region = resolved.Region()) {
+                out.Sprite = glm::vec4(region->Rect);
+                if (f.Override && !ui::FieldAs<bool>(data, *f.Override)) out.Slice = region->NineSliceOf();
+            }
+        }
+    }
     if (const ui::Element* el = reg.try_get<ui::Element>(obj.Entity()))
         out.ElementSize = (el->Resolved.x > 0.0f && el->Resolved.y > 0.0f) ? el->Resolved : el->Size;
     out.Title = obj.Name() + "  \xe2\x80\xba  " + T(part->Title);
@@ -93,6 +111,7 @@ bool WriteBound(EditorHost& host, const EditorHost::NineSliceTarget& target, con
     const std::vector<ui::PartField> fields = ui::EditableFields(*part->Fields);
     const SliceFields f = Locate(fields, target.BorderKey);
     if (!data || !f.Border) return false;
+    if (f.Override) ui::FieldAs<bool>(data, *f.Override) = true;
     ui::FieldAs<glm::vec4>(data, *f.Border) = slice.Border();
     if (f.Center) ui::FieldAs<int>(data, *f.Center) = (int)slice.CenterFill;
     if (f.Edge) ui::FieldAs<int>(data, *f.Edge) = (int)slice.EdgeFill;
@@ -100,6 +119,13 @@ bool WriteBound(EditorHost& host, const EditorHost::NineSliceTarget& target, con
     // Правят девятину — значит, режим девятины: иначе числа меняются, а
     // элемент остаётся растянутым, и это выглядит как «не работает».
     if (f.Fit) ui::FieldAs<int>(data, *f.Fit) = (int)ui::Image::Mode::NineSlice;
+    if (auto* element = reg.try_get<ui::Element>(obj.Entity()); element && !element->Style.empty()) {
+        for (const auto* field : {f.Border, f.Center, f.Edge, f.DrawCenter, f.Fit, f.Override}) {
+            if (!field) continue;
+            const auto key = std::string(part->Id) + "." + field->Key;
+            if (!element->Overrides(key)) element->StyleOverrides.push_back(key);
+        }
+    }
     return true;
 }
 
