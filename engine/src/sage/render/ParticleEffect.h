@@ -1,5 +1,8 @@
 #pragma once
+
+#include "sage/assets/SpriteSheet.h"
 #include "sage/core/TextureFiltering.h"
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -29,6 +32,10 @@
 // секундах.
 // ---------------------------------------------------------------------------
 namespace sage::fx {
+
+inline constexpr int kMaxFlipbookAxis = 64;
+inline constexpr int kMaxFlipbookFrames = kMaxFlipbookAxis * kMaxFlipbookAxis;
+inline bool ValidFlipbookAxis(int64_t tiles) { return tiles >= 1 && tiles <= kMaxFlipbookAxis; }
 
 // Откуда рождаются частицы и куда летят.
 enum class EmitShape {
@@ -199,7 +206,9 @@ struct ParticleEffect {
     // Одна картинка (Texture) или лист кадров TilesX×TilesY. Либо КАДРЫ
     // ОТДЕЛЬНЫМИ ФАЙЛАМИ (Frames): наборы часто так и приходят —
     // smoke_0.png…smoke_11.png; движок сам собирает их в лист.
+    assets::SpriteRef SpriteRef; // Preferred over the legacy texture/grid or frame files.
     std::string Texture;
+    std::string SourcePath;  // diagnostics for loaded .sagefx, not serialized
     std::vector<std::string> Frames;
     int TilesX = 1;
     int TilesY = 1;

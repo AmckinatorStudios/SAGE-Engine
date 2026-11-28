@@ -205,6 +205,13 @@ void PackWriter::AddFile(const std::string& virtualPath, const fs::path& diskFil
     m_entries.push_back({path, {}, diskFile});
 }
 
+std::vector<std::string> PackWriter::Paths() const {
+    std::vector<std::string> paths;
+    paths.reserve(m_entries.size());
+    for (const auto& entry : m_entries) paths.push_back(entry.Path);
+    return paths;
+}
+
 bool PackWriter::Has(const std::string& virtualPath) const {
     const std::string path = Normalize(virtualPath);
     for (const Entry& e : m_entries)
@@ -577,6 +584,7 @@ namespace vfs {
 
 namespace {
 std::unique_ptr<PackReader> g_pack;
+uint64_t g_mountGeneration = 0;
 std::string g_packDir;   // каталог пакета (UTF-8, прямой слэш)
 
 std::string Slashes(std::string p) {
@@ -601,10 +609,12 @@ bool Mount(const fs::path& packFile) {
 }
 
 void Unmount() {
+    ++g_mountGeneration;
     g_pack.reset();
     g_packDir.clear();
 }
 bool Mounted() { return g_pack != nullptr; }
+uint64_t MountGeneration() { return g_mountGeneration; }
 
 std::string PackedKey(const std::string& path) {
     if (!g_pack || path.empty()) return {};

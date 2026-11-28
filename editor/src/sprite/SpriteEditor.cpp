@@ -1,3 +1,5 @@
+#include "sage/render/ResourceManager.h"
+#include "sage/core/Paths.h"
 #include "SpriteEditor.h"
 
 #include <algorithm>
@@ -8,7 +10,6 @@
 
 #include "imgui.h"
 #include "imgui_internal.h" // DockBuilder: раскладка окна редактора по умолчанию
-#include <stb_image.h>
 
 #include "../EditorHost.h"
 #include "../EditorIcons.h"
@@ -18,7 +19,6 @@
 #include "../Localization.h"
 #include "SpriteEditorDetail.h"
 #include "sage/assets/AssetDatabase.h"
-#include "sage/assets/Pack.h"
 #include "sage/render/Texture.h"
 
 using sage::editor::T;
@@ -142,8 +142,8 @@ void SpriteEditor::ForgetProject() {
 
 void SpriteEditor::Open(const std::string& path, int region, int sequence) {
     Load(path);
-    if (region >= 0 && region < (int)m_doc.Sheet.Regions.size()) SelectOnly(region);
-    if (sequence >= 0 && sequence < (int)m_doc.Sheet.Sequences.size()) m_seqSelected = sequence;
+    if (region >= 0 && region < (int)m_doc.Sheet.Regions().size()) SelectOnly(region);
+    if (sequence >= 0 && sequence < (int)m_doc.Sheet.Sequences().size()) m_seqSelected = sequence;
 }
 
 void SpriteEditor::Load(const std::string& path) {
@@ -156,6 +156,7 @@ void SpriteEditor::Load(const std::string& path) {
     m_history.Clear();
     m_sel.clear();
     m_hover = -1;
+    m_seqSelected = -1;
     m_zoom = 0.0f;
     m_nineZoom = 0.0f;
     m_userView = false;
@@ -168,28 +169,20 @@ void SpriteEditor::Load(const std::string& path) {
     m_tex.reset();
     m_disk = path.empty() ? std::string() : sage::AssetDatabase::Instance().LocatePath(path);
     if (!path.empty()) {
-        // Пиксели — для пустых клеток, островов и догадки о девятине.
-        int ch = 0, w = 0, h = 0;
-        stbi_set_flip_vertically_on_load_thread(false);
-        if (unsigned char* data = sage::assets::vfs::LoadImage(m_disk, &w, &h, &ch, 4)) {
-            m_pixels = std::make_shared<const std::vector<unsigned char>>(data, data + (size_t)w * h * 4);
-            m_w = w;
-            m_h = h;
-            stbi_image_free(data);
-            // Своя текстура, а не из общего кэша: там картинка могла быть уже
-            // загружена со сглаживанием (миниатюра, сцена), а на увеличенном
-            // холсте нужен каждый пиксель без размытия. Строки — снизу вверх,
-            // как у текстур движка.
-            std::vector<unsigned char> flipped(m_pixels->size());
-            const size_t row = (size_t)w * 4;
-            for (int y = 0; y < h; ++y)
-                std::copy_n(m_pixels->data() + (size_t)(h - 1 - y) * row, row, flipped.data() + (size_t)y * row);
-            m_tex = std::make_shared<Texture>(flipped.data(), w, h, TextureFilter::Nearest, false);
-        } else {
-            SetStatus(T("Could not read the texture: ") + path, true);
+        auto& resources = ResourceManager::Instance();
+        auto sprite = resources.SpriteTextureFor(resources.ResolveSpriteImage(path, true));
+        if (sprite.Data.Resource) {
+            const auto& image = sprite.Data.Resource->Image;
+            m_doc.Sheet = sprite.Data.Resource->Sheet;
+            if (image) {
+                m_pixels = std::shared_ptr<const std::vector<unsigned char>>(image, &image->Pixels);
+                m_w = image->Width;
+                m_h = image->Height;
+                m_tex = std::move(sprite.Image);
+            }
         }
-        std::string err;
-        if (!sp::LoadDoc(m_disk, m_doc, err)) SetStatus(T("Could not read the sprite sheet: ") + err, true);
+        if (!sprite.Data.Diagnostic.empty()) SetStatus(sprite.Data.Diagnostic, true);
+        else if (!m_tex) SetStatus(T("Could not read the texture: ") + path, true);
     }
     m_savedPrint = sp::Fingerprint(m_doc);
     m_dirty = false;
@@ -232,8 +225,8 @@ void SpriteEditor::OpenFor(EditorHost& host, const EditorHost::NineSliceTarget& 
     // какой это спрайт. Девятина при этом — значения элемента, не куска.
     m_sel.clear();
     const glm::ivec4 r = glm::ivec4(b.Sprite);
-    for (int i = 0; i < (int)m_doc.Sheet.Regions.size(); ++i)
-        if (r.z > 0 && m_doc.Sheet.Regions[(size_t)i].Rect == r) SelectOnly(i);
+    for (int i = 0; i < (int)m_doc.Sheet.Regions().size(); ++i)
+        if (r.z > 0 && m_doc.Sheet.Regions()[(size_t)i].Rect == r) SelectOnly(i);
 }
 
 void SpriteEditor::RefreshBound() {
@@ -258,7 +251,7 @@ void SpriteEditor::Undo() {
     }
     if (!m_history.Undo(m_doc)) return;
     m_sel.erase(std::remove_if(m_sel.begin(), m_sel.end(),
-                               [&](int i) { return i >= (int)m_doc.Sheet.Regions.size(); }),
+                               [&](int i) { return i >= (int)m_doc.Sheet.Regions().size(); }),
                 m_sel.end());
     m_nameFor = -1;
     m_touched = true;
@@ -271,7 +264,7 @@ void SpriteEditor::Redo() {
     }
     if (!m_history.Redo(m_doc)) return;
     m_sel.erase(std::remove_if(m_sel.begin(), m_sel.end(),
-                               [&](int i) { return i >= (int)m_doc.Sheet.Regions.size(); }),
+                               [&](int i) { return i >= (int)m_doc.Sheet.Regions().size(); }),
                 m_sel.end());
     m_nameFor = -1;
     m_touched = true;
@@ -280,9 +273,28 @@ void SpriteEditor::Redo() {
 bool SpriteEditor::Save() {
     if (m_disk.empty()) return false;
     std::string err;
-    if (!sp::SaveDoc(m_disk, m_doc, err)) {
+    if (!m_doc.Sheet.Validate(err, m_w, m_h) || !sp::SaveDoc(m_disk, m_doc, err)) {
         SetStatus(T("Could not save: ") + err, true);
         return false;
+    }
+    auto& database = sage::AssetDatabase::Instance();
+    if (!database.ProjectDir().empty() && !sage::PathFromUtf8(m_path).is_absolute()) {
+        const auto guid = database.Register(sage::ui::SpriteSheet::SidecarPath(m_path));
+        if (guid.Valid()) {
+            auto& resources = ResourceManager::Instance();
+            resources.NotifySpriteChanged(guid);
+            auto sprite = resources.SpriteTextureFor(resources.ResolveSpriteSheet(guid));
+            if (sprite.Image) {
+                const auto& image = sprite.Data.Resource->Image;
+                if (m_w != image->Width || m_h != image->Height) {
+                    m_w = image->Width;
+                    m_h = image->Height;
+                    m_gridValid = m_autoValid = false;
+                }
+                m_pixels = std::shared_ptr<const std::vector<unsigned char>>(image, &image->Pixels);
+                m_tex = std::move(sprite.Image);
+            }
+        } else LOG_WARN("Sprites") << "Could not register sprite sheet: " << m_path;
     }
     m_savedPrint = sp::Fingerprint(m_doc);
     m_dirty = false;
@@ -308,8 +320,8 @@ void SpriteEditor::DeleteSelected() {
     std::vector<int> order = m_sel;
     std::sort(order.rbegin(), order.rend());
     for (int i : order)
-        if (i >= 0 && i < (int)m_doc.Sheet.Regions.size())
-            m_doc.Sheet.Regions.erase(m_doc.Sheet.Regions.begin() + i);
+        if (i >= 0 && i < (int)m_doc.Sheet.Regions().size())
+            m_doc.Sheet.Remove(m_doc.Sheet.Regions()[(size_t)i].Name);
     m_sel.clear();
     m_nameFor = -1;
 }
@@ -515,8 +527,8 @@ void SpriteEditor::HandleShortcuts() {
         if (d != glm::ivec2(0)) {
             Snapshot();
             for (int i : m_sel)
-                if (i >= 0 && i < (int)m_doc.Sheet.Regions.size())
-                    m_doc.Sheet.Regions[(size_t)i].Rect = sp::MoveRect(m_doc.Sheet.Regions[(size_t)i].Rect, d, m_w, m_h);
+                if (i >= 0 && i < (int)m_doc.Sheet.Regions().size())
+                    m_doc.Sheet.SetRect((size_t)i, sp::MoveRect(m_doc.Sheet.Regions()[(size_t)i].Rect, d, m_w, m_h));
         }
     }
 }
@@ -573,7 +585,7 @@ void SpriteEditor::DrawReplaceModal() {
     if (!ImGui::BeginPopupModal(T("Sprites already exist###SpriteEditorReplace"), nullptr,
                                 ImGuiWindowFlags_AlwaysAutoResize))
         return;
-    ImGui::Text(T("The texture already has %d sprites."), (int)m_doc.Sheet.Regions.size());
+    ImGui::Text(T("The texture already has %d sprites."), (int)m_doc.Sheet.Regions().size());
     ImGui::TextDisabled("%s", T("Add the new ones next to them, or replace them all?"));
     ImGui::PushStyleColor(ImGuiCol_Text, EditorTheme::Color(EditorTheme::Role::Warn));
     ImGui::TextUnformatted(T("Replace removes the current sprites with their names, pivots and nine-slices."));

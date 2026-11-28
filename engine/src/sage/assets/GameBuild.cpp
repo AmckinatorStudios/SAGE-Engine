@@ -3,8 +3,10 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <string_view>
 
 #include "sage/assets/AssetDatabase.h"
+#include "sage/assets/SpriteResolver.h"
 #include "sage/assets/GameInfo.h"
 #include "sage/assets/Pack.h"
 #include "sage/assets/UserContent.h"
@@ -22,6 +24,102 @@ GameBuildResult Fail(GameBuildResult r, const char* key, std::string detail = {}
     r.ErrorKey = key;
     r.ErrorDetail = std::move(detail);
     return r;
+}
+
+bool CheckSpriteAssets(const GameBuildRequest& request, const PackWriter& pack, std::string& error) {
+    AssetDatabase index;
+    if (!request.AssetIndex.empty()) index.LoadIndex(request.AssetIndex);
+    auto inProject = [&](const std::string& name) {
+        std::error_code ec;
+        const auto relative = PathFromUtf8(name);
+        if (relative.is_absolute() || relative.has_root_name() || !pack.Has(name)) return false;
+        const auto path = fs::canonical(request.ProjectDir / relative, ec);
+        if (ec) return false;
+        const auto root = fs::canonical(request.ProjectDir, ec);
+        if (ec) return false;
+        const auto underRoot = path.lexically_relative(root);
+        return !underRoot.empty() && *underRoot.begin() != "..";
+    };
+    for (const auto& name : pack.Paths()) {
+        if (PathFromUtf8(name).extension() != ".sagesheet") continue;
+        std::error_code ec;
+        if (fs::exists(request.ProjectDir / PathFromUtf8(name), ec) && !index.GuidOf(name).Valid()) {
+            error = "sprite document has no GUID in the export index: " + name;
+            return false;
+        }
+    }
+    for (const auto& ref : request.SpriteReferences) {
+        if (!ref.Valid() || index.PathOf(ref.Asset).empty()) {
+            error = "unknown sprite GUID: " + ref.Asset.ToString();
+            return false;
+        }
+    }
+    for (const auto& record : index.All()) {
+        constexpr std::string_view suffix = ".sagesheet";
+        const auto path = PathFromUtf8(record.Path);
+        if (path.extension() != suffix && record.Type != "spriteSheet") continue;
+        if (path.extension() != suffix || !inProject(record.Path)) {
+            error = "sprite document is outside the package or missing: " + record.Path;
+            return false;
+        }
+        SpriteSheet sheet;
+        if (!SpriteSheet::LoadFile(PathToUtf8(request.ProjectDir / path), sheet, error)) return false;
+        const auto image = sheet.ImagePath(record.Path.substr(0, record.Path.size() - suffix.size()));
+        if (!inProject(image)) {
+            error = "sprite image is outside the package or missing: " + image;
+            return false;
+        }
+        if (!SpriteResolver::ValidateSource(sheet, PathToUtf8(request.ProjectDir / PathFromUtf8(image)), error))
+            return false;
+        for (const auto& ref : request.SpriteReferences) {
+            if (ref.Asset != record.Guid) continue;
+            const bool found = ref.Type == SpriteRef::Kind::Region ? sheet.Find(ref.Item) != nullptr
+                                                                  : sheet.FindSequence(ref.Item) != nullptr;
+            if (!found) { error = "unknown sprite ID: " + ref.Item.ToString(); return false; }
+        }
+    }
+    for (const auto& ref : request.SpriteReferences) {
+        if (PathFromUtf8(index.PathOf(ref.Asset)).extension() != ".sagesheet") {
+            error = "sprite reference does not point to a sheet: " + ref.Asset.ToString();
+            return false;
+        }
+    }
+    return true;
+}
+
+bool CheckPackedSprites(const GameBuildRequest& request, const fs::path& archive, std::string& error) {
+    AssetDatabase index;
+    if (!request.AssetIndex.empty()) index.LoadIndex(request.AssetIndex);
+    PackReader reader;
+    bool opened = false;
+    for (const auto& record : index.All()) {
+        constexpr std::string_view suffix = ".sagesheet";
+        if (PathFromUtf8(record.Path).extension() != suffix) continue;
+        if (!opened) {
+            opened = reader.Open(archive);
+            if (!opened) { error = "could not reopen the sprite package"; return false; }
+        }
+        std::vector<uint8_t> bytes;
+        if (!reader.Read(record.Path, bytes, 16u * 1024 * 1024)) {
+            error = "sprite document is absent from the written package: " + record.Path;
+            return false;
+        }
+        SpriteSheet sheet;
+        if (!SpriteSheet::FromJsonString(std::string(bytes.begin(), bytes.end()), sheet, error)) return false;
+        const auto base = record.Path.substr(0, record.Path.size() - suffix.size());
+        const auto image = sheet.ImagePath(base);
+        if (!reader.Contains(image)) {
+            error = "sprite image is absent from the written package: " + image;
+            return false;
+        }
+        for (const auto& ref : request.SpriteReferences) {
+            if (ref.Asset != record.Guid) continue;
+            const bool found = ref.Type == SpriteRef::Kind::Region ? sheet.Find(ref.Item) != nullptr
+                                                                  : sheet.FindSequence(ref.Item) != nullptr;
+            if (!found) { error = "sprite ID is absent from the written package: " + ref.Item.ToString(); return false; }
+        }
+    }
+    return true;
 }
 
 } // namespace
@@ -110,6 +208,8 @@ GameBuildResult BuildGame(const GameBuildRequest& req, const GameBuildHooks& hoo
         pack.AddDirectory(req.ProjectDir, {".meta"}, "", {req.OutputDir, req.ProjectDir / "Builds",
                                                          // примеры пользовательских папок — рядом с игрой, не в пакете
                                                          req.ProjectDir / "userfolders"});
+    std::string spriteError;
+    if (!CheckSpriteAssets(req, pack, spriteError)) return Abort("Invalid sprite resource: ", spriteError);
     if (!req.AssetIndex.empty())
         pack.Add("assetdb.json", std::vector<uint8_t>(req.AssetIndex.begin(), req.AssetIndex.end()));
     LOG_INFO("Build") << "Сборка игры: в пакет идут " << pack.Count() << " файлов (проекта — " << projectFiles
@@ -129,6 +229,8 @@ GameBuildResult BuildGame(const GameBuildRequest& req, const GameBuildHooks& hoo
         }
         return Abort("Could not write the game package: ", pack.LastError());
     }
+    if (!CheckPackedSprites(req, tmpDir / "game.sagepak", spriteError))
+        return Abort("Invalid packed sprite resource: ", spriteError);
 
     // 4. Настройки игры — рядом с exe: их игрок вправе править (разрешение,
     // качество), и прятать их в пакет значило бы отнять у него меню «настройки».

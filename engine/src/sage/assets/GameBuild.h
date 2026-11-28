@@ -2,6 +2,9 @@
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <vector>
+
+#include "sage/assets/SpriteSheet.h"
 
 // ---------------------------------------------------------------------------
 // СБОРКА ИГРЫ — одна функция на всех: окно «File > Build Game» редактора (в
@@ -29,6 +32,7 @@ struct GameBuildRequest {
     std::filesystem::path OutputDir;      // игра ляжет в OutputDir/<название игры>
     std::filesystem::path Player;         // собранный SagePlayer (его assets/ — рядом)
     std::string AssetIndex;               // AssetDatabase::ExportIndex()
+    std::vector<SpriteRef> SpriteReferences; // References declared by build callers.
     bool CopyProjectFile = false;         // см. EngineConfig::BuildProjectFile
 };
 

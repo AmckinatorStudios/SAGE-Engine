@@ -184,6 +184,7 @@ GraphicsDevice::Caps OpenGLDevice::Capabilities() const {
     if (c.StorageBuffers) c.MaxStorageBindings = get(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS);
     c.MaxUniformBindings = get(GL_MAX_UNIFORM_BUFFER_BINDINGS);
     c.MaxTextureUnits = get(GL_MAX_TEXTURE_IMAGE_UNITS);
+    c.MaxTexture2DSize = get(GL_MAX_TEXTURE_SIZE);
     return c;
 }
 

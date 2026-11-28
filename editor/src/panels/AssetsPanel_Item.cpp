@@ -241,8 +241,30 @@ bool AssetsPanel::ApplyRename(EditorHost& host, const fs::path& from, const std:
 }
 
 void AssetsPanel::ApplyDelete(EditorHost& host, const std::vector<fs::path>& victims) {
+    auto& database = sage::AssetDatabase::Instance();
+    std::vector<fs::path> deleted;
     for (const fs::path& victim : victims) {
-        DeleteAsset(victim);
+        const auto ref = host.CurrentProject().AssetRef(victim);
+        const auto isVictim = [&](const std::string& value) {
+            return value == ref || value.rfind(ref + "/", 0) == 0 ||
+                   value == ref + ".sagesheet" || value == ref + ".sage9";
+        };
+        bool used = false;
+        for (const auto& record : database.All()) {
+            if (!isVictim(record.Path)) continue;
+            for (const auto& dependent : database.Dependents(record.Guid))
+                if (!isVictim(database.PathOf(dependent))) used = true;
+        }
+        if (used) {
+            host.SetStatusMessage("Cannot delete asset while it has dependents: " + ref);
+            continue;
+        }
+        std::string error;
+        if (!DeleteAsset(victim, error)) {
+            host.SetStatusMessage("Asset delete failed: " + error);
+            continue;
+        }
+        deleted.push_back(victim);
         Repoint(m_multi, victim, {});
         Repoint(m_selected, victim, {});
         Repoint(m_anchor, victim, {});
@@ -254,5 +276,5 @@ void AssetsPanel::ApplyDelete(EditorHost& host, const std::vector<fs::path>& vic
         sage::editor::fscache::Invalidate(victim.parent_path());
     }
     m_itemsTime = -1.0;
-    host.AssetsDeleted(victims);
+    if (!deleted.empty()) host.AssetsDeleted(deleted);
 }

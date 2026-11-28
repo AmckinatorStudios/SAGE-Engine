@@ -3,18 +3,16 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
-
-#include "sage/assets/Pack.h"
+#include "sage/core/AtomicFile.h"
 #include "sage/core/Paths.h"
+
 
 namespace sage::editor::sprite {
 
-using sage::ui::NineSlice;
-using sage::ui::SpriteRegion;
 using sage::ui::SpriteSheet;
 
 std::string Fingerprint(const SpriteDoc& doc) {
-    return doc.Sheet.ToJsonString() + "\n" + doc.Texture.ToJsonString();
+    return doc.Sheet.ToJsonString();
 }
 
 // --- История ---------------------------------------------------------------
@@ -67,23 +65,7 @@ std::vector<glm::ivec4> GridRects(int width, int height, const sage::ui::SpriteG
 
 int ApplySlices(SpriteSheet& sheet, const std::vector<glm::ivec4>& rects, const std::string& prefix,
                 SliceApply how) {
-    if (how == SliceApply::Replace) sheet.Regions.clear();
-    const std::string base = prefix.empty() ? std::string("sprite") : prefix;
-    int added = 0;
-    for (const glm::ivec4& r : rects) {
-        // Добавление поверх готовой нарезки не плодит двойников: кусок с тем
-        // же прямоугольником уже есть — у него своё имя, точка опоры и
-        // девятина, и затирать их второй копией незачем.
-        const bool twin = std::any_of(sheet.Regions.begin(), sheet.Regions.end(),
-                                      [&](const SpriteRegion& e) { return e.Rect == r; });
-        if (twin) continue;
-        SpriteRegion reg;
-        reg.Name = sheet.FreeName(base);
-        reg.Rect = r;
-        sheet.Regions.push_back(reg);
-        ++added;
-    }
-    return added;
+    return sheet.ApplySlices(rects, prefix, how == SliceApply::Replace);
 }
 
 // --- Попадание и ручки --------------------------------------------------------
@@ -93,8 +75,8 @@ int HitTest(const SpriteSheet& sheet, glm::vec2 px) {
     // кусок внутри крупной рамки не выбрать щелчком вовсе.
     int best = -1;
     long bestArea = 0;
-    for (int i = (int)sheet.Regions.size() - 1; i >= 0; --i) {
-        const glm::ivec4 r = sheet.Regions[(size_t)i].Rect;
+    for (int i = (int)sheet.Regions().size() - 1; i >= 0; --i) {
+        const glm::ivec4 r = sheet.Regions()[(size_t)i].Rect;
         if (px.x < (float)r.x || px.y < (float)r.y || px.x >= (float)(r.x + r.z) || px.y >= (float)(r.y + r.w))
             continue;
         const long area = (long)r.z * (long)r.w;
@@ -108,8 +90,8 @@ int HitTest(const SpriteSheet& sheet, glm::vec2 px) {
 
 std::vector<int> HitRect(const SpriteSheet& sheet, glm::ivec4 rect) {
     std::vector<int> out;
-    for (int i = 0; i < (int)sheet.Regions.size(); ++i) {
-        const glm::ivec4 r = sheet.Regions[(size_t)i].Rect;
+    for (int i = 0; i < (int)sheet.Regions().size(); ++i) {
+        const glm::ivec4 r = sheet.Regions()[(size_t)i].Rect;
         if (r.x < rect.x + rect.z && rect.x < r.x + r.z && r.y < rect.y + rect.w && rect.y < r.y + r.w)
             out.push_back(i);
     }
@@ -160,8 +142,8 @@ int PivotPresetOf(glm::vec2 p) {
 
 bool NameFree(const SpriteSheet& sheet, const std::string& name, int self) {
     if (name.empty()) return false;
-    for (int i = 0; i < (int)sheet.Regions.size(); ++i)
-        if (i != self && sheet.Regions[(size_t)i].Name == name) return false;
+    for (int i = 0; i < (int)sheet.Regions().size(); ++i)
+        if (i != self && sheet.Regions()[(size_t)i].Name == name) return false;
     return true;
 }
 
@@ -176,37 +158,56 @@ glm::vec4 ClampBorder(glm::vec4 b, float w, float h) {
 
 // --- Файлы -------------------------------------------------------------------
 
+bool PublishAtlas(const std::string& image, const std::string& png, SpriteSheet& document,
+                  std::string& err) {
+    namespace fs = std::filesystem;
+    if (image.empty() || png.empty() || !document.Validate(err)) {
+        if (err.empty()) err = "missing atlas image";
+        return false;
+    }
+    const auto base = sage::PathFromUtf8(image);
+    const auto name = ".sage-atlas-" + sage::AssetGuid::Generate().ToString() + ".png";
+    const auto revision = base.parent_path() / sage::PathFromUtf8(name);
+    auto next = document;
+    if (!next.SetImageFile(name)) return false;
+    std::error_code ec;
+    const bool exists = fs::exists(base, ec);
+    if (ec) { err = ec.message(); return false; }
+    const auto previous = document.ImageFile();
+    if (!sage::WriteFileAtomic(sage::PathToUtf8(revision), png, err)) return false;
+    bool createdBase = false;
+    if (!exists) {
+        createdBase = sage::WriteFileAtomic(image, png, err);
+        if (!createdBase) {
+            fs::remove(revision, ec);
+            return false;
+        }
+    }
+    if (!next.SaveFile(SpriteSheet::SidecarPath(image), err)) {
+        fs::remove(revision, ec);
+        if (createdBase) fs::remove(base, ec);
+        return false;
+    }
+    document = std::move(next);
+    // The base PNG is the compatibility image. Only revision files owned by
+    // this publisher may be retired after the document has committed.
+    if (previous.rfind(".sage-atlas-", 0) == 0 && previous != name) {
+        fs::remove(base.parent_path() / sage::PathFromUtf8(previous), ec);
+        if (!ec) fs::remove(base.parent_path() / sage::PathFromUtf8(previous + ".meta"), ec);
+    }
+    return true;
+}
+
 bool SaveDoc(const std::string& image, const SpriteDoc& doc, std::string& err) {
     if (image.empty()) {
         err = "нет картинки";
         return false;
     }
-    namespace fs = std::filesystem;
-    std::error_code ec;
-    const std::string sheetPath = SpriteSheet::SidecarPath(image);
-    const std::string ninePath = NineSlice::SidecarPath(image);
-    // Лист пишется, если в нём что-то есть или он уже лежал рядом (его
-    // опустошили — значит, пустым и сохранить, а не оставить старые куски).
-    const bool sheetHasData = !doc.Sheet.Regions.empty() || !doc.Sheet.Sequences.empty();
-    if (sheetHasData || fs::exists(sage::PathFromUtf8(sheetPath), ec))
-        if (!doc.Sheet.SaveFile(sheetPath, err)) return false;
-    if (!doc.Texture.Empty() || fs::exists(sage::PathFromUtf8(ninePath), ec))
-        if (!doc.Texture.SaveFile(ninePath, err)) return false;
-    return true;
+    return doc.Sheet.SaveFile(SpriteSheet::SidecarPath(image), err);
 }
 
 bool LoadDoc(const std::string& image, SpriteDoc& doc, std::string& err) {
-    doc = SpriteDoc();
-    if (image.empty()) return true;
-    const std::string sheetPath = SpriteSheet::SidecarPath(image);
-    std::string text;
-    if (sage::assets::vfs::ReadText(sheetPath, text) && !SpriteSheet::FromJsonString(text, doc.Sheet, err))
-        return false;
-    text.clear();
-    const std::string ninePath = NineSlice::SidecarPath(image);
-    if (sage::assets::vfs::ReadText(ninePath, text) && !NineSlice::FromJsonString(text, doc.Texture, err))
-        return false;
-    return true;
+    return SpriteSheet::LoadForImage(image, doc.Sheet, err);
 }
 
 } // namespace sage::editor::sprite

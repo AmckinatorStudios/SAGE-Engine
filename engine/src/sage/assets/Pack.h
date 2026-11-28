@@ -79,6 +79,7 @@ public:
 
     size_t Count() const { return m_entries.size(); }
     bool Has(const std::string& virtualPath) const;
+    std::vector<std::string> Paths() const;
     // Почему не записалось — строкой для человека.
     const std::string& LastError() const { return m_error; }
 
@@ -154,6 +155,7 @@ namespace vfs {
 bool Mount(const std::filesystem::path& packFile);
 void Unmount();
 bool Mounted();
+uint64_t MountGeneration();
 
 // Есть ли такой файл — в пакете или на диске.
 bool Exists(const std::string& path);

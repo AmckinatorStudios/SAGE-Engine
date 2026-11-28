@@ -1,4 +1,7 @@
 #include "ScriptEngine.h"
+#include "sage/core/Window.h"
+#include "sage/input/InputSystem.h"
+#include "sage/render/Camera.h"
 
 #include "sage/core/Log.h"
 #include "sage/core/Paths.h"

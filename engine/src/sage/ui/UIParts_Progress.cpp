@@ -112,18 +112,20 @@ void BuildPath(const Bar& bar, int w, int h, float halfWidth, std::vector<float>
 
 // Картинка порядка шкалы под её прямоугольник (экранный). nullptr — нечего
 // показывать (нет пути, нет картинки).
-const ::Texture* OrderTexture(const Bar& bar, const UIRect& inner, float scale, glm::vec4& uv) {
+std::shared_ptr<const Texture> OrderTexture(const PartDrawContext& c, const Bar& bar, const UIRect& inner, glm::vec4& uv) {
     uv = {0.0f, 1.0f, 1.0f, 0.0f};
     if (bar.Fill == Bar::Kind::CustomMask) {
-        if (bar.MaskImage.empty()) return nullptr;
-        const std::string key = "img|" + bar.MaskImage;
-        if (!bar.OrderTex || bar.OrderKey != key) {
-            bar.OrderTex = ResourceManager::Instance().GetTexture(bar.MaskImage);
-            bar.OrderKey = key;
+        if (bar.MaskSpriteRef.Valid()) {
+            auto sprite = SpritePicture(bar.MaskSpriteRef, TextureFiltering::Smooth);
+            const auto* region = sprite.Data.Region(c.Reg ? SpriteTime(*c.Reg) : 0.0f);
+            if (!region || !sprite.Image) return {};
+            const auto rect = glm::vec4(region->Rect);
+            uv = UIRenderer::MaskUV(*sprite.Image, {rect.x, rect.y, rect.z, rect.w});
+            return sprite.Image;
         }
-        if (bar.OrderTex) uv = UIRenderer::MaskUV(*bar.OrderTex, {0.0f, 0.0f, 0.0f, 0.0f});
-        return bar.OrderTex.get();
+        return PictureTexture(bar.MaskImage, TextureFiltering::Smooth);
     }
+    const float scale = c.Scale;
     const int w = std::clamp((int)std::ceil(inner.w), 8, kMaxOrderSide);
     const int h = std::clamp((int)std::ceil(inner.h), 8, kMaxOrderSide);
     // Толщины — в долях: текстура своего размера, экран — своего.
@@ -140,7 +142,7 @@ const ::Texture* OrderTexture(const Bar& bar, const UIRect& inner, float scale, 
         bar.OrderTex = MakeOrderTexture(order, cover, w, h);
         bar.OrderKey = key;
     }
-    return bar.OrderTex.get();
+    return bar.OrderTex;
 }
 
 } // namespace
@@ -165,11 +167,12 @@ void DrawProgressShaped(const PartDrawContext& c, const Bar& bar, const Look& fi
                         glm::vec2 range) {
     if (range.y <= range.x || inner.w <= 0.0f || inner.h <= 0.0f) return;
     glm::vec4 uv;
-    const ::Texture* tex = OrderTexture(bar, inner, c.Scale, uv);
+    auto tex = OrderTexture(c, bar, inner, uv);
     if (!tex) return;
     UIRenderer::Mask m;
     m.Rect = {inner.x, inner.y, inner.w, inner.h};
-    m.Image = tex;
+    m.Image = tex.get();
+    m.TextureOwner = std::move(tex);
     m.UV = uv;
     m.Ordered = true;
     // Свой рисунок с другого конца — тот же порядок, видна верхняя часть.

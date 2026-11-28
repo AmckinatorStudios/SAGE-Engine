@@ -300,8 +300,9 @@ set(SAGE_ENGINE_SOURCES
     src/sage/ui/UIControls.cpp
     src/sage/ui/UIParts_Look.cpp
     src/sage/ui/UIParts_Visual.cpp
-    src/sage/ui/NineSlice.cpp
-    src/sage/ui/SpriteSheet.cpp
+    src/sage/assets/NineSlice.cpp
+    src/sage/assets/SpriteResolver.cpp
+    src/sage/assets/SpriteSheet.cpp
     src/sage/ui/UISerialize.cpp
     src/sage/ui/Interface.cpp
     src/sage/ui/InterfaceSource.cpp

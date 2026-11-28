@@ -1,3 +1,4 @@
+#include "sage/render/ResourceManager.h"
 #include "SpriteEditor.h"
 
 #include <algorithm>
@@ -9,7 +10,6 @@
 #include <functional>
 
 #include "imgui.h"
-#include <stb_image.h>
 #include <stb_image_write.h>
 
 #include "../AssetSlot.h"
@@ -337,7 +337,7 @@ void SpriteEditor::CreateSprites() {
         SetStatus(T("Nothing to create: no cell fits the texture"), true);
         return;
     }
-    if (!m_doc.Sheet.Regions.empty()) {
+    if (!m_doc.Sheet.Regions().empty()) {
         m_pendingRects = rects;
         m_pendingPrefix = prefix;
         m_askReplace = true;
@@ -359,7 +359,7 @@ void SpriteEditor::CommitSlices(const std::vector<glm::ivec4>& rects, const std:
 // --- Выбранный кусок ---------------------------------------------------------------
 
 void SpriteEditor::DrawSelected(EditorHost& host) {
-    auto& regions = m_doc.Sheet.Regions;
+    auto& regions = m_doc.Sheet.Regions();
     m_sel.erase(std::remove_if(m_sel.begin(), m_sel.end(), [&](int i) { return i < 0 || i >= (int)regions.size(); }),
                 m_sel.end());
     if (m_sel.empty()) {
@@ -376,7 +376,7 @@ void SpriteEditor::DrawSelected(EditorHost& host) {
         return;
     }
     const int i = Primary();
-    sage::ui::SpriteRegion& reg = regions[(size_t)i];
+    const sage::ui::SpriteRegion& reg = regions[(size_t)i];
 
     // ИМЯ: уникально в листе. Занятое не применяется — поле подсвечивает
     // ошибку, пока имя не исправят (или Esc не вернёт прежнее).
@@ -394,7 +394,7 @@ void SpriteEditor::DrawSelected(EditorHost& host) {
     if (ImGui::IsItemDeactivatedAfterEdit()) {
         if (!m_nameBad && reg.Name != m_nameBuf) {
             Snapshot();
-            reg.Name = m_nameBuf;
+            m_doc.Sheet.Rename(reg.Name, m_nameBuf);
         } else if (m_nameBad) {
             std::snprintf(m_nameBuf, sizeof(m_nameBuf), "%s", reg.Name.c_str());
             m_nameBad = false;
@@ -423,7 +423,7 @@ void SpriteEditor::DrawSelected(EditorHost& host) {
         r.y = std::clamp(r.y, 0, std::max(0, m_h - 1));
         r.z = std::clamp(r.z, 1, std::max(1, m_w - r.x));
         r.w = std::clamp(r.w, 1, std::max(1, m_h - r.y));
-        reg.Rect = r;
+        m_doc.Sheet.SetRect((size_t)i, r);
         Changed();
     }
 
@@ -446,7 +446,7 @@ void SpriteEditor::DrawSelected(EditorHost& host) {
 }
 
 void SpriteEditor::DrawPivot(EditorHost& host, std::vector<int>& sel) {
-    auto& regions = m_doc.Sheet.Regions;
+    auto& regions = m_doc.Sheet.Regions();
     const sage::ui::SpriteRegion& first = regions[(size_t)sel.back()];
     const int preset = sp::PivotPresetOf(first.Pivot);
     ImGui::Spacing();
@@ -463,7 +463,7 @@ void SpriteEditor::DrawPivot(EditorHost& host, std::vector<int>& sel) {
         ImGui::PushID(k);
         if (ImGui::InvisibleButton("##pv", ImVec2(cell, cell))) {
             Snapshot();
-            for (int i : sel) regions[(size_t)i].Pivot = sp::PivotPreset(k);
+            for (int i : sel) m_doc.Sheet.SetPivot((size_t)i, sp::PivotPreset(k));
         }
         const bool hov = ImGui::IsItemHovered();
         if (hov) ImGui::SetTooltip("%s", PivotName(k));
@@ -486,7 +486,7 @@ void SpriteEditor::DrawPivot(EditorHost& host, std::vector<int>& sel) {
     o.HasReset = true;
     o.Reset = 0.5f;
     if (ictl::Pair(host, "pivot", &pv.x, &pv.y, "X", "Y", o)) {
-        for (int i : sel) regions[(size_t)i].Pivot = glm::clamp(pv, glm::vec2(0.0f), glm::vec2(1.0f));
+        for (int i : sel) m_doc.Sheet.SetPivot((size_t)i, glm::clamp(pv, glm::vec2(0.0f), glm::vec2(1.0f)));
         Changed();
     }
     ImGui::EndGroup();
@@ -512,28 +512,34 @@ void SpriteEditor::DrawSequences(EditorHost& host) {
         Snapshot();
         const int n = m_doc.Sheet.SequenceFromPrefix(m_seqName, m_seqPrefix);
         SetStatus(T("Frames in the sequence: ") + std::to_string(n));
-        for (int i = 0; i < (int)m_doc.Sheet.Sequences.size(); ++i)
-            if (m_doc.Sheet.Sequences[(size_t)i].Name == m_seqName) m_seqSelected = i;
+        for (int i = 0; i < (int)m_doc.Sheet.Sequences().size(); ++i)
+            if (m_doc.Sheet.Sequences()[(size_t)i].Name == m_seqName) m_seqSelected = i;
     }
-    for (int i = 0; i < (int)m_doc.Sheet.Sequences.size(); ++i) {
+    for (int i = 0; i < (int)m_doc.Sheet.Sequences().size(); ++i) {
         ImGui::PushID(1000 + i);
-        const sage::ui::SpriteSequence& q = m_doc.Sheet.Sequences[(size_t)i];
+        const sage::ui::SpriteSequence& q = m_doc.Sheet.Sequences()[(size_t)i];
         const std::string label = q.Name + "  (" + std::to_string(q.Frames.size()) + ")";
         if (ImGui::Selectable(label.c_str(), m_seqSelected == i)) m_seqSelected = i;
         ImGui::PopID();
     }
-    if (m_seqSelected < 0 || m_seqSelected >= (int)m_doc.Sheet.Sequences.size()) return;
-    sage::ui::SpriteSequence& q = m_doc.Sheet.Sequences[(size_t)m_seqSelected];
+    if (m_seqSelected < 0 || m_seqSelected >= (int)m_doc.Sheet.Sequences().size()) return;
+    const sage::ui::SpriteSequence& q = m_doc.Sheet.Sequences()[(size_t)m_seqSelected];
     ictl::NumOpts fo;
     fo.Step = 1.0f;
     fo.Min = 0.5f;
     fo.Max = 120.0f;
     fo.Format = "%.1f";
-    if (ictl::Number(host, T("Frames per second"), &q.Fps, fo)) Changed();
-    if (ictl::Switch(host, T("Loop"), &q.Loop)) Changed();
+    float fps = q.Fps;
+    bool loop = q.Loop;
+    bool playbackChanged = ictl::Number(host, T("Frames per second"), &fps, fo);
+    playbackChanged |= ictl::Switch(host, T("Loop"), &loop);
+    if (playbackChanged) {
+        m_doc.Sheet.SetPlayback((size_t)m_seqSelected, fps, loop);
+        Changed();
+    }
     if (ImGui::Button(T("Remove sequence"))) {
         Snapshot();
-        m_doc.Sheet.Sequences.erase(m_doc.Sheet.Sequences.begin() + m_seqSelected);
+        m_doc.Sheet.RemoveSequence((size_t)m_seqSelected);
         m_seqSelected = -1;
         return;
     }
@@ -544,8 +550,8 @@ void SpriteEditor::DrawSequences(EditorHost& host) {
     const float k = 96.0f / (float)std::max(frame->Rect.z, frame->Rect.w);
     const ImVec2 sz((float)frame->Rect.z * k, (float)frame->Rect.w * k);
     const float u0 = (float)frame->Rect.x / (float)m_w, u1 = (float)(frame->Rect.x + frame->Rect.z) / (float)m_w;
-    const float v0 = 1.0f - (float)frame->Rect.y / (float)m_h;
-    const float v1 = 1.0f - (float)(frame->Rect.y + frame->Rect.w) / (float)m_h;
+    const float v0 = (float)frame->Rect.y / (float)m_h;
+    const float v1 = (float)(frame->Rect.y + frame->Rect.w) / (float)m_h;
     sp::Nearest(ImGui::GetWindowDrawList());
     ImGui::Image((ImTextureID)(std::intptr_t)m_tex->NativeHandle(), sz, ImVec2(u0, v0), ImVec2(u1, v1));
     sp::Linear(ImGui::GetWindowDrawList());
@@ -561,24 +567,26 @@ void SpriteEditor::DrawAtlas(EditorHost& host) {
     if (m_atlasFolder.empty() || !ImGui::Button(T("Pack into an atlas"))) return;
     namespace fs = std::filesystem;
     const fs::path dir = sage::PathFromUtf8(sage::AssetDatabase::Instance().LocatePath(m_atlasFolder));
-    std::vector<std::vector<unsigned char>> pixels;
+    std::vector<std::shared_ptr<const sage::assets::SpriteImage>> pixels;
     std::vector<sage::ui::AtlasInput> inputs;
     std::error_code ec;
     std::vector<fs::path> files;
     for (const auto& entry : fs::directory_iterator(dir, ec)) {
         const std::string ext = entry.path().extension().string();
-        if (entry.is_regular_file() && (ext == ".png" || ext == ".PNG")) files.push_back(entry.path());
+        if (entry.is_regular_file() && (ext == ".png" || ext == ".PNG") &&
+            sage::PathToUtf8(entry.path().filename()).rfind(".sage-atlas-", 0) != 0) files.push_back(entry.path());
     }
     std::sort(files.begin(), files.end());
     pixels.reserve(files.size());
     for (const fs::path& f : files) {
-        int w = 0, h = 0, ch = 0;
-        stbi_set_flip_vertically_on_load_thread(false);
-        unsigned char* data = stbi_load(sage::PathToUtf8(f).c_str(), &w, &h, &ch, 4);
-        if (!data) continue;
-        pixels.emplace_back(data, data + (size_t)w * h * 4);
-        stbi_image_free(data);
-        inputs.push_back({sage::PathToUtf8(f.stem()), pixels.back().data(), w, h});
+        auto source = ResourceManager::Instance().ResolveSpriteImage(sage::PathToUtf8(f), true);
+        if (!source || !source.Resource->Image) {
+            SetStatus(T("Could not pack: ") + source.Diagnostic, true);
+            return;
+        }
+        const auto& image = source.Resource->Image;
+        pixels.push_back(image);
+        inputs.push_back({sage::PathToUtf8(f.stem()), image->Pixels.data(), image->Width, image->Height});
     }
     std::vector<unsigned char> atlas;
     int aw = 0, ah = 0;
@@ -589,13 +597,43 @@ void SpriteEditor::DrawAtlas(EditorHost& host) {
         return;
     }
     const fs::path out = dir.parent_path() / sage::PathFromUtf8(sage::PathToUtf8(dir.filename()) + "_atlas.png");
-    if (!stbi_write_png(sage::PathToUtf8(out).c_str(), aw, ah, 4, atlas.data(), aw * 4) ||
-        !sheet.SaveFile(sage::ui::SpriteSheet::SidecarPath(sage::PathToUtf8(out)), err)) {
+    const std::string outputPath = sage::PathToUtf8(out);
+    sage::ui::SpriteSheet document;
+    if (!sage::ui::SpriteSheet::LoadForImage(outputPath, document, err)) {
+        SetStatus(T("Could not save: ") + err, true);
+        return;
+    }
+    for (size_t i = document.Regions().size(); i-- > 0;)
+        if (!sheet.Find(document.Regions()[i].Name))
+            document.Remove(document.Regions()[i].Name);
+    for (const auto& packed : sheet.Regions()) {
+        if (const auto* existing = document.Find(packed.Name)) {
+            auto updated = *existing;
+            updated.Rect = packed.Rect;
+            document.Set(updated);
+        } else {
+            document.Set(packed);
+        }
+    }
+    std::string png;
+    auto append = [](void* context, void* data, int size) {
+        static_cast<std::string*>(context)->append(static_cast<const char*>(data), size);
+    };
+    if (!document.Validate(err, aw, ah) ||
+        !stbi_write_png_to_func(append, &png, aw, ah, 4, atlas.data(), aw * 4) ||
+        !sp::PublishAtlas(outputPath, png, document, err)) {
         SetStatus(T("Could not save: ") + err, true);
         return;
     }
     const std::string ref =
         m_atlasFolder.substr(0, m_atlasFolder.find_last_of('/') + 1) + sage::PathToUtf8(out.filename());
+    const auto sheetRef = sage::ui::SpriteSheet::SidecarPath(ref);
+    auto& database = sage::AssetDatabase::Instance();
+    if (!database.ProjectDir().empty() && !sage::PathFromUtf8(ref).is_absolute()) {
+        const auto guid = database.Register(sheetRef);
+        if (guid.Valid()) ResourceManager::Instance().NotifySpriteChanged(guid);
+        else LOG_WARN("Sprites") << "Could not register sprite sheet: " << sheetRef;
+    }
     Load(ref);
     SetStatus(T("Atlas packed: ") + std::to_string(inputs.size()) + " / " + std::to_string(aw) + "x" +
               std::to_string(ah));

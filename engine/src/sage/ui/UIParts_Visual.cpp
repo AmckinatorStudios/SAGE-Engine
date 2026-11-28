@@ -71,6 +71,14 @@ const std::vector<PartField>& ImageFields() {
         std::vector<PartField> v = {
             {"path", SAGE_UI_TEXT("Source"), PartField::Kind::String, offsetof(Image, Path), 0.0f, 0.0f, nullptr,
              nullptr, 0, PartField::Widget::Texture},
+            {"spriteRef", SAGE_UI_TEXT("Sprite"), PartField::Kind::SpriteRef, offsetof(Image, SpriteRef)},
+            {"namedSprite", nullptr, PartField::Kind::String, offsetof(Image, NamedSprite)},
+            {"hoverSpriteRef", SAGE_UI_TEXT("Sprite on hover"), PartField::Kind::SpriteRef, offsetof(Image, HoverSpriteRef)},
+            {"pressedSpriteRef", SAGE_UI_TEXT("Sprite when pressed"), PartField::Kind::SpriteRef, offsetof(Image, PressedSpriteRef)},
+            {"overrideSpriteSlice", SAGE_UI_TEXT("Override sprite nine-slice"), PartField::Kind::Bool,
+             offsetof(Image, OverrideSpriteSlice)},
+            {"useSpriteFit", SAGE_UI_TEXT("Use sprite display mode"), PartField::Kind::Bool, offsetof(Image, UseSpriteFit)},
+            {"useSpritePivot", SAGE_UI_TEXT("Use sprite pivot"), PartField::Kind::Bool, offsetof(Image, UseSpritePivot)},
             {"mode", SAGE_UI_TEXT("Display mode"), PartField::Kind::Enum, offsetof(Image, Fit), 0.0f, 4.0f,
              "Stretch, cut into nine pieces (corners keep their size), repeat at\n"
              "its own size, or keep the aspect ratio: show the whole picture with\n"
@@ -120,24 +128,19 @@ const std::vector<PartField>& ImageFields() {
             {"spritePressed", SAGE_UI_TEXT("Sprite when pressed"), PartField::Kind::Vec4,
              offsetof(Image, SpritePressed), 0.0f, 4096.0f},
         };
+        v[2].Hidden = true;
         v[v.size() - 1].Hidden = true;
         v[v.size() - 2].Hidden = true;
         // Фильтрация — НА ВИДУ: чёткие пиксели или сглаживание решают, глядя
         // на картинку, и прятать этот выбор в «Ещё настройки» значило, что
         // его не находили.
-        MarkAdvanced(v, {"sprite", "sequence", "sliceCenterFill", "sliceEdgeFill", "sliceDrawCenter", "pixelScale",
+        MarkAdvanced(v, {"sprite", "sequence", "hoverSpriteRef", "pressedSpriteRef",
+                         "overrideSpriteSlice", "useSpriteFit", "useSpritePivot", "sliceCenterFill", "sliceEdgeFill", "sliceDrawCenter", "pixelScale",
                          "snapPixels"});
         MarkSection(v, kSectionLook, {"tint"});
         return v;
     }();
     return f;
-}
-
-UIRenderer::Sprite StateSprite(const PartDrawContext& c, const Image& img) {
-    const glm::vec4* src = &img.Sprite;
-    if (c.Pressed && img.SpritePressed.z > 0.0f) src = &img.SpritePressed;
-    else if (c.Hovered && img.SpriteHover.z > 0.0f) src = &img.SpriteHover;
-    return {src->x, src->y, src->z, src->w};
 }
 
 void DrawImagePart(const PartDrawContext& c) {
@@ -147,24 +150,42 @@ void DrawImagePart(const PartDrawContext& c) {
     const glm::vec3 rgb = StateTint(c, glm::vec3(img.Tint));
     const float alpha = AlphaOf(c, img.Tint.a);
 
-    if (!img.Tex) {
-        // Пустой путь — картинки просто нет, и рисовать нечего. Заглушка тут
-        // была бы хуже пустоты: она закрасила бы элемент и спрятала остальное.
-        if (img.Path.empty()) return;
-        // Путь задан, а текстуры нет — вот это стоит показать: иначе «не
-        // загрузилось» и «не назначено» выглядят одинаково.
-        ui.RoundedRect(r.x, r.y, r.w, r.h, rgb, alpha, RoundingOf(c));
+    const auto* rect = &img.Sprite;
+    auto ref = img.SpriteRef;
+    const auto* name = img.Sequence.empty() ? &img.NamedSprite : &img.Sequence;
+    const bool pressed = c.Pressed && (img.PressedSpriteRef.Valid() || img.SpritePressed.z > 0.0f);
+    const bool hover = c.Hovered && (img.HoverSpriteRef.Valid() || img.SpriteHover.z > 0.0f);
+    if (pressed || hover) {
+        ref = pressed ? img.PressedSpriteRef : img.HoverSpriteRef;
+        rect = pressed ? &img.SpritePressed : &img.SpriteHover;
+        name = nullptr;
+    }
+    const bool namedSequence = name == &img.Sequence;
+    const bool linked = ref.Valid() || (name && !name->empty());
+    auto sprite = linked ? SpritePicture(ref, img.Filtering, img.Path, name ? *name : std::string{}, namedSequence)
+                         : ResourceManager::SpriteTexture{};
+    const auto* frame = sprite.Data.Region(img.SequenceTime);
+
+    PictureParams p;
+    if (frame && sprite.Image) p.Tex = ui.HoldTexture(std::move(sprite.Image));
+    else if (!ref.Valid() && (!linked || namedSequence))
+        p.Tex = img.Tex ? ui.HoldTexture(img.Tex) : ui.HoldTexture(PictureTexture(img.Path, img.Filtering));
+    if (!p.Tex) {
+        if (linked || !img.Path.empty()) ui.RoundedRect(r.x, r.y, r.w, r.h, rgb, alpha, RoundingOf(c));
         return;
     }
 
-    PictureParams p;
-    p.Tex = img.Tex.get();
-    p.Src = StateSprite(c, img);
+    p.Src = {rect->x, rect->y, rect->z, rect->w};
     p.Fit = (int)img.Fit;
     p.Slice = img.Slice();
     p.PixelScale = img.PixelScale;
     p.SnapPixels = img.SnapPixels;
     p.Repeat = img.Repeat;
+    if (frame) {
+        const bool legacy = namedSequence && !ref.Valid();
+        ApplySpriteFrame(p, *frame, legacy || img.OverrideSpriteSlice,
+                         !legacy && img.UseSpriteFit, !legacy && img.UseSpritePivot);
+    }
     DrawPicture(ui, p, r, c.Scale, rgb, alpha);
 }
 
@@ -203,6 +224,8 @@ const std::vector<PartField>& BarFields() {
              PartField::Widget::Auto, "kind", 2},
             {"pathWidth", SAGE_UI_TEXT("Path width"), PartField::Kind::Float, offsetof(Bar, PathWidth), 1.0f,
              256.0f, nullptr, nullptr, 0, PartField::Widget::Auto, "kind", 2},
+            {"maskSpriteRef", SAGE_UI_TEXT("Order sprite"), PartField::Kind::SpriteRef, offsetof(Bar, MaskSpriteRef),
+             0.0f, 0.0f, nullptr, nullptr, 0, PartField::Widget::Auto, "kind", 3},
             {"maskImage", SAGE_UI_TEXT("Order picture"), PartField::Kind::String, offsetof(Bar, MaskImage), 0.0f,
              0.0f, "Dark fills first, light last; transparent never.", nullptr, 0, PartField::Widget::Texture,
              "kind", 3},
@@ -230,7 +253,7 @@ const std::vector<PartField>& BarFields() {
              100000.0f, "The fastest the shown value moves, in value units per second; 0 — no limit."},
             {"filled", SAGE_UI_TEXT("Fill"), PartField::Kind::Look, offsetof(Bar, Filled)},
         };
-        for (const char* key : {"value", "kind", "grow", "clockwise", "startAngle", "path", "maskImage"})
+        for (const char* key : {"value", "kind", "grow", "clockwise", "startAngle", "path", "maskImage", "maskSpriteRef"})
             for (PartField& f : v)
                 if (std::string(f.Key) == key) f.Content = true;
         MarkAdvanced(v, {"fillMode", "padding", "ringWidth", "pathWidth", "reverse", "fillAmount", "source"});

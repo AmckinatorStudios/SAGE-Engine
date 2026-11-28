@@ -1,9 +1,11 @@
 #include "sage/app/CoreSystems.h"
 #include "EditorPlaySession.h"
+#include "sage/render/BillboardSystem.h"
 
 #include "sage/ai/GraphDebug.h"
 
 #include <cstdint>
+#include <exception>
 
 #include "imgui.h"
 
@@ -62,6 +64,7 @@ int EditorPlaySession::BuildRuntime(const PlayContext& ctx, Scene& scene) {
     // Паритет с рантаймом: частицы доступны скриптам уже в OnStart
     // (EmitParticles/CreateParticleStream рисуются в предпросмотре сцены).
     if (ctx.Particles) m_scripts->BindParticles(*ctx.Particles);
+    if (ctx.Billboards) m_scripts->BindBillboards(*ctx.Billboards);
 
     // Ввод — как в собранной игре: действия объявляют сами скрипты (BindAction),
     // поэтому карту действий начинаем с ЧИСТОГО ЛИСТА на каждый Play (иначе
@@ -196,10 +199,14 @@ void EditorPlaySession::TeardownRuntime(const PlayContext& ctx, Scene* scene) {
     if (m_scripting) m_scripting->Shutdown();
     m_scripting.reset();
     m_scripts.reset();
+    if (ctx.Billboards) ctx.Billboards->Clear();
     sage::ai::GraphDebugger::Get().Enabled = false;
     // Частицы спрашивали физику о столкновениях — запрос держит указатель на
     // неё, и снять его надо ДО того, как физики не станет.
-    if (ctx.Particles) ctx.Particles->SetCollisionQuery({});
+    if (ctx.Particles) {
+        ctx.Particles->SetCollisionQuery({});
+        ctx.Particles->Clear();
+    }
     m_physics.reset();
     // Шина принадлежит СЦЕНЕ, а её сейчас заменят: указатель обязан уйти раньше.
     m_input.SetEventBus(nullptr);

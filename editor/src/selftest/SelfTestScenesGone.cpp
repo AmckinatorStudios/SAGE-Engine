@@ -60,12 +60,14 @@ bool EditorLayer::SelfTestScenesGone() {
 
     // Удаление, как его делает панель Assets: файлы, затем сама папка.
     std::vector<fs::path> victims = {scenes / "gone_a.sage", scenes / "gone_b.sage"};
-    for (const fs::path& v : victims) AssetsPanel::DeleteAsset(v);
+    for (const fs::path& v : victims) {
+        if (!AssetsPanel::DeleteAsset(v, err)) fail(err);
+    }
     AssetsDeleted(victims);
     if (!m_scenePath.empty()) fail("путь открытой сцены ведёт в удалённый файл");
     if (!m_sceneDirty) fail("сцена без файла не отмечена несохранённой");
     if (!m_project.StartScene().empty()) fail("стартовой осталась удалённая сцена");
-    AssetsPanel::DeleteAsset(scenes);
+    if (!AssetsPanel::DeleteAsset(scenes, err)) fail(err);
     AssetsDeleted({scenes});
 
     // Что делает человек дальше.

@@ -65,6 +65,7 @@ void EditorSceneRenderer::RenderCameraPreview(Scene& scene, const LightingEnviro
     DrawLit(scene, env, frame.View, frame.Proj, frame.Position, /*shadingMode=*/0,
             /*wireframe=*/false, /*viewId=*/kPreviewViewId);
     m_particles->DrawFromView(frame.View, frame.Proj);
+    m_billboards->DrawFromView(frame.View, frame.Proj);
     m_previewFbo->Resolve();
 
     // Пост-обработка — как в игре: превью обещает игровой кадр, а не «сцену без
@@ -176,6 +177,7 @@ void EditorSceneRenderer::RenderGame(Scene& scene, const LightingEnvironment& en
         device.SetViewport(0, 0, m_gameW, m_gameH);
     }
     m_particles->DrawFromView(view, proj);
+    m_billboards->DrawFromView(view, proj);
 
     // Отладочная графика игры (Debug:DrawLine) — и в панели Game тоже: она
     // показывает игру, а отладочные линии рисуют, чтобы понять игру.

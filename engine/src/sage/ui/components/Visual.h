@@ -7,7 +7,7 @@
 #include "sage/render/Texture.h"
 #include "sage/core/TextureFiltering.h"
 #include "sage/ui/NineSlice.h"
-#include "sage/ui/SpriteSheet.h"
+#include "sage/assets/SpriteSheet.h"
 
 // ---------------------------------------------------------------------------
 // Из чего элемент интерфейса СДЕЛАН: подложка, надпись, картинка, полоса,
@@ -49,7 +49,11 @@ struct Look {
     // «Картинка» (см. Image::Mode ниже по файлу; числа совпадают).
     int Fit = 0;   // 0 растянуть, 1 девятина, 2 замостить, 3 вписать, 4 заполнить
     // Кусок листа в пикселях исходника (w <= 0 — весь файл).
-    glm::vec4 Sprite{0.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec4 Sprite{0.0f, 0.0f, 0.0f, 0.0f}; // legacy pixel rectangle
+    assets::SpriteRef SpriteRef;
+    bool OverrideSpriteSlice = false;
+    bool UseSpriteFit = true;
+    bool UseSpritePivot = true;
     // Девятина: неподвижные поля в пикселях исходника (л, в, п, н).
     glm::vec4 SliceBorder{0.0f, 0.0f, 0.0f, 0.0f};
     SliceFill SliceCenterFill = SliceFill::Stretch;
@@ -74,7 +78,7 @@ struct Look {
     float ShadowSize = 0.0f;
     glm::vec4 ShadowColor{0.0f, 0.0f, 0.0f, 0.35f};
 
-    bool HasTexture() const { return !Texture.empty(); }
+    bool HasTexture() const { return SpriteRef.Valid() || !NamedSprite.empty() || !Texture.empty(); }
     bool Sharp() const { return Filtering == TextureFiltering::Nearest; }
     NineSlice Slice() const {
         NineSlice s;
@@ -85,18 +89,15 @@ struct Look {
         return s;
     }
     void SetSlice(const NineSlice& s) {
+        OverrideSpriteSlice = true;
         SliceBorder = s.Border();
         SliceCenterFill = s.CenterFill;
         SliceEdgeFill = s.EdgeFill;
         SliceDrawCenter = s.DrawCenter;
     }
 
-    // Рантайм: загруженная картинка и то, с чем её загрузили. mutable —
-    // отрисовка получает элемент только на чтение, а подгрузить картинку
-    // обязана она же (путь правят в инспекторе посреди кадра).
-    mutable std::shared_ptr<::Texture> Tex;
-    mutable std::string TexPath;
-    mutable TextureFiltering TexFiltering = TextureFiltering::Smooth;
+    // Compatibility for named Lua sprites from older packages without a sheet index.
+    std::string NamedSprite;
 };
 
 // Подложка элемента — тот же вид, что у любой части, с умолчаниями панели.
@@ -231,7 +232,11 @@ struct Image {
     // Кусок листа в ПИКСЕЛЯХ исходника (w <= 0 — весь файл): в наборе спрайт
     // описан как «26x26 с (52,0)», и переводить это в доли текстуры должен
     // движок, а не человек.
-    glm::vec4 Sprite{0.0f, 0.0f, 0.0f, 0.0f};
+    glm::vec4 Sprite{0.0f, 0.0f, 0.0f, 0.0f}; // legacy pixel rectangle
+    assets::SpriteRef SpriteRef;
+    bool OverrideSpriteSlice = false;
+    bool UseSpriteFit = true;
+    bool UseSpritePivot = true;
     // Девятина: неподвижные углы в пикселях исходника (л, в, п, н). Без неё
     // панель 48x48 нельзя растянуть на 300x120 — углы размажутся с серединой.
     glm::vec4 SliceBorder{0.0f, 0.0f, 0.0f, 0.0f};
@@ -289,8 +294,9 @@ struct Image {
     // и картинка листает кадры сама (Sprite меняется по времени).
     std::string Sequence;
     float SequenceTime = 0.0f;                         // рантайм
-    std::shared_ptr<const sage::ui::SpriteSheet> Sheet; // рантайм: лист картинки
-    std::string SheetFor;                              // рантайм: для какого пути загружен
+    std::string NamedSprite; // legacy package without a sheet GUID
+    assets::SpriteRef HoverSpriteRef;
+    assets::SpriteRef PressedSpriteRef;
 
     glm::vec4 SpriteHover{0.0f, 0.0f, 0.0f, 0.0f};
     glm::vec4 SpritePressed{0.0f, 0.0f, 0.0f, 0.0f};
@@ -333,6 +339,7 @@ struct Image {
     }
 
     void SetSlice(const NineSlice& s) {
+        OverrideSpriteSlice = true;
         SliceBorder = s.Border();
         SliceCenterFill = s.CenterFill;
         SliceEdgeFill = s.EdgeFill;
@@ -410,6 +417,7 @@ struct Bar {
     bool Reverse = false;
     // Custom Mask: картинка порядка (яркость — когда заполняется).
     std::string MaskImage;
+    assets::SpriteRef MaskSpriteRef;
     // Смягчение: за сколько секунд показанное значение почти догоняет цель
     // (0 — без смягчения). Smoothing выше — предел скорости, это — плавность.
     float Easing = 0.0f;

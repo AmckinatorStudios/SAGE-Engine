@@ -212,6 +212,7 @@ GraphicsDevice::Caps NullDevice::Capabilities() const {
     c.MaxComputeGroupSize[0] = c.MaxComputeGroupSize[1] = c.MaxComputeGroupSize[2] = 1024;
     c.MaxComputeInvocations = 1024;
     c.MaxStorageBindings = c.MaxUniformBindings = c.MaxTextureUnits = 16;
+    c.MaxTexture2DSize = 4096;
     return c;
 }
 

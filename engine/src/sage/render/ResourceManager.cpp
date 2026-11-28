@@ -20,6 +20,7 @@
 #include <stdexcept>
 #include <chrono>
 #include "sage/render/ResourceManagerDetail.h"
+#include "sage/rhi/GraphicsDevice.h"
 
 using namespace resource_detail;
 
@@ -172,8 +173,152 @@ std::shared_ptr<Mesh> ResourceManager::ReloadModel(const std::string& path) {
     return GetModel(path);
 }
 
+sage::assets::ResolvedSprite ResourceManager::ResolveSprite(sage::assets::SpriteRef ref, sage::AssetGuid dependent) {
+    auto& database = m_assets ? *m_assets : sage::AssetDatabase::Instance();
+    return m_sprites.Resolve(database, ref, dependent);
+}
+
+ResourceManager::SpriteTexture ResourceManager::ResolveSpriteFrames(const std::vector<std::string>& frames,
+                                                                       TextureFilter filter) {
+    auto& database = m_assets ? *m_assets : sage::AssetDatabase::Instance();
+    const int maxSide = sage::rhi::GraphicsDevice::Get().Capabilities().MaxTexture2DSize;
+    return SpriteTextureFor(m_sprites.ResolveFrames(database, frames, maxSide), filter, false, false, true);
+}
+
+sage::assets::ResolvedSprite ResourceManager::ResolveSpriteSheet(sage::AssetGuid sheet) {
+    auto& database = m_assets ? *m_assets : sage::AssetDatabase::Instance();
+    return m_sprites.ResolveSheet(database, sheet);
+}
+
+sage::assets::ResolvedSprite ResourceManager::ResolveSpriteImage(const std::string& path, bool allowMissingSheet) {
+    auto& database = m_assets ? *m_assets : sage::AssetDatabase::Instance();
+    return m_sprites.ResolveImage(database, path, allowMissingSheet);
+}
+
+ResourceManager::SpriteTexture ResourceManager::ResolveSpriteTexture(sage::assets::SpriteRef ref,
+                                                                     TextureFilter filter, bool mipmaps,
+                                                                     bool bleed, bool srgb, bool refresh) {
+    auto& database = m_assets ? *m_assets : sage::AssetDatabase::Instance();
+    return SpriteTextureFor(m_sprites.Resolve(database, ref, {}, refresh), filter, mipmaps, bleed, srgb);
+}
+
+ResourceManager::SpriteTexture ResourceManager::SpriteTextureFor(sage::assets::ResolvedSprite data,
+                                                                 TextureFilter filter, bool mipmaps,
+                                                                 bool bleed, bool srgb) {
+    SpriteTexture result{std::move(data), {}};
+    if (!result.Data || !result.Data.Resource->Image) return result;
+    auto upload = [&](const sage::assets::ResolvedSprite& data) -> std::shared_ptr<const Texture> {
+        const auto& image = *data.Resource->Image;
+        const auto key = "@sprite/" + std::to_string(image.Generation) + SamplingSuffix(filter, mipmaps, bleed, srgb);
+        if (auto found = m_textures.find(key); found != m_textures.end()) {
+            found->second.Tick = NextTick();
+            return found->second.Tex;
+        }
+        const auto limit = sage::rhi::GraphicsDevice::Get().Capabilities().MaxTexture2DSize;
+        if (limit > 0 && (image.Width > limit || image.Height > limit))
+            throw std::runtime_error("sprite exceeds maximum GPU texture dimensions");
+        const unsigned char* pixels = image.Pixels.data();
+        std::vector<unsigned char> processed;
+        if (bleed) {
+            processed = image.Pixels;
+            sage::render::BleedTransparentColor(processed, image.Width, image.Height);
+            pixels = processed.data();
+        }
+        TextureRecord record;
+        record.Tex = std::make_shared<Texture>(pixels, image.Width, image.Height, filter, mipmaps, srgb);
+        record.Tex->SetFlippedRows(false);
+        record.SpriteSnapshot = true;
+        record.Tick = NextTick();
+        record.Bytes = record.Tex->GpuBytes();
+        auto texture = record.Tex;
+        m_textureBytes += record.Bytes;
+        m_textures.emplace(key, std::move(record));
+        EvictToBudget();
+        return texture;
+    };
+    try {
+        result.Image = upload(result.Data);
+    } catch (const std::exception& error) {
+        result.Data.Diagnostic = error.what();
+        LOG_WARN("Sprites") << result.Data.Diagnostic;
+        auto previous = m_sprites.Previous(result.Data.Ref);
+        if (previous) {
+            try {
+                result.Image = upload(previous);
+                previous.Diagnostic = std::move(result.Data.Diagnostic);
+                result.Data = std::move(previous);
+            } catch (const std::exception& fallback) {
+                result.Data.Diagnostic += "; previous image: ";
+                result.Data.Diagnostic += fallback.what();
+            }
+        }
+    }
+    return result;
+}
+
+ResourceManager::SpriteFrame ResourceManager::SpriteTexture::Frame(const sage::assets::SpriteRegion& region) const {
+    auto uv = Data.UVFor(region);
+    // Keep linear filtering within the selected region, even on an unpadded grid.
+    const glm::vec2 halfPixel(0.5f / Image->Width(), 0.5f / Image->Height());
+    uv += glm::vec4(halfPixel.x, halfPixel.y, -halfPixel.x, -halfPixel.y);
+    return {{uv.x, Image->FlippedRows() ? 1.0f - uv.w : uv.w,
+             uv.z, Image->FlippedRows() ? 1.0f - uv.y : uv.y},
+            {0.5f - region.Pivot.x, region.Pivot.y - 0.5f}};
+}
+
+std::shared_ptr<const Texture> ResourceManager::SpriteFrameTable(const SpriteTexture& sprite, int frameCount) {
+    constexpr int width = 128;
+    constexpr size_t byteLimit = 64u << 20;
+    if (!sprite || frameCount <= 0) return {};
+    const auto& data = sprite.Data;
+    const auto key = "@sprite-frames/" + std::to_string(data.Resource->Number) + "/" +
+                     data.Ref.Item.ToString() + "/" + std::to_string(static_cast<int>(data.Ref.Type)) +
+                     "/" + std::to_string(frameCount);
+    if (auto found = m_textures.find(key); found != m_textures.end()) {
+        found->second.Tick = NextTick();
+        return found->second.Tex;
+    }
+    // Two RGBA32F texels per frame: UV rectangle and pivot. Keep the instance stream
+    // the same size for legacy grids and arbitrary atlas regions.
+    const auto* sequence = data.Sequence();
+    if (size_t(frameCount) > (sequence ? sequence->FrameIds().size() : 1)) return {};
+    const size_t height = (size_t(frameCount) + width / 2 - 1) / (width / 2);
+    const auto maxSide = sage::rhi::GraphicsDevice::Get().Capabilities().MaxTexture2DSize;
+    if (maxSide < width || height > size_t(maxSide) || height > byteLimit / (width * 4 * sizeof(float)))
+        return {};
+    std::vector<float> pixels(width * height * 4, 0.0f);
+    for (int i = 0; i < frameCount; ++i) {
+        const auto* region = sequence ? data.Resource->Sheet.Find(sequence->FrameIds()[i]) : data.Region();
+        if (!region) return {};
+        const auto frame = sprite.Frame(*region);
+        auto* pixel = pixels.data() + size_t(i) * 8;
+        std::copy_n(&frame.UV.x, 4, pixel);
+        pixel[4] = frame.Pivot.x;
+        pixel[5] = frame.Pivot.y;
+    }
+    try {
+        TextureRecord record;
+        record.Tex = Texture::CreateFloat32Data(pixels.data(), width, static_cast<int>(height));
+        record.SpriteSnapshot = true;
+        record.Tick = NextTick();
+        record.Bytes = record.Tex->GpuBytes();
+        const auto texture = record.Tex;
+        m_textureBytes += record.Bytes;
+        m_textures.emplace(key, std::move(record));
+        EvictToBudget();
+        return texture;
+    } catch (const std::exception& error) {
+        LOG_WARN("Sprites") << error.what();
+        return {};
+    }
+}
+
 int ResourceManager::ReloadChangedAssets(size_t budget) {
     int reloaded = 0;
+    if (!m_sprites.Empty()) {
+        auto& database = m_assets ? *m_assets : sage::AssetDatabase::Instance();
+        reloaded = static_cast<int>(m_sprites.Poll(database, budget));
+    }
 
     // ОКНО ОПРОСА. Все записи четырёх кэшей пронумерованы подряд (модели,
     // материалы, скелетные модели, текстуры), и за вызов опрашиваются только
@@ -220,7 +365,7 @@ int ResourceManager::ReloadChangedAssets(size_t budget) {
         // Процедурную (Generated) перечитывать неоткуда, а грузящуюся (Pending)
         // рано: её пиксели ещё едут из фонового потока, и подмена сейчас
         // означала бы гонку с ними.
-        if (rec.Generated || rec.Pending || !rec.Tex) continue;
+        if (rec.Generated || rec.SpriteSnapshot || rec.Pending || !rec.Tex) continue;
         if (FileStamp(Locate(rec.Source)) != rec.Stamp) staleTextures.push_back(key);
     }
 
@@ -715,6 +860,7 @@ void ResourceManager::Quiesce() {
 }
 
 void ResourceManager::Clear() {
+    m_sprites.Clear();
     // Останавливаем фоновый поток ДО очистки карт: иначе он мог бы дописать
     // результат для только что удалённой записи (безвредно, но чище так).
     m_streamer.Stop();
@@ -749,6 +895,7 @@ void ResourceManager::Clear() {
 }
 
 void ResourceManager::ForgetProjectAssets() {
+    m_sprites.Clear();
     // Old-project completions must not reach a new entry with the same key.
     // Also join the reader before its caller remounts the global VFS.
     m_streamer.Stop();

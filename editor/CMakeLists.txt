@@ -224,6 +224,7 @@ add_executable(SageEditor WIN32
     src/panels/TweenPanel_Cards.cpp
     src/panels/TweenPanel_Menus.cpp
     src/sprite/SpriteEditModel.cpp
+    src/sprite/SpritePicker.cpp
     src/sprite/SpriteEditorBinding.cpp
     src/sprite/SpriteEditor.cpp
     src/sprite/SpriteEditor_Canvas.cpp

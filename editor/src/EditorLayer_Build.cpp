@@ -276,7 +276,10 @@ bool EditorLayer::PrepareBuild(const fs::path& outputDir, GameBuilder::Request& 
     req.CopyProjectFile = m_settings.BuildProjectFile;
     // Оглавление базы — снимок ЗДЕСЬ, в главном потоке: база живёт в нём, и
     // читать её из потока сборки, пока редактор её правит, нельзя.
-    req.AssetIndex = sage::AssetDatabase::Instance().ExportIndex();
+    auto& database = sage::AssetDatabase::Instance();
+    database.ScanProject(sage::PathToUtf8(req.ProjectDir));
+    database.ForgetMissingProjectFiles();
+    req.AssetIndex = database.ExportIndex();
     return true;
 }
 

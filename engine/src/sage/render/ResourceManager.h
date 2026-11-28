@@ -10,6 +10,7 @@ namespace sage { class AssetDatabase; class EngineContext; }
 #include "Shader.h"
 #include "sage/render/PrimitiveGenerator.h"
 #include "sage/render/ResourceCache.h"
+#include "sage/assets/SpriteResolver.h"
 #include "sage/render/TextureStreamer.h"
 #include "sage/render/VRAMBudgetManager.h"
 #include "sage/core/Log.h"
@@ -261,6 +262,27 @@ public:
     // материалов превью, — понимают, что их разбор устарел. Сверять пути и
     // времена правки у себя каждому такому месту значило бы повторить эту
     // проверку столько раз, сколько в редакторе кэшей.
+    struct SpriteFrame {
+        glm::vec4 UV{0, 0, 1, 1}; // left, bottom, right, top in GPU coordinates
+        glm::vec2 Pivot{0};       // quad-space offset from its center
+    };
+    struct SpriteTexture {
+        sage::assets::ResolvedSprite Data;
+        std::shared_ptr<const Texture> Image;
+        explicit operator bool() const { return bool(Data) && bool(Image); }
+        SpriteFrame Frame(const sage::assets::SpriteRegion& region) const;
+    };
+    void NotifySpriteChanged(sage::AssetGuid sheet) { m_sprites.NotifyChanged(sheet); }
+    sage::assets::ResolvedSprite ResolveSprite(sage::assets::SpriteRef ref, sage::AssetGuid dependent = {});
+    SpriteTexture ResolveSpriteFrames(const std::vector<std::string>& frames, TextureFilter filter);
+    sage::assets::ResolvedSprite ResolveSpriteSheet(sage::AssetGuid sheet);
+    sage::assets::ResolvedSprite ResolveSpriteImage(const std::string& path, bool allowMissingSheet = false);
+    SpriteTexture SpriteTextureFor(sage::assets::ResolvedSprite data, TextureFilter filter = TextureFilter::Nearest,
+                                   bool mipmaps = false, bool bleed = false, bool srgb = false);
+    SpriteTexture ResolveSpriteTexture(sage::assets::SpriteRef ref, TextureFilter filter = TextureFilter::Nearest,
+                                       bool mipmaps = false, bool bleed = false, bool srgb = false,
+                                       bool refresh = true);
+    std::shared_ptr<const Texture> SpriteFrameTable(const SpriteTexture& sprite, int frameCount);
 
     uint64_t AssetsGeneration() const { return m_assetsGeneration; }
 
@@ -406,6 +428,7 @@ private:
     std::string Locate(const std::string& path) const;
     std::string CacheKey(const std::string& path) const;
     sage::AssetDatabase* m_assets = nullptr;
+    sage::assets::SpriteResolver m_sprites;
     void EvictToBudget();        // вытеснить LRU-неиспользуемые до бюджета
     void DowngradeTexture(const std::string& key); // понизить разрешение вдвое
     uint64_t NextTick() { return m_vram.NextTick(); }

@@ -10,6 +10,9 @@
 #include <system_error>
 
 #include "sage/scene/Components.h"
+#include "sage/render/ResourceManager.h"
+#include "sage/core/EngineContext.h"
+#include <stb_image_write.h>
 #include "sage/scene/Scene.h"
 #include "sage/scripting/ScriptEngine.h"
 #include "sage/ui/UI.h"
@@ -114,13 +117,16 @@ TEST(UIKit_button_states_come_from_the_sheet_and_click_calls_back) {
     const entt::entity b = Named(scene, "Play");
     const auto& fill = reg.get<sage::ui::Fill>(b);
     CHECK_TRUE(fill.Texture == image);
-    CHECK_NEAR(fill.Sprite.y, 0.0f, 1e-4f);
-    CHECK_EQ(fill.Fit, 1);                       // кусок с девятиной ложится девятиной
-    CHECK_NEAR(fill.SliceBorder.w, 3.0f, 1e-4f);
+    CHECK_EQ(fill.NamedSprite, std::string("button"));
+    CHECK_TRUE(fill.UseSpriteFit);
+    const auto sheet = ResourceManager::Instance().ResolveSpriteImage(image);
+    CHECK_TRUE(bool(sheet));
+    if (sheet) CHECK_NEAR(sheet.Resource->Sheet.Find(fill.NamedSprite)->Slice.w, 3.0f, 1e-4f);
     CHECK_TRUE(fill.Sharp());                    // наборы — ближайшим соседом
     const auto& act = reg.get<sage::ui::Interactable>(b);
     CHECK_TRUE(act.UseHoverLook);
-    CHECK_NEAR(act.HoverLook.Sprite.y, 20.0f, 1e-4f);
+    CHECK_EQ(act.HoverLook.NamedSprite, std::string("button_hover"));
+    if (sheet) CHECK_EQ(sheet.Resource->Sheet.Find(act.HoverLook.NamedSprite)->Rect.y, 20);
     CHECK_NEAR(act.HoverLook.PixelScale, 2.0f, 1e-4f);   // состояние наследует обычный вид
 
     Click(scene, {100.0f, 20.0f});
@@ -129,6 +135,63 @@ TEST(UIKit_button_states_come_from_the_sheet_and_click_calls_back) {
     CHECK_TRUE(reg.get<sage::ui::Label>(Named(scene, "Play Text")).Text == "Again");
     std::error_code ec;
     fs::remove_all(dir, ec);
+}
+
+TEST(UIKit_named_sprite_and_legacy_Lua_bindings_share_the_sheet_GUID) {
+    namespace fs = std::filesystem;
+    using namespace sage::assets;
+    sage::ScopedEngineContext context;
+    const auto dir = fs::temp_directory_path() / ("sage-lua-sprite-" + sage::AssetGuid::Generate().ToString());
+    fs::create_directories(dir);
+    struct Cleanup {
+        fs::path Dir;
+        ~Cleanup() { std::error_code error; fs::remove_all(Dir, error); }
+    } cleanup{dir};
+    const auto file = (dir / "atlas.png").string();
+    const unsigned char rgba[4 * 2 * 4] = {};
+    CHECK_TRUE(stbi_write_png(file.c_str(), 4, 2, 4, rgba, 16) != 0);
+    SpriteSheet sheet;
+    sheet.Set(SpriteRegion("icon", {0, 0, 2, 2}, {1, 1, 0, 0}));
+    sheet.Set(SpriteRegion("hover", {2, 0, 2, 2}));
+    std::string error;
+    CHECK_TRUE(sheet.SaveFile(SpriteSheet::SidecarPath(file), error));
+    auto& database = sage::AssetDatabase::Instance();
+    database.ScanProject(dir.string());
+    const auto guid = database.GuidOf("atlas.png.sagesheet");
+
+    ScriptEngine se;
+    Scene scene("S");
+    se.BindScene(scene);
+    auto obj = scene.CreateObject("Legacy");
+    se.Lua()["obj"] = obj;
+    se.Lua().script(R"(
+        element = obj:AddUI()
+        element.Type = UIKind.Image
+        assert(SetUISpriteNamed(obj, "atlas.png", "icon"))
+        assert(element.Fit == "nineslice")
+        ui.button{name = "New", image = "atlas.png", sprite = "icon", hover = {sprite = "hover"}}
+    )");
+    const auto& im = scene.Registry().get<sage::ui::Image>(obj.Entity());
+    const auto e = Named(scene, "New");
+    const auto& fill = scene.Registry().get<sage::ui::Fill>(e);
+    const auto& hover = scene.Registry().get<sage::ui::Interactable>(e).HoverLook;
+    CHECK_TRUE(guid.Valid());
+    CHECK_EQ(im.SpriteRef.Asset, guid);
+    CHECK_EQ(im.SpriteRef.Item, fill.SpriteRef.Item);
+    CHECK_EQ(hover.SpriteRef.Item, sheet.Find("hover")->Id());
+    CHECK_EQ(im.Sprite, glm::vec4(0));
+    CHECK_EQ(fill.Sprite, glm::vec4(0));
+    CHECK_TRUE(sheet.Rename("icon", "renamed"));
+    sheet.SetRect(0, {1, 0, 2, 2});
+    CHECK_TRUE(sheet.SaveFile(SpriteSheet::SidecarPath(file), error));
+    ResourceManager::Instance().NotifySpriteChanged(guid);
+    se.Lua().script(R"(
+        assert(element.Sprite.x == 1)
+        SetUISprite(obj, 0, 0, 1, 1)
+        assert(element.Sprite.w == 1)
+    )");
+    CHECK_FALSE(im.SpriteRef.Valid());
+    CHECK_EQ(fill.SpriteRef.Item, sheet.Find("renamed")->Id());
 }
 
 TEST(UIKit_slider_reports_value_in_game_units) {

@@ -43,6 +43,7 @@ void EditorSceneRenderer::Init() {
     m_debugDraw.emplace();
     m_sky.emplace();
     m_particles.emplace();
+    m_billboards.emplace();
     m_outlineMask.emplace(m_vpW, m_vpH);
     m_outlineTri = sage::rhi::GraphicsDevice::Get().CreateGeometry(sage::rhi::VertexLayout{});
 }
@@ -500,6 +501,7 @@ void EditorSceneRenderer::RenderViewport(Scene& scene, Camera& camera, const Lig
         }
     }
     m_particles->Draw(camera, outView, outProj);
+    m_billboards->DrawFromView(outView, outProj);
 
     GameObject selectedObj = scene.Get(selectedId);
 

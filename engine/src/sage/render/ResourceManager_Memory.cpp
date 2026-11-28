@@ -74,7 +74,7 @@ void ResourceManager::EvictToBudget() {
         d.Bytes = rec.Bytes;
         d.Tick = rec.Tick;
         d.Side = std::max(rec.Tex->Width(), rec.Tex->Height());
-        d.Streamable = !rec.Pending && !rec.Generated;
+        d.Streamable = !rec.Pending && !rec.Generated && !rec.SpriteSnapshot;
         dcands.push_back(d);
     }
     for (size_t idx : SelectDowngrades(dcands, m_textureBytes, m_textureBudget)) {

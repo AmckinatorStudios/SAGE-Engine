@@ -185,6 +185,25 @@ Texture::Texture(const unsigned char* pixelsRGBA, int width, int height, Texture
     if (!m_texture) throw std::runtime_error("GPU texture upload failed");
 }
 
+std::shared_ptr<Texture> Texture::CreateFloat32Data(const float* rgba, int width, int height) {
+    auto texture = std::shared_ptr<Texture>(new Texture());
+    texture->m_width = width;
+    texture->m_height = height;
+    texture->m_channels = 4;
+    texture->m_hasMipmaps = false;
+    texture->m_float32 = true;
+    texture->m_filter = TextureFilter::Nearest;
+    Texture2DDesc desc;
+    desc.Width = width;
+    desc.Height = height;
+    desc.Float32 = true;
+    desc.GenerateMipmaps = false;
+    desc.FilterMode = TextureFilter::Nearest;
+    texture->m_texture = GraphicsDevice::Get().CreateTexture2D(desc, rgba);
+    if (!texture->m_texture) throw std::runtime_error("GPU data texture upload failed");
+    return texture;
+}
+
 void Texture::ReplacePixels(const unsigned char* pixelsRGBA, int width, int height,
                             TextureFilter filter, bool generateMipmaps) {
 
@@ -201,6 +220,7 @@ void Texture::ReplacePixels(const unsigned char* pixelsRGBA, int width, int heig
     auto replacement = GraphicsDevice::Get().CreateTexture2D(desc, pixelsRGBA);
     if (!replacement) throw std::runtime_error("Texture::ReplacePixels: GPU allocation/upload failed");
     m_texture = std::move(replacement);
+    m_float32 = false;
     m_width = width;
     m_height = height;
     m_channels = 4;

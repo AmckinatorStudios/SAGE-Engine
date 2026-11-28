@@ -1,4 +1,8 @@
 #include "ScriptEngine.h"
+#include "sage/ai/World.h"
+#include "sage/input/InputSystem.h"
+#include "sage/physics/PhysicsScene.h"
+#include "sage/scripting/LuaHandlerStore.h"
 
 #include "sage/core/Log.h"
 #include "sage/render/RenderTexture.h"

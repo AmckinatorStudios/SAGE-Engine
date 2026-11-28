@@ -15,6 +15,7 @@
 // утверждение, которое от драйвера не зависит.
 // ---------------------------------------------------------------------------
 #include "Fixture.h"
+#include <chrono>
 #include <filesystem>
 #include <vector>
 #include "stb_image_write.h"
@@ -23,6 +24,7 @@
 #include <cstdio>
 #include <memory>
 
+#include "sage/core/EngineContext.h"
 #include "sage/render/Framebuffer.h"
 #include "sage/render/RenderTexture.h"
 #include "sage/render/ResourceManager.h"
@@ -855,7 +857,147 @@ void CheckEngineSkinOwnsTheShape(UIRenderer& ui) {
     Check(squareCorner > 0.5, "своё оформление слушает своё скругление");
 }
 
+static void TestSpriteTextureGenerations() {
+    namespace fs = std::filesystem;
+    using namespace sage::assets;
+    const auto dir = fs::temp_directory_path() / ("sage-sprite-gpu-" + AssetGuid::Generate().ToString());
+    fs::create_directories(dir);
+    const auto sheetFile = dir / "atlas.png.sagesheet";
+    const auto image = (dir / "atlas.png").string();
+    unsigned char pixels[] = {255, 0, 0, 255, 0, 0, 255, 255};
+    Check(stbi_write_png(image.c_str(), 2, 1, 4, pixels, 8) != 0, "write a sprite image");
+    SpriteSheet sheet;
+    sheet.Set(SpriteRegion("sprite", {0, 0, 2, 1}));
+    std::string error;
+    Check(sheet.SaveFile(sheetFile.string(), error), "write a sprite sheet");
+    AssetDatabase database;
+    database.ScanProject(dir.string());
+    ResourceManager resources(database);
+    SpriteRef ref{database.GuidOf("atlas.png.sagesheet"), sheet.Find("sprite")->Id()};
+    const auto first = resources.ResolveSpriteTexture(ref);
+    const auto repeated = resources.ResolveSpriteTexture(ref);
+    const auto smooth = resources.ResolveSpriteTexture(ref, TextureFilter::Bilinear);
+    Check(first && repeated && smooth && first.Image == repeated.Image && first.Image != smooth.Image,
+          "sprite texture reuses identical sampling and separates variants");
+    sheet.SetRect(0, {0, 0, 1, 1});
+    Check(sheet.SaveFile(sheetFile.string(), error), "write updated sprite metadata");
+    resources.NotifySpriteChanged(ref.Asset);
+    Check(resources.ReloadChangedAssets() > 0, "reload a changed sprite document");
+    const auto metadata = resources.ResolveSpriteTexture(ref);
+    Check(metadata && metadata.Data.Resource != first.Data.Resource && metadata.Image == first.Image,
+          "sprite metadata revision reuses its unchanged image");
+    const unsigned char replacement[] = {0, 255, 0, 255};
+    const auto previousStamp = fs::last_write_time(image);
+    Check(stbi_write_png(image.c_str(), 1, 1, 4, replacement, 4) != 0, "replace sprite pixels");
+    // The old and new PNGs can have the same byte size. Some filesystems
+    // report the two writes in the same timestamp tick.
+    fs::last_write_time(image, previousStamp + std::chrono::seconds(2));
+    const auto newer = resources.ResolveSpriteTexture(ref);
+    Check(newer && first && newer.Image != first.Image && first.Image->Width() == 2 && newer.Image->Width() == 1,
+          "sprite image replacement preserves held GPU generations");
+    resources.ForgetProjectAssets();
+    const auto reopened = resources.ResolveSpriteTexture(ref);
+    Check(reopened && reopened.Image != newer.Image, "asset cache is cleared when the project closes");
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+}
+
+static void CheckLinkedUISprites() {
+    namespace fs = std::filesystem;
+    namespace ui = sage::ui;
+    using namespace sage::assets;
+    sage::ScopedEngineContext context;
+    const auto dir = fs::temp_directory_path() / ("sage-ui-sprite-" + AssetGuid::Generate().ToString());
+    fs::create_directories(dir);
+    struct Cleanup {
+        fs::path Dir;
+        ~Cleanup() { std::error_code error; fs::remove_all(Dir, error); }
+    } cleanup{dir};
+    const auto path = (dir / "atlas.png").string();
+
+    unsigned char rgba[8 * 8 * 4]{};
+    for (int y = 0; y < 8; ++y)
+        for (int x = 0; x < 8; ++x) {
+            auto* p = rgba + (y * 8 + x) * 4;
+            p[y < 4 ? 0 : 2] = 255;
+            p[3] = x < 4 || y < 2 || y >= 6 ? 255 : 0;
+        }
+    Check(stbi_write_png(path.c_str(), 8, 8, 4, rgba, 32) != 0, "linked UI writes its atlas");
+    SpriteSheet sheet;
+    sheet.Set(SpriteRegion("frame_1", {0, 0, 4, 4}));
+    sheet.Set(SpriteRegion("frame_2", {0, 4, 4, 4}));
+    sheet.Set(SpriteRegion("mask", {4, 0, 4, 4}));
+    sheet.SequenceFromPrefix("cycle", "frame_", 4);
+    std::string error;
+    Check(sheet.SaveFile(SpriteSheet::SidecarPath(path), error), "linked UI writes its sheet");
+    auto& assets = AssetDatabase::Instance();
+    assets.ScanProject(dir.string());
+    const auto guid = assets.GuidOf("atlas.png.sagesheet");
+    const SpriteRef region{guid, sheet.Find("frame_1")->Id()};
+    const SpriteRef maskRegion{guid, sheet.Find("mask")->Id()};
+    const SpriteRef sequence{guid, sheet.FindSequence("cycle")->Id(), SpriteRef::Kind::Sequence};
+
+    Scene scene("linked sprite UI");
+    auto& reg = scene.Registry();
+    const auto add = [&](const char* name, float x) {
+        auto object = Screen(scene, name, {24, 24});
+        auto& element = reg.get<ui::Element>(object.Entity());
+        element.Position = {x, 0};
+        element.Skin = ui::Element::SkinMode::Custom;
+        return object;
+    };
+    auto& image = reg.emplace<ui::Image>(add("Image", 0).Entity());
+    image.SpriteRef = region;
+    image.Filtering = TextureFiltering::Nearest;
+    auto& fill = reg.emplace<ui::Fill>(add("Look", 30).Entity());
+    fill.Color = glm::vec4(1);
+    fill.SpriteRef = region;
+    fill.Filtering = TextureFiltering::Nearest;
+
+    auto button = add("Button", 60);
+    reg.emplace<ui::Fill>(button.Entity());
+    auto& state = reg.emplace<ui::Interactable>(button.Entity());
+    state.UsePressedLook = true;
+    state.Runtime.Pressed = true;
+    state.PressedLook.Color = glm::vec4(1);
+    state.PressedLook.SpriteRef = sequence;
+    state.PressedLook.Filtering = TextureFiltering::Nearest;
+
+    auto parent = add("Mask", 90);
+    auto& mask = reg.emplace<ui::Mask>(parent.Entity());
+    mask.Form = ui::Mask::Shape::Image;
+    mask.SpriteRef = maskRegion;
+    mask.Filtering = TextureFiltering::Nearest;
+    auto child = add("Masked", 0);
+    scene.SetParent(child.Entity(), parent.Entity());
+    auto& white = reg.emplace<ui::Fill>(child.Entity());
+    white.Color = glm::vec4(1);
+
+    const auto channel = [](const Image& frame, int x, int y, int c) {
+        return frame.Pixels[(size_t(y) * frame.Width + x) * 3 + c];
+    };
+    UIRenderer renderer;
+    const auto before = RenderUI(renderer, scene);
+    Check(channel(before, 12, 5, 0) > 220 && channel(before, 42, 5, 0) > 220 &&
+          channel(before, 72, 5, 0) > 220, "Image, Look and a button sequence share the atlas top row");
+    Check(channel(before, 102, 5, 0) > 220 && channel(before, 102, 20, 0) < 20,
+          "mask samples the top half of its referenced atlas region");
+
+    Check(sheet.Rename("frame_1", "renamed"), "rename a live atlas region");
+    sheet.SetRect(0, {0, 4, 4, 4});
+    sheet.SetRect(2, {4, 4, 4, 4});
+    Check(sheet.SaveFile(SpriteSheet::SidecarPath(path), error), "move live atlas regions");
+    ResourceManager::Instance().NotifySpriteChanged(guid);
+    const auto after = RenderUI(renderer, scene);
+    Check(channel(after, 12, 5, 2) > 220 && channel(after, 42, 5, 2) > 220 &&
+          channel(after, 72, 5, 2) > 220, "Image, Look and sequence repaint on sprite save after rename");
+    Check(channel(after, 102, 5, 0) < 20 && channel(after, 102, 20, 0) > 220,
+          "same mask reference follows the new coordinates on save");
+}
+
 void RunUIChecks() {
+    CheckLinkedUISprites();
+    TestSpriteTextureGenerations();
     std::printf("\n--- Интерфейс игры ---\n");
     UIRenderer ui;
     CheckToggleDoesNotPaintTheRow(ui);

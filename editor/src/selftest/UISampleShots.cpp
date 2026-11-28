@@ -157,9 +157,13 @@ void EditorLayer::RunUISampleHook(const std::string& sample) {
         } else if (sample != "sprite-empty") {
             sheet.Slicing.Grid = grid;
             sheet.SliceGrid(W, H, grid, px.data());
-            sheet.Regions[0].Pivot = {0.5f, 1.0f};
+            sheet.SetPivot(0, {0.5f, 1.0f});
             sheet.Rename("coin_4", "panel");
-            if (ui::SpriteRegion* panel = sheet.Find("panel")) panel->Slice = glm::vec4(8.0f);
+            if (const auto* panel = sheet.Find("panel")) {
+                auto updated = *panel;
+                updated.Slice = glm::vec4(8.0f);
+                sheet.Set(updated);
+            }
             sheet.SequenceFromPrefix("spin", "coin_", 8.0f);
         }
         std::string err;

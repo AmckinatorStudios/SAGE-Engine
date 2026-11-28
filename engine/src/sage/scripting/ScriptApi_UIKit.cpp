@@ -1,14 +1,12 @@
 #include "sage/scripting/ScriptEngine.h"
+#include "sage/scripting/LuaHandlerStore.h"
 
 #include <algorithm>
-#include <filesystem>
-#include <map>
-#include <system_error>
 
 #include "sage/assets/AssetDatabase.h"
 #include "sage/scene/SceneComponents.h"
 #include "sage/ui/SpriteSheet.h"
-#include "sage/core/Paths.h"
+#include "sage/render/ResourceManager.h"
 #include "sage/ui/UI.h"
 #include "sage/ui/UISceneSystem.h"
 
@@ -39,33 +37,6 @@
 // ---------------------------------------------------------------------------
 
 namespace {
-
-// Описание листа спрайтов — с ПАМЯТЬЮ. Игра меняет кусок листа на наведении
-// и нажатии, и каждый такой вызов прежде читал и разбирал .sagesheet с диска
-// заново. Перечитывается файл, только если он изменился (время записи);
-// у файла из пакета времени нет — он и не меняется.
-struct CachedSheet {
-    sage::ui::SpriteSheet Sheet;
-    std::filesystem::file_time_type Stamp{};
-    bool Loaded = false;
-};
-
-const sage::ui::SpriteSheet* SheetFor(const std::string& imagePath) {
-    static std::map<std::string, CachedSheet> cache;
-    const std::string file =
-        sage::ui::SpriteSheet::SidecarPath(sage::AssetDatabase::Instance().LocatePath(imagePath));
-    std::error_code ec;
-    const auto stamp = std::filesystem::last_write_time(sage::PathFromUtf8(file), ec);
-    CachedSheet& c = cache[file];
-    if (!c.Loaded || (!ec && stamp != c.Stamp)) {
-        std::string err;
-        c.Sheet = sage::ui::SpriteSheet{};
-        c.Loaded = sage::ui::SpriteSheet::LoadFile(file, c.Sheet, err);
-        c.Stamp = ec ? std::filesystem::file_time_type{} : stamp;
-        if (!c.Loaded) return nullptr;
-    }
-    return &c.Sheet;
-}
 
 glm::vec4 ColorArg(const sol::object& v, const char* what) {
     if (v.is<glm::vec4>()) return v.as<glm::vec4>();
@@ -110,6 +81,8 @@ void ApplyLook(sage::ui::Look& look, const sol::table& t) {
     }
     if (t["image"].valid()) {
         look.Texture = t.get<std::string>("image");
+        look.SpriteRef = {};
+        look.NamedSprite.clear();
         // Картинки интерфейса почти всегда пиксельные (наборы, листы): резкая
         // фильтрация по умолчанию. Фото и плавные градиенты — sharp = false.
         look.Filtering = sage::TextureFiltering::Nearest;
@@ -124,27 +97,39 @@ void ApplyLook(sage::ui::Look& look, const sol::table& t) {
             if (f == kFits[i]) mode = i;
         if (mode < 0) throw std::runtime_error("ui: fit '" + f + "' — нужно stretch, nineslice, tile, fit или cover");
         look.Fit = mode;
+        look.UseSpriteFit = false;
     }
     if (t["sprite"].valid()) {
         sol::object s = t["sprite"];
         if (s.is<std::string>()) {
             if (look.Texture.empty()) throw std::runtime_error("ui: sprite по имени — без image");
-            const sage::ui::SpriteSheet* sheet = SheetFor(look.Texture);
-            const sage::ui::SpriteRegion* r = sheet ? sheet->Find(s.as<std::string>()) : nullptr;
-            if (!r)
-                throw std::runtime_error("ui: в листе '" + look.Texture + "' нет куска '" + s.as<std::string>() + "'");
-            look.Sprite = glm::vec4(r->Rect);
-            // Кусок-рамка из листа ложится девятиной, если её не задали явно.
-            if (r->Slice != glm::vec4(0.0f) && !t["slice"].valid()) {
-                look.SliceBorder = r->Slice;
-                look.SliceEdgeFill = r->EdgeFill;
-                look.SliceCenterFill = r->CenterFill;
-                look.SliceDrawCenter = r->DrawCenter;
-                if (!t["fit"].valid()) look.Fit = 1;
+            const auto name = s.as<std::string>();
+            const auto sheet = ResourceManager::Instance().ResolveSpriteImage(look.Texture);
+            const auto* region = sheet ? sheet.Resource->Sheet.Find(name) : nullptr;
+            const auto* sequence = sheet && !region ? sheet.Resource->Sheet.FindSequence(name) : nullptr;
+            if (!region && !sequence)
+                throw std::runtime_error("ui: в листе '" + look.Texture + "' нет куска '" + name + "'");
+            look.Sprite = glm::vec4(0);
+            look.SpriteRef = {sheet.Ref.Asset, region ? region->Id() : sequence->Id(),
+                              region ? sage::assets::SpriteRef::Kind::Region : sage::assets::SpriteRef::Kind::Sequence};
+            look.NamedSprite = look.SpriteRef.Valid() ? std::string{} : name;
+            if (!t["fit"].valid()) {
+                look.UseSpriteFit = true;
+                if (look.Fit == 1 && !look.OverrideSpriteSlice) look.Fit = 0;
             }
         } else {
+            look.SpriteRef = {};
+            look.NamedSprite.clear();
             look.Sprite = Vec4Arg(s, "sprite");
         }
+    }
+    if ((t["slice"].valid() || t["tile_edges"].valid() || t["center"].valid()) && !look.OverrideSpriteSlice) {
+        auto resolved = look.SpriteRef.Valid() ? ResourceManager::Instance().ResolveSprite(look.SpriteRef)
+                                              : ResourceManager::Instance().ResolveSpriteImage(look.Texture);
+        const auto* region = look.SpriteRef.Valid() ? resolved.Region()
+            : resolved && !look.NamedSprite.empty() ? resolved.Resource->Sheet.Find(look.NamedSprite) : nullptr;
+        if (region) look.SetSlice(region->NineSliceOf());
+        look.OverrideSpriteSlice = true;
     }
     if (t["slice"].valid()) {
         look.SliceBorder = Vec4Arg(t["slice"], "slice");

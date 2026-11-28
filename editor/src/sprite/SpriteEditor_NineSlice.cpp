@@ -45,15 +45,15 @@ glm::ivec4 SpriteEditor::NineSource() const {
         return {0, 0, m_w, m_h};
     }
     const int i = Primary();
-    if (i >= 0 && i < (int)m_doc.Sheet.Regions.size()) return m_doc.Sheet.Regions[(size_t)i].Rect;
+    if (i >= 0 && i < (int)m_doc.Sheet.Regions().size()) return m_doc.Sheet.Regions()[(size_t)i].Rect;
     return {0, 0, m_w, m_h};
 }
 
 NineSlice SpriteEditor::NineGet() const {
     if (m_bound) return m_boundSlice.Slice;
     const int i = Primary();
-    if (i >= 0 && i < (int)m_doc.Sheet.Regions.size()) return m_doc.Sheet.Regions[(size_t)i].NineSliceOf();
-    return m_doc.Texture;
+    if (i >= 0 && i < (int)m_doc.Sheet.Regions().size()) return m_doc.Sheet.Regions()[(size_t)i].NineSliceOf();
+    return m_doc.Sheet.TextureSlice;
 }
 
 void SpriteEditor::NineSet(const NineSlice& n) {
@@ -64,14 +64,10 @@ void SpriteEditor::NineSet(const NineSlice& n) {
         return;
     }
     const int i = Primary();
-    if (i >= 0 && i < (int)m_doc.Sheet.Regions.size()) {
-        sage::ui::SpriteRegion& r = m_doc.Sheet.Regions[(size_t)i];
-        r.Slice = n.Border();
-        r.EdgeFill = n.EdgeFill;
-        r.CenterFill = n.CenterFill;
-        r.DrawCenter = n.DrawCenter;
+    if (i >= 0 && i < (int)m_doc.Sheet.Regions().size()) {
+        m_doc.Sheet.SetSlice((size_t)i, n);
     } else {
-        m_doc.Texture = n;
+        m_doc.Sheet.TextureSlice = n;
     }
     m_touched = true;
 }
@@ -93,7 +89,7 @@ void SpriteEditor::DrawNineCanvas(ImVec2 a, ImVec2 size) {
     const ImVec2 e(o.x + (float)src.z * z, o.y + (float)src.w * z);
     sp::Checkers(dl, o, e, 10.0f);
     const float u0 = (float)src.x / (float)m_w, u1 = (float)(src.x + src.z) / (float)m_w;
-    const float v0 = 1.0f - (float)src.y / (float)m_h, v1 = 1.0f - (float)(src.y + src.w) / (float)m_h;
+    const float v0 = (float)src.y / (float)m_h, v1 = (float)(src.y + src.w) / (float)m_h;
     sp::Nearest(dl);
     dl->AddImage((ImTextureID)(std::intptr_t)m_tex->NativeHandle(), o, e, ImVec2(u0, v0), ImVec2(u1, v1));
     sp::Linear(dl);
@@ -177,7 +173,7 @@ void SpriteEditor::DrawNineCanvas(ImVec2 a, ImVec2 size) {
     char what[160];
     const int i = Primary();
     if (m_bound) std::snprintf(what, sizeof(what), "%s %s", T("Element:"), m_boundSlice.Title.c_str());
-    else if (i >= 0) std::snprintf(what, sizeof(what), "%s %s", T("Sprite:"), m_doc.Sheet.Regions[(size_t)i].Name.c_str());
+    else if (i >= 0) std::snprintf(what, sizeof(what), "%s %s", T("Sprite:"), m_doc.Sheet.Regions()[(size_t)i].Name.c_str());
     else std::snprintf(what, sizeof(what), "%s", T("Whole texture (saved as .sage9)"));
     const ImVec2 ts = ImGui::CalcTextSize(what);
     dl->AddText(ImVec2(a.x + (size.x - ts.x) * 0.5f, a.y + size.y - ts.y - 10.0f),
@@ -219,8 +215,8 @@ void SpriteEditor::DrawNineResult(ImVec2 a, ImVec2 size) {
     req.Scale = z;
     const ImTextureID id = (ImTextureID)(std::intptr_t)m_tex->NativeHandle();
     auto draw = [&](const SliceQuad& q) {
-        const ImVec2 uv0(q.SrcX / tw, 1.0f - q.SrcY / th);
-        const ImVec2 uv1((q.SrcX + q.SrcW) / tw, 1.0f - (q.SrcY + q.SrcH) / th);
+        const ImVec2 uv0(q.SrcX / tw, q.SrcY / th);
+        const ImVec2 uv1((q.SrcX + q.SrcW) / tw, (q.SrcY + q.SrcH) / th);
         dl->AddImage(id, {q.DstX, q.DstY}, {q.DstX + q.DstW, q.DstY + q.DstH}, uv0, uv1);
     };
     dl->PushClipRect(o, e, true);
@@ -283,7 +279,7 @@ void SpriteEditor::DrawNineInspector(EditorHost& host) {
         ImGui::PopTextWrapPos();
         return;
     }
-    const auto& regions = m_doc.Sheet.Regions;
+    const auto& regions = m_doc.Sheet.Regions();
     if (ictl::BeginSection("sprite.nine.target", T("Target"))) {
         // Что режется: вид элемента (его свои значения), кусок листа или вся
         // картинка (без кусков — .sage9).

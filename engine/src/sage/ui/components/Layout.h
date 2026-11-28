@@ -1,4 +1,5 @@
 #pragma once
+#include "sage/assets/SpriteSheet.h"
 #include <glm/glm.hpp>
 
 #include "sage/ui/Element.h"
@@ -60,14 +61,12 @@ struct Mask {
     // Картинка-маска (Shape::Image) и кусок листа (w <= 0 — весь файл).
     std::string Image;
     glm::vec4 Sprite{0.0f, 0.0f, 0.0f, 0.0f};
+    assets::SpriteRef SpriteRef;
     TextureFiltering Filtering = TextureFiltering::Smooth;
 
     // Режет ли маска по форме (шейдером), а не одними ножницами.
     bool Shaped() const { return Form != Shape::Rect || Feather > 0.0f || Invert; }
 
-    // Рантайм: загруженная картинка-маска.
-    mutable std::shared_ptr<::Texture> Tex;
-    mutable std::string TexPath;
     // Рантайм: форма хозяина, растеризованная в маску (Auto), и по каким
     // настройкам и размеру — меняется форма, перестраивается и маска.
     mutable std::shared_ptr<::Texture> ShapeTex;

@@ -424,7 +424,7 @@ std::vector<std::string> NumberedSequence(const std::string& anyFrame,
     // Нумерация бывает с нуля или с единицы.
     int first = exists(name(0, padded)) ? 0 : (exists(name(1, padded)) ? 1 : -1);
     if (first < 0) return out;
-    for (int i = first; i < first + 4096; ++i) {
+    for (int i = first; i < first + sage::fx::kMaxFlipbookFrames; ++i) {
         const std::string f = name(i, padded);
         if (!exists(f)) break;
         out.push_back(f);
@@ -582,10 +582,12 @@ bool DrawParticleEffect(ParticleEffect& fx, const ParticleUiHooks& h) {
 
     // --- Текстура ---
     if (Section(T("Texture and frames"), nullptr, changed, h, true)) {
+        if (h.SpriteSlot) changed |= h.SpriteSlot(T("Sprite resource"), fx.SpriteRef);
+        ImGui::BeginDisabled(fx.SpriteRef.Valid());
         if (h.TextureSlot && h.TextureSlot("fxtex", fx.Texture)) changed = true;
         if (!fx.Texture.empty() && fx.Frames.empty()) {
-            changed |= DragI(T("Frames across"), &fx.TilesX, 0.05f, 1, 64, h);
-            changed |= DragI(T("Frames down"), &fx.TilesY, 0.05f, 1, 64, h);
+            changed |= DragI(T("Frames across"), &fx.TilesX, 0.05f, 1, kMaxFlipbookAxis, h);
+            changed |= DragI(T("Frames down"), &fx.TilesY, 0.05f, 1, kMaxFlipbookAxis, h);
         }
         // Кадры отдельными файлами — движок склеит их в лист сам.
         ImGui::TextDisabled(T("Frames as separate files: %d"), (int)fx.Frames.size());
@@ -603,11 +605,13 @@ bool DrawParticleEffect(ParticleEffect& fx, const ParticleUiHooks& h) {
             fx.Frames.erase(fx.Frames.begin() + remove);
             changed = true;
         }
+        ImGui::BeginDisabled(fx.Frames.size() >= kMaxFlipbookFrames);
         if (ImGui::Button(T("Add frame"))) {
             Before(h);
             fx.Frames.push_back(fx.Frames.empty() ? fx.Texture : fx.Frames.back());
             changed = true;
         }
+        ImGui::EndDisabled();
         ImGui::SameLine();
         // «smoke_3.png» → smoke_0 … smoke_11: набор кадров одной кнопкой.
         const std::string seed = !fx.Frames.empty() ? fx.Frames.front() : fx.Texture;
@@ -628,6 +632,7 @@ bool DrawParticleEffect(ParticleEffect& fx, const ParticleUiHooks& h) {
             fx.Frames.clear();
             changed = true;
         }
+        ImGui::EndDisabled();
         const char* flip[] = {T("Over lifetime"), T("By frame rate"), T("Random frame"), T("One frame")};
         changed |= Combo(T("Frame playback"), fx.Flipbook, flip, 4, h);
         if (fx.Flipbook == FlipbookMode::OverLifetime)
@@ -647,7 +652,7 @@ bool DrawParticleEffect(ParticleEffect& fx, const ParticleUiHooks& h) {
         changed |= Combo(T("Draw as"), fx.Render, modes, 6, h);
         const char* blends[] = {T("Alpha"), T("Additive (glows)"), T("Premultiplied")};
         changed |= Combo(T("Blending"), fx.Blend, blends, 3, h);
-        if (fx.Texture.empty() && fx.Frames.empty()) {
+        if (!fx.SpriteRef.Valid() && fx.Texture.empty() && fx.Frames.empty()) {
             const char* sprites[] = {T("Soft circle"), T("Circle"), T("Square")};
             changed |= Combo(T("Shape without texture"), fx.Sprite, sprites, 3, h);
         }

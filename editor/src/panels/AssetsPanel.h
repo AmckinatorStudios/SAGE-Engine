@@ -153,7 +153,7 @@ public:
     // на него — битыми. Такое надо проверять тестом, а модалку тест не нажмёт.
     static bool RenameAsset(const std::filesystem::path& path, const std::string& newName,
                             std::filesystem::path& outRenamed, std::string& err);
-    static void DeleteAsset(const std::filesystem::path& path);
+    static bool DeleteAsset(const std::filesystem::path& path, std::string& err);
 
     // Что получилось при внесении файла в проект.
     struct ImportReport {

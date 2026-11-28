@@ -33,7 +33,8 @@ std::string AssetGuid::ToString() const {
 
 AssetGuid AssetGuid::FromString(const std::string& text) {
     AssetGuid g;
-    if (text.size() != 32) return g;   // битая строка -> невалидный, а не исключение
+    if (text.size() != 32 || text.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos)
+        return g;
     auto hex = [](const std::string& s) -> uint64_t {
         uint64_t v = 0;
         for (char c : s) {
@@ -105,6 +106,7 @@ std::string AssetDatabase::TypeFromExtension(const std::string& path) {
         return (char)std::tolower(c);
     });
     if (ext == "sagemat") return "material";
+    if (ext == "sagesheet") return "spriteSheet";
     if (ext == "sage") return "scene";
     if (ext == "lua") return "script";
     if (ext == "obj" || ext == "gltf" || ext == "glb") return "model";
@@ -178,6 +180,7 @@ int AssetDatabase::ScanProject(const std::string& projectDir) {
     for (const fs::directory_entry& entry :
          fs::recursive_directory_iterator(projectDir, fs::directory_options::skip_permission_denied,
                                           ec)) {
+        if (entry.path().filename().string().rfind(".sage-atlas-", 0) == 0) continue;
         if (!entry.is_regular_file(ec)) continue;
         const std::string full = Normalize(entry.path().string());
         if (full.size() > 5 && full.compare(full.size() - 5, 5, ".meta") == 0) continue;
@@ -218,6 +221,34 @@ int AssetDatabase::ScanProject(const std::string& projectDir) {
     return found;
 }
 
+void AssetDatabase::ForgetMissingProjectFiles() {
+    if (m_projectDir.empty() || assets::vfs::Mounted()) return;
+    m_records.erase(std::remove_if(m_records.begin(), m_records.end(), [&](const AssetRecord& record) {
+        std::error_code ec;
+        const auto file = PathFromUtf8(m_projectDir) / PathFromUtf8(record.Path);
+        const bool exists = fs::exists(file, ec);
+        if (ec || exists) return false;
+        if (auto outgoing = m_dependsOn.find(record.Guid); outgoing != m_dependsOn.end()) {
+            for (const auto& target : outgoing->second) {
+                if (auto incoming = m_dependedBy.find(target); incoming != m_dependedBy.end()) {
+                    auto& users = incoming->second;
+                    users.erase(std::remove(users.begin(), users.end(), record.Guid), users.end());
+                    if (users.empty()) m_dependedBy.erase(incoming);
+                }
+            }
+            m_dependsOn.erase(outgoing);
+        }
+        return true;
+    }), m_records.end());
+    m_byGuid.clear();
+    m_byPath.clear();
+    for (size_t i = 0; i < m_records.size(); ++i) {
+        m_byGuid[m_records[i].Guid] = i;
+        m_byPath[m_records[i].Path] = i;
+    }
+    // Keep incoming references to disappeared GUIDs for broken-reference diagnostics.
+}
+
 std::string AssetDatabase::PathOf(const AssetGuid& guid) const {
     auto it = m_byGuid.find(guid);
     return it == m_byGuid.end() ? std::string() : m_records[it->second].Path;
@@ -241,7 +272,7 @@ AssetGuid AssetDatabase::Register(const std::string& path, const std::string& ty
     AssetGuid guid = ReadMeta(full);
     if (!guid.Valid()) {
         guid = AssetGuid::Generate();
-        WriteMeta(full, guid, kind);
+        if (!WriteMeta(full, guid, kind) && kind == "spriteSheet") return {};
     }
     m_byGuid[guid] = m_records.size();
     m_byPath[rel] = m_records.size();

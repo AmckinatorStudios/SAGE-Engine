@@ -1,4 +1,5 @@
 #include "sage/ui/UIMasks.h"
+#include "sage/ui/UIPartsDetail.h"
 
 #include <algorithm>
 #include <cmath>
@@ -45,24 +46,37 @@ UIRenderer::Mask ShapeMaskFor(const entt::registry& reg, entt::entity owner, con
                 m.ShapeTex = std::make_shared<::Texture>(rgba.data(), w, h, TextureFilter::Bilinear, false);
                 m.ShapeKey = key;
             }
-            out.Image = m.ShapeTex.get();
-        } else if (const Fill* fill = reg.try_get<Fill>(owner); fill && fill->Tex) {
-            out.Image = fill->Tex.get();
-            out.UV = UIRenderer::MaskUV(*fill->Tex, {fill->Sprite.x, fill->Sprite.y, fill->Sprite.z, fill->Sprite.w});
+            out.TextureOwner = m.ShapeTex;
+            out.Image = out.TextureOwner.get();
+        } else if (const Fill* fill = reg.try_get<Fill>(owner)) {
+            const auto* interact = reg.try_get<Interactable>(owner);
+            PartDrawContext context;
+            context.Reg = &reg;
+            context.Entity = owner;
+            const auto* element = reg.try_get<Element>(owner);
+            context.EngineSkin = element && element->Skin == Element::SkinMode::Engine;
+            context.Enabled = !interact || interact->Enabled;
+            context.Hovered = interact && interact->Runtime.Hovered;
+            context.Pressed = interact && interact->Runtime.Pressed;
+            context.Focused = interact && interact->Runtime.Focused;
+            bool tinted = false;
+            const auto& look = parts::StateLook(context, *fill, tinted);
+            auto sprite = parts::SpritePicture(look.SpriteRef, look.Filtering, look.Texture, look.NamedSprite);
+            const auto* region = sprite.Data.Region(parts::SpriteTime(reg));
+            const auto rect = region ? glm::vec4(region->Rect) : look.Sprite;
+            out.TextureOwner = look.SpriteRef.Valid() || !look.NamedSprite.empty()
+                ? (region ? std::move(sprite.Image) : nullptr) : parts::PictureTexture(look.Texture, look.Filtering);
+            out.Image = out.TextureOwner.get();
+            if (out.Image) out.UV = UIRenderer::MaskUV(*out.Image, {rect.x, rect.y, rect.z, rect.w});
         }
-    } else if (m.Form == Mask::Shape::Image && !m.Image.empty()) {
-        // Картинка-маска — лениво, при отрисовке: путь правят в инспекторе
-        // посреди кадра (так же, как картинку вида, см. LookTexture).
-        if (!m.Tex || m.TexPath != m.Image) {
-            const bool sharp = m.Filtering == TextureFiltering::Nearest;
-            m.Tex = sharp ? ResourceManager::Instance().GetTexture(m.Image, TextureFilter::Nearest, false)
-                          : ResourceManager::Instance().GetTexture(m.Image);
-            m.TexPath = m.Image;
-        }
-        if (m.Tex) {
-            out.Image = m.Tex.get();
-            out.UV = UIRenderer::MaskUV(*m.Tex, {m.Sprite.x, m.Sprite.y, m.Sprite.z, m.Sprite.w});
-        }
+    } else if (m.Form == Mask::Shape::Image) {
+        auto sprite = parts::SpritePicture(m.SpriteRef, m.Filtering);
+        const auto* region = sprite.Data.Region(parts::SpriteTime(reg));
+        const auto rect = region ? glm::vec4(region->Rect) : m.Sprite;
+        out.TextureOwner = m.SpriteRef.Valid() ? (region ? std::move(sprite.Image) : nullptr)
+                                              : parts::PictureTexture(m.Image, m.Filtering);
+        out.Image = out.TextureOwner.get();
+        if (out.Image) out.UV = UIRenderer::MaskUV(*out.Image, {rect.x, rect.y, rect.z, rect.w});
     }
     return out;
 }

@@ -10,6 +10,8 @@
 #include <string>
 
 #include "sage/scripting/ScriptEngine.h"
+#include "sage/input/InputEvent.h"
+#include "sage/input/InputSystem.h"
 #include "sage/scene/Scene.h"
 #include "sage/scene/Components.h"
 #include "sage/core/Log.h"

@@ -2,6 +2,7 @@
 #include "sage/assets/AssetDatabase.h"
 #include "sage/assets/Pack.h"
 #include "sage/core/Log.h"
+#include "sage/core/Paths.h"
 #include "sage/scripting/ScriptModules.h"
 #include "sage/scripting/LuaHandlerStore.h"
 #include "sage/scripting/ScriptApi.h"
@@ -11,7 +12,6 @@
 #include "sage/render/Camera.h"
 #include "sage/render/ParticleSystem.h"
 #include "sage/render/BillboardSystem.h"
-#include "sage/render/Texture.h"
 #include "sage/physics/Ragdoll.h"
 #include "sage/physics/PhysicsScene.h"
 #include "sage/ui/UIShowcase.h"
@@ -27,6 +27,8 @@
 #include <cctype>
 #include <optional>
 
+
+ScriptEngine::~ScriptEngine() = default;
 
 ScriptEngine::ScriptEngine() {
     // package открыт ради require: игра крупнее одного экрана кода должна
@@ -581,6 +583,7 @@ void ScriptEngine::DispatchQuit() {
 static constexpr int kMaxUpdateErrors = 3;
 
 void ScriptEngine::UpdateAll(float deltaTime) {
+    if (m_billboards) m_billboards->Update(deltaTime);
     for (auto& instance : m_instances) {
         // Объект уничтожен через DestroyObject() — сущность больше не валидна.
         if (instance.HasObject && !instance.Object.Valid()) continue;
@@ -795,16 +798,3 @@ void ScriptEngine::UpdateCoroutines(float dt) {
                        [](const std::shared_ptr<CoroutineInstance>& c) { return c->Dead; }),
         m_coroutines.end());
 }
-
-const Texture* ScriptEngine::GetOrLoadBillboardTexture(const std::string& path) {
-    auto it = m_billboardTextures.find(path);
-    if (it != m_billboardTextures.end()) return it->second.get();
-
-    // Bilinear — разумный дефолт для одиночных спрайтов (не атлас, в
-    // отличие от блочного атласа вокселей, которому нужен Nearest)
-    auto texture = std::make_unique<Texture>(path, TextureFilter::Bilinear);
-    const Texture* raw = texture.get();
-    m_billboardTextures[path] = std::move(texture);
-    return raw;
-}
-

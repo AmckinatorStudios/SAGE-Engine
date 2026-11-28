@@ -1,4 +1,5 @@
 #include "ScriptEngine.h"
+#include "sage/physics/PhysicsScene.h"
 
 #include "sage/core/Log.h"
 #include "sage/physics/Ragdoll.h"

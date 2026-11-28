@@ -231,6 +231,7 @@ void UIRenderer::Begin(int screenWidth, int screenHeight) {
     m_fbHeight = screenHeight;
     m_vertices.clear();
     m_segments.clear();
+    m_frameTextures.clear();
     m_clipStack.clear();
     m_maskStack.clear();
     m_blend = UIBlend::Normal;
@@ -275,6 +276,18 @@ void UIRenderer::PushRotation(glm::vec2 center, float degrees, float scale) {
     // Ноль градусов при масштабе 1 — тождество: тратить по два умножения на
     // вершину не за что, а элементов на экране сотни.
     m_rotActive = std::fabs(degrees) > 0.0001f || std::fabs(scale - 1.0f) > 0.0001f;
+}
+
+glm::vec2 UIRenderer::SetRotationCenter(glm::vec2 center) {
+    const auto old = m_rotCenter;
+    m_rotCenter = center;
+    return old;
+}
+
+const Texture* UIRenderer::HoldTexture(std::shared_ptr<const Texture> texture) {
+    const auto* ptr = texture.get();
+    if (ptr) m_frameTextures.try_emplace(ptr, std::move(texture));
+    return ptr;
 }
 
 void UIRenderer::PopRotation() { m_rotActive = false; }
@@ -427,17 +440,21 @@ namespace {
 // ВЕРХНЕГО левого угла файла — как его видит человек в редакторе картинок, — и
 // переворот надо снять ровно здесь. Иначе «панель в (11,11)» возьмёт кусок с
 // противоположного края листа, и это выглядит как случайный мусор.
-inline float SheetV(float yPixels, float texHeight) { return 1.0f - yPixels / texHeight; }
+inline float SheetV(const Texture& tex, float yPixels, float texHeight) {
+    const float v = yPixels / texHeight;
+    return tex.FlippedRows() ? 1.0f - v : v;
+}
 
 // Кусок листа в долях текстуры. Спрайт задан в пикселях исходника — здесь он и
 // переводится, один раз и в одном месте.
 struct SpriteUV { glm::vec2 uv0{0.0f, 1.0f}, uv1{1.0f, 0.0f}; };
 SpriteUV ResolveSprite(const Texture& tex, const UIRenderer::Sprite& s) {
     SpriteUV out;
+    if (!tex.FlippedRows()) out = {{0.0f, 0.0f}, {1.0f, 1.0f}};
     if (s.Whole() || tex.Width() <= 0 || tex.Height() <= 0) return out;
     const float tw = (float)tex.Width(), th = (float)tex.Height();
-    out.uv0 = {s.X / tw, SheetV(s.Y, th)};
-    out.uv1 = {(s.X + s.W) / tw, SheetV(s.Y + s.H, th)};
+    out.uv0 = {s.X / tw, SheetV(tex, s.Y, th)};
+    out.uv1 = {(s.X + s.W) / tw, SheetV(tex, s.Y + s.H, th)};
     return out;
 }
 } // namespace
@@ -456,7 +473,7 @@ void UIRenderer::BeginSpriteClamp(const Texture& tex, Sprite src) {
     const float inset = tex.Filter() == TextureFilter::Nearest ? 0.001f : 0.5f;
     const float ix = std::min(inset, src.W * 0.5f), iy = std::min(inset, src.H * 0.5f);
     const float u0 = (src.X + ix) / tw, u1 = (src.X + src.W - ix) / tw;
-    const float va = SheetV(src.Y + iy, th), vb = SheetV(src.Y + src.H - iy, th);
+    const float va = SheetV(tex, src.Y + iy, th), vb = SheetV(tex, src.Y + src.H - iy, th);
     m_uvClamp = {u0, std::min(va, vb), u1, std::max(va, vb)};
     m_uvClampOn = true;
 }
@@ -503,8 +520,8 @@ void UIRenderer::ImageNineSlice(float x, float y, float w, float h, const Textur
             const float qh = dy[row + 1] - dy[row];
             if (qw <= 0.0f || qh <= 0.0f) { CurrentSegment(texture).QuadCount--; continue; }
             PushImageQuad(dx[col], dy[row], qw, qh,
-                          {sx[col] / tw, SheetV(sy[row], th)},
-                          {sx[col + 1] / tw, SheetV(sy[row + 1], th)}, tint, alpha);
+                          {sx[col] / tw, SheetV(*texture, sy[row], th)},
+                          {sx[col + 1] / tw, SheetV(*texture, sy[row + 1], th)}, tint, alpha);
         }
     }
 }
@@ -528,8 +545,8 @@ void UIRenderer::ImageSliced(float x, float y, float w, float h, const Texture* 
     BeginSpriteClamp(*texture, src);
     for (const sage::ui::SliceQuad& q : quads) {
         PushImageQuad(q.DstX, q.DstY, q.DstW, q.DstH,
-                      {q.SrcX / tw, SheetV(q.SrcY, th)},
-                      {(q.SrcX + q.SrcW) / tw, SheetV(q.SrcY + q.SrcH, th)}, tint, alpha);
+                      {q.SrcX / tw, SheetV(*texture, q.SrcY, th)},
+                      {(q.SrcX + q.SrcW) / tw, SheetV(*texture, q.SrcY + q.SrcH, th)}, tint, alpha);
     }
     m_uvClampOn = false;
 }
@@ -548,8 +565,8 @@ void UIRenderer::ImageTiled(float x, float y, float w, float h, const Texture* t
     BeginSpriteClamp(*texture, src);
     for (const sage::ui::SliceQuad& q : quads) {
         PushImageQuad(q.DstX, q.DstY, q.DstW, q.DstH,
-                      {q.SrcX / tw, SheetV(q.SrcY, th)},
-                      {(q.SrcX + q.SrcW) / tw, SheetV(q.SrcY + q.SrcH, th)}, tint, alpha);
+                      {q.SrcX / tw, SheetV(*texture, q.SrcY, th)},
+                      {(q.SrcX + q.SrcW) / tw, SheetV(*texture, q.SrcY + q.SrcH, th)}, tint, alpha);
     }
     m_uvClampOn = false;
 }
@@ -645,9 +662,8 @@ void UIRenderer::PopMask() {
 }
 
 glm::vec4 UIRenderer::MaskUV(const Texture& tex, Sprite src) {
-    if (src.Whole() || tex.Width() <= 0 || tex.Height() <= 0) return {0.0f, 1.0f, 1.0f, 0.0f};
-    const float tw = (float)tex.Width(), th = (float)tex.Height();
-    return {src.X / tw, 1.0f - src.Y / th, (src.X + src.W) / tw, 1.0f - (src.Y + src.H) / th};
+    const auto uv = ResolveSprite(tex, src);
+    return {uv.uv0.x, uv.uv0.y, uv.uv1.x, uv.uv1.y};
 }
 
 void UIRenderer::PopClipRect() {

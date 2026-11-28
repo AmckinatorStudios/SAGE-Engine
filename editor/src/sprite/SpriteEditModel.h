@@ -4,7 +4,6 @@
 
 #include <glm/glm.hpp>
 
-#include "sage/ui/NineSlice.h"
 #include "sage/ui/SpriteSheet.h"
 
 // ---------------------------------------------------------------------------
@@ -12,16 +11,15 @@
 //
 // Всё, что можно ошибиться посчитать (история правок, «добавить или
 // заменить», попадание в рамку, тяга за ручки, точка опоры, проверка имени,
-// сохранение двух файлов), живёт здесь: это проверяется модульным тестом
+// сохранение документа), живёт здесь: это проверяется модульным тестом
 // (tests/test_sprite_editor.cpp), а окно лишь рисует и зовёт эти функции.
 // ---------------------------------------------------------------------------
 namespace sage::editor::sprite {
 
-// Что правится: нарезка листа и девятина картинки целиком (.sage9) — у
+// Что правится: нарезка листа и девятина картинки целиком — у
 // картинки без кусков девятина своя, у куска — в листе.
 struct SpriteDoc {
     sage::ui::SpriteSheet Sheet;
-    sage::ui::NineSlice Texture;
 };
 
 // Текст документа для сравнения «есть ли несохранённое».
@@ -85,9 +83,9 @@ bool NameFree(const sage::ui::SpriteSheet& sheet, const std::string& name, int s
 // верх + низ не больше стороны.
 glm::vec4 ClampBorder(glm::vec4 border, float w, float h);
 
-// СОХРАНЕНИЕ: лист — «картинка.sagesheet», девятина картинки — «.sage9». Пишется
-// только то, что есть: пустой лист не заводится рядом с картинкой, у которой
-// его не было. Оба файла — атомарно (сначала временный, затем подмена).
+// Единый лист рядом с изображением. Старый .sage9 читается при миграции.
+bool PublishAtlas(const std::string& image, const std::string& png, sage::ui::SpriteSheet& document,
+                  std::string& err);
 bool SaveDoc(const std::string& imageDiskPath, const SpriteDoc& doc, std::string& err);
 // Открыть: нет файлов — пустой документ (это не ошибка).
 bool LoadDoc(const std::string& imageDiskPath, SpriteDoc& doc, std::string& err);

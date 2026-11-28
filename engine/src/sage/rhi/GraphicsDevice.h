@@ -314,6 +314,7 @@ public:
         int MaxStorageBindings = 0;
         int MaxUniformBindings = 0;
         int MaxTextureUnits = 0;
+        int MaxTexture2DSize = 0;
     };
     virtual Caps Capabilities() const { return {}; }
 

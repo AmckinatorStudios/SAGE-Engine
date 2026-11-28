@@ -417,28 +417,6 @@ void AnimateToggles(entt::registry& reg, const std::vector<Solved>& items, float
     }
 }
 
-void UpdateImageSequences(entt::registry& reg, const std::vector<Solved>& items, float dt) {
-    for (const Solved& it : items) {
-        Image* im = reg.try_get<Image>(it.Entity);
-        if (!im || im->Sequence.empty() || im->Path.empty()) continue;
-        if (im->SheetFor != im->Path) {
-            // Лист — один раз на путь: ошибка чтения не повторяется каждый кадр.
-            im->SheetFor = im->Path;
-            auto sheet = std::make_shared<SpriteSheet>();
-            std::string err;
-            const std::string real = sage::AssetDatabase::Instance().LocatePath(im->Path);
-            if (SpriteSheet::LoadFile(SpriteSheet::SidecarPath(real), *sheet, err)) im->Sheet = sheet;
-            else im->Sheet.reset();
-        }
-        if (!im->Sheet) continue;
-        const SpriteSequence* seq = im->Sheet->FindSequence(im->Sequence);
-        if (!seq) continue;
-        im->SequenceTime += dt;
-        if (const SpriteRegion* r = im->Sheet->Find(seq->FrameAt(im->SequenceTime)))
-            im->Sprite = glm::vec4(r->Rect);
-    }
-}
-
 void UpdateProgress(entt::registry& reg, const std::vector<Solved>& items, float dt) {
     for (const Solved& it : items) {
         Bar* bar = reg.try_get<Bar>(it.Entity);

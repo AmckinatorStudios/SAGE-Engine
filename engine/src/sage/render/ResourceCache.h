@@ -37,6 +37,7 @@ public:
         bool Mipmaps = true;
         int MaxSide = 0;
         bool Generated = false;
+        bool SpriteSnapshot = false;
         bool Bleed = false;
         bool Srgb = false;
         long long Stamp = 0;

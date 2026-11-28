@@ -13,6 +13,7 @@
 #include "SpriteEditorBinding.h"
 
 class Texture;
+namespace sage::editor::sprite { struct SpriteEditorTestAccess; }
 
 // ---------------------------------------------------------------------------
 // РЕДАКТОР СПРАЙТОВ — нарезка картинки на именованные куски и их девятина.
@@ -28,9 +29,8 @@ class Texture;
 // истории. Острова ищутся в фоне: интерфейс не замирает, прежний результат
 // виден, пока считается новый.
 //
-// Сохранение — «картинка.sagesheet» (куски, их точка опоры и девятина,
-// настройки нарезки) и «картинка.sage9» (девятина картинки без кусков),
-// атомарно. Данные и счёт — SpriteEditModel.h.
+// Единый «картинка.sagesheet» сохраняется атомарно. Старый «картинка.sage9»
+// читается при миграции. Данные редактора и история — SpriteEditModel.h.
 // ---------------------------------------------------------------------------
 class SpriteEditor {
 public:
@@ -53,6 +53,7 @@ public:
     enum class Tool { Select, Rectangle, Move, Resize, Pivot };
 
 private:
+    friend struct sage::editor::sprite::SpriteEditorTestAccess;
     // --- Документ (SpriteEditor.cpp) -----------------------------------
     void Load(const std::string& path);
     void Snapshot();                       // перед правкой — в историю
@@ -113,7 +114,7 @@ private:
     // Картинка.
     std::string m_path;                    // ссылка ассета
     std::string m_disk;                    // настоящий путь на диске
-    std::shared_ptr<Texture> m_tex;
+    std::shared_ptr<const Texture> m_tex;
     std::shared_ptr<const std::vector<unsigned char>> m_pixels;   // RGBA, строки сверху вниз
     int m_w = 0, m_h = 0;
 

@@ -11,15 +11,15 @@ class AudioEngine;
 class PhysicsScene;
 namespace sage::input { class InputSystem; }
 namespace sage::net { class NetworkSystem; }
-namespace sage::ai { class World; }
+namespace sage::ai { class World; struct GraphDoc; }
 namespace sage::scripting { 
     class LuaHandlerStore;
     class ScriptTasks;
-    struct ApiBindings;
 }
 namespace sage::events { class Bus; }
 
 #include "sage/vars/Value.h"
+#include "sage/scripting/ScriptApi.h"
 
 #include <sol/sol.hpp>
 #include <functional>
@@ -85,6 +85,7 @@ namespace sage::events { class Bus; }
 class ScriptEngine {
 public:
     ScriptEngine();
+    ~ScriptEngine();
 
 
     // Даёт скриптам доступ к сцене: SpawnObject/FindObject/DestroyObject
@@ -524,11 +525,6 @@ private:
     bool m_quitDispatched = false; // OnQuit уже разослан (см. DispatchQuit)
 
 
-    // Текстуры для билбордов, заказанных из Lua по пути к файлу, кэшируются
-    // здесь (по пути) и живут, пока жив ScriptEngine — билборды в
-    // BillboardSystem хранят на них НЕвладеющий указатель (см. AddBillboard).
-    const Texture* GetOrLoadBillboardTexture(const std::string& path);
-
     sol::state m_lua;
     sage::scripting::ApiBindings m_api;
     // Переносимые функции (RegisterApiFunction) — в Lua и вызыватели.
@@ -575,7 +571,6 @@ private:
     // Сеть кадра — НЕвладеющий указатель, как и остальные привязки: её создаёт
     // и держит тот, кто ведёт игру (рантайм, тест), а не движок скриптов.
     sage::net::NetworkSystem* m_network = nullptr;
-    std::unordered_map<std::string, std::unique_ptr<Texture>> m_billboardTextures;
 
     // Твины геймплея — тикают в UpdateAll со скриптами (замирают на паузе,
     // умирают вместе с движком скриптов при Stop). Правятся из Lua (Tween*).

@@ -34,6 +34,7 @@
 #include "EditorHost.h"
 #include "PostChainUi.h"
 #include "ParticleUi.h"
+#include "../sprite/SpritePicker.h"
 #include "sage/render/ParticleEffectIO.h"
 #include "sage/assets/AssetDatabase.h"
 #include "sage/core/Paths.h"
@@ -142,6 +143,9 @@ void InspectorPanel::DrawEffectSections(EditorHost& host, GameObject obj, entt::
             sage::editor::ParticleUiHooks hooks;
             hooks.BeforeEdit = [&host] { host.PushUndoSnapshot(); };
             hooks.TrackItem = [&host] { host.TrackLastImGuiItem(); };
+            hooks.SpriteSlot = [&host](const char* label, sage::assets::SpriteRef& ref) {
+                return sage::editor::SpritePicker(host, label, ref);
+            };
             auto slot = [this, &host](const char* id, std::string& path, assetslot::Kind kind) {
                 const assetslot::Result r = assetslot::Draw(host, id, kind, path, &m_preview);
                 if (r.Changed) {
