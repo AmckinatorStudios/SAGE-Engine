@@ -3,12 +3,16 @@
 #include "Material.h"
 
 namespace sage::render { class SkinnedModel; }
+namespace sage { class AssetDatabase; class EngineContext; }
 #include "Skybox.h"
 #include "ModelLoader.h"
 #include "Texture.h"
 #include "Shader.h"
+#include "sage/render/PrimitiveGenerator.h"
+#include "sage/render/ResourceCache.h"
+#include "sage/render/TextureStreamer.h"
+#include "sage/render/VRAMBudgetManager.h"
 #include "sage/core/Log.h"
-#include "sage/scene/Transform.h" // подключаем заранее не обязательно, но пусть будет явный порядок
 #include "sage/scene/Components.h" // MeshRef::Type для GetPrimitive
 #include <unordered_map>
 #include <memory>
@@ -43,7 +47,10 @@ class ResourceManager {
 public:
     // Владеет кэшем sage::EngineContext — он же разрушает его, пока живо
     // графическое устройство. Создавать свой экземпляр можно и нужно в тестах.
-    ResourceManager(); // out-of-line: m_async — неполный тип pimpl (см. .cpp)
+    ResourceManager();
+    // Невладеющая зависимость: база должна пережить менеджер. Контекст
+    // использует этот конструктор; default оставлен как legacy bridge.
+    explicit ResourceManager(sage::AssetDatabase& assets);
 
     ResourceManager(const ResourceManager&) = delete;
     ResourceManager& operator=(const ResourceManager&) = delete;
@@ -79,30 +86,7 @@ public:
     //
     // С массивом забыть нечего: Clear() сбрасывает весь массив одной строкой, а
     // новая форма — это одна ветка в Build ниже.
-    std::shared_ptr<Mesh> GetPrimitive(MeshRef::Type type) {
-        const size_t index = (size_t)type;
-        if (index >= kPrimitiveСount) return nullptr;
-        std::shared_ptr<Mesh>& slot = m_primitives[index];
-        if (!slot) {
-            switch (type) {
-                case MeshRef::Type::Cube:
-                    slot = std::make_shared<Mesh>(Mesh::CreateCube(m_keepMeshCpu)); break;
-                case MeshRef::Type::Sphere:
-                    slot = std::make_shared<Mesh>(Mesh::CreateSphere(24, 32, m_keepMeshCpu)); break;
-                case MeshRef::Type::Plane:
-                    slot = std::make_shared<Mesh>(Mesh::CreatePlane(1, m_keepMeshCpu)); break;
-                case MeshRef::Type::Cylinder:
-                    slot = std::make_shared<Mesh>(Mesh::CreateCylinder(32, m_keepMeshCpu)); break;
-                case MeshRef::Type::Cone:
-                    slot = std::make_shared<Mesh>(Mesh::CreateCone(32, m_keepMeshCpu)); break;
-                case MeshRef::Type::Capsule:
-                    slot = std::make_shared<Mesh>(Mesh::CreateCapsule(12, 24, m_keepMeshCpu)); break;
-                // None не рисуется, Model грузится через GetModel.
-                default: return nullptr;
-            }
-        }
-        return slot;
-    }
+    std::shared_ptr<Mesh> GetPrimitive(MeshRef::Type type);
 
     // ПРИМИТИВ СО СВОИМИ НАСТРОЙКАМИ ГЕОМЕТРИИ (MeshRef::prim). Настройки,
     // дающие геометрию по умолчанию, — тот же общий меш, что выше. Остальные
@@ -161,8 +145,8 @@ public:
 
     // Текстура по пути АСИНХРОННО: возвращает объект немедленно (сначала
     // плейсхолдер 1x1), реальные пиксели подгружаются фоновым потоком и
-    // заменяются в этом же объекте на PumpAsyncUploads(). Никогда не nullptr
-    // при непустом пути. Для стриминга ассетов без фризов кадра.
+    // заменяются в этом же объекте на PumpAsyncUploads(). При backpressure
+    // или ошибке создания возвращает nullptr; запрос можно повторить после pump.
     //
     // Настройки выборки и bleed — те же, что у GetTexture, и дают ту же запись
     // кэша: картинку, заказанную фоном, потом спросят обычным путём. Пока
@@ -277,6 +261,7 @@ public:
     // материалов превью, — понимают, что их разбор устарел. Сверять пути и
     // времена правки у себя каждому такому месту значило бы повторить эту
     // проверку столько раз, сколько в редакторе кэшей.
+
     uint64_t AssetsGeneration() const { return m_assetsGeneration; }
 
     // Небо из каталога с гранями px/nx/py/ny/pz/nz. Кэшируется по пути: сцена
@@ -321,6 +306,10 @@ public:
     // заменяет их GPU-хранилище. ОБЯЗАН вызываться на главном потоке раз в кадр
     // (Application::Run делает это сам). Возвращает число загруженных за вызов.
     int PumpAsyncUploads();
+    // Configure only when PendingAsyncTextures()==0. Bytes must fit one decode.
+    void ConfigureTextureStreaming(const sage::render::TextureStreamer::Limits& limits,
+                                   const sage::render::TextureStreamer::PumpBudget& pump);
+    sage::render::TextureStreamer::Stats TextureStreamingStats() const { return m_streamer.GetStats(); }
 
     // Выгружает все текстуры/модели/материалы, на которые больше никто не
     // ссылается (use_count()==1). Возвращает число выгруженных ресурсов.
@@ -329,7 +318,7 @@ public:
 
     // Бюджет VRAM под текстуры. При превышении GetTexture вытесняет LRU
     // НЕИСПОЛЬЗУЕМЫЕ текстуры. 0 — без ограничения (вытеснения не будет).
-    void SetTextureBudgetBytes(size_t bytes) { m_textureBudget = bytes; }
+    void SetTextureBudgetBytes(size_t bytes) { m_vram.SetBudgetBytes(bytes); }
     // Стриминг мип-уровней: когда бюджет исчерпан, а вытеснять нечего (все
     // текстуры кому-то нужны), уменьшать разрешение вместо того, чтобы молча
     // превышать бюджет. Слегка размытая текстура лучше вылета по памяти.
@@ -339,13 +328,7 @@ public:
     // Кандидат на ПОНИЖЕНИЕ разрешения (в отличие от вытеснения — применимо и к
     // тем, на кого ссылаются: объект Texture остаётся жив, меняется только
     // картинка внутри).
-    struct DowngradeCandidate {
-        size_t Index = 0;
-        size_t Bytes = 0;
-        uint64_t Tick = 0;
-        int Side = 0;      // текущая длинная сторона в пикселях
-        bool Streamable = false; // можно ли понизить (не в полёте, есть файл)
-    };
+    using DowngradeCandidate = sage::render::VRAMBudgetManager::DowngradeCandidate;
 
     // Кого понизить, чтобы уложиться в бюджет. Как и SelectEvictions — ЧИСТАЯ
     // функция без GL и без файлов: политику памяти надо уметь проверять
@@ -361,8 +344,8 @@ public:
     static void DownscaleRGBA(const std::vector<unsigned char>& src, int w, int h,
                               std::vector<unsigned char>& dst, int& outW, int& outH);
 
-    size_t TextureBudgetBytes() const { return m_textureBudget; }
-    size_t ResidentTextureBytes() const { return m_textureBytes; }
+    size_t TextureBudgetBytes() const { return m_vram.BudgetBytes(); }
+    size_t ResidentTextureBytes() const { return m_vram.ResidentBytes(); }
 
     // Статистика для оверлея/тестов.
     struct Stats {
@@ -378,6 +361,10 @@ public:
     Stats GetStats() const;
 
     void Clear();
+    // Terminal owner-thread barrier: cancel/join streaming before scene teardown.
+    // Clear/ForgetProjectAssets do not reopen admission after this call.
+    void Quiesce();
+    bool AcceptingAsyncWork() const { return m_acceptingAsyncWork; }
 
     // ЗАБЫТЬ ВСЁ, ЧТО ПРИНАДЛЕЖАЛО ПРОШЛОМУ ПРОЕКТУ.
     //
@@ -406,12 +393,7 @@ public:
                                 int& outW, int& outH);
 
     // Запись кандидата на вытеснение для чистой (без GL) LRU-политики.
-    struct EvictCandidate {
-        size_t Index = 0;    // индекс во внешнем списке вызывающего
-        size_t Bytes = 0;    // размер ресурса
-        uint64_t Tick = 0;   // «использован последний раз» (меньше = старее)
-        bool Evictable = false; // можно ли выгрузить (никто не ссылается)
-    };
+    using EvictCandidate = sage::render::VRAMBudgetManager::EvictCandidate;
     // Возвращает индексы кандидатов, которые надо выгрузить, чтобы уместиться в
     // бюджет: сначала самые старые (LRU), только Evictable. currentBytes —
     // текущая занятость. Чистая функция — ядро политики, юнит-тестируемо.
@@ -419,93 +401,46 @@ public:
                                                size_t currentBytes, size_t budget);
 
 private:
-    void StartWorker();          // лениво поднимает фоновый поток декодирования
+    friend class sage::EngineContext;
+    bool m_acceptingAsyncWork = true;
+    std::string Locate(const std::string& path) const;
+    std::string CacheKey(const std::string& path) const;
+    sage::AssetDatabase* m_assets = nullptr;
     void EvictToBudget();        // вытеснить LRU-неиспользуемые до бюджета
     void DowngradeTexture(const std::string& key); // понизить разрешение вдвое
-    uint64_t NextTick() { return ++m_tick; }
+    uint64_t NextTick() { return m_vram.NextTick(); }
 
-    // Кэш форм по MeshRef::Type. Размер — по последнему значению перечисления,
-    // чтобы новая форма не требовала править ещё и число.
-    static constexpr size_t kPrimitiveСount = (size_t)MeshRef::Type::Model + 1;
-    std::shared_ptr<Mesh> m_primitives[kPrimitiveСount];
-    // Примитивы со своими настройками геометрии — по ключу настроек.
-    std::unordered_map<std::string, std::shared_ptr<Mesh>> m_primitiveVariants;
+    // Компоненты владеют самостоятельными зонами ответственности. Ссылки ниже
+    // сохраняют внутренний код фасада компактным в переходный период.
+    ResourceCache m_cache;
+    sage::render::PrimitiveGenerator m_primitives;
+    sage::render::VRAMBudgetManager m_vram;
+    sage::render::TextureStreamer m_streamer;
+    sage::render::TextureStreamer::PumpBudget m_uploadBudget;
+    std::string m_streamMaterialCursor;
+    std::unordered_map<std::string, std::shared_ptr<Mesh>>& m_models;
+    std::unordered_map<std::string, std::shared_ptr<Material>>& m_materials;
+    std::unordered_map<std::string, long long>& m_modelStamps;
+    std::unordered_map<std::string, long long>& m_materialStamps;
+    std::unordered_map<std::string, long long>& m_skinnedStamps;
+    std::unordered_map<std::string, std::shared_ptr<sage::render::SkinnedModel>>& m_skinned;
+    std::unordered_map<std::string, ResourceCache::ShaderEntry>& m_shaders;
+    std::unordered_map<std::string, std::shared_ptr<Skybox>>& m_skyboxes;
+    std::unordered_map<std::string, ResourceCache::TextureRecord>& m_textures;
+    size_t& m_reloadCursor;
+    uint64_t& m_assetsGeneration;
+    size_t& m_textureBudget;
+    size_t& m_textureBytes;
+    size_t& m_evictions;
+    size_t& m_downgrades;
+    using ShaderEntry = ResourceCache::ShaderEntry;
+    using TextureRecord = ResourceCache::TextureRecord;
     bool m_keepMeshCpu = false;   // см. SetKeepMeshCpuData
-    std::unordered_map<std::string, std::shared_ptr<Mesh>> m_models;
-    std::unordered_map<std::string, std::shared_ptr<Material>> m_materials;
     // Время правки файла на момент загрузки — по нему ReloadChangedAssets
     // понимает, что ресурс устарел. Ноль означает «файла не было»: такой
     // ресурс перечитается, как только файл появится.
-    std::unordered_map<std::string, long long> m_modelStamps;
-    std::unordered_map<std::string, long long> m_materialStamps;
-    std::unordered_map<std::string, long long> m_skinnedStamps;
-    uint64_t m_assetsGeneration = 0;
-
-    // Кэш шейдерных программ. Ключ — "vert|frag"; вместе с программой держим
-    // пути и время правки файлов, чтобы ReloadChangedShaders понял, что менять.
-    struct ShaderEntry {
-        std::shared_ptr<Shader> Program; // nullptr — не собрался
-        std::string VertPath, FragPath;
-        long long VertStamp = 0, FragStamp = 0;
-        long long IncludeStamp = 0;   // сумма штампов «#include "…"» файлов программы
-        bool Screen = false; // вершинный — встроенный полноэкранный (VertPath пуст)
-    };
-    std::unordered_map<std::string, ShaderEntry> m_shaders;
-    std::unordered_map<std::string, std::shared_ptr<Skybox>> m_skyboxes;
-
-    // Запись кэша текстуры: сам ресурс + учёт для бюджета/LRU + флаг «ещё
-    // грузится» (плейсхолдер, реальные байты пока не в VRAM).
-    struct TextureRecord {
-        std::shared_ptr<Texture> Tex;
-        size_t Bytes = 0;
-        uint64_t Tick = 0;
-        bool Pending = false;
-        // ПУТЬ К ФАЙЛУ. Ключ кэша им больше не является: один файл живёт в
-        // кэше СТОЛЬКО раз, сколько у него разных настроек выборки (см.
-        // CacheKey), и перечитать, понизить или выгрузить запись можно только
-        // зная, откуда она взялась.
-        std::string Source;
-        // С какими настройками картинка на видеокарте. Часть ключа, а не
-        // состояние записи: две фильтрации одного файла — это две картинки.
-        TextureFilter Filter = TextureFilter::Trilinear;
-        bool Mipmaps = true;
-
-        // Ограничение стороны при загрузке. 0 — полное разрешение. Ставится
-        // понижением под нехватку памяти (см. StreamToBudget) и снимается,
-        // когда память освободилась.
-        int MaxSide = 0;
-        // У картинки НЕТ файла: она посчитана (процедурная) или снята движком.
-        // Такую нельзя ни вытеснить, ни понизить, ни собрать мусорщиком — всё
-        // это делается в расчёте «понадобится — перечитаем с диска», а читать
-        // здесь неоткуда, и вместо экономии памяти получилась бы пропавшая
-        // текстура.
-        bool Generated = false;
-        // Прозрачным пикселям отдан цвет соседних (см. GetTexture, bleed).
-        bool Bleed = false;
-        // Цвет в sRGB (см. GetTexture, srgb).
-        bool Srgb = false;
-        // Время правки файла на момент загрузки — по нему ReloadChangedAssets
-        // видит, что картинку перерисовали снаружи. У Generated смысла не
-        // имеет: файла нет.
-        long long Stamp = 0;
-    };
-    std::unordered_map<std::string, TextureRecord> m_textures;
-    std::unordered_map<std::string, std::shared_ptr<sage::render::SkinnedModel>> m_skinned;
-
-    size_t m_textureBudget = 0;      // 0 = без ограничения (по умолчанию)
-    size_t m_textureBytes = 0;       // сумма Bytes резидентных текстур
-    uint64_t m_tick = 0;             // монотонный счётчик обращений (LRU)
-    size_t m_evictions = 0;
-    size_t m_downgrades = 0;         // сколько раз понижали разрешение
     // Понижать разрешение, когда вытеснять нечего. Выключается тестами и теми,
     // кому важнее резкость, чем укладывание в бюджет.
     bool m_mipStreaming = true;
     bool m_streamMaterialTextures = false;
-    // Где остановился опрос файлов (см. ReloadChangedAssets с бюджетом).
-    size_t m_reloadCursor = 0;
-
-    // --- Асинхронный конвейер (реализация в .cpp, чтобы не тащить <thread>
-    //     и очереди во все TU, включающие этот заголовок) ---
-    struct AsyncImpl;
-    std::unique_ptr<AsyncImpl> m_async;
 };

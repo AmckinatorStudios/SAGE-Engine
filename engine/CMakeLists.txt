@@ -182,6 +182,10 @@ set(SAGE_ENGINE_SOURCES
     src/sage/render/PostFXShaders_Light.cpp
     src/sage/render/RenderTexture.cpp
     src/sage/render/Volumetrics.cpp
+    src/sage/render/PrimitiveGenerator.cpp
+    src/sage/render/ResourceCache.cpp
+    src/sage/render/TextureStreamer.cpp
+    src/sage/render/VRAMBudgetManager.cpp
     src/sage/render/ResourceManager.cpp
     src/sage/render/ResourceManager_Materials.cpp
     src/sage/render/ResourceManager_Memory.cpp

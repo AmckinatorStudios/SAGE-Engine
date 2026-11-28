@@ -160,11 +160,12 @@ std::string Normalize(const std::string& path) {
     return out;
 }
 
-bool ReadWholeFile(const fs::path& file, std::vector<uint8_t>& out) {
+bool ReadWholeFile(const fs::path& file, std::vector<uint8_t>& out, size_t maxBytes = SIZE_MAX) {
+    out.clear();
     std::ifstream in(file, std::ios::binary | std::ios::ate);
     if (!in) return false;
     const std::streamsize size = in.tellg();
-    if (size < 0) return false;
+    if (size < 0 || (uint64_t)size > maxBytes) return false;
     in.seekg(0);
     out.resize((size_t)size);
     if (size > 0 && !in.read((char*)out.data(), size)) return false;
@@ -516,6 +517,10 @@ bool PackReader::Contains(const std::string& virtualPath) const {
 }
 
 bool PackReader::Read(const std::string& virtualPath, std::vector<uint8_t>& out) const {
+    return Read(virtualPath, out, SIZE_MAX);
+}
+
+bool PackReader::Read(const std::string& virtualPath, std::vector<uint8_t>& out, size_t maxBytes) const {
     out.clear();
     if (!m_open) return false;
     const std::string path = Normalize(virtualPath);
@@ -527,6 +532,7 @@ bool PackReader::Read(const std::string& virtualPath, std::vector<uint8_t>& out)
     if (it == m_index.end() || it->first != path) return false;
 
     const IndexEntry& e = it->second;
+    if (e.Stored > maxBytes || e.Original > maxBytes) return false;
     std::ifstream in(m_file, std::ios::binary);
     if (!in) return false;
     in.seekg((std::streamoff)e.Offset);
@@ -696,14 +702,18 @@ std::vector<std::string> ListDirs(const std::string& directory) {
 }
 
 bool ReadFile(const std::string& path, std::vector<uint8_t>& out) {
+    return ReadFile(path, out, SIZE_MAX);
+}
+
+bool ReadFile(const std::string& path, std::vector<uint8_t>& out, size_t maxBytes) {
     // Пакет ПЕРВЫМ. Рядом с собранной игрой могут остаться файлы от прошлой
     // сборки, и прочитать их вместо упакованных значило бы запустить вчерашнюю
     // логику с сегодняшними данными — дефект, который ищут очень долго.
     if (g_pack) {
         const std::string key = PackedKey(path);
-        if (!key.empty()) return g_pack->Read(key, out);
+        if (!key.empty()) return g_pack->Read(key, out, maxBytes);
     }
-    return ReadWholeFile(sage::PathFromUtf8(path), out);
+    return ReadWholeFile(sage::PathFromUtf8(path), out, maxBytes);
 }
 
 bool ReadText(const std::string& path, std::string& out) {

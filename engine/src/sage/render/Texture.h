@@ -66,6 +66,7 @@ public:
     // (единственный с GL-контекстом) вызывает это, ЗАМЕНЯЯ картинку прямо в
     // существующем объекте Texture — все держатели shared_ptr<Texture>
     // (материалы, UI) видят подгруженное изображение без повторного запроса.
+    // При ошибке загрузки бросает исключение и сохраняет прежнюю текстуру.
     void ReplacePixels(const unsigned char* pixelsRGBA, int width, int height,
                        TextureFilter filter = TextureFilter::Trilinear, bool generateMipmaps = true);
 

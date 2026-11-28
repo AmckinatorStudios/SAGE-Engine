@@ -12,80 +12,13 @@
 #include <stb_image.h> // реализация STB_IMAGE_IMPLEMENTATION живёт в Texture.cpp
 #include <algorithm>
 #include <cstdlib>
-#include <atomic>
-#include <condition_variable>
-#include <deque>
-#include <mutex>
-#include <thread>
 #include <utility>
 
 // Внутреннее устройство кэша ресурсов, общее для его файлов: загрузка и
 // перезагрузка (ResourceManager.cpp), материалы (ResourceManager_Materials.cpp),
 // бюджет памяти (ResourceManager_Memory.cpp).
 
-// ---------------------------------------------------------------------------
-// Асинхронный конвейер декодирования. Спрятан в .cpp, чтобы <thread>/очереди не
-// протекали в каждый TU, включающий ResourceManager.h. Один фоновый поток:
-// декодирует файлы изображений в CPU-буферы RGBA8; главный поток забирает
-// готовое в PumpAsyncUploads() и заливает в VRAM (GL только с главного потока).
-// ---------------------------------------------------------------------------
-struct ResourceManager::AsyncImpl {
-    struct Decoded {
-        std::string Path;
-        std::vector<unsigned char> Pixels;
-        int W = 0, H = 0;
-        bool Ok = false;
-    };
-
-    std::thread Worker;
-    std::mutex JobMx;
-    std::condition_variable JobCv;
-    // Ключ кэша и путь, который реально открывается, — разные строки (см.
-    // Locate ниже). Разрешение делает главный поток при постановке задачи:
-    // воркеру нельзя трогать базу ассетов, её могут пересканировать в этот же
-    // момент.
-    struct Job {
-        std::string Key;
-        std::string File;
-        bool Bleed = false;   // вырез по альфе: цвет под прозрачностью (AlphaBleed.h)
-    };
-    std::deque<Job> Jobs;
-
-    std::mutex ResMx;
-    std::deque<Decoded> Results;
-
-    std::atomic<bool> Stop{false};
-    std::atomic<int> Pending{0}; // задач в полёте (в очереди/декодируются/ждут pump)
-
-    void Run() {
-        for (;;) {
-            Job job;
-            {
-                std::unique_lock<std::mutex> lk(JobMx);
-                JobCv.wait(lk, [&] { return Stop.load() || !Jobs.empty(); });
-                if (Stop.load() && Jobs.empty()) return;
-                if (Jobs.empty()) continue;
-                job = std::move(Jobs.front());
-                Jobs.pop_front();
-            }
-            Decoded d;
-            d.Path = job.Key;
-            d.Ok = ResourceManager::DecodeImageFile(job.File, d.Pixels, d.W, d.H);
-            if (d.Ok && job.Bleed) sage::render::BleedTransparentColor(d.Pixels, d.W, d.H);
-            {
-                std::lock_guard<std::mutex> lk(ResMx);
-                Results.push_back(std::move(d));
-            }
-        }
-    }
-};
-
 namespace resource_detail {
-
-// Путь из проекта -> путь, который откроется ИЗ ТЕКУЩЕГО каталога процесса.
-inline std::string Locate(const std::string& path) {
-    return sage::AssetDatabase::Instance().LocatePath(path);
-}
 
 // КЛЮЧ КЭША: один файл — одна запись, как бы путь ни написали.
 //
@@ -137,13 +70,6 @@ inline std::string SamplingSuffix(TextureFilter filter, bool mipmaps, bool bleed
            (bleed ? "b" : "") + (srgb ? "s" : "");
 }
 
-inline std::string CacheKey(const std::string& path) {
-    if (path.empty()) return path;
-    std::error_code ec;
-    const std::filesystem::path full = std::filesystem::weakly_canonical(Locate(path), ec);
-    if (ec || full.empty()) return std::filesystem::path(path).lexically_normal().generic_string();
-    return full.generic_string();
-}
 // Время последней правки файла в виде числа; 0 — файла нет/недоступен.
 inline long long FileStamp(const std::string& path) {
     std::error_code ec;

@@ -15,12 +15,10 @@
 
 #include <algorithm>
 #include <cstdlib>
-#include <atomic>
-#include <condition_variable>
-#include <deque>
-#include <mutex>
-#include <thread>
 #include <utility>
+#include <cmath>
+#include <stdexcept>
+#include <chrono>
 #include "sage/render/ResourceManagerDetail.h"
 
 using namespace resource_detail;
@@ -28,7 +26,41 @@ using namespace resource_detail;
 
 
 // --- GL-независимое декодирование (используется и воркером, и юнит-тестом) ---
-ResourceManager::ResourceManager() = default;
+ResourceManager::ResourceManager()
+    : m_models(m_cache.Models),
+      m_materials(m_cache.Materials),
+      m_modelStamps(m_cache.ModelStamps),
+      m_materialStamps(m_cache.MaterialStamps),
+      m_skinnedStamps(m_cache.SkinnedStamps),
+      m_skinned(m_cache.Skinned),
+      m_shaders(m_cache.Shaders),
+      m_skyboxes(m_cache.Skyboxes),
+      m_textures(m_cache.Textures),
+      m_reloadCursor(m_cache.ReloadCursor),
+      m_assetsGeneration(m_cache.AssetsGeneration),
+      m_textureBudget(m_vram.BudgetRef()),
+      m_textureBytes(m_vram.ResidentRef()),
+      m_evictions(m_vram.EvictionsRef()),
+      m_downgrades(m_vram.DowngradesRef()) {}
+
+ResourceManager::ResourceManager(sage::AssetDatabase& assets) : ResourceManager() {
+    m_assets = &assets;
+}
+
+std::string ResourceManager::Locate(const std::string& path) const {
+    // Только default-конструктор сохраняет прежнюю позднюю маршрутизацию.
+    // Owned-кэш контекста не зависит от текущего thread binding.
+    auto& assets = m_assets ? *m_assets : sage::AssetDatabase::Instance();
+    return assets.LocatePath(path);
+}
+
+std::string ResourceManager::CacheKey(const std::string& path) const {
+    if (path.empty()) return path;
+    std::error_code ec;
+    const auto full = std::filesystem::weakly_canonical(Locate(path), ec);
+    if (ec || full.empty()) return std::filesystem::path(path).lexically_normal().generic_string();
+    return full.generic_string();
+}
 
 ResourceManager& ResourceManager::Instance() {
     return sage::EngineContext::Current().Resources();
@@ -36,55 +68,13 @@ ResourceManager& ResourceManager::Instance() {
 
 bool ResourceManager::DecodeImageFile(const std::string& path, std::vector<unsigned char>& outRGBA,
                                       int& outW, int& outH) {
-    // Тот же флип, что и синхронный путь Texture(path): (0,0) внизу-слева для GL,
-    // чтобы async- и sync-текстуры выглядели одинаково.
-    //
-    // ФЛАГ — ПОТОЧНЫЙ (_thread), и это не перестраховка. Обычный
-    // stbi_set_flip_vertically_on_load ГЛОБАЛЕН на весь процесс, а эта функция
-    // работает в фоновом потоке загрузки текстур. Рядом, на главном потоке,
-    // идут разборы, которым нужно ОБРАТНОЕ значение: картинки внутри glTF
-    // (у них v=0 — верхняя строка), грани скайбокса, запечённые карты света.
-    // Выставит воркер свой true между «поставил false» и «декодирую» — и
-    // текстура модели приезжает перевёрнутой: у палитровых моделей цвета лежат
-    // в одном углу, после переворота развёртка попадает в пустоту, и персонаж
-    // выходит чёрным. Плавающе, «через раз», в зависимости от того, успела ли
-    // рядом грузиться чужая картинка, — то есть ровно так, как выглядит
-    // «модель не всегда загружается нормально».
-    //
-    // Поточный флаг снимает гонку целиком: у каждого потока своё значение, а
-    // ставят его ВСЕ, кто декодирует (см. остальные вызовы
-    // stbi_set_flip_vertically_on_load_thread в движке) — смешивать поточный и
-    // глобальный нельзя, поточный всегда старше.
-    stbi_set_flip_vertically_on_load_thread(true);
-    int channels = 0;
-    unsigned char* data = sage::assets::vfs::LoadImage(path, &outW, &outH, &channels, 4); // RGBA
-    if (!data) return false;
-    const size_t bytes = (size_t)outW * (size_t)outH * 4u;
-    outRGBA.assign(data, data + bytes);
-    stbi_image_free(data);
-    return true;
+    return sage::render::TextureStreamer::DecodeImageFile(path, outRGBA, outW, outH);
 }
 
 // --- Чистая LRU-политика вытеснения (ядро менеджера памяти, юнит-тестируемо) ---
 std::vector<size_t> ResourceManager::SelectEvictions(const std::vector<EvictCandidate>& candidates,
                                                      size_t currentBytes, size_t budget) {
-    std::vector<size_t> result;
-    if (budget == 0 || currentBytes <= budget) return result;
-
-    std::vector<const EvictCandidate*> evictable;
-    for (const auto& c : candidates)
-        if (c.Evictable) evictable.push_back(&c);
-    // Старейшие (наименьший Tick) — первыми на выход.
-    std::sort(evictable.begin(), evictable.end(),
-              [](const EvictCandidate* a, const EvictCandidate* b) { return a->Tick < b->Tick; });
-
-    size_t bytes = currentBytes;
-    for (const EvictCandidate* c : evictable) {
-        if (bytes <= budget) break;
-        result.push_back(c->Index);
-        bytes -= std::min(bytes, c->Bytes);
-    }
-    return result;
+    return sage::render::VRAMBudgetManager::SelectEvictions(candidates, currentBytes, budget);
 }
 
 
@@ -192,7 +182,10 @@ int ResourceManager::ReloadChangedAssets(size_t budget) {
     // число бюджет ограничивает.
     const size_t total =
         m_modelStamps.size() + m_materialStamps.size() + m_skinnedStamps.size() + m_textures.size();
-    if (total == 0) return 0;
+    if (total == 0) {
+        if (reloaded > 0) ++m_assetsGeneration;
+        return reloaded;
+    }
     const bool all = budget == 0 || budget >= total;
     const size_t start = all ? 0 : m_reloadCursor % total;
     const size_t window = all ? total : budget;
@@ -322,7 +315,7 @@ std::shared_ptr<Texture> ResourceManager::LoadTextureFile(const std::string& fil
 }
 
 int ResourceManager::PendingAsyncTextures() const {
-    return m_async ? std::max(0, m_async->Pending.load()) : 0;
+    return m_streamer.Pending();
 }
 
 std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
@@ -371,7 +364,8 @@ std::shared_ptr<Texture> ResourceManager::GetTexture(const std::string& path,
 std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& path,
                                                          TextureFilter filter, bool mipmaps,
                                                          bool bleed, bool srgb) {
-    if (path.empty()) return nullptr;
+    if (!m_acceptingAsyncWork) return nullptr;
+    if (path.empty() || path.size() > m_streamer.GetLimits().PathBytes) return nullptr;
     // Тот же ключ, что у GetTexture с теми же настройками, — иначе асинхронно
     // загруженная картинка легла бы в ДРУГУЮ запись кэша, чем ту, которую
     // потом спросят обычным путём, и файл прочитался бы дважды.
@@ -391,6 +385,13 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
         return generated->second.Tex;
     }
 
+    // Only the owner thread changes the pending count. Check capacity before
+    // touching the GPU, then publish the placeholder before starting decode.
+    const auto& limits = m_streamer.GetLimits();
+    if (m_streamer.GetStats().Pending >= limits.Requests) return nullptr;
+    const std::string source = Locate(path);
+    if (key.size() > limits.PathBytes || source.size() > limits.PathBytes) return nullptr;
+
     // Плейсхолдер 1x1 (нейтральный серый) — виден мгновенно, реальные пиксели
     // заменят его на PumpAsyncUploads(). Без мипмапов -> размер ничтожен.
     // У выреза по альфе заглушка прозрачная: серый квадрат на месте листа на
@@ -403,7 +404,9 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
         rec.Tex = std::make_shared<Texture>(kPlaceholder, 1, 1, TextureFilter::Bilinear, false, srgb);
     } catch (const std::exception& e) {
         LOG_ERROR("Resources") << "Не удалось создать плейсхолдер текстуры (" << path << "): " << e.what();
-        m_textures[key] = TextureRecord{}; // негативный кэш
+        return nullptr;
+    } catch (...) {
+        LOG_ERROR("Resources") << "Не удалось создать плейсхолдер текстуры: " << path;
         return nullptr;
     }
     rec.Bytes = rec.Tex->GpuBytes();
@@ -414,52 +417,77 @@ std::shared_ptr<Texture> ResourceManager::GetTextureAsync(const std::string& pat
     rec.Srgb = srgb;
     rec.Tick = NextTick();
     rec.Pending = true;
-    rec.Stamp = FileStamp(Locate(path));
+    rec.Stamp = FileStamp(source);
     std::shared_ptr<Texture> result = rec.Tex;
-    m_textureBytes += rec.Bytes;
-    m_textures[key] = std::move(rec);
-
-    StartWorker();
-    {
-        // Ключ задачи — тот же канонический: результат ищется в кэше по нему,
-        // и разойдись они, готовые пиксели не нашли бы своей записи.
-        std::lock_guard<std::mutex> lk(m_async->JobMx);
-        m_async->Jobs.push_back({key, Locate(path), bleed});
+    auto entry = m_textures.emplace(key, std::move(rec)).first;
+    try {
+        if (m_streamer.Enqueue(key, source, bleed)) {
+            m_textureBytes += entry->second.Bytes;
+            return result;
+        }
+    } catch (const std::exception& e) {
+        LOG_ERROR("Resources") << "Texture streaming enqueue failed: " << e.what();
+    } catch (...) {
+        LOG_ERROR("Resources") << "Texture streaming enqueue failed: " << path;
     }
-    m_async->Pending.fetch_add(1);
-    m_async->JobCv.notify_one();
-    return result;
+    m_textures.erase(entry);
+
+    return nullptr;
+}
+
+void ResourceManager::ConfigureTextureStreaming(const sage::render::TextureStreamer::Limits& limits,
+        const sage::render::TextureStreamer::PumpBudget& pump) {
+    if (pump.Bytes < limits.DecodedBytes || !pump.Results ||
+        !std::isfinite(pump.Milliseconds) || pump.Milliseconds <= 0)
+        throw std::invalid_argument("ResourceManager: invalid texture upload budget");
+    m_streamer.Configure(limits);
+    m_uploadBudget = pump;
 }
 
 int ResourceManager::PumpAsyncUploads() {
-    if (!m_async) return 0;
-    std::deque<AsyncImpl::Decoded> ready;
-    {
-        std::lock_guard<std::mutex> lk(m_async->ResMx);
-        ready.swap(m_async->Results);
-    }
+    if (!m_acceptingAsyncWork) return 0;
+    const auto start = std::chrono::steady_clock::now();
     int uploaded = 0;
-    for (auto& d : ready) {
-        m_async->Pending.fetch_sub(1);
-        auto it = m_textures.find(d.Path);
-        if (it == m_textures.end()) continue; // запись успели выгрузить/Clear
+    m_streamer.PumpReady(m_uploadBudget, [&](const sage::render::TextureStreamer::Decoded& d) {
+        auto it = m_textures.find(d.Key);
+        if (it == m_textures.end() || !it->second.Pending) return;
         TextureRecord& rec = it->second;
-        if (d.Ok && rec.Tex && d.W > 0 && d.H > 0) {
-            m_textureBytes -= std::min(m_textureBytes, rec.Bytes);
-            // С ТЕМИ настройками выборки, с какими заказывали: здесь стояли
-            // значения по умолчанию, и картинка, заказанная резкой или без
-            // мипмапов, приезжала сглаженной.
-            rec.Tex->ReplacePixels(d.Pixels.data(), d.W, d.H, rec.Filter, rec.Mipmaps);
-            rec.Bytes = rec.Tex->GpuBytes();
-            m_textureBytes += rec.Bytes;
-            rec.Tick = NextTick();
-            ++uploaded;
-        } else if (!d.Ok) {
-            LOG_ERROR("Resources") << "Асинхронная текстура не декодировалась: " << d.Path;
-        }
         rec.Pending = false;
-    }
+        try {
+            if (d.Ok && rec.Tex && d.Width > 0 && d.Height > 0) {
+                // С ТЕМИ настройками выборки, с какими заказывали: здесь стояли
+                // значения по умолчанию, и картинка, заказанная резкой или без
+                // мипмапов, приезжала сглаженной.
+                rec.Tex->ReplacePixels(d.Pixels.data(), d.Width, d.Height, rec.Filter, rec.Mipmaps);
+                m_textureBytes -= std::min(m_textureBytes, rec.Bytes);
+                rec.Bytes = rec.Tex->GpuBytes();
+                m_textureBytes += rec.Bytes;
+                rec.Tick = NextTick();
+                ++uploaded;
+            } else if (!d.Ok) {
+                LOG_ERROR("Resources") << "Асинхронная текстура не декодировалась: " << d.Key;
+            }
+        } catch (const std::exception& e) {
+            LOG_ERROR("Resources") << "Texture streaming upload failed: " << d.Key << ": " << e.what();
+        } catch (...) {
+            LOG_ERROR("Resources") << "Texture streaming upload failed: " << d.Key;
+        }
+    });
     if (uploaded > 0) EvictToBudget();
+    // Materials loaded once by a scene also need to retry rejected admission.
+    // Round-robin over existing cache entries: no deferred queue, no full scan.
+    if (m_streamMaterialTextures && !m_materials.empty()) {
+        auto it = m_materials.find(m_streamMaterialCursor);
+        if (it == m_materials.end()) it = m_materials.begin();
+        const size_t checks = std::min(m_uploadBudget.Results, m_materials.size());
+        for (size_t i = 0; i < checks; ++i) {
+            if (std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - start).count() >= m_uploadBudget.Milliseconds) break;
+            if (it->second) RefreshMaterialTextures(*it->second);
+            if (++it == m_materials.end()) it = m_materials.begin();
+        }
+        m_streamMaterialCursor = it->first;
+    }
     return uploaded;
 }
 
@@ -664,97 +692,36 @@ int ResourceManager::ReloadChangedShaders() {
 
 void ResourceManager::DownscaleRGBA(const std::vector<unsigned char>& src, int w, int h,
                                     std::vector<unsigned char>& dst, int& outW, int& outH) {
-    outW = std::max(1, w / 2);
-    outH = std::max(1, h / 2);
-    dst.assign((size_t)outW * outH * 4u, 0);
-    if (w <= 0 || h <= 0 || src.size() < (size_t)w * h * 4u) return;
-
-    // Усреднение 2x2, а не выбрасывание каждого второго пикселя. Прореживание
-    // вдвое дешевле и даёт заметный алиасинг: тонкие линии текстуры то
-    // появляются, то исчезают при движении. Здесь это особенно важно, потому
-    // что понижение применяется к УЖЕ ВИДИМЫМ текстурам — рябь была бы заметна
-    // сразу.
-    for (int y = 0; y < outH; ++y) {
-        for (int x = 0; x < outW; ++x) {
-            const int sx = std::min(x * 2, w - 1);
-            const int sy = std::min(y * 2, h - 1);
-            const int sx1 = std::min(sx + 1, w - 1);
-            const int sy1 = std::min(sy + 1, h - 1);
-            for (int c = 0; c < 4; ++c) {
-                const int a0 = src[((size_t)sy * w + sx) * 4 + c];
-                const int a1 = src[((size_t)sy * w + sx1) * 4 + c];
-                const int a2 = src[((size_t)sy1 * w + sx) * 4 + c];
-                const int a3 = src[((size_t)sy1 * w + sx1) * 4 + c];
-                dst[((size_t)y * outW + x) * 4 + c] = (unsigned char)((a0 + a1 + a2 + a3 + 2) / 4);
-            }
-        }
-    }
+    sage::render::VRAMBudgetManager::DownscaleRGBA(src, w, h, dst, outW, outH);
 }
 
 std::vector<size_t> ResourceManager::SelectDowngrades(
     const std::vector<DowngradeCandidate>& candidates, size_t currentBytes, size_t budget) {
-    std::vector<size_t> chosen;
-    if (budget == 0 || currentBytes <= budget) return chosen;
-
-    // Сортируем по давности обращения: та, к которой давно не обращались,
-    // переживёт понижение незаметнее.
-    std::vector<const DowngradeCandidate*> order;
-    order.reserve(candidates.size());
-    for (const DowngradeCandidate& c : candidates) {
-        // Ниже 64 пикселей не опускаемся: дальше экономия копеечная, а текстура
-        // превращается в кашу, и это видно уже не «слегка».
-        if (c.Streamable && c.Side > 64) order.push_back(&c);
-    }
-    std::sort(order.begin(), order.end(),
-              [](const DowngradeCandidate* a, const DowngradeCandidate* b) { return a->Tick < b->Tick; });
-
-    size_t bytes = currentBytes;
-    for (const DowngradeCandidate* c : order) {
-        if (bytes <= budget) break;
-        // Понижение вдвое по стороне — это вчетверо по площади, то есть
-        // освобождается три четверти занятого текстурой.
-        bytes -= std::min(bytes, c->Bytes - c->Bytes / 4);
-        chosen.push_back(c->Index);
-    }
-    return chosen;
+    return sage::render::VRAMBudgetManager::SelectDowngrades(candidates, currentBytes, budget);
 }
 
-void ResourceManager::StartWorker() {
-    if (m_async) return;
-    m_async = std::make_unique<AsyncImpl>();
-    m_async->Worker = std::thread([impl = m_async.get()] { impl->Run(); });
+std::shared_ptr<Mesh> ResourceManager::GetPrimitive(MeshRef::Type type) {
+    return m_primitives.Get(type, m_keepMeshCpu);
 }
 
 std::shared_ptr<Mesh> ResourceManager::GetPrimitive(MeshRef::Type type, const sage::render::PrimitiveParams& params) {
-    sage::render::PrimitiveShape shape;
-    if (!MeshRef::ShapeOf(type, shape)) return nullptr;
-    // Настройки по умолчанию — общий меш формы (тот же, что у всех старых сцен).
-    if (params.SameAsDefault(shape)) return GetPrimitive(type);
-    const std::string key = params.Key(shape);
-    if (auto it = m_primitiveVariants.find(key); it != m_primitiveVariants.end()) return it->second;
-    // Уборка перед новым вариантом: те, что держит только кэш, больше никому
-    // не нужны (поле детализации тянули — промежуточные значения не копятся).
-    for (auto it = m_primitiveVariants.begin(); it != m_primitiveVariants.end();)
-        it = it->second.use_count() == 1 ? m_primitiveVariants.erase(it) : std::next(it);
-    const sage::render::MeshData data = sage::render::BuildPrimitive(shape, params);
-    auto mesh = std::make_shared<Mesh>(data.Vertices, data.Indices, m_keepMeshCpu);
-    m_primitiveVariants[key] = mesh;
-    return mesh;
+    return m_primitives.Get(type, params, m_keepMeshCpu);
+}
+
+void ResourceManager::Quiesce() {
+    m_acceptingAsyncWork = false;
+    m_streamer.Stop();
+    for (auto& entry : m_textures) entry.second.Pending = false;
 }
 
 void ResourceManager::Clear() {
     // Останавливаем фоновый поток ДО очистки карт: иначе он мог бы дописать
     // результат для только что удалённой записи (безвредно, но чище так).
-    if (m_async) {
-        m_async->Stop.store(true);
-        m_async->JobCv.notify_all();
-        if (m_async->Worker.joinable()) m_async->Worker.join();
-        m_async.reset();
-    }
+    m_streamer.Stop();
+    m_streamMaterialCursor.clear();
     // ВСЕ формы разом: забыть одну нельзя, а забытая освобождала бы свой буфер
     // видеокарты после смерти GL-контекста — то есть падением при выходе.
-    for (std::shared_ptr<Mesh>& primitive : m_primitives) primitive.reset();
-    m_primitiveVariants.clear();
+    m_primitives.Clear();
     m_models.clear();
     // Штампы — вместе с записями: оставшись без своих ресурсов, они заставляли
     // ReloadChangedAssets «перечитывать» давно выгруженные файлы (а удалённые —
@@ -782,6 +749,10 @@ void ResourceManager::Clear() {
 }
 
 void ResourceManager::ForgetProjectAssets() {
+    // Old-project completions must not reach a new entry with the same key.
+    // Also join the reader before its caller remounts the global VFS.
+    m_streamer.Stop();
+    m_streamMaterialCursor.clear();
     // Только ЗАПИСИ КЭША. Ни один живой объект здесь не разрушается насильно:
     // уходящая сцена ещё держит свои shared_ptr, и отобрать у неё материал
     // посреди кадра значило бы поменять падение «чужая модель» на падение
@@ -809,9 +780,4 @@ void ResourceManager::ForgetProjectAssets() {
 }
 
 ResourceManager::~ResourceManager() {
-    if (m_async) {
-        m_async->Stop.store(true);
-        m_async->JobCv.notify_all();
-        if (m_async->Worker.joinable()) m_async->Worker.join();
-    }
 }
